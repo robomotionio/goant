@@ -5,10 +5,56 @@ package engine
 // search/split.
 
 import (
+	"fmt"
 	"strings"
+	"unicode"
 
 	"goant/internal/regexpjs"
 )
+
+// regExpEscape implements RegExp.escape's EncodeForRegExpEscape (ES2025): the
+// first character, if an ASCII letter or digit, is hex-escaped so the result can
+// never begin an identifier; syntax characters get a backslash; whitespace and a
+// fixed punctuator set become \xHH / \uHHHH; everything else passes through.
+func regExpEscape(s string) string {
+	const syntax = "^$\\.*+?()[]{}|/"
+	const punct = ",-=<>#&!%:;@~'`\"" + " "
+	var b strings.Builder
+	first := true
+	for _, c := range s {
+		if first && ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+			fmt.Fprintf(&b, "\\x%02x", c)
+			first = false
+			continue
+		}
+		first = false
+		switch {
+		case strings.ContainsRune(syntax, c):
+			b.WriteByte('\\')
+			b.WriteRune(c)
+		case c == '\t':
+			b.WriteString("\\t")
+		case c == '\n':
+			b.WriteString("\\n")
+		case c == '\v':
+			b.WriteString("\\v")
+		case c == '\f':
+			b.WriteString("\\f")
+		case c == '\r':
+			b.WriteString("\\r")
+		case strings.ContainsRune(punct, c) || c == 0xA0 || c == 0xFEFF ||
+			c == 0x2028 || c == 0x2029 || unicode.IsSpace(c):
+			if c <= 0xFF {
+				fmt.Fprintf(&b, "\\x%02x", c)
+			} else {
+				fmt.Fprintf(&b, "\\u%04x", c)
+			}
+		default:
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
+}
 
 func (rt *Runtime) initRegExpBuiltin() {
 	proto := rt.newObject(rt.objectProto)
@@ -135,6 +181,18 @@ func (rt *Runtime) initRegExpBuiltin() {
 	for i := 1; i <= 9; i++ {
 		cobj.defineOwn("$"+itoaSmall(i), rt.internString(""), attrConfigurable)
 	}
+	// RegExp.escape(S): escape a string for literal use in a pattern (ES2025).
+	rt.defMethod(cobj, "escape", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if arg(args, 0).Type() != TStr {
+			return mkundef(), rt.typeError("RegExp.escape argument must be a string")
+		}
+		return rt.newString(regExpEscape(string(rt.strBytes(arg(args, 0))))), nil
+	})
+	// RegExp.lastMatch (Annex B legacy static): the last matched substring.
+	cobj.defineAccessor("lastMatch", rt.newNativeFunc("get lastMatch", 0,
+		func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			return rt.newString(rt.regexpLastMatch), nil
+		}), mkundef(), true, false, attrConfigurable)
 	rt.defSpeciesGetter(ctor)
 	rt.regexpCtor = ctor
 	rt.defGlobal("RegExp", ctor)
@@ -497,6 +555,9 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	}
 	if re.Global || re.Sticky {
 		rt.setField(this, "lastIndex", mknum(float64(m.Index+m.Groups[0].Length)))
+	}
+	if len(m.Groups) > 0 {
+		rt.regexpLastMatch = m.Groups[0].Value // RegExp.lastMatch (Annex B)
 	}
 
 	res := rt.newArray()

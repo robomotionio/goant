@@ -235,6 +235,7 @@ compat-table/es2025/regex.duplicate-named-groups.js
 compat-table/es2025/regex.pattern-modifiers.i.js
 compat-table/es2025/regex.pattern-modifiers.m.js
 compat-table/es2025/regex.pattern-modifiers.s.js
+compat-table/es2025/RegExp.escape.js
 compat-table/es2025/Set.prototype.difference.js
 compat-table/es2025/Set.prototype.intersection.js
 compat-table/es2025/Set.prototype.isDisjointFrom.js
@@ -1049,6 +1050,7 @@ compat-table/next/await-using.js
 compat-table/next/DisposableStack.js
 compat-table/next/Map.prototype.upsert.js
 compat-table/next/RegExp.1-9.js
+compat-table/next/RegExp.lastMatch.js
 compat-table/next/SuppressedError.js
 compat-table/next/Symbol.dispose.bound.js
 compat-table/next/throw-expr.arrow.js

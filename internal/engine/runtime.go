@@ -42,7 +42,8 @@ type Runtime struct {
 	booleanProto          Value
 	errorProto            Value
 	regexpProto           Value
-	regexpCtor            Value // %RegExp% constructor (SpeciesConstructor default)
+	regexpCtor            Value  // %RegExp% constructor (SpeciesConstructor default)
+	regexpLastMatch       string // RegExp.lastMatch (Annex B legacy static)
 	mapProto              Value
 	setProto              Value
 	symbolProto           Value
