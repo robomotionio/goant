@@ -537,12 +537,15 @@ compat-table/es6/WeakSet.prototype.add-returns-this.js
 compat-table/es6/WeakSet.prototype.delete.js
 compat-table/es6/WeakSet.prototype-not-instance.js
 compat-table/es6/well-known.hasInstance.js
+compat-table/es6/well-known.isConcatSpreadable.non-spreadable.js
 compat-table/es6/well-known.iterator.js
 compat-table/es6/well-known.match.js
 compat-table/es6/well-known.replace.js
 compat-table/es6/well-known.search.js
+compat-table/es6/well-known.species.Array.concat.js
 compat-table/es6/well-known.species.Array.filter.js
 compat-table/es6/well-known.species.Array.map.js
+compat-table/es6/well-known.species.Array.slice.js
 compat-table/es6/well-known.species.js
 compat-table/es6/well-known.split.js
 compat-table/es6/well-known.toPrimitive.js

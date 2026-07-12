@@ -423,29 +423,42 @@ func (rt *Runtime) initArrayBuiltin() {
 		}
 		start := relIndex(rt, arg(args, 0), n, 0)
 		end := relIndex(rt, arg(args, 1), n, n)
-		res := rt.newArray()
-		ro := rt.objPtr(res)
+		res, e := rt.arraySpeciesCreate(this, end-start)
+		if e != nil {
+			return mkundef(), e
+		}
+		out := 0
 		for i := start; i < end; i++ {
 			el, _ := rt.getElement(this, mknum(float64(i)))
-			rt.arraySet(ro, ro.arrLen, el)
+			rt.setElement(res, mknum(float64(out)), el)
+			out++
 		}
 		return res, nil
 	})
 	rt.defMethod(proto, "concat", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		res := rt.newArray()
-		ro := rt.objPtr(res)
+		res, e := rt.arraySpeciesCreate(this, 0)
+		if e != nil {
+			return mkundef(), e
+		}
+		idx := 0
 		appendVal := func(v Value) {
-			if v.Type() == TArr {
-				vo := rt.objPtr(v)
-				for i := uint32(0); i < vo.arrLen; i++ {
-					el := mkundef()
-					if int(i) < len(vo.arr) {
-						el = vo.arr[i]
-					}
-					rt.arraySet(ro, ro.arrLen, el)
+			// Arrays (and isConcatSpreadable objects) are spread; else appended.
+			spread := v.Type() == TArr
+			if o := rt.objPtr(v); o != nil && rt.symIsConcatSpreadable != 0 {
+				if s := rt.getFieldSymbol(v, rt.symIsConcatSpreadable.handle()); !s.IsUndefined() {
+					spread = rt.toBoolean(s)
+				}
+			}
+			if spread {
+				vn, _ := rt.lengthOf(v)
+				for i := 0; i < vn; i++ {
+					el, _ := rt.getElement(v, mknum(float64(i)))
+					rt.setElement(res, mknum(float64(idx)), el)
+					idx++
 				}
 			} else {
-				rt.arraySet(ro, ro.arrLen, v)
+				rt.setElement(res, mknum(float64(idx)), v)
+				idx++
 			}
 		}
 		appendVal(this)
