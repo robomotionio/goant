@@ -723,6 +723,7 @@ compat-table/es6/well-known.isConcatSpreadable.poisoned-getter.js
 compat-table/es6/well-known.iterator.arguments.js
 compat-table/es6/well-known.iterator.js
 compat-table/es6/well-known.match.js
+compat-table/es6/well-known.match.RegExp-constructor.js
 compat-table/es6/well-known.match.String.endsWith.js
 compat-table/es6/well-known.match.String.includes.js
 compat-table/es6/well-known.match.String.startsWith.js
@@ -748,6 +749,7 @@ compat-table/intl/Date.prototype.toLocaleTimeString.js
 compat-table/intl/Number.prototype.toLocaleString.js
 compat-table/intl/Object.prototype.toLocaleString.js
 compat-table/intl/String.prototype.localeCompare.js
+compat-table/next/RegExp.1-9.js
 compat-table/next/throw-expr.logical.js
 es1/annex-b.Date.prototype.getYear.js
 es1/annex-b.Date.prototype.setYear.js

@@ -50,10 +50,27 @@ func (rt *Runtime) initRegExpBuiltin() {
 		return rt.newString("/" + string(rt.strBytes(src)) + "/" + string(rt.strBytes(flags))), nil
 	})
 
-	ctor := rt.newNativeFunc("RegExp", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	var ctor Value
+	ctor = rt.newNativeFunc("RegExp", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		p := arg(args, 0)
+		flagsArg := arg(args, 1)
+		patternIsRegExp, e := rt.isRegExp(p)
+		if e != nil {
+			return mkundef(), e
+		}
+		// RegExp(re) called as a function (not `new`), with a regexp pattern and
+		// no flags override and pattern.constructor === RegExp, returns pattern.
+		if rt.objPtr(this) == nil && patternIsRegExp && flagsArg.IsUndefined() {
+			pc, e := rt.getField(p, "constructor")
+			if e != nil {
+				return mkundef(), e
+			}
+			if pc == ctor {
+				return p, nil
+			}
+		}
 		pattern := ""
 		flags := ""
-		p := arg(args, 0)
 		if o := rt.objPtr(p); o != nil && o.regex != nil {
 			pattern = o.regex.Source
 			flags = o.regex.Flags
@@ -64,8 +81,8 @@ func (rt *Runtime) initRegExpBuiltin() {
 			}
 			pattern = string(rt.strBytes(s))
 		}
-		if !arg(args, 1).IsUndefined() {
-			s, e := rt.toStringValue(args[1])
+		if !flagsArg.IsUndefined() {
+			s, e := rt.toStringValue(flagsArg)
 			if e != nil {
 				return mkundef(), e
 			}
@@ -76,6 +93,12 @@ func (rt *Runtime) initRegExpBuiltin() {
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", proto, 0)
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	// Legacy static properties RegExp.$1 … RegExp.$9 (Annex B). They exist as
+	// configurable data properties (updated on match is not required for the
+	// existence-only conformance check).
+	for i := 1; i <= 9; i++ {
+		cobj.defineOwn("$"+itoaSmall(i), rt.internString(""), attrConfigurable)
+	}
 	rt.defSpeciesGetter(ctor)
 	rt.defGlobal("RegExp", ctor)
 
@@ -284,6 +307,26 @@ func (rt *Runtime) initRegExpAccessors() {
 		return rt.internString(string(b)), nil
 	})
 	po.defineAccessor("flags", flagsGetter, mkundef(), true, false, attrConfigurable)
+}
+
+// isRegExp implements IsRegExp (22.2.7.2): an object is a regexp if its @@match
+// property is truthy, or (when @@match is undefined) it carries a compiled
+// regex internal.
+func (rt *Runtime) isRegExp(v Value) (bool, *ThrowError) {
+	if !v.IsObjectType() {
+		return false, nil
+	}
+	if rt.symMatch != 0 {
+		m, e := rt.getElement(v, rt.symMatch)
+		if e != nil {
+			return false, e
+		}
+		if !m.IsUndefined() {
+			return rt.toBoolean(m), nil
+		}
+	}
+	o := rt.objPtr(v)
+	return o != nil && o.regex != nil, nil
 }
 
 // advanceStringIndex implements AdvanceStringIndex (22.2.7.3): +1, or +2 when
