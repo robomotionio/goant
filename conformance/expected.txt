@@ -251,6 +251,7 @@ compat-table/es5/strict.this-not-coerced-accessors.js
 compat-table/es5/strict.this-not-coerced-methods.js
 compat-table/es5/strict.this-undefined.js
 compat-table/es5/String.property-access.js
+compat-table/es5/String.prototype.split.js
 compat-table/es5/String.prototype.trim.js
 compat-table/es6/annex-b.function.hoisted-block-level.js
 compat-table/es6/annex-b.__proto__.literals.multiple-error.js

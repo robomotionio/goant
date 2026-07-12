@@ -880,6 +880,18 @@ func (rt *Runtime) stringSplitRegexp(this Value, re *regexpjs.Regexp, limitV Val
 	if !limitV.IsUndefined() {
 		limit = rt.intArg([]Value{limitV}, 0)
 	}
+	if limit == 0 {
+		return res, nil
+	}
+	// Empty input: return [] if the separator matches (even the empty match),
+	// otherwise [""] (spec §22.2.6.14 step 12).
+	if len(input) == 0 {
+		if m, err := re.Exec(input, 0); err == nil && m != nil {
+			return res, nil
+		}
+		rt.arraySet(ro, 0, s)
+		return res, nil
+	}
 	last := 0
 	pos := 0
 	for pos <= len(input) {
@@ -918,6 +930,15 @@ func (rt *Runtime) stringSplitString(this Value, args []Value) (Value, *ThrowErr
 	}
 	res := rt.newArray()
 	ro := rt.objPtr(res)
+	// lim === 0 yields an empty array — this precedes the undefined-separator
+	// shortcut (spec §22.1.3.23 steps 6–8).
+	limit := -1
+	if !arg(args, 1).IsUndefined() {
+		limit = int(toUint32(float64(rt.intArg(args, 1))))
+	}
+	if limit == 0 {
+		return res, nil
+	}
 	if arg(args, 0).IsUndefined() {
 		rt.arraySet(ro, 0, rt.newStringBytes(append([]byte{}, b...)))
 		return res, nil
@@ -925,10 +946,6 @@ func (rt *Runtime) stringSplitString(this Value, args []Value) (Value, *ThrowErr
 	sep, e := rt.stringArg(args, 0)
 	if e != nil {
 		return mkundef(), e
-	}
-	limit := -1
-	if !arg(args, 1).IsUndefined() {
-		limit = int(toUint32(float64(rt.intArg(args, 1))))
 	}
 	if len(sep) == 0 {
 		for i := 0; i < utf16Len(b); i++ {
