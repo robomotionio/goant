@@ -132,7 +132,11 @@ func (rt *Runtime) suspend(value Value) (resumed Value, inject *genResume) {
 
 // newGenerator creates a generator object wrapping an unstarted coroutine.
 func (rt *Runtime) newGenerator(fn *svFunc, cl *closure, fnVal, thisVal Value, args []Value) Value {
-	v := rt.newObject(rt.genProto)
+	proto := rt.genProto
+	if fn.isAsync && rt.asyncGenProto != 0 {
+		proto = rt.asyncGenProto // async generator: %AsyncGeneratorPrototype%
+	}
+	v := rt.newObject(proto)
 	o := rt.objPtr(v)
 	o.gen = rt.newGenState(fn, cl, fnVal, thisVal, args)
 	return v

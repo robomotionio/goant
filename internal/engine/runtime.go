@@ -46,6 +46,8 @@ type Runtime struct {
 	promiseProto          Value
 	genProto              Value // %GeneratorPrototype%
 	iteratorProto         Value // %IteratorPrototype%
+	asyncIteratorProto    Value // %AsyncIteratorPrototype%
+	asyncGenProto         Value // %AsyncGeneratorPrototype%
 	arrayIterProto        Value // %ArrayIteratorPrototype%
 	mapIterProto          Value // %MapIteratorPrototype%
 	setIterProto          Value // %SetIteratorPrototype%
@@ -209,6 +211,7 @@ func New() *Runtime {
 	rt.initProxyBuiltin()
 	rt.initTypedArrays()
 	rt.initIteratorHelpers()
+	rt.initAsyncIterator()
 	rt.initSharedArrayBuffer()
 	rt.initAtomics()
 	rt.initAnnexB()

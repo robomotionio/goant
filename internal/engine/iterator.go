@@ -45,7 +45,11 @@ func (rt *Runtime) getAsyncIterator(source Value) (Value, *ThrowError) {
 // promises of IteratorResults (25.1.4.1). The wrapper's next awaits the sync
 // value and re-wraps it with the sync done flag.
 func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) Value {
-	wrap := rt.newObject(rt.objectProto)
+	proto := rt.objectProto
+	if rt.asyncIteratorProto != 0 {
+		proto = rt.asyncIteratorProto
+	}
+	wrap := rt.newObject(proto)
 	o := rt.objPtr(wrap)
 	step := func(method string) nativeFunc {
 		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
