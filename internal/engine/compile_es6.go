@@ -91,6 +91,7 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 		if elem.Kind == NAssignPat || (elem.Kind == NAssign && elem.Op == TokAssign) {
 			target, defExpr = elem.Left, elem.Right
 		}
+		nameDefaultTarget(target, defExpr)
 		c.applyDefault(defExpr)
 		c.destructureTarget(target, kind)
 	}
@@ -151,6 +152,7 @@ func (c *compiler) destructureArray(pattern *Node, src int, kind VarKind) {
 		if elem.Kind == NAssignPat || (elem.Kind == NAssign && elem.Op == TokAssign) {
 			target, defExpr = elem.Left, elem.Right
 		}
+		nameDefaultTarget(target, defExpr)
 		c.emitOpU16(OpGetLocal, uint16(src))
 		c.compileNumberLiteral(float64(i))
 		c.emit(OpGetElem) // src[i]
@@ -189,6 +191,7 @@ func (c *compiler) destructureObject(pattern *Node, src int, kind VarKind) {
 			defExpr = target.Right
 			target = target.Left
 		}
+		nameDefaultTarget(target, defExpr)
 		if computed {
 			// { [expr]: target }: read src[ToPropertyKey(expr)].
 			c.emitOpU16(OpGetLocal, uint16(src)) // [src]

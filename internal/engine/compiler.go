@@ -889,6 +889,16 @@ func nameAnonExpr(rhs *Node, name string) {
 	}
 }
 
+// nameDefaultTarget applies NamedEvaluation to a destructuring default: when the
+// binding/assignment target is a plain identifier and the default initializer is
+// an anonymous function or class, the function takes the identifier's name
+// (`[x = () => {}] = []` ⇒ x.name === "x"). Member targets take no name.
+func nameDefaultTarget(target, defExpr *Node) {
+	if target != nil && target.Kind == NIdent {
+		nameAnonExpr(defExpr, target.Str)
+	}
+}
+
 // emitConstAssignError emits a throw of `TypeError: Assignment to constant
 // variable.` leaving the (already-evaluated) assigned value on the stack.
 func (c *compiler) emitConstAssignError() {
