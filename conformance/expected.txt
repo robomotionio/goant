@@ -66,6 +66,7 @@ compat-table/es2017/String.prototype.padStart.js
 compat-table/es2018/async-iterators.for-await-of.js
 compat-table/es2018/async-iterators.generators.js
 compat-table/es2018/misc.Proxy-ownKeys-duplicate-keys.js
+compat-table/es2018/misc.template-literal-revision.js
 compat-table/es2018/object-rest.js
 compat-table/es2018/object-spread.js
 compat-table/es2018/Promise.prototype.finally.js
@@ -684,10 +685,12 @@ compat-table/es6/Symbol.prototype.js
 compat-table/es6/Symbol.String.js
 compat-table/es6/Symbol.typeof.js
 compat-table/es6/template.basic.js
+compat-table/es6/template.escape-sequences.js
 compat-table/es6/template.frozen-array.js
 compat-table/es6/template.line-break.js
 compat-table/es6/template.permanent-caching.js
 compat-table/es6/template.tagged.js
+compat-table/es6/template.toString.js
 compat-table/es6/typed-arrays.ArrayBuffer.Symbol.species.js
 compat-table/es6/typed-arrays.constructor-iterables.js
 compat-table/es6/typed-arrays.constructor-requires-new.js

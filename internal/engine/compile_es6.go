@@ -552,11 +552,22 @@ func (c *compiler) compileTemplate(n *Node) {
 		c.emitConst(c.rt.internString(""))
 		return
 	}
+	// An untagged template with an invalid escape sequence in any cooked segment
+	// is an early SyntaxError (only tagged templates tolerate it — the cooked
+	// value there is undefined). The segments are the even-indexed args.
+	for i := 0; i < len(segs); i += 2 {
+		if segs[i].Flags&fnInvalidCooked != 0 {
+			c.errorf("Invalid or unexpected token")
+			return
+		}
+	}
 	// First cooked segment.
 	c.emitConst(c.rt.internString(segs[0].Str))
 	for i := 1; i < len(segs); i += 2 {
-		// Interpolated expression, coerced to string via `+` (left is a string).
+		// Interpolated expression: ToString via ToPropertyKey (hint "string", so
+		// `${obj}` calls toString before valueOf) then concatenate with OpAdd.
 		c.compileExpr(segs[i])
+		c.emit(OpToPropkey)
 		c.emit(OpAdd)
 		if i+1 < len(segs) {
 			c.emitConst(c.rt.internString(segs[i+1].Str))
@@ -683,7 +694,13 @@ func (c *compiler) compileTaggedTemplate(n *Node) {
 	raw := c.rt.newArray()
 	ro := c.rt.objPtr(raw)
 	for i := 0; i < len(segs); i += 2 {
-		c.rt.arraySet(co, co.arrLen, c.rt.internString(segs[i].Str))
+		// Template Literal Revision: a segment with an invalid escape sequence has
+		// an undefined cooked value in a tagged template (only .raw survives).
+		cookedVal := c.rt.internString(segs[i].Str)
+		if segs[i].Flags&fnInvalidCooked != 0 {
+			cookedVal = mkundef()
+		}
+		c.rt.arraySet(co, co.arrLen, cookedVal)
 		c.rt.arraySet(ro, ro.arrLen, c.rt.internString(segs[i].Aux))
 	}
 	co.defineOwn("raw", raw, 0)

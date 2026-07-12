@@ -541,6 +541,18 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			}
 			push(mknum(n))
 			ip++
+		case OpToPropkey:
+			// Coerce to a property key (ToPrimitive with hint "string"). Used by
+			// template substitution so `${obj}` prefers toString over valueOf, and
+			// the following OpAdd concatenates the string primitive.
+			a := pop()
+			pk, e := rt.toPropertyKey(a)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(pk)
+			ip++
 		case OpInc:
 			a := pop()
 			n, e := rt.toNumber(a)
