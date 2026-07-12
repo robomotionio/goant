@@ -324,7 +324,9 @@ compat-table/es6/Function.name.accessor.js
 compat-table/es6/Function.name.bound.js
 compat-table/es6/Function.name.class-expression.js
 compat-table/es6/Function.name.class-object-method.js
+compat-table/es6/Function.name.class-prototype.js
 compat-table/es6/Function.name.class-statement.js
+compat-table/es6/Function.name.class-static.js
 compat-table/es6/Function.name.class-variable.js
 compat-table/es6/Function.name.configurable.js
 compat-table/es6/Function.name.expression.js

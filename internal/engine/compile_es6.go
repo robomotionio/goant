@@ -404,6 +404,17 @@ func (c *compiler) compileClass(n *Node) {
 			c.emit(OpPop)
 			continue
 		}
+		// The method function's .name is its key (get/set prefixed for accessors).
+		if m.Right.Str == "" {
+			prefix := ""
+			if m.Flags&fnGetter != 0 {
+				prefix = "get "
+			} else if m.Flags&fnSetter != 0 {
+				prefix = "set "
+			}
+			m.Right.Str = prefix + name
+			m.Right.Flags |= fnInferredName
+		}
 		c.emitOpU16(OpGetLocal, uint16(target))
 		c.compileFunc(m.Right)
 		flags := byte(0) // data method
