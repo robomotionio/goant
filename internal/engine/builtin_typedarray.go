@@ -9,6 +9,7 @@ package engine
 import (
 	"encoding/binary"
 	"math"
+	"math/big"
 	"sort"
 )
 
@@ -24,7 +25,12 @@ const (
 	taUint32
 	taFloat32
 	taFloat64
+	taBigInt64
+	taBigUint64
 )
+
+// isBigIntKind reports whether a typed-array kind holds BigInt elements.
+func isBigIntKind(k taKind) bool { return k == taBigInt64 || k == taBigUint64 }
 
 type taInfo struct {
 	name string
@@ -36,6 +42,7 @@ var taKinds = []taInfo{
 	{"Int16Array", 2}, {"Uint16Array", 2},
 	{"Int32Array", 4}, {"Uint32Array", 4},
 	{"Float32Array", 4}, {"Float64Array", 8},
+	{"BigInt64Array", 8}, {"BigUint64Array", 8},
 }
 
 type typedArray struct {
@@ -123,7 +130,15 @@ func (rt *Runtime) taGet(o *object, i int) (Value, bool) {
 	if t == nil || i < 0 || i >= t.length {
 		return mkundef(), false
 	}
-	return mknum(decodeElem(t.bytes, t.byteOffset+i*t.size(), t.kind)), true
+	off := t.byteOffset + i*t.size()
+	if isBigIntKind(t.kind) {
+		u := binary.LittleEndian.Uint64(t.bytes[off:])
+		if t.kind == taBigInt64 {
+			return rt.newBigInt(big.NewInt(int64(u))), true
+		}
+		return rt.newBigInt(new(big.Int).SetUint64(u)), true
+	}
+	return mknum(decodeElem(t.bytes, off, t.kind)), true
 }
 
 func (rt *Runtime) taSet(o *object, i int, v float64) bool {
@@ -132,6 +147,17 @@ func (rt *Runtime) taSet(o *object, i int, v float64) bool {
 		return false
 	}
 	encodeElem(t.bytes, t.byteOffset+i*t.size(), t.kind, v)
+	return true
+}
+
+// taSetBig writes a BigInt element (BigInt64Array / BigUint64Array) as its
+// low-64-bit two's-complement pattern.
+func (rt *Runtime) taSetBig(o *object, i int, v *big.Int) bool {
+	t := o.ta
+	if t == nil || i < 0 || i >= t.length {
+		return false
+	}
+	binary.LittleEndian.PutUint64(t.bytes[t.byteOffset+i*t.size():], bigIntAsUintN(64, v).Uint64())
 	return true
 }
 
@@ -426,6 +452,46 @@ func (rt *Runtime) initDataViewBuiltin() {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
 			t.enc(o.dv.bytes, off, argNum(rt, args, 1), le)
+			return mkundef(), nil
+		})
+	}
+	// 64-bit BigInt views (BigInt-valued, so separate from the float64 loop).
+	for _, bt := range []struct {
+		name   string
+		signed bool
+	}{{"BigInt64", true}, {"BigUint64", false}} {
+		bt := bt
+		rt.defMethod(po, "get"+bt.name, 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			o := rt.objPtr(this)
+			if o == nil || o.dv == nil {
+				return mkundef(), rt.typeError("DataView.prototype.get" + bt.name + " on incompatible receiver")
+			}
+			off := o.dv.byteOffset + int(argNum(rt, args, 0))
+			le := rt.toBoolean(arg(args, 1))
+			if off < 0 || off+8 > len(o.dv.bytes) {
+				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
+			}
+			u := order(le).Uint64(o.dv.bytes[off:])
+			if bt.signed {
+				return rt.newBigInt(big.NewInt(int64(u))), nil
+			}
+			return rt.newBigInt(new(big.Int).SetUint64(u)), nil
+		})
+		rt.defMethod(po, "set"+bt.name, 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			o := rt.objPtr(this)
+			if o == nil || o.dv == nil {
+				return mkundef(), rt.typeError("DataView.prototype.set" + bt.name + " on incompatible receiver")
+			}
+			off := o.dv.byteOffset + int(argNum(rt, args, 0))
+			bi, e := rt.toBigInt(arg(args, 1))
+			if e != nil {
+				return mkundef(), e
+			}
+			le := rt.toBoolean(arg(args, 2))
+			if off < 0 || off+8 > len(o.dv.bytes) {
+				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
+			}
+			order(le).PutUint64(o.dv.bytes[off:], bigIntAsUintN(64, bi).Uint64())
 			return mkundef(), nil
 		})
 	}

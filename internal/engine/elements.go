@@ -387,11 +387,20 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 		return nil
 	}
 	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TTypedArray {
+		o := rt.objPtr(obj)
+		if o.ta != nil && isBigIntKind(o.ta.kind) {
+			bi, e := rt.toBigInt(v)
+			if e != nil {
+				return e
+			}
+			rt.taSetBig(o, int(idx), bi)
+			return nil
+		}
 		n, e := rt.toNumber(v)
 		if e != nil {
 			return e
 		}
-		rt.taSet(rt.objPtr(obj), int(idx), n)
+		rt.taSet(o, int(idx), n)
 		return nil
 	}
 	name, e := rt.propKeyString(key)
