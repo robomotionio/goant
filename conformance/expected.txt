@@ -646,6 +646,7 @@ compat-table/es6/well-known.toPrimitive.js
 compat-table/es6/well-known.toStringTag.existing-builtins.js
 compat-table/es6/well-known.toStringTag.js
 compat-table/es6/well-known.toStringTag.misc-builtins.js
+compat-table/es6/well-known.unscopables.js
 compat-table/intl/Array.prototype.toLocaleString.js
 compat-table/intl/Date.prototype.toLocaleDateString.js
 compat-table/intl/Date.prototype.toLocaleString.js

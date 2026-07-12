@@ -32,6 +32,20 @@ func (rt *Runtime) typeofString(v Value) string {
 
 // deleteElement implements delete obj[key], returning whether the property was
 // removed (or absent).
+// isUnscopable reports whether name is excluded from a `with` scope via the
+// object's Symbol.unscopables list.
+func (rt *Runtime) isUnscopable(obj Value, name string) bool {
+	if rt.symUnscopables == 0 {
+		return false
+	}
+	unsc := rt.getFieldSymbol(obj, rt.symUnscopables.handle())
+	if !unsc.IsObjectType() {
+		return false
+	}
+	v, _ := rt.getField(unsc, name)
+	return rt.toBoolean(v)
+}
+
 func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 	if obj.IsNullish() {
 		return false, rt.typeError("cannot delete property of " + rt.nullishName(obj))

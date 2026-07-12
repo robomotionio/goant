@@ -174,7 +174,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			found := false
 			for k := len(withStack) - 1; k >= 0; k-- {
-				if rt.hasProp(withStack[k], name) {
+				if rt.hasProp(withStack[k], name) && !rt.isUnscopable(withStack[k], name) {
 					v, e := rt.getField(withStack[k], name)
 					if e != nil {
 						thrown = e
