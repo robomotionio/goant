@@ -484,11 +484,11 @@ func (c *compiler) compileVarDecl(n *Node) {
 func (c *compiler) compileIf(n *Node) {
 	c.compileExpr(n.Cond)
 	elseJump := c.emitJump(OpJmpFalse)
-	c.compileStmt(n.Left)
+	c.compileIfBranch(n.Left)
 	if n.Right != nil {
 		endJump := c.emitJump(OpJmp)
 		c.patchJump(elseJump)
-		c.compileStmt(n.Right)
+		c.compileIfBranch(n.Right)
 		c.patchJump(endJump)
 	} else {
 		c.patchJump(elseJump)

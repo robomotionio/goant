@@ -12,17 +12,89 @@ package engine
 // scoped to the block rather than the enclosing function.
 func (c *compiler) hoistFunctions(list []*Node, blockScoped bool) {
 	for _, stmt := range list {
-		if stmt == nil || stmt.Kind != NFunc || stmt.Str == "" || stmt.Flags&fnArrow != 0 {
+		fn := stmt
+		// Annex B (sloppy): a labeled function declaration `label: function f(){}`
+		// hoists like a plain one.
+		for !c.fn.isStrict && fn != nil && fn.Kind == NLabel {
+			fn = fn.Body
+		}
+		if fn == nil || fn.Kind != NFunc || fn.Str == "" || fn.Flags&fnArrow != 0 {
 			continue
 		}
-		c.compileFunc(stmt)
+		c.compileFunc(fn)
 		if blockScoped && c.fn.isStrict {
-			slot := c.declareLexical(stmt.Str, false)
+			slot := c.declareLexical(fn.Str, false)
 			c.emitOpU16(OpPutLocal, uint16(slot))
 		} else {
-			c.bindDeclared(stmt.Str)
+			c.bindDeclared(fn.Str)
 		}
 	}
+	// Annex B B.3.4 (sloppy): a function declaration that is the body of an
+	// if-statement branch hoists its name (undefined) to the enclosing scope; the
+	// assignment happens when the branch executes (see compileIfBranch).
+	if !c.fn.isStrict {
+		for _, stmt := range list {
+			c.hoistAnnexBIf(stmt)
+		}
+	}
+}
+
+// hoistAnnexBIf declares (as undefined) the names of any function declarations
+// that are direct if-statement branch bodies, recursing through nested ifs.
+func (c *compiler) hoistAnnexBIf(stmt *Node) {
+	if stmt == nil || stmt.Kind != NIf {
+		return
+	}
+	for _, b := range []*Node{stmt.Left, stmt.Right} {
+		for b != nil && b.Kind == NLabel {
+			b = b.Body
+		}
+		if b == nil {
+			continue
+		}
+		if b.Kind == NFunc && b.Str != "" && b.Flags&fnArrow == 0 {
+			c.declareAnnexBName(b.Str)
+		} else if b.Kind == NIf {
+			c.hoistAnnexBIf(b)
+		}
+	}
+}
+
+// declareAnnexBName creates an enclosing-scope binding (initialized to undefined)
+// for an Annex B if-body function, unless one already exists.
+func (c *compiler) declareAnnexBName(name string) {
+	if c.isScript {
+		g := c.rt.objPtr(c.rt.global)
+		if !g.hasOwn(name) {
+			g.defineOwn(name, mkundef(), attrWritable|attrEnumerable)
+		}
+		return
+	}
+	if c.resolveLocal(name) >= 0 {
+		return
+	}
+	slot := c.declareVar(name, false)
+	c.emit(OpUndef)
+	c.emitOpU16(OpPutLocal, uint16(slot))
+}
+
+// compileIfBranch compiles an if-statement branch. In sloppy mode a bare function
+// declaration branch (Annex B) assigns the hoisted enclosing binding.
+func (c *compiler) compileIfBranch(n *Node) {
+	if !c.fn.isStrict && n != nil && n.Kind == NFunc && n.Str != "" &&
+		n.Flags&fnArrow == 0 && n.Flags&fnParen == 0 {
+		c.compileFunc(n)
+		switch {
+		case c.resolveLocal(n.Str) >= 0:
+			c.emitOpU16(OpPutLocal, uint16(c.resolveLocal(n.Str)))
+		case c.resolveUpvalue(n.Str) >= 0:
+			c.emitOpU16(OpPutUpval, uint16(c.resolveUpvalue(n.Str)))
+		default:
+			c.emitGlobalPut(n.Str)
+		}
+		return
+	}
+	c.compileStmt(n)
 }
 
 // hoistLexicals pre-declares the simple let/const bindings of a statement list at
