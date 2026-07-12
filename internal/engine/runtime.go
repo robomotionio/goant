@@ -32,20 +32,23 @@ type Runtime struct {
 	global Value
 
 	// Core prototype objects (ant isolate proto fields).
-	objectProto   Value
-	functionProto Value
-	arrayProto    Value
-	stringProto   Value
-	numberProto   Value
-	booleanProto  Value
-	errorProto    Value
-	regexpProto   Value
-	mapProto      Value
-	setProto      Value
-	symbolProto   Value
-	promiseProto  Value
-	genProto      Value // %GeneratorPrototype%
-	iteratorProto Value // %IteratorPrototype%
+	objectProto           Value
+	functionProto         Value
+	arrayProto            Value
+	stringProto           Value
+	numberProto           Value
+	booleanProto          Value
+	errorProto            Value
+	regexpProto           Value
+	mapProto              Value
+	setProto              Value
+	symbolProto           Value
+	promiseProto          Value
+	genProto              Value // %GeneratorPrototype%
+	iteratorProto         Value // %IteratorPrototype%
+	asyncFunctionProto    Value // %AsyncFunction.prototype%
+	generatorFuncProto    Value // %GeneratorFunction.prototype%
+	asyncGeneratorFnProto Value
 
 	// TypedArray / ArrayBuffer / DataView prototypes.
 	arrayBufferProto Value
@@ -157,6 +160,14 @@ func New() *Runtime {
 	// [Symbol.iterator] method (Array/String/Collections).
 	rt.initSymbolBuiltin()
 	rt.initIteratorProto()
+	// %AsyncFunction.prototype% / %GeneratorFunction.prototype% (proto chain +
+	// Symbol.toStringTag) for async/generator function objects.
+	rt.asyncFunctionProto = rt.newObject(rt.functionProto)
+	rt.setStringTag(rt.asyncFunctionProto, "AsyncFunction")
+	rt.generatorFuncProto = rt.newObject(rt.functionProto)
+	rt.setStringTag(rt.generatorFuncProto, "GeneratorFunction")
+	rt.asyncGeneratorFnProto = rt.newObject(rt.functionProto)
+	rt.setStringTag(rt.asyncGeneratorFnProto, "AsyncGeneratorFunction")
 	rt.initBuiltins()
 	rt.initMath()
 	rt.initObjectBuiltin()

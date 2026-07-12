@@ -8,7 +8,16 @@ package engine
 // its captured upvalues.
 func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 	oh, obj := rt.objects.alloc()
+	// Function-kind prototype chain (async/generator functions have their own).
 	obj.proto = rt.functionProto
+	switch {
+	case fn.isAsync && fn.isGenerator && rt.asyncGeneratorFnProto != 0:
+		obj.proto = rt.asyncGeneratorFnProto
+	case fn.isAsync && rt.asyncFunctionProto != 0:
+		obj.proto = rt.asyncFunctionProto
+	case fn.isGenerator && rt.generatorFuncProto != 0:
+		obj.proto = rt.generatorFuncProto
+	}
 	obj.shape = newShape()
 	obj.typeTag = TFunc
 	obj.flags.extensible = true
@@ -24,12 +33,18 @@ func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 	obj.defineOwn("name", rt.internString(fn.name), attrConfigurable)
 
 	fnVal := mkval(TFunc, uint64(oh))
-	// Non-arrow functions carry a .prototype object with a .constructor back-
-	// reference, used by `new` and instanceof.
-	if !fn.isArrow {
+	// Ordinary and generator functions carry a .prototype; arrow and async
+	// functions do not.
+	if !fn.isArrow && !fn.isAsync {
 		obj.flags.isConstructor = true
-		proto := rt.newObject(rt.objectProto)
-		rt.objPtr(proto).defineOwn("constructor", fnVal, attrWritable|attrConfigurable)
+		protoParent := rt.objectProto
+		if fn.isGenerator {
+			protoParent = rt.genProto // generator instances' prototype chain
+		}
+		proto := rt.newObject(protoParent)
+		if !fn.isGenerator {
+			rt.objPtr(proto).defineOwn("constructor", fnVal, attrWritable|attrConfigurable)
+		}
 		obj.defineOwn("prototype", proto, attrWritable)
 	}
 	return fnVal

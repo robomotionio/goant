@@ -25,6 +25,9 @@ compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.shadow-accessors.j
 compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.symbols.js
 compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.ToObject.js
 compat-table/es2017/async.must-await-value.js
+compat-table/es2017/async.no-prototype.js
+compat-table/es2017/async.prototype-chain.js
+compat-table/es2017/async.Symbol.toStringTag.js
 compat-table/es2017/Atomics.add.js
 compat-table/es2017/Atomics.and.js
 compat-table/es2017/Atomics.compareExchange.js
