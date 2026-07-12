@@ -52,6 +52,11 @@ func (c *compiler) compileObject(n *Node) {
 			c.emit(OpDup)
 			c.compileExpr(prop.Left) // computed key
 			c.compileExpr(prop.Right)
+			// NamedEvaluation: an anonymous function/class value takes its name from
+			// the computed key ("[desc]" for a symbol key).
+			if isAnonFuncDef(prop.Right) {
+				c.emit(OpSetNameComp)
+			}
 			c.emit(OpDefineMethodComp)
 			c.emitByte(3)
 			c.emit(OpPop) // DEFINE_METHOD_COMP leaves the target; drop the dup

@@ -726,6 +726,12 @@ func (c *compiler) compileUnary(n *Node) {
 // nameAnonExpr implements NamedEvaluation: an anonymous function/class on the
 // RHS of a binding or assignment takes the target's name (mutating the AST node
 // so compileFunc/compileClass stamp it as the .name).
+// isAnonFuncDef reports whether n is an anonymous function or class expression —
+// i.e. an IsAnonymousFunctionDefinition target for NamedEvaluation.
+func isAnonFuncDef(n *Node) bool {
+	return n != nil && (n.Kind == NFunc || n.Kind == NClass) && n.Str == ""
+}
+
 func nameAnonExpr(rhs *Node, name string) {
 	if rhs == nil || name == "" {
 		return

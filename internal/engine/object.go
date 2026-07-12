@@ -563,6 +563,26 @@ func (o *object) ownSymbolKeys() []uint32 {
 // computed at runtime. flags: 0=data method (non-enumerable, writable,
 // configurable), 1=getter, 2=setter (merged with an existing accessor). The key
 // may be a symbol or a string (numeric keys become array/index properties).
+// setInferredNameFromKey implements SetFunctionName(fn, key) for a computed
+// property key: a symbol key yields "[description]" (or "" when it has none),
+// any other key yields its property-key string. Used by OpSetNameComp.
+func (rt *Runtime) setInferredNameFromKey(fn, key Value) {
+	o := rt.objPtr(fn)
+	if o == nil || !o.flags.isCallable {
+		return
+	}
+	k := rt.toPropertyKeyValue(key)
+	var name string
+	if k.IsSymbol() {
+		if desc := rt.symbolDesc(k); !desc.IsUndefined() {
+			name = "[" + string(rt.strBytes(desc)) + "]"
+		}
+	} else if s, e := rt.toStringValue(k); e == nil {
+		name = string(rt.strBytes(s))
+	}
+	o.defineOwn("name", rt.newString(name), attrConfigurable)
+}
+
 func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
 	o := rt.objPtr(target)
 	if o == nil {

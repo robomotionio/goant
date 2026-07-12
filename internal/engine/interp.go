@@ -541,6 +541,15 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			}
 			push(mknum(n))
 			ip++
+		case OpSetNameComp:
+			// [key, func] (unchanged): NamedEvaluation for an anonymous function or
+			// class in a computed property — set func.name from the property key
+			// ("[desc]" for a symbol, the key string otherwise). Emitted only when
+			// the compiler statically knows the value is an anonymous definition.
+			if len(stack) >= 2 {
+				rt.setInferredNameFromKey(stack[len(stack)-1], stack[len(stack)-2])
+			}
+			ip++
 		case OpToPropkey:
 			// Coerce to a property key (ToPrimitive with hint "string"). Used by
 			// template substitution so `${obj}` prefers toString over valueOf, and

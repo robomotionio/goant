@@ -390,6 +390,7 @@ compat-table/es6/Function.name.object-method.js
 compat-table/es6/Function.name.shorthand.js
 compat-table/es6/Function.name.shorthand.no-lexical.js
 compat-table/es6/Function.name.statement.js
+compat-table/es6/Function.name.symbol-keyed.js
 compat-table/es6/generators.basic.js
 compat-table/es6/generators.constructor.js
 compat-table/es6/generators.no-new-this.js
