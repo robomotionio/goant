@@ -66,6 +66,11 @@ type Runtime struct {
 	// enqueued jobs.
 	microtasks []func()
 
+	// macrotasks is the timer queue (setTimeout/setInterval). goant has no real
+	// clock: tasks run in (delay, insertion) order after microtasks drain.
+	macrotasks []macrotask
+	timerSeq   uint64
+
 	// Well-known symbols and the Symbol.for registry.
 	symbolCounter         uint64
 	symbolRegistry        map[string]Value
@@ -134,6 +139,19 @@ func (u *upvalue) closeUp()    { u.closed = *u.location; u.location = &u.closed 
 type closure struct {
 	fn       *svFunc
 	upvalues []*upvalue
+}
+
+// macrotask is a pending timer callback (setTimeout/setInterval). goant has no
+// real clock, so ordering is by (delay, seq): earlier delay first, ties broken
+// by scheduling order. period > 0 marks a setInterval task (re-armed on fire).
+type macrotask struct {
+	fn        Value
+	args      []Value
+	delay     float64
+	period    float64
+	seq       uint64
+	id        uint64
+	cancelled bool
 }
 
 // ErrNotImplemented marks engine surface that is scaffolded but not yet ported.
@@ -240,7 +258,7 @@ func (rt *Runtime) RunString(filename, src string) (Value, error) {
 		return mkundef(), err
 	}
 	v, err := rt.execute(fn)
-	rt.drainMicrotasks()
+	rt.runEventLoop()
 	// Async conformance protocol: a test sets globalThis.__asyncTestPending and
 	// clears it from asyncTestPassed(); if still pending after the microtask
 	// queue drains, the async assertion never succeeded.

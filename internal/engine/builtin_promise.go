@@ -21,6 +21,78 @@ func (rt *Runtime) drainMicrotasks() {
 	}
 }
 
+// maxMacrotasks caps timer fires per run so a self-rescheduling setInterval (or
+// setTimeout chain) cannot hang the host; goant has no wall clock to advance.
+const maxMacrotasks = 1 << 20
+
+// runEventLoop drains microtasks, then fires timers one at a time in (delay,
+// seq) order — draining microtasks after each — until no timers remain. This is
+// the host event loop for setTimeout/setInterval under a virtual clock.
+func (rt *Runtime) runEventLoop() {
+	rt.drainMicrotasks()
+	for fired := 0; fired < maxMacrotasks; fired++ {
+		// Pick the earliest live task by (delay, seq).
+		best := -1
+		for i := range rt.macrotasks {
+			t := &rt.macrotasks[i]
+			if t.cancelled {
+				continue
+			}
+			if best < 0 {
+				best = i
+				continue
+			}
+			b := &rt.macrotasks[best]
+			if t.delay < b.delay || (t.delay == b.delay && t.seq < b.seq) {
+				best = i
+			}
+		}
+		if best < 0 {
+			break
+		}
+		t := rt.macrotasks[best]
+		if t.period > 0 {
+			// setInterval: re-arm with a fresh seq so siblings interleave fairly.
+			rt.timerSeq++
+			rt.macrotasks[best].delay = t.delay + t.period
+			rt.macrotasks[best].seq = rt.timerSeq
+		} else {
+			rt.macrotasks = append(rt.macrotasks[:best], rt.macrotasks[best+1:]...)
+		}
+		if rt.exitCode != nil {
+			return
+		}
+		rt.callValue(t.fn, mkundef(), t.args)
+		rt.drainMicrotasks()
+	}
+}
+
+// scheduleTimer enqueues a timer callback and returns its numeric id.
+func (rt *Runtime) scheduleTimer(fn Value, delay, period float64, args []Value) Value {
+	rt.timerSeq++
+	id := rt.timerSeq
+	if delay < 0 || delay != delay {
+		delay = 0
+	}
+	rt.macrotasks = append(rt.macrotasks, macrotask{
+		fn: fn, args: args, delay: delay, period: period, seq: id, id: id,
+	})
+	return mknum(float64(id))
+}
+
+// cancelTimer marks a scheduled timer cancelled (clearTimeout/clearInterval).
+func (rt *Runtime) cancelTimer(id Value) {
+	if id.Type() != TNum {
+		return
+	}
+	n := uint64(id.Number())
+	for i := range rt.macrotasks {
+		if rt.macrotasks[i].id == n {
+			rt.macrotasks[i].cancelled = true
+		}
+	}
+}
+
 // isPromise reports whether v is a promise object (carries settlement state).
 func (rt *Runtime) isPromise(v Value) bool {
 	o := rt.objPtr(v)

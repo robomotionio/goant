@@ -26,7 +26,9 @@ compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.symbols.js
 compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.ToObject.js
 compat-table/es2017/async.arrow-in-class.js
 compat-table/es2017/async.arrow.js
+compat-table/es2017/async.await.js
 compat-table/es2017/async.await-non-promise.js
+compat-table/es2017/async.await-rejection.js
 compat-table/es2017/async.methods-class.js
 compat-table/es2017/async.methods-object.js
 compat-table/es2017/async.must-await-value.js
@@ -481,8 +483,10 @@ compat-table/es6/Object.assign.js
 compat-table/es6/Object.getOwnPropertySymbols.js
 compat-table/es6/Object.is.js
 compat-table/es6/Object.setPrototypeOf.js
+compat-table/es6/Promise.all.js
 compat-table/es6/Promise.constructor-requires-new.js
 compat-table/es6/Promise.prototype-not-instance.js
+compat-table/es6/Promise.race.js
 compat-table/es6/Promise.Symbol.species.js
 compat-table/es6/Proxy.handler.apply.invariants.js
 compat-table/es6/Proxy.handler.apply.js
@@ -554,7 +558,9 @@ compat-table/es6/String.raw.js
 compat-table/es6/subclassing.Array.from.js
 compat-table/es6/subclassing.Array.prototype-chain.js
 compat-table/es6/subclassing.Function.prototype-chain.js
+compat-table/es6/subclassing.Promise.all.js
 compat-table/es6/subclassing.Promise.prototype-chain.js
+compat-table/es6/subclassing.Promise.race.js
 compat-table/es6/subclassing.RegExp.prototype-chain.js
 compat-table/es6/super.correct-constructor.js
 compat-table/es6/super.expression.js

@@ -42,6 +42,58 @@ func (rt *Runtime) initBuiltins() {
 	// print (a bare stdout printer, convenient for conformance harnesses)
 	g.defineOwn("print", rt.newNativeFunc("print", 0, logFn(os.Stdout)), attrWritable|attrConfigurable)
 
+	// Timers (HTML setTimeout/setInterval). goant runs a virtual clock: callbacks
+	// fire from the host event loop in (delay, scheduling-order), after the
+	// microtask queue drains. The delay only orders tasks; no time actually
+	// elapses. Extra arguments are forwarded to the callback.
+	timer := func(period bool) nativeFunc {
+		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			fn := arg(args, 0)
+			if !rt.isCallable(fn) {
+				return mknum(0), nil
+			}
+			delay := 0.0
+			if len(args) > 1 {
+				if n, ok := rt.toNumberPrimitive(args[1]); ok {
+					delay = n
+				}
+			}
+			var extra []Value
+			if len(args) > 2 {
+				extra = append(extra, args[2:]...)
+			}
+			p := 0.0
+			if period {
+				if delay <= 0 {
+					p = 1 // a zero-delay interval still needs a positive period
+				} else {
+					p = delay
+				}
+			}
+			return rt.scheduleTimer(fn, delay, p, extra), nil
+		}
+	}
+	g.defineOwn("setTimeout", rt.newNativeFunc("setTimeout", 2, timer(false)), attrWritable|attrConfigurable)
+	g.defineOwn("setInterval", rt.newNativeFunc("setInterval", 2, timer(true)), attrWritable|attrConfigurable)
+	clear := func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		rt.cancelTimer(arg(args, 0))
+		return mkundef(), nil
+	}
+	g.defineOwn("clearTimeout", rt.newNativeFunc("clearTimeout", 1, clear), attrWritable|attrConfigurable)
+	g.defineOwn("clearInterval", rt.newNativeFunc("clearInterval", 1, clear), attrWritable|attrConfigurable)
+	g.defineOwn("setImmediate", rt.newNativeFunc("setImmediate", 1, timer(false)), attrWritable|attrConfigurable)
+	g.defineOwn("clearImmediate", rt.newNativeFunc("clearImmediate", 1, clear), attrWritable|attrConfigurable)
+
+	// queueMicrotask(fn): schedule fn on the promise-reaction (microtask) queue.
+	g.defineOwn("queueMicrotask", rt.newNativeFunc("queueMicrotask", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		fn := arg(args, 0)
+		if !rt.isCallable(fn) {
+			return mkundef(), rt.typeError("queueMicrotask argument is not callable")
+		}
+		rt.enqueueMicrotask(func() { rt.callValue(fn, mkundef(), nil) })
+		return mkundef(), nil
+	}), attrWritable|attrConfigurable)
+
 	// eval — indirect (global-scope) evaluation. Direct-eval local-scope access
 	// is a later refinement; this handles the common expression/statement cases.
 	g.defineOwn("eval", rt.newNativeFunc("eval", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
