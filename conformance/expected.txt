@@ -403,12 +403,15 @@ compat-table/es6/misc.function-length-configurable.js
 compat-table/es6/misc.identifier-syntax.no-escaped-reserved.js
 compat-table/es6/misc.identifier-syntax.var-1.js
 compat-table/es6/misc.identifier-syntax.var-2.js
+compat-table/es6/misc.Invalid-Date.js
 compat-table/es6/misc.Object.freeze.primitives.js
 compat-table/es6/misc.Object.getOwnPropertyDescriptor.primitives.js
+compat-table/es6/misc.Object.getOwnPropertyNames.primitives.js
 compat-table/es6/misc.Object.getPrototypeOf.primitives.js
 compat-table/es6/misc.Object.isExtensible.primitives.js
 compat-table/es6/misc.Object.isFrozen.primitives.js
 compat-table/es6/misc.Object.isSealed.primitives.js
+compat-table/es6/misc.Object.keys.primitives.js
 compat-table/es6/misc.Object.preventExtensions.primitives.js
 compat-table/es6/misc.Object.seal.primitives.js
 compat-table/es6/misc.property-order.JSON.parse.js

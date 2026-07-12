@@ -155,6 +155,25 @@ func (rt *Runtime) initDateBuiltin() {
 		return rt.newString(msToTime(v.Number()).Format("Mon Jan 02 2006 15:04:05 GMT+0000 (Coordinated Universal Time)")), nil
 	}
 	rt.defMethod(proto, "toString", 0, toStr)
+	// Date.prototype[Symbol.toPrimitive]: default and string hints use toString
+	// (so `date + ""` yields the date string, not its numeric valueOf).
+	if rt.symToPrimitive != 0 {
+		proto.defineOwnSymbol(rt.symToPrimitive.handle(), rt.newNativeFunc("[Symbol.toPrimitive]", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			if !this.IsObjectType() {
+				return mkundef(), rt.typeError("Date.prototype[Symbol.toPrimitive] called on non-object")
+			}
+			hint := ""
+			if h := arg(args, 0); h.IsString() {
+				hint = string(rt.strBytes(h))
+			}
+			method := "toString"
+			if hint == "number" {
+				method = "valueOf"
+			}
+			fn, _ := rt.getField(this, method)
+			return rt.callValue(fn, this, nil)
+		}), attrConfigurable)
+	}
 	rt.defMethod(proto, "toUTCString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		v, e := rt.dateMs(this)
 		if e != nil {

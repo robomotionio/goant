@@ -553,6 +553,17 @@ func (rt *Runtime) makeDataDescriptor(v Value, w, e, c bool) Value {
 // means include-all). Integer indices come first.
 func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) Value {
 	arr := rt.newArray()
+	if v.IsString() {
+		ao := rt.objPtr(arr)
+		n := utf16Len(rt.strBytes(v))
+		for i := 0; i < n; i++ {
+			rt.arraySet(ao, ao.arrLen, rt.newString(strconv.Itoa(i)))
+		}
+		if !enumerableOnly {
+			rt.arraySet(ao, ao.arrLen, rt.internString("length"))
+		}
+		return arr
+	}
 	o := rt.objPtr(v)
 	if o == nil {
 		return arr
@@ -684,6 +695,14 @@ func (rt *Runtime) objectToStringTag(v Value) string {
 // first in ascending order, then insertion order).
 func (rt *Runtime) objectKeys(v Value) Value {
 	arr := rt.newArray()
+	if v.IsString() {
+		ao := rt.objPtr(arr)
+		n := utf16Len(rt.strBytes(v))
+		for i := 0; i < n; i++ {
+			rt.arraySet(ao, ao.arrLen, rt.newString(strconv.Itoa(i)))
+		}
+		return arr
+	}
 	o := rt.objPtr(v)
 	if o == nil {
 		return arr
