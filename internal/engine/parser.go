@@ -1386,6 +1386,12 @@ func (p *parser) parseClass() *Node {
 			}
 			method.Left = p.mkPrivateIdentFromTok()
 			p.consume()
+		} else if p.tok() == TokString {
+			method.Left = p.mkStringFromTok()
+			p.consume()
+		} else if p.tok() == TokNumber {
+			method.Left = mkNum(tod(p.tval()))
+			p.consume()
 		} else {
 			method.Left = p.mkIdentFromTok()
 			p.consume()

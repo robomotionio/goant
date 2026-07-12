@@ -216,6 +216,7 @@ compat-table/es6/class.prototype-methods.js
 compat-table/es6/class.statement.js
 compat-table/es6/class.static-accessor-properties.js
 compat-table/es6/class.static-methods.js
+compat-table/es6/class.string-keyed-methods.js
 compat-table/es6/const.basic.js
 compat-table/es6/const.block-scoped.js
 compat-table/es6/const.for-loop.js
