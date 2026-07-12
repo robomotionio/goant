@@ -275,6 +275,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 			return mkundef(), e
 		}
 		newFlags := string(rt.strBytes(flagsS))
+		unicode := strings.Contains(newFlags, "u")
 		if !strings.Contains(newFlags, "y") {
 			newFlags += "y"
 		}
@@ -285,12 +286,8 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if so := rt.objPtr(splitter); so != nil && so.regex != nil {
 			return rt.stringSplitRegexp(arg(args, 0), so.regex, arg(args, 1))
 		}
-		// A non-RegExp splitter would need the fully generic exec-driven algorithm;
-		// fall back to returning the whole string as a single segment.
-		res := rt.newArray()
-		s, _ := rt.toStringValue(arg(args, 0))
-		rt.arraySet(rt.objPtr(res), 0, s)
-		return res, nil
+		// A non-RegExp splitter: run the fully generic exec-driven algorithm.
+		return rt.regexpSymbolSplitGeneric(splitter, arg(args, 0), arg(args, 1), unicode)
 	})
 }
 
@@ -958,6 +955,79 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 		out.WriteString(string(Srunes[nextPos:]))
 	}
 	return rt.newString(out.String()), nil
+}
+
+// regexpSymbolSplitGeneric is the fully generic RegExp.prototype[@@split] path
+// (22.2.6.14) for a splitter that is not a native RegExp: it drives matches via
+// the abstract RegExpExec so every access is observable.
+func (rt *Runtime) regexpSymbolSplitGeneric(splitter, strVal, limitV Value, unicode bool) (Value, *ThrowError) {
+	sV, e := rt.toStringValue(strVal)
+	if e != nil {
+		return mkundef(), e
+	}
+	S := []rune(string(rt.strBytes(sV)))
+	res := rt.newArray()
+	ro := rt.objPtr(res)
+	lim := int64(1)<<32 - 1
+	if !limitV.IsUndefined() {
+		lim = int64(toUint32(float64(rt.intArg([]Value{limitV}, 0))))
+	}
+	if lim == 0 {
+		return res, nil
+	}
+	pushSeg := func(v Value) { rt.arraySet(ro, ro.arrLen, v) }
+	if len(S) == 0 {
+		z, e := rt.abstractRegExpExec(splitter, sV)
+		if e != nil {
+			return mkundef(), e
+		}
+		if z.IsNull() {
+			pushSeg(sV)
+		}
+		return res, nil
+	}
+	p := 0
+	q := 0
+	for q < len(S) {
+		if e := rt.setField(splitter, "lastIndex", mknum(float64(q))); e != nil {
+			return mkundef(), e
+		}
+		z, e := rt.abstractRegExpExec(splitter, sV)
+		if e != nil {
+			return mkundef(), e
+		}
+		if z.IsNull() {
+			q = int(rt.advanceStringIndex(sV, float64(q), unicode))
+			continue
+		}
+		liV, _ := rt.getField(splitter, "lastIndex")
+		liN, _ := rt.toNumber(liV)
+		end := min(int(liN), len(S))
+		if end == p {
+			q = int(rt.advanceStringIndex(sV, float64(q), unicode))
+			continue
+		}
+		pushSeg(rt.newString(string(S[p:q])))
+		if int64(ro.arrLen) == lim {
+			return res, nil
+		}
+		lenV, _ := rt.getField(z, "length")
+		ln, _ := rt.toNumber(lenV)
+		for i := 1; i <= max(int(ln)-1, 0); i++ {
+			cv, e := rt.getElement(z, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
+			pushSeg(cv)
+			if int64(ro.arrLen) == lim {
+				return res, nil
+			}
+		}
+		p = end
+		q = p
+	}
+	pushSeg(rt.newString(string(S[p:])))
+	return res, nil
 }
 
 func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError) {
