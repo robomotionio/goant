@@ -45,6 +45,8 @@ compat-table/es2020/optional-chaining.bracket.js
 compat-table/es2020/optional-chaining.function-call.js
 compat-table/es2020/optional-chaining.method-call.js
 compat-table/es2020/optional-chaining.property.js
+compat-table/es2020/String.prototype.matchAll.js
+compat-table/es2020/String.prototype.matchAll.throws-non-global.js
 compat-table/es2021/logical-assignment.and.js
 compat-table/es2021/logical-assignment.and.setter-not-invoked.js
 compat-table/es2021/logical-assignment.and.short-circuit.js
@@ -421,9 +423,12 @@ compat-table/es6/Set.prototype.values.js
 compat-table/es6/String.fromCodePoint.js
 compat-table/es6/String.prototype.codePointAt.js
 compat-table/es6/String.prototype.endsWith.js
+compat-table/es6/String.prototype.endsWith.throws-regex.js
 compat-table/es6/String.prototype.includes.js
+compat-table/es6/String.prototype.normalize.js
 compat-table/es6/String.prototype.repeat.js
 compat-table/es6/String.prototype.startsWith.js
+compat-table/es6/String.prototype.startsWith.throws-regex.js
 compat-table/es6/String.prototype.Symbol.iterator.js
 compat-table/es6/String.raw.js
 compat-table/es6/subclassing.Array.prototype-chain.js
@@ -508,7 +513,11 @@ compat-table/es6/WeakSet.prototype.delete.js
 compat-table/es6/WeakSet.prototype-not-instance.js
 compat-table/es6/well-known.hasInstance.js
 compat-table/es6/well-known.iterator.js
+compat-table/es6/well-known.match.js
+compat-table/es6/well-known.replace.js
+compat-table/es6/well-known.search.js
 compat-table/es6/well-known.species.js
+compat-table/es6/well-known.split.js
 compat-table/es6/well-known.toPrimitive.js
 compat-table/es6/well-known.toStringTag.js
 compat-table/es6/well-known.toStringTag.misc-builtins.js

@@ -159,6 +159,9 @@ func (rt *Runtime) initStringRegexpMethods() {
 	sp := rt.objPtr(rt.stringProto)
 
 	rt.defMethod(sp, "search", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if r, ok, e := rt.delegateSymbolMethod(rt.symSearch, arg(args, 0), this); ok {
+			return r, e
+		}
 		b, e := rt.thisStringBytes(this)
 		if e != nil {
 			return mkundef(), e
@@ -175,6 +178,9 @@ func (rt *Runtime) initStringRegexpMethods() {
 	})
 
 	rt.defMethod(sp, "match", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if r, ok, e := rt.delegateSymbolMethod(rt.symMatch, arg(args, 0), this); ok {
+			return r, e
+		}
 		s, e := rt.toStringValue(this)
 		if e != nil {
 			return mkundef(), e
@@ -213,7 +219,58 @@ func (rt *Runtime) initStringRegexpMethods() {
 	})
 
 	rt.defMethod(sp, "replace", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if m := rt.getFieldSymbol(arg(args, 0), symOrZero(rt.symReplace)); rt.isCallable(m) {
+			s, e := rt.toStringValue(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.callValue(m, arg(args, 0), []Value{s, arg(args, 1)})
+		}
 		return rt.stringReplace(this, arg(args, 0), arg(args, 1))
+	})
+
+	rt.defMethod(sp, "matchAll", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.toStringValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		pat := arg(args, 0)
+		if o := rt.objPtr(pat); o != nil && o.regex != nil && !o.regex.Global {
+			return mkundef(), rt.typeError("String.prototype.matchAll called with a non-global RegExp argument")
+		}
+		reObj, e := rt.regexpArg(pat)
+		if e != nil {
+			return mkundef(), e
+		}
+		re := rt.objPtr(reObj).regex
+		input := []rune(string(rt.strBytes(s)))
+		// Precompute all match-result arrays, then hand back an iterator.
+		var results []Value
+		pos := 0
+		for {
+			m, err := re.Exec(input, pos)
+			if err != nil || m == nil {
+				break
+			}
+			res := rt.newArray()
+			ro := rt.objPtr(res)
+			for i, g := range m.Groups {
+				if g.Index < 0 && i > 0 {
+					rt.arraySet(ro, uint32(i), mkundef())
+				} else {
+					rt.arraySet(ro, uint32(i), rt.newString(g.Value))
+				}
+			}
+			ro.defineOwn("index", mknum(float64(m.Index)), attrDefault)
+			ro.defineOwn("input", s, attrDefault)
+			results = append(results, res)
+			adv := m.Index + m.Groups[0].Length
+			if adv <= pos {
+				adv = pos + 1
+			}
+			pos = adv
+		}
+		return rt.sliceIterator(results), nil
 	})
 
 	rt.defMethod(sp, "replaceAll", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -264,12 +321,48 @@ func (rt *Runtime) initStringRegexpMethods() {
 	})
 
 	rt.defMethod(sp, "split", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if m := rt.getFieldSymbol(arg(args, 0), symOrZero(rt.symSplit)); rt.isCallable(m) {
+			s, e := rt.toStringValue(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.callValue(m, arg(args, 0), []Value{s, arg(args, 1)})
+		}
 		sep := arg(args, 0)
 		if o := rt.objPtr(sep); o != nil && o.regex != nil {
 			return rt.stringSplitRegexp(this, o.regex, arg(args, 1))
 		}
 		return rt.stringSplitString(this, args)
 	})
+}
+
+// symOrZero returns a symbol's handle, or a never-matching sentinel when the
+// well-known symbol hasn't been initialized.
+func symOrZero(v Value) uint32 {
+	if v == 0 {
+		return 0xFFFFFFFF
+	}
+	return v.handle()
+}
+
+// delegateSymbolMethod checks whether pattern carries the well-known symbol
+// method (Symbol.match/replace/search/split); if so it invokes pattern[sym](str)
+// and returns (result, true). Real RegExp objects don't define these, so they
+// fall through to the built-in path.
+func (rt *Runtime) delegateSymbolMethod(sym, pattern, str Value) (Value, bool, *ThrowError) {
+	if sym == 0 || pattern.IsNullish() {
+		return mkundef(), false, nil
+	}
+	m := rt.getFieldSymbol(pattern, sym.handle())
+	if !rt.isCallable(m) {
+		return mkundef(), false, nil
+	}
+	s, e := rt.toStringValue(str)
+	if e != nil {
+		return mkundef(), true, e
+	}
+	r, e := rt.callValue(m, pattern, []Value{s})
+	return r, true, e
 }
 
 // coerceRegExp turns a value into a compiled regex (compiling a string pattern).

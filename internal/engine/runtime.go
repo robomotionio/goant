@@ -71,6 +71,10 @@ type Runtime struct {
 	symHasInstance   Value
 	symToPrimitive   Value
 	symToStringTag   Value
+	symMatch         Value
+	symReplace       Value
+	symSearch        Value
+	symSplit         Value
 
 	// errors holds the NativeError constructors/prototypes for internal throws.
 	errors errorCtors

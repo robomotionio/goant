@@ -82,10 +82,10 @@ func (rt *Runtime) initSymbolBuiltin() {
 	rt.symToStringTag = wk("toStringTag")
 	wk("isConcatSpreadable")
 	wk("species")
-	wk("match")
-	wk("replace")
-	wk("search")
-	wk("split")
+	rt.symMatch = wk("match")
+	rt.symReplace = wk("replace")
+	rt.symSearch = wk("search")
+	rt.symSplit = wk("split")
 	wk("unscopables")
 
 	// Symbol.for / Symbol.keyFor (global registry).

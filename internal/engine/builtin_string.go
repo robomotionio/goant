@@ -6,7 +6,15 @@ package engine
 import (
 	"math"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
+
+// isRegExpValue reports whether v is a RegExp object.
+func (rt *Runtime) isRegExpValue(v Value) bool {
+	o := rt.objPtr(v)
+	return o != nil && o.regex != nil
+}
 
 // thisStringBytes coerces a method receiver to its WTF-8 string bytes.
 func (rt *Runtime) thisStringBytes(this Value) ([]byte, *ThrowError) {
@@ -96,6 +104,9 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if rt.isRegExpValue(arg(args, 0)) {
+			return mkundef(), rt.typeError("First argument to String.prototype.includes must not be a regular expression")
+		}
 		sub, e := rt.stringArg(args, 0)
 		if e != nil {
 			return mkundef(), e
@@ -107,6 +118,9 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if rt.isRegExpValue(arg(args, 0)) {
+			return mkundef(), rt.typeError("First argument to String.prototype.startsWith must not be a regular expression")
+		}
 		sub, e := rt.stringArg(args, 0)
 		if e != nil {
 			return mkundef(), e
@@ -117,6 +131,9 @@ func (rt *Runtime) initStringBuiltin() {
 		b, e := rt.thisStringBytes(this)
 		if e != nil {
 			return mkundef(), e
+		}
+		if rt.isRegExpValue(arg(args, 0)) {
+			return mkundef(), rt.typeError("First argument to String.prototype.endsWith must not be a regular expression")
 		}
 		sub, e := rt.stringArg(args, 0)
 		if e != nil {
@@ -379,6 +396,35 @@ func (rt *Runtime) initStringBuiltin() {
 		})
 		proto.defineOwnSymbol(rt.symIterator.handle(), strIter, attrWritable|attrConfigurable)
 	}
+	rt.defMethod(proto, "normalize", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		b, e := rt.thisStringBytes(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		form := "NFC"
+		if f := arg(args, 0); !f.IsUndefined() {
+			fv, e := rt.toStringValue(f)
+			if e != nil {
+				return mkundef(), e
+			}
+			form = string(rt.strBytes(fv))
+		}
+		var nf norm.Form
+		switch form {
+		case "NFC":
+			nf = norm.NFC
+		case "NFD":
+			nf = norm.NFD
+		case "NFKC":
+			nf = norm.NFKC
+		case "NFKD":
+			nf = norm.NFKD
+		default:
+			return mkundef(), rt.rangeError("The normalization form should be one of NFC, NFD, NFKC, NFKD")
+		}
+		return rt.newStringBytes(nf.Bytes(b)), nil
+	})
+
 	// String.raw`...` — assemble a template's raw strings with substitutions.
 	rt.defMethod(cobj, "raw", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		tmpl := arg(args, 0)
