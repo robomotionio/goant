@@ -224,6 +224,37 @@ func (o *object) getOwnSymbol(sym uint32) (Value, bool) {
 // hasOwn reports whether key is an own property.
 func (o *object) hasOwn(key string) bool { return o.shape.lookupInterned(key) >= 0 }
 
+// setStringTag installs a non-writable Symbol.toStringTag on obj (for the
+// Object.prototype.toString brand of namespace/collection builtins).
+func (rt *Runtime) setStringTag(obj Value, name string) {
+	if rt.symToStringTag == 0 {
+		return
+	}
+	if o := rt.objPtr(obj); o != nil {
+		o.defineOwnSymbol(rt.symToStringTag.handle(), rt.newString(name), attrConfigurable)
+	}
+}
+
+// hasInProtoChain reports whether proto appears on v's prototype chain.
+func (rt *Runtime) hasInProtoChain(v, proto Value) bool {
+	o := rt.objPtr(v)
+	if o == nil {
+		return false
+	}
+	cur := o.proto
+	for depth := 0; depth < maxProtoChainDepth; depth++ {
+		if cur == proto {
+			return true
+		}
+		co := rt.objPtr(cur)
+		if co == nil {
+			return false
+		}
+		cur = co.proto
+	}
+	return false
+}
+
 // defineOwnSymbol installs a symbol-keyed own property.
 func (o *object) defineOwnSymbol(sym uint32, v Value, attrs uint8) bool {
 	slot, ok := addSymbolTr(&o.shape, sym, attrs)
@@ -231,6 +262,20 @@ func (o *object) defineOwnSymbol(sym uint32, v Value, attrs uint8) bool {
 		return false
 	}
 	o.slotSet(slot, v)
+	return true
+}
+
+// defineAccessorSymbol installs a symbol-keyed accessor property.
+func (o *object) defineAccessorSymbol(sym uint32, getter, setter Value, hasGet, hasSet bool, attrs uint8) bool {
+	slot, ok := addSymbolTr(&o.shape, sym, attrs)
+	if !ok {
+		return false
+	}
+	o.ensureUniqueShape()
+	p := o.shape.propAt(slot)
+	p.hasGetter, p.hasSetter = hasGet, hasSet
+	p.getter, p.setter = getter, setter
+	o.slotSet(slot, mkundef())
 	return true
 }
 

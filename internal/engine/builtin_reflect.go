@@ -84,11 +84,7 @@ func (rt *Runtime) initReflectBuiltin() {
 		if e := needObj(arg(args, 0), "defineProperty"); e != nil {
 			return mkundef(), e
 		}
-		name, e := rt.propKeyString(arg(args, 1))
-		if e != nil {
-			return mkundef(), e
-		}
-		return mkbool(rt.objectDefineProperty(arg(args, 0), name, arg(args, 2)) == nil), nil
+		return mkbool(rt.objectDefinePropertyKey(arg(args, 0), arg(args, 1), arg(args, 2)) == nil), nil
 	})
 	rt.defMethod(ro, "getOwnPropertyDescriptor", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(arg(args, 0))

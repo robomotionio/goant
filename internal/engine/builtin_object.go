@@ -116,11 +116,7 @@ func (rt *Runtime) initObjectBuiltin() {
 		if !obj.IsObjectType() {
 			return mkundef(), rt.typeError("Object.defineProperty called on non-object")
 		}
-		name, e := rt.propKeyString(arg(args, 1))
-		if e != nil {
-			return mkundef(), e
-		}
-		if e := rt.objectDefineProperty(obj, name, arg(args, 2)); e != nil {
+		if e := rt.objectDefinePropertyKey(obj, arg(args, 1), arg(args, 2)); e != nil {
 			return mkundef(), e
 		}
 		return obj, nil
@@ -325,11 +321,34 @@ func (rt *Runtime) enumerableOwnKeys(v Value) []string {
 
 // objectDefineProperty applies an ES5 property descriptor to obj[name].
 func (rt *Runtime) objectDefineProperty(obj Value, name string, descVal Value) *ThrowError {
+	return rt.objectDefinePropertyKey(obj, rt.internString(name), descVal)
+}
+
+// objectDefinePropertyKey applies a descriptor to obj[key] for a string or
+// symbol key.
+func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) *ThrowError {
 	if !descVal.IsObjectType() {
 		return rt.typeError("Property description must be an object")
 	}
 	o := rt.objPtr(obj)
-	existing := o.ownDescriptor(name)
+	if o == nil {
+		return rt.typeError("Object.defineProperty called on non-object")
+	}
+	sym := key.IsSymbol()
+	name := ""
+	var symOff uint32
+	var existing ownDesc
+	if sym {
+		symOff = key.handle()
+		existing = o.ownDescriptorSym(symOff)
+	} else {
+		var e *ThrowError
+		name, e = rt.propKeyString(key)
+		if e != nil {
+			return e
+		}
+		existing = o.ownDescriptor(name)
+	}
 	get := func(k string) (Value, bool) {
 		if rt.hasProp(descVal, k) {
 			v, _ := rt.getField(descVal, k)
@@ -375,14 +394,22 @@ func (rt *Runtime) objectDefineProperty(obj Value, name string, descVal Value) *
 		if hasSet {
 			s, hs = setV, !setV.IsUndefined()
 		}
-		o.defineAccessor(name, g, s, hg, hs, attrs)
+		if sym {
+			o.defineAccessorSymbol(symOff, g, s, hg, hs, attrs)
+		} else {
+			o.defineAccessor(name, g, s, hg, hs, attrs)
+		}
 		return nil
 	}
 	val := existing.value
 	if hasVal {
 		val = valV
 	}
-	o.defineOwn(name, val, attrs)
+	if sym {
+		o.defineOwnSymbol(symOff, val, attrs)
+	} else {
+		o.defineOwn(name, val, attrs)
+	}
 	return nil
 }
 
@@ -516,19 +543,49 @@ func (rt *Runtime) objectToStringTag(v Value) string {
 		return "[object Undefined]"
 	case TNull:
 		return "[object Null]"
-	case TArr:
-		return "[object Array]"
-	case TFunc, TCFunc:
-		return "[object Function]"
-	case TStr:
-		return "[object String]"
-	case TNum:
-		return "[object Number]"
-	case TBool:
-		return "[object Boolean]"
-	default:
-		return "[object Object]"
 	}
+	builtin := "Object"
+	switch v.Type() {
+	case TArr:
+		builtin = "Array"
+	case TFunc, TCFunc:
+		builtin = "Function"
+	case TStr:
+		builtin = "String"
+	case TNum:
+		builtin = "Number"
+	case TBool:
+		builtin = "Boolean"
+	default:
+		if o := rt.objPtr(v); o != nil {
+			switch {
+			case o.flags.isCallable:
+				builtin = "Function"
+			case o.brandID() == brandDate:
+				builtin = "Date"
+			case o.regex != nil:
+				builtin = "RegExp"
+			case rt.hasInProtoChain(v, rt.errorProto):
+				builtin = "Error"
+			case o.hasOwn("callee") && o.hasOwn("length"):
+				builtin = "Arguments"
+			}
+		}
+	}
+	// A string-valued Symbol.toStringTag (own or inherited, via the wrapper
+	// prototype for primitives) overrides the built-in tag.
+	if rt.symToStringTag != 0 {
+		lookup := v
+		if !v.IsObjectType() {
+			lookup = rt.primitiveProto(v)
+		}
+		if lookup.IsObjectType() {
+			if tag := rt.getFieldSymbol(lookup, rt.symToStringTag.handle()); tag.IsString() {
+				builtin = string(rt.strBytes(tag))
+			}
+		}
+	}
+	return "[object " + builtin + "]"
 }
 
 // objectKeys returns an array of own enumerable string keys (integer indices

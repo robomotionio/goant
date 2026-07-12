@@ -306,6 +306,15 @@ func (rt *Runtime) propKeyString(key Value) (string, *ThrowError) {
 	if key.IsString() {
 		return string(rt.strBytes(key)), nil
 	}
+	// ToPropertyKey: an object key is taken to a primitive (string hint) first,
+	// honoring Symbol.toPrimitive / valueOf / toString.
+	if key.IsObjectType() || key.Type() == TTypedArray {
+		p, e := rt.toPrimitive(key, "string")
+		if e != nil {
+			return "", e
+		}
+		key = p
+	}
 	s, ok := rt.toStringPrimitive(key)
 	if !ok {
 		return "", rt.typeError("cannot convert property key to string")

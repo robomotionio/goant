@@ -932,7 +932,18 @@ func (rt *Runtime) abstractEquals(a, b Value) bool {
 	if tb == TBool {
 		return rt.abstractEquals(a, mknum(boolToNum(b)))
 	}
-	// object vs primitive requires ToPrimitive (Phase 3+); bigint later.
+	// object vs primitive (number/string/symbol): ToPrimitive the object side,
+	// then re-compare (ES abstract equality steps 10-11).
+	if a.IsObjectType() && (tb == TNum || tb == TStr || tb == TSymbol) {
+		if pa, e := rt.toPrimitive(a, ""); e == nil {
+			return rt.abstractEquals(pa, b)
+		}
+	}
+	if b.IsObjectType() && (ta == TNum || ta == TStr || ta == TSymbol) {
+		if pb, e := rt.toPrimitive(b, ""); e == nil {
+			return rt.abstractEquals(a, pb)
+		}
+	}
 	return false
 }
 

@@ -255,7 +255,6 @@ compat-table/es6/misc.Object.preventExtensions.primitives.js
 compat-table/es6/misc.Object.seal.primitives.js
 compat-table/es6/misc.property-order.JSON.parse.js
 compat-table/es6/misc.property-order.Object.keys.js
-compat-table/es6/misc.prototypes-not-instances.js
 compat-table/es6/misc.Proxy.deleteProperty.Array.pop.js
 compat-table/es6/misc.Proxy.get.Array.pop.js
 compat-table/es6/misc.Proxy.get.Array.shift.js
@@ -344,9 +343,9 @@ compat-table/es6/super.expression.js
 compat-table/es6/super.method-calls.js
 compat-table/es6/super.statement.js
 compat-table/es6/super.this-binding.js
+compat-table/es6/Symbol.defineProperty.js
 compat-table/es6/Symbol.global-registry.js
 compat-table/es6/Symbol.hidden-keys.js
-compat-table/es6/Symbol.JSON.stringify.object.js
 compat-table/es6/Symbol.JSON.stringify.primitive.js
 compat-table/es6/Symbol.no-new.js
 compat-table/es6/Symbol.prototype.js
@@ -373,8 +372,12 @@ compat-table/es6/WeakSet.no-clear.js
 compat-table/es6/WeakSet.prototype.add-returns-this.js
 compat-table/es6/WeakSet.prototype.delete.js
 compat-table/es6/WeakSet.prototype-not-instance.js
+compat-table/es6/well-known.hasInstance.js
 compat-table/es6/well-known.iterator.js
 compat-table/es6/well-known.species.js
+compat-table/es6/well-known.toPrimitive.js
+compat-table/es6/well-known.toStringTag.js
+compat-table/es6/well-known.toStringTag.misc-builtins.js
 compat-table/intl/Array.prototype.toLocaleString.js
 compat-table/intl/Date.prototype.toLocaleDateString.js
 compat-table/intl/Date.prototype.toLocaleString.js

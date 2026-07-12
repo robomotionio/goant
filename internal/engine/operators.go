@@ -129,6 +129,16 @@ func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
 // [[HasInstance]] on a callable's .prototype (Symbol.hasInstance lands in
 // Phase 5).
 func (rt *Runtime) jsInstanceof(l, r Value) (bool, *ThrowError) {
+	// A Symbol.hasInstance method on the RHS overrides the ordinary check.
+	if rt.symHasInstance != 0 && r.IsObjectType() {
+		if hi := rt.getFieldSymbol(r, rt.symHasInstance.handle()); rt.isCallable(hi) {
+			res, e := rt.callValue(hi, r, []Value{l})
+			if e != nil {
+				return false, e
+			}
+			return rt.toBoolean(res), nil
+		}
+	}
 	if !rt.isCallable(r) {
 		return false, rt.typeError("right-hand side of 'instanceof' is not callable")
 	}

@@ -183,6 +183,7 @@ func (rt *Runtime) initMapBuiltin() {
 	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 	rt.defGlobal("Map", ctor)
+	rt.setStringTag(proto, "Map")
 	rt.mapProto = proto
 }
 
@@ -294,6 +295,7 @@ func (rt *Runtime) initSetBuiltin() {
 	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 	rt.defGlobal("Set", ctor)
+	rt.setStringTag(proto, "Set")
 	rt.setProto = proto
 }
 

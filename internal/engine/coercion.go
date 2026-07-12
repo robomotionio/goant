@@ -79,6 +79,23 @@ func (rt *Runtime) toPrimitive(v Value, hint string) (Value, *ThrowError) {
 	if !v.IsObjectType() && v.Type() != TTypedArray {
 		return v, nil
 	}
+	// A Symbol.toPrimitive method overrides the ordinary valueOf/toString order.
+	if rt.symToPrimitive != 0 {
+		if exotic := rt.getFieldSymbol(v, rt.symToPrimitive.handle()); rt.isCallable(exotic) {
+			h := hint
+			if h == "" {
+				h = "default"
+			}
+			res, e := rt.callValue(exotic, v, []Value{rt.newString(h)})
+			if e != nil {
+				return mkundef(), e
+			}
+			if res.IsObjectType() {
+				return mkundef(), rt.typeError("Cannot convert object to primitive value")
+			}
+			return res, nil
+		}
+	}
 	methods := [2]string{"valueOf", "toString"}
 	if hint == "string" {
 		methods = [2]string{"toString", "valueOf"}

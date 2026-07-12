@@ -83,6 +83,7 @@ func (rt *Runtime) initJSONBuiltin() {
 		return v, nil
 	})
 
+	rt.setStringTag(json, "JSON")
 	rt.objPtr(rt.global).defineOwn("JSON", json, attrWritable|attrConfigurable)
 }
 

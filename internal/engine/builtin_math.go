@@ -101,6 +101,7 @@ func (rt *Runtime) initMath() {
 		return mknum(rt.nextRandom()), nil
 	}), attrWritable|attrConfigurable)
 
+	rt.setStringTag(m, "Math")
 	rt.objPtr(rt.global).defineOwn("Math", m, attrWritable|attrConfigurable)
 }
 
