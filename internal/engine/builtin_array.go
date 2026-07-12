@@ -975,6 +975,7 @@ func (rt *Runtime) initArrayBuiltin() {
 	ctor := rt.newNativeFunc("Array", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		res := rt.newArray()
 		ro := rt.objPtr(res)
+		ro.proto = rt.newTargetProto(rt.arrayProto) // honor new.target (subclassing)
 		if len(args) == 1 && args[0].Type() == TNum {
 			n := args[0].Number()
 			if n < 0 || n != float64(uint32(n)) {

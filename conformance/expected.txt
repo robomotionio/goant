@@ -582,9 +582,12 @@ compat-table/es6/Proxy.JSON.stringify.js
 compat-table/es6/Proxy.no-prototype.js
 compat-table/es6/Proxy.revocable.js
 compat-table/es6/Reflect.apply.js
+compat-table/es6/Reflect.construct.Array-subclassing.js
+compat-table/es6/Reflect.construct.Function-subclassing.js
 compat-table/es6/Reflect.construct.js
 compat-table/es6/Reflect.construct.new-target.js
 compat-table/es6/Reflect.construct.Promise-subclassing.js
+compat-table/es6/Reflect.construct.RegExp-subclassing.js
 compat-table/es6/Reflect.construct.third-argument.js
 compat-table/es6/Reflect.defineProperty.js
 compat-table/es6/Reflect.deleteProperty.js

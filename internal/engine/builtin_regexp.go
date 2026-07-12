@@ -88,7 +88,14 @@ func (rt *Runtime) initRegExpBuiltin() {
 			}
 			flags = string(rt.strBytes(s))
 		}
-		return rt.newRegExp(pattern, flags)
+		rv, e := rt.newRegExp(pattern, flags)
+		if e != nil {
+			return mkundef(), e
+		}
+		if o := rt.objPtr(rv); o != nil { // honor new.target (subclassing)
+			o.proto = rt.newTargetProto(rt.regexpProto)
+		}
+		return rv, nil
 	})
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", proto, 0)

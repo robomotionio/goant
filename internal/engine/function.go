@@ -80,6 +80,21 @@ func (rt *Runtime) construct(fnVal Value, args []Value) (Value, *ThrowError) {
 	return rt.constructWithTarget(fnVal, args, fnVal)
 }
 
+// newTargetProto returns the [[Prototype]] to use for an object created by the
+// current native constructor: new.target.prototype when constructing (so
+// Reflect.construct(C, args, newTarget) / subclasses inherit correctly),
+// otherwise the given intrinsic fallback.
+func (rt *Runtime) newTargetProto(fallback Value) Value {
+	nt := rt.pendingNewTarget
+	if nt.IsUndefined() {
+		return fallback
+	}
+	if p, e := rt.getField(nt, "prototype"); e == nil && p.IsObjectType() {
+		return p
+	}
+	return fallback
+}
+
 // constructing reports whether the current native builtin was invoked via
 // [[Construct]] (new.target is set). Native constructors read this first thing
 // to enforce "requires 'new'", since a method call like global.ArrayBuffer(n)

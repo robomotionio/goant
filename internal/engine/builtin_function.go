@@ -114,6 +114,9 @@ func (rt *Runtime) initFunctionBuiltin() {
 	// Function constructor: compile `function anonymous(params) { body }` in the
 	// global scope and return the resulting function (ant dynamic Function).
 	ctor := rt.newNativeFunc("Function", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// Capture new.target's prototype now: compiling/executing the body below
+		// runs a frame that clears pendingNewTarget.
+		resultProto := rt.newTargetProto(rt.functionProto)
 		var params []string
 		body := ""
 		if len(args) > 0 {
@@ -151,6 +154,9 @@ func (rt *Runtime) initFunctionBuiltin() {
 		}
 		v, _ := rt.getField(rt.global, tmp)
 		rt.objPtr(rt.global).deleteOwn(tmp)
+		if o := rt.objPtr(v); o != nil { // honor new.target (subclassing)
+			o.proto = resultProto
+		}
 		return v, nil
 	})
 	cobj := rt.objPtr(ctor)
