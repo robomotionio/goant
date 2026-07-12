@@ -404,6 +404,7 @@ compat-table/es6/const.block-scoped.js
 compat-table/es6/const.for-in.js
 compat-table/es6/const.for-loop.js
 compat-table/es6/const.for-of.js
+compat-table/es6/const.no-redefine.js
 compat-table/es6/const.no-statement.js
 compat-table/es6/const.shadow.js
 compat-table/es6/const.strict.basic.js
@@ -411,6 +412,7 @@ compat-table/es6/const.strict.block-scoped.js
 compat-table/es6/const.strict.for-in.js
 compat-table/es6/const.strict.for-loop.js
 compat-table/es6/const.strict.for-of.js
+compat-table/es6/const.strict.no-redefine.js
 compat-table/es6/const.strict.no-statement.js
 compat-table/es6/const.strict.shadow.js
 compat-table/es6/Date.prototype.Symbol.toPrimitive.js

@@ -881,6 +881,15 @@ func nameAnonExpr(rhs *Node, name string) {
 	}
 }
 
+// emitConstAssignError emits a throw of `TypeError: Assignment to constant
+// variable.` leaving the (already-evaluated) assigned value on the stack.
+func (c *compiler) emitConstAssignError() {
+	idx := c.constant(c.rt.internString("Assignment to constant variable."))
+	c.emit(OpThrowError)
+	c.emitU32(uint32(idx))
+	c.emitByte(0) // TypeError
+}
+
 func (c *compiler) compileAssign(n *Node) {
 	// Destructuring assignment: [a,b]=rhs / ({x}=rhs). Yields the RHS value.
 	if n.Op == TokAssign && n.Left != nil && (n.Left.Kind == NArray || n.Left.Kind == NObject) {
@@ -925,15 +934,18 @@ func (c *compiler) compileAssign(n *Node) {
 		}
 	}
 	storeVar := func() {
+		// Assignment to a const binding always throws a TypeError (in strict and
+		// sloppy code alike). The value stays on the stack (assignment is an expr).
+		if slot >= 0 && c.locals[slot].isConst {
+			c.emitConstAssignError()
+			return
+		}
 		// A named function expression's self-reference is immutable: assigning to it
 		// throws a TypeError in strict mode and is a silent no-op otherwise (the
 		// evaluated value stays on the stack either way).
 		if slot >= 0 && c.locals[slot].selfName {
 			if c.fn.isStrict {
-				idx := c.constant(c.rt.internString("Assignment to constant variable."))
-				c.emit(OpThrowError)
-				c.emitU32(uint32(idx))
-				c.emitByte(0) // TypeError
+				c.emitConstAssignError()
 			}
 			return
 		}
@@ -988,15 +1000,17 @@ func (c *compiler) compileAssign(n *Node) {
 		c.emit(op)
 	}
 
+	// Assignment to a const binding always throws a TypeError.
+	if slot >= 0 && c.locals[slot].isConst {
+		c.emitConstAssignError()
+		return
+	}
 	// A named function expression's self-reference is immutable: assigning to it
 	// throws a TypeError in strict mode and is a silent no-op otherwise (the value
 	// stays on the stack, since assignment is an expression).
 	if slot >= 0 && c.locals[slot].selfName {
 		if c.fn.isStrict {
-			idx := c.constant(c.rt.internString("Assignment to constant variable."))
-			c.emit(OpThrowError)
-			c.emitU32(uint32(idx))
-			c.emitByte(0) // TypeError
+			c.emitConstAssignError()
 		}
 		return
 	}
