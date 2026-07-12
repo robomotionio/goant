@@ -61,7 +61,11 @@ func (rt *Runtime) initFunctionBuiltin() {
 		if len(args) > 1 {
 			boundArgs = append(boundArgs, args[1:]...)
 		}
-		bound := rt.newNativeFunc("bound", 0, func(rt *Runtime, _ Value, callArgs []Value) (Value, *ThrowError) {
+		targetName := ""
+		if nv, e := rt.getField(target, "name"); e == nil && nv.IsString() {
+			targetName = string(rt.strBytes(nv))
+		}
+		bound := rt.newNativeFunc("bound "+targetName, 0, func(rt *Runtime, _ Value, callArgs []Value) (Value, *ThrowError) {
 			full := append(append([]Value{}, boundArgs...), callArgs...)
 			return rt.callValue(target, boundThis, full)
 		})

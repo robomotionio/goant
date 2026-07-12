@@ -164,8 +164,9 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	}
 
 	// A named function is self-bound: its name refers to itself inside the body
-	// (named function expressions; also enables recursion for declarations).
-	if n.Str != "" && n.Flags&fnArrow == 0 {
+	// (named function expressions; also enables recursion for declarations). A
+	// name assigned by NamedEvaluation does NOT create this binding.
+	if n.Str != "" && n.Flags&fnArrow == 0 && n.Flags&fnInferredName == 0 {
 		slot := c.declareVar(n.Str, false)
 		c.emit(OpSpecialObj)
 		c.emitByte(1) // current function value

@@ -18,11 +18,17 @@ func (c *compiler) compileObject(n *Node) {
 				c.errorf("computed accessor keys not yet supported (slice)")
 				return
 			}
-			c.compileFunc(prop.Right) // the accessor function
-			flags := byte(1)          // getter
+			flags := byte(1) // getter
+			prefix := "get "
 			if prop.Flags&fnSetter != 0 {
 				flags = 2 // setter
+				prefix = "set "
 			}
+			if prop.Right.Str == "" {
+				prop.Right.Str = prefix + name
+				prop.Right.Flags |= fnInferredName
+			}
+			c.compileFunc(prop.Right) // the accessor function
 			idx := c.constant(c.rt.internString(name))
 			c.emit(OpDefineMethod)
 			c.emitU32(uint32(idx))
@@ -42,6 +48,7 @@ func (c *compiler) compileObject(n *Node) {
 			c.errorf("unsupported object literal key (slice)")
 			return
 		}
+		nameAnonExpr(prop.Right, name)
 		c.compileExpr(prop.Right)
 		c.emitDefineField(name) // obj val -> obj
 	}

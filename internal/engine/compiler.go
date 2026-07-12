@@ -288,6 +288,7 @@ func (c *compiler) compileVarDecl(n *Node) {
 			return
 		}
 		name := decl.Left.Str
+		nameAnonExpr(decl.Right, name)
 		if asGlobal {
 			if decl.Right != nil {
 				c.compileExpr(decl.Right)
@@ -655,6 +656,19 @@ func (c *compiler) compileUnary(n *Node) {
 	}
 }
 
+// nameAnonExpr implements NamedEvaluation: an anonymous function/class on the
+// RHS of a binding or assignment takes the target's name (mutating the AST node
+// so compileFunc/compileClass stamp it as the .name).
+func nameAnonExpr(rhs *Node, name string) {
+	if rhs == nil || name == "" {
+		return
+	}
+	if (rhs.Kind == NFunc || rhs.Kind == NClass) && rhs.Str == "" {
+		rhs.Str = name
+		rhs.Flags |= fnInferredName
+	}
+}
+
 func (c *compiler) compileAssign(n *Node) {
 	if n.Left != nil && n.Left.Kind == NMember {
 		c.compileMemberAssign(n)
@@ -721,6 +735,7 @@ func (c *compiler) compileAssign(n *Node) {
 
 	// Evaluate the value to assign, leaving it on the stack.
 	if n.Op == TokAssign {
+		nameAnonExpr(n.Right, name)
 		c.compileExpr(n.Right)
 	} else {
 		op, ok := compoundOpcode(n.Op)
