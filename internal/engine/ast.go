@@ -114,6 +114,7 @@ const (
 	fnModuleSyntax    = 1 << 16
 	fnDerivedCtor     = 1 << 17
 	fnInferredName    = 1 << 18 // name came from NamedEvaluation (no self-binding)
+	fnClassCtor       = 1 << 19 // a class constructor (must be invoked with new)
 )
 
 // Export flags (ant ast.h EX_*).

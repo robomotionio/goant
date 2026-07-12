@@ -318,6 +318,7 @@ func (c *compiler) compileClass(n *Node) {
 		ctorFn.SrcOff = n.SrcOff
 		ctorFn.SrcEnd = n.SrcEnd
 	}
+	ctorFn.Flags |= fnClassCtor // must be invoked with `new`
 	// Bind super BEFORE compiling the constructor/methods so their bodies can
 	// capture *superctor* / *superproto* as upvalues (for super() / super.x).
 	superSlot, superProtoSlot := -1, -1

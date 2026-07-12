@@ -60,6 +60,21 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	newTarget := rt.pendingNewTarget
 	rt.pendingNewTarget = mkundef()
 
+	// A class constructor may only be invoked via `new` (new.target is set) — or
+	// via super() from a derived constructor, which propagates its new.target
+	// through rt.activeNewTarget.
+	if fn.isClassCtor {
+		if newTarget.IsUndefined() {
+			newTarget = rt.activeNewTarget
+			if newTarget.IsUndefined() {
+				return mkundef(), rt.typeError("Class constructor " + fn.name + " cannot be invoked without 'new'")
+			}
+		}
+		savedActiveNT := rt.activeNewTarget
+		rt.activeNewTarget = newTarget
+		defer func() { rt.activeNewTarget = savedActiveNT }()
+	}
+
 	code := fn.code
 	stack := make([]Value, 0, fn.maxStack+16)
 	// Locals start as undefined (the zero Value 0x0 would decode as the number

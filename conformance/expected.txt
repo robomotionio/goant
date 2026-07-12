@@ -264,6 +264,7 @@ compat-table/es6/class.expression.js
 compat-table/es6/class.extends-expressions.js
 compat-table/es6/class.extends.js
 compat-table/es6/class.methods-not-enumerable.js
+compat-table/es6/class.new-target.js
 compat-table/es6/class.optional-semicolons.js
 compat-table/es6/class.prototype-methods.js
 compat-table/es6/class.statement.js
@@ -535,6 +536,7 @@ compat-table/es6/subclassing.RegExp.prototype-chain.js
 compat-table/es6/super.correct-constructor.js
 compat-table/es6/super.expression.js
 compat-table/es6/super.method-calls.js
+compat-table/es6/super.new-target-binding.js
 compat-table/es6/super.statement.js
 compat-table/es6/super.this-binding.js
 compat-table/es6/Symbol.defineProperty.js

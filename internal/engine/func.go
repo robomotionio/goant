@@ -33,6 +33,7 @@ type svFunc struct {
 	isArrow     bool
 	isAsync     bool
 	isGenerator bool
+	isClassCtor bool
 }
 
 // ---- bytecode emission (compiler side) ----

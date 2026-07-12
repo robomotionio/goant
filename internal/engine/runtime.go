@@ -86,8 +86,11 @@ type Runtime struct {
 	// arguments (ES5 §13.2.3).
 	poison Value
 
-	// pendingNewTarget carries new.target from construct into the next runFrame.
+	// pendingNewTarget carries new.target from construct into the next runFrame;
+	// activeNewTarget holds the executing class constructor's new.target so a
+	// super() call (an ordinary call) can propagate it to the parent ctor.
 	pendingNewTarget Value
+	activeNewTarget  Value
 
 	// frameDepth tracks native call depth for the stack-overflow guard.
 	frameDepth int
