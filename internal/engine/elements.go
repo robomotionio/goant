@@ -160,6 +160,11 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 	}
 	if idx, ok := rt.arrayIndexOf(key); ok {
 		switch obj.Type() {
+		case TTypedArray:
+			if v, ok := rt.taGet(rt.objPtr(obj), int(idx)); ok {
+				return v, nil
+			}
+			return mkundef(), nil
 		case TArr:
 			o := rt.objPtr(obj)
 			if idx < o.arrLen && int(idx) < len(o.arr) {
@@ -240,6 +245,14 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 	}
 	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TArr {
 		rt.arraySet(rt.objPtr(obj), idx, v)
+		return nil
+	}
+	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TTypedArray {
+		n, e := rt.toNumber(v)
+		if e != nil {
+			return e
+		}
+		rt.taSet(rt.objPtr(obj), int(idx), n)
 		return nil
 	}
 	name, e := rt.propKeyString(key)

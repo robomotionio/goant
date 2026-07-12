@@ -47,6 +47,12 @@ type Runtime struct {
 	genProto      Value // %GeneratorPrototype%
 	iteratorProto Value // %IteratorPrototype%
 
+	// TypedArray / ArrayBuffer / DataView prototypes.
+	arrayBufferProto Value
+	dataViewProto    Value
+	typedArrayProto  Value   // %TypedArray%.prototype
+	typedArrayProtos []Value // per-kind prototypes (indexed by taKind)
+
 	// curGen is the coroutine currently executing on the JS "thread" (nil on the
 	// main frame). Generator/async suspension hands control between the driver
 	// and the coroutine goroutine via curGen's channels.
@@ -151,6 +157,7 @@ func New() *Runtime {
 	rt.initGeneratorBuiltin()
 	rt.initReflectBuiltin()
 	rt.initProxyBuiltin()
+	rt.initTypedArrays()
 	return rt
 }
 

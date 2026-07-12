@@ -20,6 +20,14 @@ func (rt *Runtime) iterableValues(v Value) ([]Value, *ThrowError) {
 			}
 		}
 		return out, nil
+	case TTypedArray:
+		o := rt.objPtr(v)
+		n := rt.taLength(o)
+		out := make([]Value, n)
+		for i := 0; i < n; i++ {
+			out[i], _ = rt.taGet(o, i)
+		}
+		return out, nil
 	case TStr:
 		b := rt.strBytes(v)
 		var out []Value
@@ -51,13 +59,13 @@ func (rt *Runtime) iterableValues(v Value) ([]Value, *ThrowError) {
 // is a built-in iterable: array, string, Map, Set).
 func (rt *Runtime) isIterable(v Value) bool {
 	switch v.Type() {
-	case TArr, TStr:
+	case TArr, TStr, TTypedArray:
 		return true
 	}
 	if o := rt.objPtr(v); o != nil && o.coll != nil {
 		return true
 	}
-	if v.IsObjectType() && rt.symIterator != 0 {
+	if (v.IsObjectType() || v.Type() == TTypedArray) && rt.symIterator != 0 {
 		return rt.isCallable(rt.getFieldSymbol(v, rt.symIterator.handle()))
 	}
 	return false

@@ -1,0 +1,781 @@
+package engine
+
+// ArrayBuffer / TypedArray / DataView (ant modules/typedarray.c). ArrayBuffer
+// owns a flat byte store; a TypedArray is a typed window over it (element get/set
+// route through getElement/setElement so the ordinary index protocol and all the
+// %TypedArray%.prototype iteration methods operate on the buffer with the view's
+// element coercion). DataView provides explicit typed, endianness-aware access.
+
+import (
+	"encoding/binary"
+	"math"
+	"sort"
+)
+
+type taKind int
+
+const (
+	taInt8 taKind = iota
+	taUint8
+	taUint8Clamped
+	taInt16
+	taUint16
+	taInt32
+	taUint32
+	taFloat32
+	taFloat64
+)
+
+type taInfo struct {
+	name string
+	size int
+}
+
+var taKinds = []taInfo{
+	{"Int8Array", 1}, {"Uint8Array", 1}, {"Uint8ClampedArray", 1},
+	{"Int16Array", 2}, {"Uint16Array", 2},
+	{"Int32Array", 4}, {"Uint32Array", 4},
+	{"Float32Array", 4}, {"Float64Array", 8},
+}
+
+type typedArray struct {
+	buf        Value  // backing ArrayBuffer value (for .buffer)
+	bytes      []byte // alias of the ArrayBuffer's byte store
+	kind       taKind
+	byteOffset int
+	length     int
+}
+
+type dataView struct {
+	buf        Value
+	bytes      []byte
+	byteOffset int
+	byteLength int
+}
+
+func (t *typedArray) size() int { return taKinds[t.kind].size }
+
+// decodeElem reads one element of kind from b at off (little-endian).
+func decodeElem(b []byte, off int, kind taKind) float64 {
+	switch kind {
+	case taInt8:
+		return float64(int8(b[off]))
+	case taUint8, taUint8Clamped:
+		return float64(b[off])
+	case taInt16:
+		return float64(int16(binary.LittleEndian.Uint16(b[off:])))
+	case taUint16:
+		return float64(binary.LittleEndian.Uint16(b[off:]))
+	case taInt32:
+		return float64(int32(binary.LittleEndian.Uint32(b[off:])))
+	case taUint32:
+		return float64(binary.LittleEndian.Uint32(b[off:]))
+	case taFloat32:
+		return float64(math.Float32frombits(binary.LittleEndian.Uint32(b[off:])))
+	case taFloat64:
+		return math.Float64frombits(binary.LittleEndian.Uint64(b[off:]))
+	}
+	return 0
+}
+
+// encodeElem writes v as kind into b at off (little-endian, with the kind's
+// integer wraparound / clamping).
+func encodeElem(b []byte, off int, kind taKind, v float64) {
+	switch kind {
+	case taInt8, taUint8:
+		b[off] = byte(int64(toIntWrap(v)))
+	case taUint8Clamped:
+		b[off] = clampUint8(v)
+	case taInt16, taUint16:
+		binary.LittleEndian.PutUint16(b[off:], uint16(int64(toIntWrap(v))))
+	case taInt32, taUint32:
+		binary.LittleEndian.PutUint32(b[off:], uint32(int64(toIntWrap(v))))
+	case taFloat32:
+		binary.LittleEndian.PutUint32(b[off:], math.Float32bits(float32(v)))
+	case taFloat64:
+		binary.LittleEndian.PutUint64(b[off:], math.Float64bits(v))
+	}
+}
+
+// toIntWrap implements ToInt-style truncation used by integer TypedArray writes.
+func toIntWrap(v float64) int64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return int64(math.Trunc(v))
+}
+
+func clampUint8(v float64) byte {
+	if math.IsNaN(v) || v <= 0 {
+		return 0
+	}
+	if v >= 255 {
+		return 255
+	}
+	// round half to even
+	r := math.RoundToEven(v)
+	return byte(r)
+}
+
+// taGet/taSet are the element accessors used by getElement/setElement.
+func (rt *Runtime) taGet(o *object, i int) (Value, bool) {
+	t := o.ta
+	if t == nil || i < 0 || i >= t.length {
+		return mkundef(), false
+	}
+	return mknum(decodeElem(t.bytes, t.byteOffset+i*t.size(), t.kind)), true
+}
+
+func (rt *Runtime) taSet(o *object, i int, v float64) bool {
+	t := o.ta
+	if t == nil || i < 0 || i >= t.length {
+		return false
+	}
+	encodeElem(t.bytes, t.byteOffset+i*t.size(), t.kind, v)
+	return true
+}
+
+func (rt *Runtime) newArrayBuffer(byteLen int) Value {
+	v := rt.newObject(rt.arrayBufferProto)
+	o := rt.objPtr(v)
+	if byteLen < 0 {
+		byteLen = 0
+	}
+	o.abuf = make([]byte, byteLen)
+	return v
+}
+
+// newTypedArray builds a view of `kind` from a constructor argument.
+func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError) {
+	h, o := rt.objects.alloc()
+	o.proto = rt.typedArrayProtos[kind]
+	o.shape = newShape()
+	o.typeTag = TTypedArray
+	o.flags.extensible = true
+	tv := mkval(TTypedArray, uint64(h))
+
+	a0 := arg(args, 0)
+	switch {
+	case a0.IsNumber() || a0.IsUndefined():
+		n := 0
+		if a0.IsNumber() {
+			n = int(a0.Number())
+		}
+		buf := rt.newArrayBuffer(n * taKinds[kind].size)
+		o.ta = &typedArray{buf: buf, bytes: rt.objPtr(buf).abuf, kind: kind, length: n}
+	case rt.isArrayBufferValue(a0):
+		bo := rt.objPtr(a0)
+		byteOff := 0
+		if b := arg(args, 1); b.IsNumber() {
+			byteOff = int(b.Number())
+		}
+		length := (len(bo.abuf) - byteOff) / taKinds[kind].size
+		if l := arg(args, 2); l.IsNumber() {
+			length = int(l.Number())
+		}
+		o.ta = &typedArray{buf: a0, bytes: bo.abuf, kind: kind, byteOffset: byteOff, length: length}
+	default:
+		// Iterable or array-like source: copy element-wise.
+		var items []Value
+		if rt.isIterable(a0) {
+			it, e := rt.iterableValues(a0)
+			if e != nil {
+				return mkundef(), e
+			}
+			items = it
+		} else if src := rt.objPtr(a0); src != nil {
+			n, _ := rt.lengthOf(a0)
+			for i := 0; i < n; i++ {
+				el, _ := rt.getElement(a0, mknum(float64(i)))
+				items = append(items, el)
+			}
+		}
+		buf := rt.newArrayBuffer(len(items) * taKinds[kind].size)
+		o.ta = &typedArray{buf: buf, bytes: rt.objPtr(buf).abuf, kind: kind, length: len(items)}
+		for i, it := range items {
+			n, _ := rt.toNumber(it)
+			rt.taSet(o, i, n)
+		}
+	}
+	return tv, nil
+}
+
+func (rt *Runtime) isArrayBufferValue(v Value) bool {
+	o := rt.objPtr(v)
+	return o != nil && o.abuf != nil && o.ta == nil && o.dv == nil
+}
+
+func (rt *Runtime) initTypedArrays() {
+	// %TypedArray%.prototype shared by all element kinds.
+	taProto := rt.newObject(rt.objectProto)
+	rt.typedArrayProto = taProto
+	tp := rt.objPtr(taProto)
+	rt.defineTypedArrayMethods(tp)
+	rt.setStringTag(taProto, "TypedArray")
+
+	rt.typedArrayProtos = make([]Value, len(taKinds))
+	for k := range taKinds {
+		kind := taKind(k)
+		proto := rt.newObject(taProto)
+		rt.typedArrayProtos[k] = proto
+		info := taKinds[k]
+		ctor := rt.newNativeFunc(info.name, 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			if !this.IsObjectType() && this.Type() != TTypedArray {
+				return mkundef(), rt.typeError("Constructor " + info.name + " requires 'new'")
+			}
+			return rt.newTypedArray(kind, args)
+		})
+		cobj := rt.objPtr(ctor)
+		cobj.defineOwn("prototype", proto, 0)
+		cobj.defineOwn("BYTES_PER_ELEMENT", mknum(float64(info.size)), 0)
+		rt.objPtr(proto).defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+		rt.objPtr(proto).defineOwn("BYTES_PER_ELEMENT", mknum(float64(info.size)), 0)
+		// from / of statics.
+		rt.defMethod(cobj, "from", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			src := arg(args, 0)
+			var items []Value
+			if rt.isIterable(src) {
+				it, e := rt.iterableValues(src)
+				if e != nil {
+					return mkundef(), e
+				}
+				items = it
+			} else {
+				n, _ := rt.lengthOf(src)
+				for i := 0; i < n; i++ {
+					el, _ := rt.getElement(src, mknum(float64(i)))
+					items = append(items, el)
+				}
+			}
+			mapFn := arg(args, 1)
+			arrV, _ := rt.newTypedArray(kind, []Value{mknum(float64(len(items)))})
+			ao := rt.objPtr(arrV)
+			for i, it := range items {
+				v := it
+				if rt.isCallable(mapFn) {
+					mv, e := rt.callValue(mapFn, arg(args, 2), []Value{it, mknum(float64(i))})
+					if e != nil {
+						return mkundef(), e
+					}
+					v = mv
+				}
+				n, _ := rt.toNumber(v)
+				rt.taSet(ao, i, n)
+			}
+			return arrV, nil
+		})
+		rt.defMethod(cobj, "of", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			arrV, _ := rt.newTypedArray(kind, []Value{mknum(float64(len(args)))})
+			ao := rt.objPtr(arrV)
+			for i, it := range args {
+				n, _ := rt.toNumber(it)
+				rt.taSet(ao, i, n)
+			}
+			return arrV, nil
+		})
+		rt.defGlobal(info.name, ctor)
+	}
+
+	rt.initArrayBufferBuiltin()
+	rt.initDataViewBuiltin()
+}
+
+func (rt *Runtime) initArrayBufferBuiltin() {
+	proto := rt.newObject(rt.objectProto)
+	rt.arrayBufferProto = proto
+	po := rt.objPtr(proto)
+	po.defineAccessor("byteLength", rt.newNativeFunc("byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if o := rt.objPtr(this); o != nil {
+			return mknum(float64(len(o.abuf))), nil
+		}
+		return mknum(0), nil
+	}), mkundef(), true, false, attrConfigurable)
+	rt.defMethod(po, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || o.abuf == nil {
+			return mkundef(), rt.typeError("ArrayBuffer.prototype.slice on incompatible receiver")
+		}
+		n := len(o.abuf)
+		start := rt.relativeIndex(arg(args, 0), n)
+		end := n
+		if !arg(args, 1).IsUndefined() {
+			end = rt.relativeIndex(arg(args, 1), n)
+		}
+		if end < start {
+			end = start
+		}
+		nb := rt.newArrayBuffer(end - start)
+		copy(rt.objPtr(nb).abuf, o.abuf[start:end])
+		return nb, nil
+	})
+	rt.setStringTag(proto, "ArrayBuffer")
+
+	ctor := rt.newNativeFunc("ArrayBuffer", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		n := 0
+		if a := arg(args, 0); a.IsNumber() {
+			n = int(a.Number())
+		}
+		return rt.newArrayBuffer(n), nil
+	})
+	cobj := rt.objPtr(ctor)
+	cobj.defineOwn("prototype", proto, 0)
+	rt.defMethod(cobj, "isView", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(arg(args, 0))
+		return mkbool(o != nil && (o.ta != nil || o.dv != nil)), nil
+	})
+	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	rt.defGlobal("ArrayBuffer", ctor)
+}
+
+func (rt *Runtime) initDataViewBuiltin() {
+	proto := rt.newObject(rt.objectProto)
+	rt.dataViewProto = proto
+	po := rt.objPtr(proto)
+
+	type dvType struct {
+		name string
+		size int
+		enc  func(b []byte, off int, v float64, le bool)
+		dec  func(b []byte, off int, le bool) float64
+	}
+	order := func(le bool) binary.ByteOrder {
+		if le {
+			return binary.LittleEndian
+		}
+		return binary.BigEndian
+	}
+	types := []dvType{
+		{"Int8", 1, func(b []byte, o int, v float64, le bool) { b[o] = byte(int64(toIntWrap(v))) }, func(b []byte, o int, le bool) float64 { return float64(int8(b[o])) }},
+		{"Uint8", 1, func(b []byte, o int, v float64, le bool) { b[o] = byte(int64(toIntWrap(v))) }, func(b []byte, o int, le bool) float64 { return float64(b[o]) }},
+		{"Int16", 2, func(b []byte, o int, v float64, le bool) { order(le).PutUint16(b[o:], uint16(int64(toIntWrap(v)))) }, func(b []byte, o int, le bool) float64 { return float64(int16(order(le).Uint16(b[o:]))) }},
+		{"Uint16", 2, func(b []byte, o int, v float64, le bool) { order(le).PutUint16(b[o:], uint16(int64(toIntWrap(v)))) }, func(b []byte, o int, le bool) float64 { return float64(order(le).Uint16(b[o:])) }},
+		{"Int32", 4, func(b []byte, o int, v float64, le bool) { order(le).PutUint32(b[o:], uint32(int64(toIntWrap(v)))) }, func(b []byte, o int, le bool) float64 { return float64(int32(order(le).Uint32(b[o:]))) }},
+		{"Uint32", 4, func(b []byte, o int, v float64, le bool) { order(le).PutUint32(b[o:], uint32(int64(toIntWrap(v)))) }, func(b []byte, o int, le bool) float64 { return float64(order(le).Uint32(b[o:])) }},
+		{"Float32", 4, func(b []byte, o int, v float64, le bool) { order(le).PutUint32(b[o:], math.Float32bits(float32(v))) }, func(b []byte, o int, le bool) float64 { return float64(math.Float32frombits(order(le).Uint32(b[o:]))) }},
+		{"Float64", 8, func(b []byte, o int, v float64, le bool) { order(le).PutUint64(b[o:], math.Float64bits(v)) }, func(b []byte, o int, le bool) float64 { return math.Float64frombits(order(le).Uint64(b[o:])) }},
+	}
+	for _, t := range types {
+		t := t
+		rt.defMethod(po, "get"+t.name, 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			o := rt.objPtr(this)
+			if o == nil || o.dv == nil {
+				return mkundef(), rt.typeError("DataView.prototype.get" + t.name + " on incompatible receiver")
+			}
+			off := o.dv.byteOffset + int(argNum(rt, args, 0))
+			le := rt.toBoolean(arg(args, 1))
+			if off < 0 || off+t.size > len(o.dv.bytes) {
+				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
+			}
+			return mknum(t.dec(o.dv.bytes, off, le)), nil
+		})
+		rt.defMethod(po, "set"+t.name, 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			o := rt.objPtr(this)
+			if o == nil || o.dv == nil {
+				return mkundef(), rt.typeError("DataView.prototype.set" + t.name + " on incompatible receiver")
+			}
+			off := o.dv.byteOffset + int(argNum(rt, args, 0))
+			le := rt.toBoolean(arg(args, 2))
+			if off < 0 || off+t.size > len(o.dv.bytes) {
+				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
+			}
+			t.enc(o.dv.bytes, off, argNum(rt, args, 1), le)
+			return mkundef(), nil
+		})
+	}
+	po.defineAccessor("byteLength", rt.newNativeFunc("byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if o := rt.objPtr(this); o != nil && o.dv != nil {
+			return mknum(float64(o.dv.byteLength)), nil
+		}
+		return mknum(0), nil
+	}), mkundef(), true, false, attrConfigurable)
+	rt.setStringTag(proto, "DataView")
+
+	ctor := rt.newNativeFunc("DataView", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		bo := rt.objPtr(arg(args, 0))
+		if bo == nil || bo.abuf == nil {
+			return mkundef(), rt.typeError("First argument to DataView constructor must be an ArrayBuffer")
+		}
+		off := 0
+		if b := arg(args, 1); b.IsNumber() {
+			off = int(b.Number())
+		}
+		length := len(bo.abuf) - off
+		if l := arg(args, 2); l.IsNumber() {
+			length = int(l.Number())
+		}
+		v := rt.newObject(proto)
+		rt.objPtr(v).dv = &dataView{buf: arg(args, 0), bytes: bo.abuf, byteOffset: off, byteLength: length}
+		return v, nil
+	})
+	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
+	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	rt.defGlobal("DataView", ctor)
+}
+
+func argNum(rt *Runtime, args []Value, i int) float64 {
+	n, _ := rt.toNumber(arg(args, i))
+	return n
+}
+
+// taLength returns a TypedArray's element length (for lengthOf / methods).
+func (rt *Runtime) taLength(o *object) int {
+	if o.ta != nil {
+		return o.ta.length
+	}
+	return 0
+}
+
+// defineTypedArrayMethods installs the shared %TypedArray%.prototype methods.
+// They read/write elements through getElement/setElement (typed coercion) and
+// use taLength, so they work uniformly across every element kind.
+func (rt *Runtime) defineTypedArrayMethods(tp *object) {
+	length := func(this Value) int {
+		if o := rt.objPtr(this); o != nil {
+			return rt.taLength(o)
+		}
+		return 0
+	}
+	tp.defineAccessor("length", rt.newNativeFunc("length", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return mknum(float64(length(this))), nil
+	}), mkundef(), true, false, attrConfigurable)
+	tp.defineAccessor("byteLength", rt.newNativeFunc("byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if o := rt.objPtr(this); o != nil && o.ta != nil {
+			return mknum(float64(o.ta.length * o.ta.size())), nil
+		}
+		return mknum(0), nil
+	}), mkundef(), true, false, attrConfigurable)
+	tp.defineAccessor("byteOffset", rt.newNativeFunc("byteOffset", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if o := rt.objPtr(this); o != nil && o.ta != nil {
+			return mknum(float64(o.ta.byteOffset)), nil
+		}
+		return mknum(0), nil
+	}), mkundef(), true, false, attrConfigurable)
+	tp.defineAccessor("buffer", rt.newNativeFunc("buffer", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if o := rt.objPtr(this); o != nil && o.ta != nil {
+			return o.ta.buf, nil
+		}
+		return mkundef(), nil
+	}), mkundef(), true, false, attrConfigurable)
+
+	get := func(this Value, i int) Value { v, _ := rt.getElement(this, mknum(float64(i))); return v }
+
+	m := func(name string, n int, fn nativeFunc) { rt.defMethod(tp, name, n, fn) }
+
+	m("forEach", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		for i, l := 0, length(this); i < l; i++ {
+			if _, e := rt.callValue(cb, arg(args, 1), []Value{get(this, i), mknum(float64(i)), this}); e != nil {
+				return mkundef(), e
+			}
+		}
+		return mkundef(), nil
+	})
+	m("map", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		l := length(this)
+		out, _ := rt.newTypedArray(rt.objPtr(this).ta.kind, []Value{mknum(float64(l))})
+		oo := rt.objPtr(out)
+		for i := 0; i < l; i++ {
+			r, e := rt.callValue(cb, arg(args, 1), []Value{get(this, i), mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			nv, _ := rt.toNumber(r)
+			rt.taSet(oo, i, nv)
+		}
+		return out, nil
+	})
+	m("filter", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		var keep []float64
+		for i, l := 0, length(this); i < l; i++ {
+			el := get(this, i)
+			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.toBoolean(r) {
+				keep = append(keep, el.Number())
+			}
+		}
+		out, _ := rt.newTypedArray(rt.objPtr(this).ta.kind, []Value{mknum(float64(len(keep)))})
+		oo := rt.objPtr(out)
+		for i, v := range keep {
+			rt.taSet(oo, i, v)
+		}
+		return out, nil
+	})
+	reduce := func(this Value, args []Value, right bool) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		l := length(this)
+		acc := arg(args, 1)
+		hasAcc := len(args) > 1
+		idx := func(k int) int {
+			if right {
+				return l - 1 - k
+			}
+			return k
+		}
+		start := 0
+		if !hasAcc {
+			if l == 0 {
+				return mkundef(), rt.typeError("Reduce of empty array with no initial value")
+			}
+			acc = get(this, idx(0))
+			start = 1
+		}
+		for k := start; k < l; k++ {
+			i := idx(k)
+			r, e := rt.callValue(cb, mkundef(), []Value{acc, get(this, i), mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			acc = r
+		}
+		return acc, nil
+	}
+	m("reduce", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) { return reduce(this, args, false) })
+	m("reduceRight", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) { return reduce(this, args, true) })
+	m("every", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		for i, l := 0, length(this); i < l; i++ {
+			r, e := rt.callValue(cb, arg(args, 1), []Value{get(this, i), mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			if !rt.toBoolean(r) {
+				return mkfalse(), nil
+			}
+		}
+		return mktrue(), nil
+	})
+	m("some", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		for i, l := 0, length(this); i < l; i++ {
+			r, e := rt.callValue(cb, arg(args, 1), []Value{get(this, i), mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.toBoolean(r) {
+				return mktrue(), nil
+			}
+		}
+		return mkfalse(), nil
+	})
+	m("find", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		for i, l := 0, length(this); i < l; i++ {
+			el := get(this, i)
+			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.toBoolean(r) {
+				return el, nil
+			}
+		}
+		return mkundef(), nil
+	})
+	m("findIndex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		for i, l := 0, length(this); i < l; i++ {
+			r, e := rt.callValue(cb, arg(args, 1), []Value{get(this, i), mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.toBoolean(r) {
+				return mknum(float64(i)), nil
+			}
+		}
+		return mknum(-1), nil
+	})
+	m("indexOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		target, _ := rt.toNumber(arg(args, 0))
+		for i, l := 0, length(this); i < l; i++ {
+			if get(this, i).Number() == target {
+				return mknum(float64(i)), nil
+			}
+		}
+		return mknum(-1), nil
+	})
+	m("lastIndexOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		target, _ := rt.toNumber(arg(args, 0))
+		for i := length(this) - 1; i >= 0; i-- {
+			if get(this, i).Number() == target {
+				return mknum(float64(i)), nil
+			}
+		}
+		return mknum(-1), nil
+	})
+	m("includes", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		target, _ := rt.toNumber(arg(args, 0))
+		for i, l := 0, length(this); i < l; i++ {
+			if rt.sameValueZero(get(this, i), mknum(target)) {
+				return mktrue(), nil
+			}
+		}
+		return mkfalse(), nil
+	})
+	m("join", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		sep := ","
+		if s := arg(args, 0); !s.IsUndefined() {
+			sv, _ := rt.toStringValue(s)
+			sep = string(rt.strBytes(sv))
+		}
+		out := ""
+		for i, l := 0, length(this); i < l; i++ {
+			if i > 0 {
+				out += sep
+			}
+			out += numberToString(get(this, i).Number())
+		}
+		return rt.newString(out), nil
+	})
+	m("reverse", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		l := length(this)
+		for i := 0; i < l/2; i++ {
+			a, _ := rt.taGet(o, i)
+			b, _ := rt.taGet(o, l-1-i)
+			rt.taSet(o, i, b.Number())
+			rt.taSet(o, l-1-i, a.Number())
+		}
+		return this, nil
+	})
+	m("fill", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		v, _ := rt.toNumber(arg(args, 0))
+		l := length(this)
+		start := rt.relativeIndex(arg(args, 1), l)
+		end := l
+		if !arg(args, 2).IsUndefined() {
+			end = rt.relativeIndex(arg(args, 2), l)
+		}
+		for i := start; i < end; i++ {
+			rt.taSet(o, i, v)
+		}
+		return this, nil
+	})
+	m("slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		l := length(this)
+		start := rt.relativeIndex(arg(args, 0), l)
+		end := l
+		if !arg(args, 1).IsUndefined() {
+			end = rt.relativeIndex(arg(args, 1), l)
+		}
+		if end < start {
+			end = start
+		}
+		out, _ := rt.newTypedArray(o.ta.kind, []Value{mknum(float64(end - start))})
+		oo := rt.objPtr(out)
+		for i := 0; i < end-start; i++ {
+			el, _ := rt.taGet(o, start+i)
+			rt.taSet(oo, i, el.Number())
+		}
+		return out, nil
+	})
+	m("subarray", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		l := length(this)
+		start := rt.relativeIndex(arg(args, 0), l)
+		end := l
+		if !arg(args, 1).IsUndefined() {
+			end = rt.relativeIndex(arg(args, 1), l)
+		}
+		if end < start {
+			end = start
+		}
+		v := mkval(TTypedArray, uint64(rt.newTypedArrayView(o.ta, start, end-start)))
+		return v, nil
+	})
+	m("copyWithin", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		l := length(this)
+		to := rt.relativeIndex(arg(args, 0), l)
+		from := rt.relativeIndex(arg(args, 1), l)
+		final := l
+		if !arg(args, 2).IsUndefined() {
+			final = rt.relativeIndex(arg(args, 2), l)
+		}
+		count := final - from
+		if count > l-to {
+			count = l - to
+		}
+		buf := make([]float64, 0, count)
+		for i := 0; i < count; i++ {
+			el, _ := rt.taGet(o, from+i)
+			buf = append(buf, el.Number())
+		}
+		for i := 0; i < count; i++ {
+			rt.taSet(o, to+i, buf[i])
+		}
+		return this, nil
+	})
+	m("set", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		src := arg(args, 0)
+		off := int(argNum(rt, args, 1))
+		n, _ := rt.lengthOf(src)
+		for i := 0; i < n; i++ {
+			el, _ := rt.getElement(src, mknum(float64(i)))
+			nv, _ := rt.toNumber(el)
+			rt.taSet(o, off+i, nv)
+		}
+		return mkundef(), nil
+	})
+	m("sort", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		l := length(this)
+		vals := make([]float64, l)
+		for i := 0; i < l; i++ {
+			el, _ := rt.taGet(o, i)
+			vals[i] = el.Number()
+		}
+		cmp := arg(args, 0)
+		var sortErr *ThrowError
+		sort.SliceStable(vals, func(i, j int) bool {
+			if rt.isCallable(cmp) {
+				r, e := rt.callValue(cmp, mkundef(), []Value{mknum(vals[i]), mknum(vals[j])})
+				if e != nil {
+					sortErr = e
+					return false
+				}
+				n, _ := rt.toNumber(r)
+				return n < 0
+			}
+			return vals[i] < vals[j]
+		})
+		if sortErr != nil {
+			return mkundef(), sortErr
+		}
+		for i := 0; i < l; i++ {
+			rt.taSet(o, i, vals[i])
+		}
+		return this, nil
+	})
+	m("keys", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.newIndexIterator(this, iterKeys), nil
+	})
+	m("entries", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.newIndexIterator(this, iterEntries), nil
+	})
+	valuesFn := rt.newNativeFunc("values", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.newIndexIterator(this, iterValues), nil
+	})
+	tp.defineOwn("values", valuesFn, attrWritable|attrConfigurable)
+	if rt.symIterator != 0 {
+		tp.defineOwnSymbol(rt.symIterator.handle(), valuesFn, attrWritable|attrConfigurable)
+	}
+}
+
+// newTypedArrayView allocates a TypedArray sharing t's buffer (subarray).
+func (rt *Runtime) newTypedArrayView(t *typedArray, start, length int) uint32 {
+	h, o := rt.objects.alloc()
+	o.proto = rt.typedArrayProtos[t.kind]
+	o.shape = newShape()
+	o.typeTag = TTypedArray
+	o.flags.extensible = true
+	o.ta = &typedArray{buf: t.buf, bytes: t.bytes, kind: t.kind, byteOffset: t.byteOffset + start*t.size(), length: length}
+	return uint32(h)
+}

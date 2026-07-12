@@ -70,6 +70,13 @@ type object struct {
 	// proxy is set for Proxy objects (their target + trap handler).
 	proxy *proxyState
 
+	// abuf is the backing byte store for an ArrayBuffer object.
+	abuf []byte
+	// ta is set for TypedArray views (element kind + window into an ArrayBuffer);
+	// dv marks a DataView over a buffer.
+	ta *typedArray
+	dv *dataView
+
 	typeTag Type
 	flags   objFlags
 }

@@ -85,7 +85,7 @@ func (rt *Runtime) construct(fnVal Value, args []Value) (Value, *ThrowError) {
 	if e != nil {
 		return mkundef(), e
 	}
-	if ret.IsObjectType() {
+	if ret.IsObjectType() || ret.Type() == TTypedArray {
 		return ret, nil
 	}
 	return thisObj, nil
