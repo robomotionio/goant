@@ -142,16 +142,37 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 
 	res := rt.newArray()
 	ro := rt.objPtr(res)
+	groups := mkundef()
 	for i, g := range m.Groups {
-		if g.Index < 0 && i > 0 {
-			rt.arraySet(ro, uint32(i), mkundef())
-		} else {
-			rt.arraySet(ro, uint32(i), rt.newString(g.Value))
+		missing := g.Index < 0 && i > 0
+		val := rt.newString(g.Value)
+		if missing {
+			val = mkundef()
+		}
+		rt.arraySet(ro, uint32(i), val)
+		if g.Name != "" && !allDigits(g.Name) {
+			if groups.IsUndefined() {
+				groups = rt.newObject(mknull())
+			}
+			rt.objPtr(groups).defineOwn(g.Name, val, attrDefault)
 		}
 	}
 	ro.defineOwn("index", mknum(float64(m.Index)), attrDefault)
 	ro.defineOwn("input", s, attrDefault)
+	ro.defineOwn("groups", groups, attrDefault)
 	return res, nil
+}
+
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // initStringRegexpMethods installs match/replace/search/split on String.prototype.
