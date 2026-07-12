@@ -224,23 +224,33 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	// Parameters become the first local slots. Simple/default params get one
 	// slot each (and are arg-copied); a rest param collects the remaining args.
 	type deferredDefault struct {
-		slot int
-		expr *Node
+		slot   int
+		expr   *Node
+		argIdx int
 	}
 	type deferredPattern struct {
 		slot    int
 		pattern *Node
 		def     *Node
 	}
+	// orderedParam records a simple / default NIdent parameter in source order for
+	// left-to-right TDZ binding.
+	type orderedParam struct {
+		slot   int
+		argIdx int
+		def    *Node // nil for a plain parameter
+	}
 	var defaults []deferredDefault
 	var patterns []deferredPattern
+	var ordered []orderedParam
 	var restParam *Node
 	restIndex := -1
 	paramCount := 0
 	for i, p := range n.Args {
 		switch p.Kind {
 		case NIdent:
-			c.declareVar(p.Str, false)
+			slot := c.declareVar(p.Str, false)
+			ordered = append(ordered, orderedParam{slot, i, nil})
 			paramCount++
 		case NArray, NObject:
 			slot := c.addLocal("*param*", false)
@@ -251,7 +261,8 @@ func (c *compiler) compileFunctionBody(n *Node) {
 			if p.Left != nil && p.Left.Kind == NIdent {
 				// Rename the slot to the parameter name for direct reference.
 				c.locals[slot].name = p.Left.Str
-				defaults = append(defaults, deferredDefault{slot, p.Right})
+				defaults = append(defaults, deferredDefault{slot, p.Right, i})
+				ordered = append(ordered, orderedParam{slot, i, p.Right})
 			} else {
 				patterns = append(patterns, deferredPattern{slot, p.Left, p.Right})
 			}
@@ -319,14 +330,39 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		c.emitU16(uint16(restIndex))
 		c.emitOpU16(OpPutLocal, uint16(slot))
 	}
-	// Default parameters: if the arg is undefined, evaluate the default.
-	for _, d := range defaults {
-		c.emitOpU16(OpGetLocal, uint16(d.slot))
-		c.emit(OpIsUndef)
-		skip := c.emitJump(OpJmpFalse)
-		c.compileExpr(d.expr)
-		c.emitOpU16(OpPutLocal, uint16(d.slot))
-		c.patchJump(skip)
+	// Default parameters. When the list is all simple/default NIdent parameters
+	// (no destructuring), bind them left-to-right through the temporal dead zone:
+	// every parameter slot starts as an EMPTY hole, and each is initialized from
+	// its raw argument (or default) in turn, so a default referencing the same or a
+	// later parameter throws (default-params.tdz). Otherwise fall back to the
+	// simpler frame-prefill + default-fixup path.
+	if len(defaults) > 0 && len(patterns) == 0 {
+		for _, o := range ordered {
+			c.emit(OpEmpty)
+			c.emitOpU16(OpPutLocal, uint16(o.slot))
+		}
+		for _, o := range ordered {
+			c.emit(OpGetArg)
+			c.emitU16(uint16(o.argIdx))
+			if o.def != nil {
+				c.emit(OpDup)
+				c.emit(OpIsUndef)
+				useArg := c.emitJump(OpJmpFalse)
+				c.emit(OpPop)
+				c.compileExpr(o.def)
+				c.patchJump(useArg)
+			}
+			c.emitOpU16(OpPutLocal, uint16(o.slot))
+		}
+	} else {
+		for _, d := range defaults {
+			c.emitOpU16(OpGetLocal, uint16(d.slot))
+			c.emit(OpIsUndef)
+			skip := c.emitJump(OpJmpFalse)
+			c.compileExpr(d.expr)
+			c.emitOpU16(OpPutLocal, uint16(d.slot))
+			c.patchJump(skip)
+		}
 	}
 	// Destructuring parameters: bind the pattern from the (defaulted) arg slot.
 	for _, dp := range patterns {

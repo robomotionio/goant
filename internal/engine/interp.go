@@ -347,6 +347,16 @@ restart:
 		case OpIsUndef:
 			push(mkbool(pop().IsUndefined()))
 			ip++
+		case OpGetArg:
+			// Raw positional argument (undefined if not supplied), bypassing the
+			// parameter local so it can be read while that local is in its TDZ.
+			ai := int(readU16(code, ip+1))
+			if ai < len(args) {
+				push(args[ai])
+			} else {
+				push(mkundef())
+			}
+			ip += 3
 		case OpRest:
 			start := int(readU16(code, ip+1))
 			restArr := rt.newArray()

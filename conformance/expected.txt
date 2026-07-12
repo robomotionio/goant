@@ -433,6 +433,7 @@ compat-table/es6/default-params.explicit-undefined.js
 compat-table/es6/default-params.new-function.js
 compat-table/es6/default-params.refer-previous.js
 compat-table/es6/default-params.separate-scope.js
+compat-table/es6/default-params.tdz.js
 compat-table/es6/destructuring-assign.array.js
 compat-table/es6/destructuring-assign.astral-string.js
 compat-table/es6/destructuring-assign.chained-iterable.js
