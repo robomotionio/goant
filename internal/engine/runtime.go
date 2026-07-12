@@ -197,7 +197,9 @@ func (rt *Runtime) newPlainObject() Value {
 // initGlobal creates the global object and its predefined value properties
 // (ant setup in ant.c). Constructors/builtin functions are added in Phase 4.
 func (rt *Runtime) initGlobal() {
-	rt.global = rt.newObject(mknull())
+	// The global object's [[Prototype]] is Object.prototype, so bare references
+	// like `hasOwnProperty` / `__defineGetter__` resolve through it.
+	rt.global = rt.newObject(rt.objectProto)
 	g := rt.objPtr(rt.global)
 	g.defineOwn("globalThis", rt.global, attrWritable|attrConfigurable)
 	// Immutable value properties (ES5 §15.1.1): non-writable, non-configurable.
