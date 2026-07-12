@@ -1,6 +1,7 @@
 compat-table/es2016/Array.prototype.includes.generic.js
 compat-table/es2016/Array.prototype.includes.js
 compat-table/es2016/Array.prototype.includes.sparse.js
+compat-table/es2016/Array.prototype.includes.typed-array.js
 compat-table/es2016/exponentiation.assignment.js
 compat-table/es2016/exponentiation.basic.js
 compat-table/es2016/exponentiation.unary-negation-error.js
@@ -709,6 +710,7 @@ compat-table/es6/typed-arrays.prototype.sort.js
 compat-table/es6/typed-arrays.prototype.subarray.js
 compat-table/es6/typed-arrays.prototype.Symbol.iterator.js
 compat-table/es6/typed-arrays.prototype.values.js
+compat-table/es6/typed-arrays.Symbol.species.js
 compat-table/es6/typed-arrays.Uint16Array.js
 compat-table/es6/typed-arrays.Uint32Array.js
 compat-table/es6/typed-arrays.Uint8Array.js

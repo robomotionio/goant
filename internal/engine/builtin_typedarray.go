@@ -293,8 +293,10 @@ func (rt *Runtime) initTypedArrays() {
 			}
 			return arrV, nil
 		})
+		rt.defSpeciesGetter(ctor) // <Kind>[Symbol.species] getter (returns this)
 		rt.defGlobal(info.name, ctor)
 	}
+	rt.defSpeciesGetter(taCtor) // %TypedArray%[Symbol.species]
 
 	rt.initArrayBufferBuiltin()
 	rt.initDataViewBuiltin()
@@ -657,7 +659,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	})
 	m("includes", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		target, _ := rt.toNumber(arg(args, 0))
-		for i, l := 0, length(this); i < l; i++ {
+		l := length(this)
+		start := rt.relativeIndex(arg(args, 1), l)
+		for i := start; i < l; i++ {
 			if rt.sameValueZero(get(this, i), mknum(target)) {
 				return mktrue(), nil
 			}
