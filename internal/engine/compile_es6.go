@@ -327,8 +327,16 @@ func (c *compiler) compileClass(n *Node) {
 		c.compileExpr(n.Left)
 		c.emitOpU16(OpPutLocal, uint16(superSlot))
 		superProtoSlot = c.declareVar("*superproto*", false)
+		// superproto = (superctor == null) ? null : superctor.prototype
 		c.emitOpU16(OpGetLocal, uint16(superSlot))
+		c.emit(OpDup)
+		notNull := c.emitJump(OpJmpNotNullish)
+		c.emit(OpPop)
+		c.emit(OpNull)
+		doneP := c.emitJump(OpJmp)
+		c.patchJump(notNull)
 		c.emitFieldOp(OpGetField, "prototype")
+		c.patchJump(doneP)
 		c.emitOpU16(OpPutLocal, uint16(superProtoSlot))
 	}
 
@@ -337,15 +345,23 @@ func (c *compiler) compileClass(n *Node) {
 
 	// Wire the extends prototype chain now that the ctor exists.
 	if n.Left != nil {
+		// C.prototype.__proto__ = superproto (null for `extends null`).
 		c.emitOpU16(OpGetLocal, uint16(ctorSlot))
 		c.emitFieldOp(OpGetField, "prototype")
 		c.emitOpU16(OpGetLocal, uint16(superProtoSlot))
 		c.emit(OpSetProto)
 		c.emit(OpPop)
+		// C.__proto__ = superctor, but only when not `extends null` (else the
+		// constructor keeps Function.prototype).
+		c.emitOpU16(OpGetLocal, uint16(superSlot))
+		skip := c.emitJump(OpJmpNotNullish)
+		doneC := c.emitJump(OpJmp) // null: leave C.__proto__ as Function.prototype
+		c.patchJump(skip)
 		c.emitOpU16(OpGetLocal, uint16(ctorSlot))
 		c.emitOpU16(OpGetLocal, uint16(superSlot))
 		c.emit(OpSetProto)
 		c.emit(OpPop)
+		c.patchJump(doneC)
 	}
 
 	// Cache the prototype object.

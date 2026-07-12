@@ -264,6 +264,7 @@ compat-table/es6/class.constructor-requires-new.js
 compat-table/es6/class.expression.js
 compat-table/es6/class.extends-expressions.js
 compat-table/es6/class.extends.js
+compat-table/es6/class.extends-null.js
 compat-table/es6/class.implicit-strict.js
 compat-table/es6/class.methods-not-enumerable.js
 compat-table/es6/class.new-target.js
