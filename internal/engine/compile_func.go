@@ -271,6 +271,47 @@ func (c *compiler) compileNew(n *Node) {
 	c.emitU16(uint16(len(n.Args)))
 }
 
+// compileTailCall emits a proper-tail-call form of `return f(args)` (OpTailCall /
+// OpTailCallMethod, which reuse the current frame). It returns false — so the
+// caller falls back to a normal call+return — for forms that are not eligible:
+// spread arguments, optional chains, or super calls.
+func (c *compiler) compileTailCall(n *Node) bool {
+	if hasSpread(n.Args) || containsOptional(n) {
+		return false
+	}
+	if n.Left != nil && n.Left.Kind == NIdent && n.Left.Str == "super" {
+		return false
+	}
+	if n.Left != nil && n.Left.Kind == NMember && n.Left.Left != nil &&
+		n.Left.Left.Kind == NIdent && n.Left.Left.Str == "super" {
+		return false
+	}
+	if n.Left != nil && n.Left.Kind == NMember {
+		member := n.Left
+		c.compileExpr(member.Left) // [this]
+		if member.Flags&1 != 0 {   // computed
+			c.emit(OpDup)
+			c.compileExpr(member.Right)
+			c.emit(OpGetElem)
+		} else {
+			c.emitFieldOp(OpGetField2, member.Right.Str)
+		}
+		for _, a := range n.Args {
+			c.compileExpr(a)
+		}
+		c.emit(OpTailCallMethod)
+		c.emitU16(uint16(len(n.Args)))
+		return true
+	}
+	c.compileExpr(n.Left) // [fn]
+	for _, a := range n.Args {
+		c.compileExpr(a)
+	}
+	c.emit(OpTailCall)
+	c.emitU16(uint16(len(n.Args)))
+	return true
+}
+
 // compileCall compiles a function or method call.
 func (c *compiler) compileCall(n *Node) {
 	// Optional-chain calls (a?.b(), a?.(), a?.b.c()) short-circuit as a unit.

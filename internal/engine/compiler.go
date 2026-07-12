@@ -60,6 +60,10 @@ type compiler struct {
 	// usingStack is the local slot holding the current block's disposal-record
 	// array (for `using` declarations), or -1 when not inside a using block.
 	usingStack int
+
+	// tryDepth > 0 inside a try/catch/finally body, where a `return` must run the
+	// pending finally rather than tail-call away.
+	tryDepth int
 }
 
 func (c *compiler) consumeLabel() string {
@@ -305,6 +309,12 @@ func (c *compiler) compileStmt(n *Node) {
 	case NTry:
 		c.compileTry(n)
 	case NReturn:
+		// Proper tail call: `return f(args)` in strict code (outside any try and not
+		// in a generator/async body) reuses the current frame instead of recursing.
+		if c.fn.isStrict && c.tryDepth == 0 && !c.fn.isGenerator && !c.fn.isAsync &&
+			n.Right != nil && n.Right.Kind == NCall && c.compileTailCall(n.Right) {
+			return
+		}
 		if n.Right != nil {
 			c.compileExpr(n.Right)
 		} else {

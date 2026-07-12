@@ -58,51 +58,22 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	rt.frameStrict = fn.isStrict
 	defer func() { rt.frameStrict = savedStrict }()
 
-	// In sloppy mode a nullish `this` is coerced to the global object; strict
-	// functions keep it as-is (strict.this-undefined-in-function).
-	if !fn.isStrict && thisVal.IsNullish() {
-		thisVal = rt.global
-	}
-
-	// new.target for this invocation: set by construct just before the call and
-	// consumed here so nested ordinary calls see undefined.
-	newTarget := rt.pendingNewTarget
-	rt.pendingNewTarget = mkundef()
-
-	// A class constructor may only be invoked via `new` (new.target is set) — or
-	// via super() from a derived constructor, which propagates its new.target
-	// through rt.activeNewTarget.
-	if fn.isClassCtor {
-		if newTarget.IsUndefined() {
-			newTarget = rt.activeNewTarget
-			if newTarget.IsUndefined() {
-				return mkundef(), rt.typeError("Class constructor " + fn.name + " cannot be invoked without 'new'")
-			}
-		}
-		savedActiveNT := rt.activeNewTarget
-		rt.activeNewTarget = newTarget
-		defer func() { rt.activeNewTarget = savedActiveNT }()
-	}
-
-	code := fn.code
-	stack := make([]Value, 0, fn.maxStack+16)
-	// Locals start as undefined (the zero Value 0x0 would decode as the number
-	// 0.0, so an unread local must not be left zeroed).
-	locals := make([]Value, fn.maxLocals)
-	for i := range locals {
-		locals[i] = mkundef()
-	}
-	// Parameters occupy the first slots (ant frame arg layout).
-	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
-		if i < len(args) {
-			locals[i] = args[i]
-		}
-	}
-	var openUpvals map[int]*upvalue
-	var handlers []tryHandler
-	var pendingThrow Value
-	var withStack []Value
-	ip := 0
+	// Frame state, declared up-front so a proper tail call (OP_TAIL_CALL) can reset
+	// it and reuse this Go frame instead of recursing.
+	var (
+		code         []byte
+		stack        []Value
+		locals       []Value
+		openUpvals   map[int]*upvalue
+		handlers     []tryHandler
+		pendingThrow Value
+		withStack    []Value
+		newTarget    Value
+		thrown       *ThrowError
+		ip           int
+	)
+	savedActiveNT := rt.activeNewTarget
+	defer func() { rt.activeNewTarget = savedActiveNT }()
 
 	push := func(v Value) { stack = append(stack, v) }
 	pop := func() Value {
@@ -111,7 +82,6 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		return v
 	}
 	peek := func() Value { return stack[len(stack)-1] }
-
 	// captureUpvalue returns the open upvalue for a local slot, creating it on
 	// first use so multiple closures over the same slot share one cell.
 	captureUpvalue := func(slot int) *upvalue {
@@ -131,7 +101,48 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		}
 	}
 
-	var thrown *ThrowError
+restart:
+	// In sloppy mode a nullish `this` is coerced to the global object; strict
+	// functions keep it as-is (strict.this-undefined-in-function).
+	rt.frameStrict = fn.isStrict
+	if !fn.isStrict && thisVal.IsNullish() {
+		thisVal = rt.global
+	}
+	// new.target for this invocation: set by construct just before the call and
+	// consumed here so nested ordinary calls see undefined.
+	newTarget = rt.pendingNewTarget
+	rt.pendingNewTarget = mkundef()
+	// A class constructor may only be invoked via `new` (new.target is set) — or
+	// via super() from a derived constructor, which propagates new.target through
+	// rt.activeNewTarget.
+	if fn.isClassCtor {
+		if newTarget.IsUndefined() {
+			newTarget = rt.activeNewTarget
+			if newTarget.IsUndefined() {
+				return mkundef(), rt.typeError("Class constructor " + fn.name + " cannot be invoked without 'new'")
+			}
+		}
+		rt.activeNewTarget = newTarget
+	}
+	code = fn.code
+	stack = make([]Value, 0, fn.maxStack+16)
+	// Locals start as undefined (the zero Value 0x0 would decode as the number
+	// 0.0, so an unread local must not be left zeroed).
+	locals = make([]Value, fn.maxLocals)
+	for i := range locals {
+		locals[i] = mkundef()
+	}
+	// Parameters occupy the first slots (ant frame arg layout).
+	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
+		if i < len(args) {
+			locals[i] = args[i]
+		}
+	}
+	openUpvals = nil
+	handlers = nil
+	pendingThrow = mkundef()
+	withStack = nil
+	ip = 0
 
 	for {
 		op := Opcode(code[ip])
@@ -910,6 +921,35 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			}
 			push(ret)
 			ip += 3
+		case OpTailCall, OpTailCallMethod:
+			// Proper tail call: `return f(args)` in strict code. If the callee is an
+			// ordinary compiled function we reset this frame and reuse the Go stack
+			// slot (goto restart) instead of recursing, giving bounded stack growth.
+			argc := int(readU16(code, ip+1))
+			callArgs := make([]Value, argc)
+			for i := argc - 1; i >= 0; i-- {
+				callArgs[i] = pop()
+			}
+			callee := pop()
+			tailThis := mkundef()
+			if op == OpTailCallMethod {
+				tailThis = pop()
+			}
+			if o := rt.objPtr(callee); o != nil && o.native == nil && o.proxy == nil {
+				if cl2 := rt.closures.get(o.closure); cl2 != nil &&
+					!cl2.fn.isGenerator && !cl2.fn.isAsync && !cl2.fn.isClassCtor {
+					closeAll()
+					fn, cl, fnVal, thisVal, args = cl2.fn, cl2, callee, tailThis, callArgs
+					goto restart
+				}
+			}
+			ret, e := rt.callValue(callee, tailThis, callArgs)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			closeAll()
+			return ret, nil
 		case OpSuperApply:
 			// super(...): [superctor, argsArray] -> constructed object. The parent
 			// is [[Construct]]ed with the derived class's new.target, and the result

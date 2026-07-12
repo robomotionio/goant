@@ -498,6 +498,8 @@ func (c *compiler) compileSwitch(n *Node) {
 }
 
 func (c *compiler) compileTry(n *Node) {
+	c.tryDepth++
+	defer func() { c.tryDepth-- }()
 	// TRY_PUSH marks a catch handler; on throw the interpreter jumps there.
 	handler := c.emitJump(OpTryPush)
 	c.compileStmt(n.Body)
