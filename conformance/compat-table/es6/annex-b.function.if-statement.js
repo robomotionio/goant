@@ -17,10 +17,15 @@ global.__createIterableObject = function (arr, methods) {
   return iterable;
 };
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
-// feature: RegExp "u" flag, case folding
-var __ok = (function () {return "ſ".match(/\w/iu) && !"ſ".match(/\W/iu)
-  && "\u212a".match(/\w/iu) && !"\u212a".match(/\W/iu)
-  && "\u212a".match(/.\b/iu) && "ſ".match(/.\b/iu)
-  && !"\u212a".match(/.\B/iu) && !"ſ".match(/.\B/iu);
+// feature: non-strict function semantics
+// subtest: function statements in if-statement clauses
+var __ok = (function () {// Note: only available outside of strict mode.
+if (!this) return false;
+
+if(true) function foo() { return 2; }
+if(false) {} else function bar() { return 3; }
+if(true) function baz() { return 4; } else {}
+if(false) function qux() { return 5; } else function qux() { return 6; }
+return foo() === 2 && bar() === 3 && baz() === 4 && qux() === 6;
 })();
 if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

@@ -17,10 +17,32 @@ global.__createIterableObject = function (arr, methods) {
   return iterable;
 };
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
-// feature: RegExp "u" flag, case folding
-var __ok = (function () {return "ſ".match(/\w/iu) && !"ſ".match(/\W/iu)
-  && "\u212a".match(/\w/iu) && !"\u212a".match(/\W/iu)
-  && "\u212a".match(/.\b/iu) && "ſ".match(/.\b/iu)
-  && !"\u212a".match(/.\B/iu) && !"ſ".match(/.\B/iu);
+// feature: .at() method on the built-in indexables
+// subtest: %TypedArray%.prototype.at()
+var __ok = (function () {return [
+  'Int8Array',
+  'Uint8Array',
+  'Uint8ClampedArray',
+  'Int16Array',
+  'Uint16Array',
+  'Int32Array',
+  'Uint32Array',
+  'Float32Array',
+  'Float64Array'
+].every(function (TypedArray) {
+  var Constructor = globalThis[TypedArray];
+  if (typeof Constructor !== 'function') {
+    return false;
+  }
+  var arr = new Constructor([1, 2, 3]);
+  return arr.at(0) === 1
+    && arr.at(-3) === 1
+    && arr.at(1) === 2
+    && arr.at(-2) === 2
+    && arr.at(2) === 3
+    && arr.at(-1) === 3
+    && arr.at(3) === undefined
+    && arr.at(-4) === undefined;
+});
 })();
 if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

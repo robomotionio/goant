@@ -17,10 +17,11 @@ global.__createIterableObject = function (arr, methods) {
   return iterable;
 };
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
-// feature: RegExp "u" flag, case folding
-var __ok = (function () {return "ſ".match(/\w/iu) && !"ſ".match(/\W/iu)
-  && "\u212a".match(/\w/iu) && !"\u212a".match(/\W/iu)
-  && "\u212a".match(/.\b/iu) && "ſ".match(/.\b/iu)
-  && !"\u212a".match(/.\B/iu) && !"ſ".match(/.\B/iu);
+// feature: Uint8Array to/from base64 and hex
+// subtest: Uint8Array.fromBase64()
+var __ok = (function () {const arr1 = new Uint8Array([72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]);
+const arr2 = Uint8Array.fromBase64("SGVsbG8gV29ybGQ=");
+return arr1.length === arr2.length &&
+       arr1.every((element, index) => element === arr2[index]);
 })();
 if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

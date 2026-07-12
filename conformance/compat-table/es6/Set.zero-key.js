@@ -17,10 +17,14 @@ global.__createIterableObject = function (arr, methods) {
   return iterable;
 };
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
-// feature: RegExp "u" flag, case folding
-var __ok = (function () {return "ſ".match(/\w/iu) && !"ſ".match(/\W/iu)
-  && "\u212a".match(/\w/iu) && !"\u212a".match(/\W/iu)
-  && "\u212a".match(/.\b/iu) && "ſ".match(/.\b/iu)
-  && !"\u212a".match(/.\B/iu) && !"ſ".match(/.\B/iu);
+// feature: Set
+// subtest: -0 key converts to +0
+var __ok = (function () {var set = new Set();
+set.add(-0);
+var k;
+set.forEach(function (value) {
+  k = 1 / value;
+});
+return k === Infinity && set.has(+0);
 })();
 if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

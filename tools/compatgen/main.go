@@ -93,19 +93,22 @@ func main() {
 		return
 	}
 
-	// Emit tests for claimed targets (sync + async).
+	// Emit tests for claimed targets (sync + async). A leaf can appear in more than
+	// one category (e.g. regex.flags.u.case-folding in both es6 and es2017); the
+	// claimed record is written to every full path that shares the leaf.
 	written := 0
 	for leaf, r := range claimedBy {
-		full := targets[leaf] // compat-table/<cat>/<leaf>.js
-		rel := strings.TrimPrefix(full, "compat-table/")
-		dst := filepath.Join(*outRoot, rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			fatal(err)
+		for _, full := range targets[leaf] { // compat-table/<cat>/<leaf>.js
+			rel := strings.TrimPrefix(full, "compat-table/")
+			dst := filepath.Join(*outRoot, rel)
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				fatal(err)
+			}
+			if err := os.WriteFile(dst, []byte(genTest(r, pin)), 0o644); err != nil {
+				fatal(err)
+			}
+			written++
 		}
-		if err := os.WriteFile(dst, []byte(genTest(r, pin)), 0o644); err != nil {
-			fatal(err)
-		}
-		written++
 	}
 	fmt.Fprintf(os.Stderr, "compatgen: wrote %d files to %s\n", written, *outRoot)
 }
@@ -172,7 +175,7 @@ func jaccard(a, b map[string]bool) float64 {
 // autoMap greedily assigns unmapped target leaves to unmapped records by token
 // similarity (best pairs first, 1:1), merging results into mapping.json. Manual
 // overrides already present are preserved and their targets/records excluded.
-func autoMap(recs []record, targets map[string]string, overrides map[string]string, thresh float64) {
+func autoMap(recs []record, targets map[string][]string, overrides map[string]string, thresh float64) {
 	usedLeaf := map[string]bool{}
 	usedRec := map[string]bool{}
 
@@ -302,9 +305,11 @@ func runExtract() []record {
 	return recs
 }
 
-// loadTargets returns leaf -> full compat-table name from the spec file.
-func loadTargets(path string) map[string]string {
-	m := map[string]string{}
+// loadTargets returns leaf -> full compat-table names from the spec file. A leaf
+// may map to several full names when the same test appears in multiple category
+// directories (e.g. es6 and es2017).
+func loadTargets(path string) map[string][]string {
+	m := map[string][]string{}
 	for _, line := range strings.Split(readFile(path), "\n") {
 		name := strings.SplitN(strings.TrimSpace(line), ":", 2)[0]
 		if !strings.HasPrefix(name, "compat-table/") {
@@ -315,7 +320,7 @@ func loadTargets(path string) map[string]string {
 			leaf = strings.TrimPrefix(name, "compat-table/")[i+1:]
 		}
 		leaf = strings.TrimSuffix(leaf, ".js")
-		m[leaf] = name
+		m[leaf] = append(m[leaf], name)
 	}
 	return m
 }
@@ -332,7 +337,7 @@ func loadOverrides(path string) map[string]string {
 	return m
 }
 
-func reportUnmapped(targets map[string]string, claimed map[string]*record) {
+func reportUnmapped(targets map[string][]string, claimed map[string]*record) {
 	var miss []string
 	for leaf := range targets {
 		if _, ok := claimed[leaf]; !ok {

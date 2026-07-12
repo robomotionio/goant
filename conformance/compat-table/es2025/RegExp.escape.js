@@ -17,10 +17,10 @@ global.__createIterableObject = function (arr, methods) {
   return iterable;
 };
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
-// feature: RegExp "u" flag, case folding
-var __ok = (function () {return "ſ".match(/\w/iu) && !"ſ".match(/\W/iu)
-  && "\u212a".match(/\w/iu) && !"\u212a".match(/\W/iu)
-  && "\u212a".match(/.\b/iu) && "ſ".match(/.\b/iu)
-  && !"\u212a".match(/.\B/iu) && !"ſ".match(/.\B/iu);
+// feature: RegExp Escaping
+var __ok = (function () {return RegExp.escape("The Quick Brown Fox") === "\\x54he\\x20Quick\\x20Brown\\x20Fox" &&
+  RegExp.escape("(*.*)") === "\\(\\*\\.\\*\\)" &&
+  RegExp.escape("｡^･ｪ･^｡") === "｡\\^･ｪ･\\^｡" &&
+  RegExp.escape("\\d \\D (?:)") === "\\\\d\\x20\\\\D\\x20\\(\\?\\x3a\\)";
 })();
 if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

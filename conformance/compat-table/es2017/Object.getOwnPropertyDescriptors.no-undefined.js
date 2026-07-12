@@ -17,10 +17,11 @@ global.__createIterableObject = function (arr, methods) {
   return iterable;
 };
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
-// feature: RegExp "u" flag, case folding
-var __ok = (function () {return "ſ".match(/\w/iu) && !"ſ".match(/\W/iu)
-  && "\u212a".match(/\w/iu) && !"\u212a".match(/\W/iu)
-  && "\u212a".match(/.\b/iu) && "ſ".match(/.\b/iu)
-  && !"\u212a".match(/.\B/iu) && !"ſ".match(/.\B/iu);
+// feature: Object static methods
+// subtest: Object.getOwnPropertyDescriptors doesn't provide undefined descriptors
+var __ok = (function () {var P = new Proxy({ a: 1 }, {
+  getOwnPropertyDescriptor: function (t, k) {}
+});
+return !Object.getOwnPropertyDescriptors(P).hasOwnProperty('a');
 })();
 if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

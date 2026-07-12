@@ -17,10 +17,18 @@ global.__createIterableObject = function (arr, methods) {
   return iterable;
 };
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
-// feature: RegExp "u" flag, case folding
-var __ok = (function () {return "ſ".match(/\w/iu) && !"ſ".match(/\W/iu)
-  && "\u212a".match(/\w/iu) && !"\u212a".match(/\W/iu)
-  && "\u212a".match(/.\b/iu) && "ſ".match(/.\b/iu)
-  && !"\u212a".match(/.\B/iu) && !"ſ".match(/.\B/iu);
+// feature: Proxy internal calls, getter/setter methods
+// subtest: __defineSetter__
+var __ok = (function () {// Object.prototype.__defineSetter__ -> DefinePropertyOrThrow -> [[DefineOwnProperty]]
+var def = [];
+var p = new Proxy({}, {
+  defineProperty: function (o, v, desc) {
+    def.push(v);
+    Object.defineProperty(o, v, desc);
+    return true;
+  }
+});
+Object.prototype.__defineSetter__.call(p, "foo", Object);
+return def + '' === "foo";
 })();
 if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

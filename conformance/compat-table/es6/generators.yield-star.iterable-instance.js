@@ -17,10 +17,19 @@ global.__createIterableObject = function (arr, methods) {
   return iterable;
 };
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
-// feature: RegExp "u" flag, case folding
-var __ok = (function () {return "ſ".match(/\w/iu) && !"ſ".match(/\W/iu)
-  && "\u212a".match(/\w/iu) && !"\u212a".match(/\W/iu)
-  && "\u212a".match(/.\b/iu) && "ſ".match(/.\b/iu)
-  && !"\u212a".match(/.\B/iu) && !"ſ".match(/.\B/iu);
+// feature: generators
+// subtest: yield *, instances of iterables
+var __ok = (function () {var iterator = (function * generator() {
+  yield * Object.create(__createIterableObject([5, 6, 7]));
+}());
+var item = iterator.next();
+var passed = item.value === 5 && item.done === false;
+item = iterator.next();
+passed &= item.value === 6 && item.done === false;
+item = iterator.next();
+passed &= item.value === 7 && item.done === false;
+item = iterator.next();
+passed &= item.value === void undefined && item.done === true;
+return passed;
 })();
 if (!__ok) { throw new Error("compat-table check failed: " + __ok); }
