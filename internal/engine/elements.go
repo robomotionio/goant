@@ -199,6 +199,11 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 	if obj.IsNullish() {
 		return mkundef(), rt.typeError("cannot read properties of " + rt.nullishName(obj))
 	}
+	if pk, ke := rt.toPropertyKey(key); ke != nil {
+		return mkundef(), ke
+	} else {
+		key = pk
+	}
 	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
 		return rt.proxyGet(o.proxy, rt.toPropertyKeyValue(key), obj)
 	}
@@ -281,11 +286,26 @@ func (rt *Runtime) hasFieldSymbol(obj Value, sym uint32) bool {
 	return false
 }
 
+// toPropertyKey implements ToPropertyKey: an object key is coerced via
+// ToPrimitive(string) so a boxed Symbol/String/Number becomes its primitive
+// (e.g. Object(sym) used as a key resolves to the symbol, not "Symbol(...)").
+func (rt *Runtime) toPropertyKey(key Value) (Value, *ThrowError) {
+	if !key.IsObjectType() {
+		return key, nil
+	}
+	return rt.toPrimitive(key, "string")
+}
+
 // setElement writes obj[key] = v with the array fast path.
 func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 	if obj.IsNullish() {
 		return rt.typeError("cannot set properties of " + rt.nullishName(obj))
 	}
+	pk, ke := rt.toPropertyKey(key)
+	if ke != nil {
+		return ke
+	}
+	key = pk
 	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
 		return rt.proxySet(o.proxy, rt.toPropertyKeyValue(key), v, obj)
 	}

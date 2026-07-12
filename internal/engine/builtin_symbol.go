@@ -133,4 +133,16 @@ func (rt *Runtime) initSymbolBuiltin() {
 	rt.defGlobal("Symbol", ctor)
 	// Symbol.prototype[@@toStringTag] === "Symbol" (data property).
 	rt.setStringTag(proto, "Symbol")
+	// Symbol.prototype[@@toPrimitive] returns the wrapped symbol (so a boxed
+	// Symbol used as a property key coerces to the symbol, not "Symbol(...)").
+	if rt.symToPrimitive != 0 {
+		tp := rt.newNativeFunc("[Symbol.toPrimitive]", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			sym, ok := rt.thisSymbol(this)
+			if !ok {
+				return mkundef(), rt.typeError("Symbol.prototype[Symbol.toPrimitive] requires a symbol")
+			}
+			return sym, nil
+		})
+		po.defineOwnSymbol(rt.symToPrimitive.handle(), tp, attrConfigurable)
+	}
 }

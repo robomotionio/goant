@@ -658,6 +658,7 @@ compat-table/es6/super.this-binding.js
 compat-table/es6/Symbol.defineProperty.js
 compat-table/es6/Symbol.global-registry.js
 compat-table/es6/Symbol.hidden-keys.js
+compat-table/es6/Symbol.JSON.stringify.object.js
 compat-table/es6/Symbol.JSON.stringify.primitive.js
 compat-table/es6/Symbol.no-new.js
 compat-table/es6/Symbol.Object.js
