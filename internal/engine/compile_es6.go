@@ -162,6 +162,16 @@ func (c *compiler) destructureArray(pattern *Node, src int, kind VarKind) {
 }
 
 func (c *compiler) destructureObject(pattern *Node, src int, kind VarKind) {
+	// RequireObjectCoercible(src): object destructuring of null/undefined throws a
+	// TypeError before any binding — even for an empty pattern (`{} = null`).
+	c.emitOpU16(OpGetLocal, uint16(src))
+	c.emit(OpIsUndefOrNull)
+	coercible := c.emitJump(OpJmpFalse)
+	c.emit(OpThrowError)
+	c.emitU32(uint32(c.constant(c.rt.internString("Cannot destructure null or undefined"))))
+	c.emitByte(0) // TypeError
+	c.patchJump(coercible)
+
 	var priorKeys []string
 	for _, prop := range pattern.Args {
 		if prop.Kind == NSpread {

@@ -347,6 +347,9 @@ restart:
 		case OpIsUndef:
 			push(mkbool(pop().IsUndefined()))
 			ip++
+		case OpIsUndefOrNull:
+			push(mkbool(pop().IsNullish()))
+			ip++
 		case OpGetArg:
 			// Raw positional argument (undefined if not supplied), bypassing the
 			// parameter local so it can be read while that local is in its TDZ.
