@@ -172,6 +172,60 @@ func (rt *Runtime) initObjectBuiltin() {
 	rt.defMethod(cobj, "getOwnPropertyNames", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.ownPropertyNames(arg(args, 0), false), nil
 	})
+	rt.defMethod(cobj, "hasOwn", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		obj, e := rt.toObjectValue(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		o := rt.objPtr(obj)
+		if o == nil {
+			return mkfalse(), nil
+		}
+		key := arg(args, 1)
+		if key.IsSymbol() {
+			return mkbool(o.shape.lookupSymbol(key.handle()) >= 0), nil
+		}
+		name, e := rt.propKeyString(key)
+		if e != nil {
+			return mkundef(), e
+		}
+		if obj.Type() == TArr {
+			if idx, ok := canonicalIndex(name); ok {
+				return mkbool(idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty()), nil
+			}
+			if name == "length" {
+				return mktrue(), nil
+			}
+		}
+		return mkbool(o.ownDescriptor(name).exists), nil
+	})
+	rt.defMethod(cobj, "groupBy", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		items, e := rt.iterableValues(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		cb := arg(args, 1)
+		res := rt.newObject(mknull())
+		ro := rt.objPtr(res)
+		for i, it := range items {
+			kv, e := rt.callValue(cb, mkundef(), []Value{it, mknum(float64(i))})
+			if e != nil {
+				return mkundef(), e
+			}
+			key, e := rt.propKeyString(kv)
+			if e != nil {
+				return mkundef(), e
+			}
+			grp, ok := ro.getOwn(key)
+			if !ok {
+				grp = rt.newArray()
+				ro.defineOwn(key, grp, attrDefault)
+			}
+			go2 := rt.objPtr(grp)
+			rt.arraySet(go2, go2.arrLen, it)
+		}
+		return res, nil
+	})
 	rt.defMethod(cobj, "getOwnPropertySymbols", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		res := rt.newArray()
 		ra := rt.objPtr(res)

@@ -134,6 +134,9 @@ func (rt *Runtime) initReflectBuiltin() {
 		for _, k := range o.ownKeys() {
 			rt.arraySet(ra, ra.arrLen, rt.newString(k))
 		}
+		for _, off := range o.ownSymbolKeys() {
+			rt.arraySet(ra, ra.arrLen, mkval(TSymbol, uint64(off)))
+		}
 		return res, nil
 	})
 	rt.defMethod(ro, "apply", 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
