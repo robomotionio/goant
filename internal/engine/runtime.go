@@ -234,6 +234,7 @@ func New() *Runtime {
 	rt.initDisposableStack()
 	rt.initSharedArrayBuffer()
 	rt.initAtomics()
+	rt.initIntl()
 	rt.initAnnexB()
 	return rt
 }
