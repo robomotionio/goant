@@ -97,6 +97,9 @@ compat-table/es2019/String.prototype.trimStart.js
 compat-table/es2019/Symbol.prototype.description.empty.js
 compat-table/es2019/Symbol.prototype.description.js
 compat-table/es2019/Symbol.prototype.description.undefined.js
+compat-table/es2020/BigInt.asIntN.js
+compat-table/es2020/BigInt.asUintN.js
+compat-table/es2020/BigInt.constructor.js
 compat-table/es2020/nullish-coalescing.js
 compat-table/es2020/optional-chaining.bracket.js
 compat-table/es2020/optional-chaining.function-call.js

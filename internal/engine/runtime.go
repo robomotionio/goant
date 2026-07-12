@@ -19,6 +19,7 @@ type Runtime struct {
 	strings  *pool[flatString]
 	symbols  *pool[symbol]
 	closures *pool[closure]
+	bigints  *pool[bigIntCell]
 
 	// String interning table (Phase 2): interned text -> flat-string handle.
 	interned map[string]Handle
@@ -37,6 +38,7 @@ type Runtime struct {
 	arrayProto            Value
 	stringProto           Value
 	numberProto           Value
+	bigintProto           Value
 	booleanProto          Value
 	errorProto            Value
 	regexpProto           Value
@@ -184,6 +186,7 @@ func New() *Runtime {
 		strings:  newPool[flatString](),
 		symbols:  newPool[symbol](),
 		closures: newPool[closure](),
+		bigints:  newPool[bigIntCell](),
 		interned: make(map[string]Handle),
 	}
 	// Value(0) decodes as the number 0, not undefined; new.target slots must start
@@ -213,6 +216,7 @@ func New() *Runtime {
 	rt.initArrayBuiltin()
 	rt.initStringBuiltin()
 	rt.initNumberBuiltin()
+	rt.initBigIntBuiltin()
 	rt.initBooleanBuiltin()
 	rt.initDateBuiltin()
 	rt.initURIBuiltins()

@@ -8,7 +8,10 @@ package engine
 // DIVERGENCE (slice only): jumps use absolute byte targets; the full port
 // adopts ant's exact branch encoding (reconciled via the bytecode-diff harness).
 
-import "math"
+import (
+	"math"
+	"math/big"
+)
 
 // ThrowError wraps a thrown JS value surfaced as a Go error. When control is
 // set it is a non-catchable control-flow signal (e.g. process.exit) that
@@ -525,6 +528,11 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			ip++
 		case OpNeg:
 			a := pop()
+			if a.Type() == TBigInt {
+				push(rt.newBigInt(new(big.Int).Neg(rt.bigIntVal(a))))
+				ip++
+				break
+			}
 			n, e := rt.toNumber(a)
 			if e != nil {
 				thrown = e
@@ -959,6 +967,12 @@ func (rt *Runtime) jsAdd(a, b Value) (Value, *ThrowError) {
 		}
 		return rt.newStringBytes(append(append([]byte{}, rt.strBytes(sa)...), rt.strBytes(sb)...)), nil
 	}
+	if pa.Type() == TBigInt || pb.Type() == TBigInt {
+		if pa.Type() != TBigInt || pb.Type() != TBigInt {
+			return mkundef(), rt.typeError("Cannot mix BigInt and other types, use explicit conversions")
+		}
+		return rt.bigIntBinaryOp(OpAdd, rt.bigIntVal(pa), rt.bigIntVal(pb))
+	}
 	na, ea := rt.toNumberPrimitive(pa)
 	if !ea {
 		return mkundef(), rt.typeError("cannot convert to number")
@@ -971,6 +985,20 @@ func (rt *Runtime) jsAdd(a, b Value) (Value, *ThrowError) {
 }
 
 func (rt *Runtime) jsArith(op Opcode, a, b Value) (Value, *ThrowError) {
+	if a.Type() == TBigInt || b.Type() == TBigInt {
+		pa, e := rt.toPrimitive(a, "number")
+		if e != nil {
+			return mkundef(), e
+		}
+		pb, e := rt.toPrimitive(b, "number")
+		if e != nil {
+			return mkundef(), e
+		}
+		if pa.Type() != TBigInt || pb.Type() != TBigInt {
+			return mkundef(), rt.typeError("Cannot mix BigInt and other types, use explicit conversions")
+		}
+		return rt.bigIntBinaryOp(op, rt.bigIntVal(pa), rt.bigIntVal(pb))
+	}
 	na, ea := rt.toNumber(a)
 	if ea != nil {
 		return mkundef(), ea
@@ -995,6 +1023,15 @@ func (rt *Runtime) jsArith(op Opcode, a, b Value) (Value, *ThrowError) {
 }
 
 func (rt *Runtime) jsBitwise(op Opcode, a, b Value) (Value, *ThrowError) {
+	if a.Type() == TBigInt || b.Type() == TBigInt {
+		if a.Type() != TBigInt || b.Type() != TBigInt {
+			return mkundef(), rt.typeError("Cannot mix BigInt and other types, use explicit conversions")
+		}
+		if op == OpUshr {
+			return mkundef(), rt.typeError("BigInts have no unsigned right shift, use >> instead")
+		}
+		return rt.bigIntBinaryOp(op, rt.bigIntVal(a), rt.bigIntVal(b))
+	}
 	if op == OpUshr {
 		ua, e := rt.toUint32(a)
 		if e != nil {
@@ -1031,6 +1068,19 @@ func (rt *Runtime) jsBitwise(op Opcode, a, b Value) (Value, *ThrowError) {
 
 // jsRelational implements abstract relational comparison for primitives.
 func (rt *Runtime) jsRelational(op Opcode, a, b Value) (Value, *ThrowError) {
+	if a.Type() == TBigInt && b.Type() == TBigInt {
+		cmp := rt.bigIntVal(a).Cmp(rt.bigIntVal(b))
+		switch op {
+		case OpLt:
+			return mkbool(cmp < 0), nil
+		case OpLe:
+			return mkbool(cmp <= 0), nil
+		case OpGt:
+			return mkbool(cmp > 0), nil
+		case OpGe:
+			return mkbool(cmp >= 0), nil
+		}
+	}
 	if a.IsString() && b.IsString() {
 		cmp := compareStrings(rt.strBytes(a), rt.strBytes(b))
 		switch op {

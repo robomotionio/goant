@@ -148,6 +148,9 @@ func (rt *Runtime) toStringValue(v Value) (Value, *ThrowError) {
 	}
 	s, ok := rt.toStringPrimitive(v)
 	if !ok {
+		if v.Type() == TBigInt {
+			return rt.newString(bigIntToString(rt.bigIntVal(v), 10)), nil
+		}
 		if v.IsSymbol() {
 			return mkundef(), rt.typeError("cannot convert a Symbol value to a string")
 		}
@@ -208,6 +211,10 @@ func (rt *Runtime) strictEquals(a, b Value) bool {
 	}
 	if ta == TStr {
 		return string(rt.strBytes(a)) == string(rt.strBytes(b))
+	}
+	if ta == TBigInt {
+		x, y := rt.bigIntVal(a), rt.bigIntVal(b)
+		return x != nil && y != nil && x.Cmp(y) == 0
 	}
 	return a == b
 }

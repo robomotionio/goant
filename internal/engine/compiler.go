@@ -472,6 +472,8 @@ func (c *compiler) compileExpr(n *Node) {
 		c.compileNumberLiteral(n.Num)
 	case NString:
 		c.emitConst(c.rt.internString(n.Str))
+	case NBigInt:
+		c.compileBigIntLiteral(n.Str)
 	case NBool:
 		if n.Num != 0 {
 			c.emit(OpTrue)
