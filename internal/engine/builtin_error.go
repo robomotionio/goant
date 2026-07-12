@@ -81,6 +81,7 @@ func (rt *Runtime) initErrorBuiltin() {
 			errObj = rt.newObject(aggProto)
 		}
 		eo := rt.objPtr(errObj)
+		eo.setSlot(slotBrand, mknum(brandError)) // [[ErrorData]]
 		errsArr := rt.newArray()
 		if it := arg(args, 0); !it.IsNullish() {
 			vals, e := rt.iterableValues(it)
@@ -134,6 +135,7 @@ func (rt *Runtime) makeErrorCtor(name string, proto, _parentCtor Value) Value {
 		} else {
 			errObj = rt.newObject(proto)
 		}
+		rt.objPtr(errObj).setSlot(slotBrand, mknum(brandError)) // [[ErrorData]]
 		if len(args) > 0 && !args[0].IsUndefined() {
 			s, e := rt.toStringValue(args[0])
 			if e != nil {
@@ -165,6 +167,11 @@ func (rt *Runtime) makeError(proto Value, name, msg string) Value {
 		return rt.newString(name + ": " + msg)
 	}
 	e := rt.newObject(proto)
+	rt.objPtr(e).setSlot(slotBrand, mknum(brandError)) // [[ErrorData]]
 	rt.objPtr(e).defineOwn("message", rt.internString(msg), attrWritable|attrConfigurable)
 	return e
 }
+
+// brandError marks objects with an [[ErrorData]] internal slot (error instances,
+// not the NativeError prototypes).
+const brandError = 1002

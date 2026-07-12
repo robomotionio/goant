@@ -465,6 +465,7 @@ compat-table/es6/misc.property-order.Object.getOwnPropertyNames.js
 compat-table/es6/misc.property-order.Object.keys.js
 compat-table/es6/misc.property-order.Reflect.ownKeys.string.js
 compat-table/es6/misc.property-order.Reflect.ownKeys.symbol.js
+compat-table/es6/misc.prototypes-not-instances.js
 compat-table/es6/misc.Proxy.defineProperty.SetIntegrityLevel.js
 compat-table/es6/misc.Proxy.defineProperty.Set.js
 compat-table/es6/misc.Proxy.deleteProperty.Array.copyWithin.js

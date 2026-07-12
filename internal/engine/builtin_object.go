@@ -875,7 +875,7 @@ func (rt *Runtime) objectToStringTag(v Value) string {
 				builtin = "Date"
 			case o.regex != nil:
 				builtin = "RegExp"
-			case rt.hasInProtoChain(v, rt.errorProto):
+			case o.brandID() == brandError:
 				builtin = "Error"
 			case o.hasOwn("callee") && o.hasOwn("length"):
 				builtin = "Arguments"
