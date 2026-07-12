@@ -274,6 +274,16 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 		return
 	}
 
+	// Annex B.3.6: a `var` loop variable may carry an initializer in a for-in head
+	// (non-strict — the parser rejects it in strict mode). Evaluate it once, before
+	// the object expression, and seed the loop variable with it.
+	if produceOp == OpForIn {
+		if init := forInVarInitializer(n.Left); init != nil {
+			c.compileExpr(init)
+			store()
+		}
+	}
+
 	c.compileExpr(n.Right)
 	c.emit(produceOp) // source -> keys/values array
 	keysSlot := c.addLocal("*fik*", false)
@@ -324,6 +334,20 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 // for-in loop binding (declaring it if it is a fresh let/const/local var). The
 // second result is the loop variable's local slot when it is lexically block-
 // scoped (let/const), so the caller can close per-iteration captures; -1 else.
+// forInVarInitializer returns the initializer of a single simple `var`
+// declarator in a for-in head (`for (var i = 0 in obj)`), or nil. Only var
+// bindings with a plain identifier target qualify (Annex B legacy syntax).
+func forInVarInitializer(left *Node) *Node {
+	if left != nil && left.Kind == NVar && left.VarKind == VarVar &&
+		len(left.Args) == 1 && left.Args[0] != nil {
+		decl := left.Args[0]
+		if decl.Left != nil && decl.Left.Kind == NIdent {
+			return decl.Right
+		}
+	}
+	return nil
+}
+
 func (c *compiler) forInStore(left *Node) (func(), int) {
 	var name string
 	switch {

@@ -10,6 +10,7 @@ compat-table/es2016/misc.nested-rest-destructuring-params.js
 compat-table/es2016/misc.Proxy-Array-includes.js
 compat-table/es2016/misc.Proxy-enumerate-removed.js
 compat-table/es2016/misc.strict-fn-non-simple-params-error.js
+compat-table/es2017/annex-b.for-in-assignment-non-strict.js
 compat-table/es2017/annex-b.Object.prototype.__defineGetter__.js
 compat-table/es2017/annex-b.Object.prototype.__defineGetter__.symbols.js
 compat-table/es2017/annex-b.Object.prototype.__defineGetter__.ToObject.js
