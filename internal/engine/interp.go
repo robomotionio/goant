@@ -603,7 +603,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 				ip += 5
 			}
 		case OpJmpNotNullish:
-			if !peek().IsNullish() {
+			if !pop().IsNullish() {
 				ip = int(readU32(code, ip+1))
 			} else {
 				ip += 5
