@@ -331,6 +331,7 @@ compat-table/es6/destructuring-assign.computed-properties.js
 compat-table/es6/destructuring-assign.defaults.js
 compat-table/es6/destructuring-assign.empty-patterns.js
 compat-table/es6/destructuring-assign.iterable-expression.js
+compat-table/es6/destructuring-assign.iterator-closing.js
 compat-table/es6/destructuring-assign.nested.js
 compat-table/es6/destructuring-assign.nested-rest.js
 compat-table/es6/destructuring-assign.object-expression.js
@@ -341,6 +342,7 @@ compat-table/es6/destructuring-decl.computed-properties.js
 compat-table/es6/destructuring-decl.defaults.js
 compat-table/es6/destructuring-decl.for-in.js
 compat-table/es6/destructuring-decl.for-of.js
+compat-table/es6/destructuring-decl.iterator-closing.js
 compat-table/es6/destructuring-decl.nested.js
 compat-table/es6/destructuring-decl.object-primitives.js
 compat-table/es6/destructuring-decl.rest.js
@@ -353,6 +355,7 @@ compat-table/es6/destructuring-params.defaults-new-function.js
 compat-table/es6/destructuring-params.defaults-separate-scope.js
 compat-table/es6/destructuring-params.duplicate-identifier.js
 compat-table/es6/destructuring-params.empty-patterns.js
+compat-table/es6/destructuring-params.iterator-closing.js
 compat-table/es6/destructuring-params.nested.js
 compat-table/es6/destructuring-params.new-function.js
 compat-table/es6/destructuring-params.object-primitives.js

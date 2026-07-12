@@ -24,10 +24,25 @@ func (c *compiler) destructureTarget(pattern *Node, kind VarKind) {
 	case NIdent:
 		c.bindDeclName(pattern.Str, kind)
 	case NArray:
-		src := c.tempLocal()
-		c.emit(OpForOf) // materialize the iterable into an array
-		c.emitOpU16(OpPutLocal, uint16(src))
-		c.destructureArray(pattern, src, kind)
+		// A pattern with a rest element consumes the whole iterator (done at the
+		// end, nothing to close), so materializing is fine; otherwise drive the
+		// iterator lazily and close it when not exhausted (7.4.6 / destructuring
+		// iterator-closing).
+		hasRest := false
+		for _, e := range pattern.Args {
+			if e != nil && (e.Kind == NRest || e.Kind == NSpread) {
+				hasRest = true
+				break
+			}
+		}
+		if hasRest {
+			src := c.tempLocal()
+			c.emit(OpForOf)
+			c.emitOpU16(OpPutLocal, uint16(src))
+			c.destructureArray(pattern, src, kind)
+		} else {
+			c.destructureArrayIter(pattern, kind)
+		}
 	case NObject:
 		src := c.tempLocal()
 		c.emitOpU16(OpPutLocal, uint16(src))
@@ -51,6 +66,67 @@ func (c *compiler) destructureTarget(pattern *Node, kind VarKind) {
 	default:
 		c.errorf("unsupported destructuring target (slice)")
 	}
+}
+
+// destructureArrayIter destructures an array pattern (without a rest element) by
+// driving the iterator one value per target, then closing it if it isn't
+// already exhausted (spec IteratorBindingInitialization / DestructuringAssignment).
+func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
+	iterSlot := c.tempLocal()
+	c.emit(OpIterCall) // source (on stack) -> iterator
+	c.emitByte(0)
+	c.emitOpU16(OpPutLocal, uint16(iterSlot))
+	resSlot := c.tempLocal()
+	doneSlot := c.tempLocal()
+	c.emit(OpFalse)
+	c.emitOpU16(OpPutLocal, uint16(doneSlot))
+
+	for _, elem := range pattern.Args {
+		c.emitIterStep(iterSlot, resSlot, doneSlot) // leaves the value (or undefined)
+		if elem.Kind == NEmpty {
+			c.emit(OpPop) // hole: consume one step and discard
+			continue
+		}
+		target, defExpr := elem, (*Node)(nil)
+		if elem.Kind == NAssignPat || (elem.Kind == NAssign && elem.Op == TokAssign) {
+			target, defExpr = elem.Left, elem.Right
+		}
+		c.applyDefault(defExpr)
+		c.destructureTarget(target, kind)
+	}
+	// if !done: IteratorClose(iter) (the pattern didn't consume everything).
+	c.emitOpU16(OpGetLocal, uint16(doneSlot))
+	skip := c.emitJump(OpJmpTrue)
+	c.emitOpU16(OpGetLocal, uint16(iterSlot))
+	c.emit(OpIterClose)
+	c.patchJump(skip)
+}
+
+// emitIterStep leaves the next value from the iterator on the stack, or
+// undefined once the iterator is done, updating doneSlot. It never calls next()
+// again after the iterator reports done.
+func (c *compiler) emitIterStep(iterSlot, resSlot, doneSlot int) {
+	c.emitOpU16(OpGetLocal, uint16(doneSlot))
+	alreadyDone := c.emitJump(OpJmpTrue) // done -> push undefined
+	// r = iter.next(); done = r.done
+	c.emitOpU16(OpGetLocal, uint16(iterSlot))
+	c.emitFieldOp(OpGetField2, "next")
+	c.emit(OpCallMethod)
+	c.emitU16(0)
+	c.emitOpU16(OpPutLocal, uint16(resSlot))
+	c.emitOpU16(OpGetLocal, uint16(resSlot))
+	c.emitFieldOp(OpGetField, "done")
+	c.emitOpU16(OpPutLocal, uint16(doneSlot))
+	// push done ? undefined : r.value
+	c.emitOpU16(OpGetLocal, uint16(doneSlot))
+	nowDone := c.emitJump(OpJmpTrue)
+	c.emitOpU16(OpGetLocal, uint16(resSlot))
+	c.emitFieldOp(OpGetField, "value")
+	haveVal := c.emitJump(OpJmp)
+	c.patchJump(alreadyDone)
+	c.patchJump(nowDone)
+	c.emit(OpUndef)
+	c.patchJump(haveVal)
 }
 
 func (c *compiler) destructureArray(pattern *Node, src int, kind VarKind) {
