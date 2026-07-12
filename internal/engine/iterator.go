@@ -35,11 +35,58 @@ func (rt *Runtime) iterableValues(v Value) ([]Value, *ThrowError) {
 		}
 		return out, nil
 	default:
-		// Custom iterables (Map/Set/generators/Symbol.iterator) land later.
+		// Built-in Map/Set fast path.
 		if it := rt.objectIterableValues(v); it != nil {
 			return it, nil
 		}
+		// General Symbol.iterator protocol (generators, user iterables).
+		if out, ok, e := rt.iterateProtocol(v); ok || e != nil {
+			return out, e
+		}
 		return nil, rt.typeError(rt.typeofString(v) + " is not iterable")
+	}
+}
+
+// iterateProtocol drains an object implementing the Symbol.iterator protocol,
+// returning (values, true, nil). ok is false when v has no Symbol.iterator
+// method (so the caller can fall through to the not-iterable error).
+func (rt *Runtime) iterateProtocol(v Value) ([]Value, bool, *ThrowError) {
+	if !v.IsObjectType() || rt.symIterator == 0 {
+		return nil, false, nil
+	}
+	itFn := rt.getFieldSymbol(v, rt.symIterator.handle())
+	if !rt.isCallable(itFn) {
+		return nil, false, nil
+	}
+	iter, e := rt.callValue(itFn, v, nil)
+	if e != nil {
+		return nil, true, e
+	}
+	next, e := rt.getField(iter, "next")
+	if e != nil {
+		return nil, true, e
+	}
+	if !rt.isCallable(next) {
+		return nil, true, rt.typeError("iterator.next is not a function")
+	}
+	var out []Value
+	for {
+		res, e := rt.callValue(next, iter, nil)
+		if e != nil {
+			return nil, true, e
+		}
+		done, e := rt.getField(res, "done")
+		if e != nil {
+			return nil, true, e
+		}
+		if rt.toBoolean(done) {
+			return out, true, nil
+		}
+		val, e := rt.getField(res, "value")
+		if e != nil {
+			return nil, true, e
+		}
+		out = append(out, val)
 	}
 }
 

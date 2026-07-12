@@ -401,6 +401,11 @@ func (c *compiler) compileExpr(n *Node) {
 		c.compileExpr(n.Left)
 		c.emit(OpPop)
 		c.compileExpr(n.Right)
+	case NYield:
+		c.compileYield(n)
+	case NAwait:
+		c.compileExpr(n.Right)
+		c.emit(OpAwait)
 	default:
 		c.errorf("unsupported expression kind %v (slice)", n.Kind)
 	}

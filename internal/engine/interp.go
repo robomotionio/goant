@@ -588,6 +588,24 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		case OpThrow:
 			thrown = &ThrowError{Value: pop(), rt: rt}
 			goto unwind
+
+		case OpYield, OpAwait:
+			// Suspend this coroutine, handing the operand to its driver and
+			// blocking until resumed. A throw/return injection unwinds instead of
+			// producing a resume value.
+			resumed, inject := rt.suspend(pop())
+			if inject != nil {
+				switch inject.kind {
+				case genThrow:
+					thrown = &ThrowError{Value: inject.val, rt: rt}
+					goto unwind
+				case genReturn:
+					closeAll()
+					return inject.val, nil
+				}
+			}
+			push(resumed)
+			ip++
 		case OpTryPush:
 			handlers = append(handlers, tryHandler{catchIP: int(readU32(code, ip+1)), stackDepth: len(stack)})
 			ip += 5

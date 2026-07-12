@@ -44,6 +44,12 @@ type Runtime struct {
 	setProto      Value
 	symbolProto   Value
 	promiseProto  Value
+	genProto      Value // %GeneratorPrototype%
+
+	// curGen is the coroutine currently executing on the JS "thread" (nil on the
+	// main frame). Generator/async suspension hands control between the driver
+	// and the coroutine goroutine via curGen's channels.
+	curGen *genState
 
 	// microtasks is the promise-reaction job queue (ant microtask ring). It is
 	// drained after the top-level script and after each callback that may have
@@ -137,6 +143,7 @@ func New() *Runtime {
 	rt.initCollections()
 	rt.initSymbolBuiltin()
 	rt.initPromiseBuiltin()
+	rt.initGeneratorBuiltin()
 	return rt
 }
 

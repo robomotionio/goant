@@ -66,6 +66,13 @@ func (rt *Runtime) construct(fnVal Value, args []Value) (Value, *ThrowError) {
 	if o == nil || !o.flags.isCallable {
 		return mkundef(), rt.typeError("value is not a constructor")
 	}
+	if cl := rt.closures.get(o.closure); cl != nil && (cl.fn.isGenerator || cl.fn.isAsync || cl.fn.isArrow) {
+		nm := cl.fn.name
+		if nm == "" {
+			nm = "Function"
+		}
+		return mkundef(), rt.typeError(nm + " is not a constructor")
+	}
 	proto := mknull()
 	if p, e := rt.getField(fnVal, "prototype"); e == nil && p.IsObjectType() {
 		proto = p
@@ -113,6 +120,12 @@ func (rt *Runtime) callValue(fnVal, thisVal Value, args []Value) (Value, *ThrowE
 	cl := rt.closures.get(o.closure)
 	if cl == nil {
 		return mkundef(), rt.typeError("value is not a function")
+	}
+	if cl.fn.isGenerator {
+		return rt.newGenerator(cl.fn, cl, fnVal, thisVal, args), nil
+	}
+	if cl.fn.isAsync {
+		return rt.runAsync(cl.fn, cl, fnVal, thisVal, args), nil
 	}
 	return rt.runFrame(cl.fn, cl, fnVal, thisVal, args)
 }

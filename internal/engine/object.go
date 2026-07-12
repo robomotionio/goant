@@ -64,6 +64,9 @@ type object struct {
 	// promise is set for Promise objects (their settlement state).
 	promise *promiseState
 
+	// gen is set for generator objects (their suspended coroutine).
+	gen *genState
+
 	typeTag Type
 	flags   objFlags
 }
