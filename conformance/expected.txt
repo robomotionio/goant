@@ -361,6 +361,7 @@ compat-table/es6/destructuring-params.throws-null-undefined.js
 compat-table/es6/for-of.array.js
 compat-table/es6/for-of.astral-string.js
 compat-table/es6/for-of.generator.js
+compat-table/es6/for-of.iterator-closing-break.js
 compat-table/es6/for-of.sparse-array.js
 compat-table/es6/Function.name.accessor.js
 compat-table/es6/Function.name.bound.js
@@ -496,6 +497,7 @@ compat-table/es6/misc.Proxy.get.Date.toJSON.js
 compat-table/es6/misc.Proxy.get.Error.toString.js
 compat-table/es6/misc.Proxy.get.Function.bind.js
 compat-table/es6/misc.Proxy.get.instanceof.js
+compat-table/es6/misc.Proxy.get.IteratorComplete.js
 compat-table/es6/misc.Proxy.get.JSON.stringify.js
 compat-table/es6/misc.Proxy.get.Object.assign.js
 compat-table/es6/misc.Proxy.get.Object.defineProperties.js

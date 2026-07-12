@@ -154,6 +154,26 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			ao.arrLen = uint32(len(vals))
 			push(arr)
 			ip++
+		case OpIterCall:
+			// Pop the source, push its (live) sync iterator. The lazy for-of loop
+			// drives it with iter.next() and closes it on break.
+			it, e := rt.getSyncIterator(pop())
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(it)
+			ip += 2 // Size 2 (unused inline operand byte)
+		case OpIterClose:
+			// Pop the iterator and call its return() (IteratorClose, normal
+			// completion — errors from return() are swallowed).
+			iter := pop()
+			if iter.IsObjectType() {
+				if rf, e := rt.getField(iter, "return"); e == nil && rt.isCallable(rf) {
+					rt.callValue(rf, iter, nil)
+				}
+			}
+			ip++
 		case OpForAwaitOf:
 			// Pop the source, push its async iterator (GetAsyncIterator). The
 			// caller-emitted loop then drives it with await iter.next().

@@ -134,9 +134,61 @@ func (c *compiler) compileFor(n *Node) {
 // array produced by FOR_IN.
 func (c *compiler) compileForIn(n *Node) { c.compileForArray(n, OpForIn) }
 
-// compileForOf lowers `for (v of iter)` to iteration over the values array
-// produced by FOR_OF.
-func (c *compiler) compileForOf(n *Node) { c.compileForArray(n, OpForOf) }
+// compileForOf lowers `for (v of iter)` to a lazy loop over a live iterator:
+// each step calls iter.next() and, on an abrupt `break`, closes the iterator via
+// its return() (IteratorClose). Normal exhaustion does not close (already done).
+func (c *compiler) compileForOf(n *Node) {
+	c.scopeDepth++
+	store, lexSlot := c.forInStore(n.Left)
+	if store == nil {
+		c.errorf("unsupported for-of target (slice)")
+		c.scopeDepth--
+		return
+	}
+	c.compileExpr(n.Right)
+	c.emit(OpIterCall) // source -> iterator
+	c.emitByte(0)      // Size-2 opcode: unused inline operand
+	iterSlot := c.addLocal("*foi*", false)
+	c.emitOpU16(OpPutLocal, uint16(iterSlot))
+	resSlot := c.addLocal("*for*", false)
+
+	l := c.pushLoop(c.consumeLabel(), false)
+	condStart := len(c.fn.code)
+	// result = iter.next()
+	c.emitOpU16(OpGetLocal, uint16(iterSlot))
+	c.emitFieldOp(OpGetField2, "next") // [iter, next]
+	c.emit(OpCallMethod)
+	c.emitU16(0) // [result]
+	c.emitOpU16(OpPutLocal, uint16(resSlot))
+	// if result.done: exit without closing (iterator already exhausted)
+	c.emitOpU16(OpGetLocal, uint16(resSlot))
+	c.emitFieldOp(OpGetField, "done")
+	normalExit := c.emitJump(OpJmpTrue)
+	// v = result.value
+	c.emitOpU16(OpGetLocal, uint16(resSlot))
+	c.emitFieldOp(OpGetField, "value")
+	store()
+
+	c.compileStmt(n.Body)
+
+	l.continueTarget = len(c.fn.code)
+	c.patchContinues(l)
+	if lexSlot >= 0 {
+		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
+	}
+	c.emit(OpJmp)
+	c.emitU32(uint32(condStart))
+
+	// break lands here (popLoop patches l.breaks to this position): close the
+	// iterator, then fall through to the normal exit.
+	c.popLoop()
+	c.emitOpU16(OpGetLocal, uint16(iterSlot))
+	c.emit(OpIterClose)
+	c.patchJump(normalExit) // done skips the close block above
+
+	c.scopeDepth--
+	c.popBlockScope()
+}
 
 // compileForAwaitOf lowers `for await (v of src)` to a lazy loop that awaits
 // each iter.next() result (GetAsyncIterator + repeated await). Only valid inside

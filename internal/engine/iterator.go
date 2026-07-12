@@ -5,6 +5,29 @@ package engine
 // Map/Set; the lazy Symbol.iterator + generator protocol is layered on when
 // Symbol and generators land.
 
+// getSyncIterator implements GetIterator(obj, sync): call obj[@@iterator]() and
+// return the iterator object (for the lazy for-of loop, which closes it on an
+// abrupt completion).
+func (rt *Runtime) getSyncIterator(source Value) (Value, *ThrowError) {
+	if rt.symIterator != 0 {
+		m, e := rt.getElement(source, rt.symIterator)
+		if e != nil {
+			return mkundef(), e
+		}
+		if rt.isCallable(m) {
+			it, e := rt.callValue(m, source, nil)
+			if e != nil {
+				return mkundef(), e
+			}
+			if !it.IsObjectType() {
+				return mkundef(), rt.typeError("[Symbol.iterator]() returned a non-object")
+			}
+			return it, nil
+		}
+	}
+	return mkundef(), rt.typeError(rt.typeofString(source) + " " + rt.inspect(source, false) + " is not iterable")
+}
+
 // getAsyncIterator implements GetIterator(obj, async): prefer @@asyncIterator,
 // otherwise wrap the sync @@iterator via CreateAsyncFromSyncIterator. The
 // returned object's next() yields a promise of an IteratorResult.
