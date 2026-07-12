@@ -262,6 +262,7 @@ compat-table/es6/destructuring-params.object-primitives.js
 compat-table/es6/destructuring-params.rest.js
 compat-table/es6/destructuring-params.shorthand-defaults-arrow.js
 compat-table/es6/destructuring-params.throws-null-undefined.js
+compat-table/es6/for-of.array.js
 compat-table/es6/for-of.astral-string.js
 compat-table/es6/for-of.generator.js
 compat-table/es6/for-of.sparse-array.js
@@ -455,6 +456,7 @@ compat-table/es6/String.prototype.startsWith.js
 compat-table/es6/String.prototype.startsWith.throws-regex.js
 compat-table/es6/String.prototype.Symbol.iterator.js
 compat-table/es6/String.raw.js
+compat-table/es6/subclassing.Array.from.js
 compat-table/es6/subclassing.Array.prototype-chain.js
 compat-table/es6/subclassing.Function.prototype-chain.js
 compat-table/es6/subclassing.Promise.prototype-chain.js

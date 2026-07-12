@@ -66,6 +66,20 @@ func (rt *Runtime) sortValues(vs []Value, cmp Value) *ThrowError {
 // arraySpeciesCreate implements ArraySpeciesCreate: the result of an array
 // method uses this.constructor[Symbol.species] as its constructor when present,
 // otherwise a plain Array.
+// arrayFromCtor creates the result for Array.of/from: when called as a static on
+// a subclass constructor (`this`), it constructs via that constructor; otherwise
+// a plain Array. Lets `class C extends Array {}` inherit species-correct statics.
+func (rt *Runtime) arrayFromCtor(this Value, length int) (Value, *ThrowError) {
+	if rt.isCallable(this) {
+		v, e := rt.construct(this, []Value{mknum(float64(length))})
+		if e != nil {
+			return mkundef(), e
+		}
+		return v, nil
+	}
+	return rt.newArray(), nil
+}
+
 func (rt *Runtime) arraySpeciesCreate(this Value, length int) (Value, *ThrowError) {
 	if this.Type() == TArr && rt.symSpecies != 0 {
 		ctor, e := rt.getField(this, "constructor")
@@ -833,18 +847,18 @@ func (rt *Runtime) initArrayBuiltin() {
 		return mkbool(arg(args, 0).Type() == TArr), nil
 	})
 	rt.defMethod(cobj, "of", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		res := rt.newArray()
-		ro := rt.objPtr(res)
-		for _, a := range args {
-			rt.arraySet(ro, ro.arrLen, a)
+		res, e := rt.arrayFromCtor(this, len(args))
+		if e != nil {
+			return mkundef(), e
+		}
+		for i, a := range args {
+			rt.setElement(res, mknum(float64(i)), a)
 		}
 		return res, nil
 	})
 	rt.defMethod(cobj, "from", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		src := arg(args, 0)
 		mapFn := arg(args, 1)
-		res := rt.newArray()
-		ro := rt.objPtr(res)
 		var items []Value
 		// Iterable (Symbol.iterator: array/string/Map/Set/generators/user) takes
 		// precedence over the array-like (length-indexed) path.
@@ -866,6 +880,10 @@ func (rt *Runtime) initArrayBuiltin() {
 		} else if src.IsNullish() {
 			return mkundef(), rt.typeError("Array.from requires an array-like or iterable object")
 		}
+		res, e := rt.arrayFromCtor(this, len(items))
+		if e != nil {
+			return mkundef(), e
+		}
 		for i, it := range items {
 			v := it
 			if rt.isCallable(mapFn) {
@@ -875,7 +893,7 @@ func (rt *Runtime) initArrayBuiltin() {
 				}
 				v = mv
 			}
-			rt.arraySet(ro, ro.arrLen, v)
+			rt.setElement(res, mknum(float64(i)), v)
 		}
 		return res, nil
 	})
