@@ -152,6 +152,10 @@ func (c *compiler) compileForOf(n *Node) {
 	c.emitOpU16(OpPutLocal, uint16(iterSlot))
 	resSlot := c.addLocal("*for*", false)
 
+	// A try-handler covers the loop so a throw in next()/the body closes the
+	// iterator before propagating.
+	catchHandler := c.emitJump(OpTryPush)
+
 	l := c.pushLoop(c.consumeLabel(), false)
 	condStart := len(c.fn.code)
 	// result = iter.next()
@@ -179,12 +183,29 @@ func (c *compiler) compileForOf(n *Node) {
 	c.emit(OpJmp)
 	c.emitU32(uint32(condStart))
 
-	// break lands here (popLoop patches l.breaks to this position): close the
-	// iterator, then fall through to the normal exit.
+	// break lands here (popLoop patches l.breaks here): pop the handler, close
+	// the iterator, jump to end.
 	c.popLoop()
+	c.emit(OpTryPop)
 	c.emitOpU16(OpGetLocal, uint16(iterSlot))
 	c.emit(OpIterClose)
-	c.patchJump(normalExit) // done skips the close block above
+	endBreak := c.emitJump(OpJmp)
+
+	// normal exhaustion: pop the handler (no close — already done), jump to end.
+	c.patchJump(normalExit)
+	c.emit(OpTryPop)
+	endDone := c.emitJump(OpJmp)
+
+	// throw: close the iterator, then re-throw the caught value.
+	c.patchJump(catchHandler)
+	c.emit(OpCatch)
+	c.emitU32(0)
+	c.emitOpU16(OpGetLocal, uint16(iterSlot))
+	c.emit(OpIterClose)
+	c.emit(OpThrow)
+
+	c.patchJump(endBreak)
+	c.patchJump(endDone)
 
 	c.scopeDepth--
 	c.popBlockScope()

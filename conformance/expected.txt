@@ -363,6 +363,7 @@ compat-table/es6/for-of.array.js
 compat-table/es6/for-of.astral-string.js
 compat-table/es6/for-of.generator.js
 compat-table/es6/for-of.iterator-closing-break.js
+compat-table/es6/for-of.iterator-closing-throw.js
 compat-table/es6/for-of.sparse-array.js
 compat-table/es6/Function.name.accessor.js
 compat-table/es6/Function.name.bound.js
