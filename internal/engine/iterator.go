@@ -28,6 +28,54 @@ func (rt *Runtime) getSyncIterator(source Value) (Value, *ThrowError) {
 	return mkundef(), rt.typeError(rt.typeofString(source) + " " + rt.inspect(source, false) + " is not iterable")
 }
 
+// iteratorClose calls iter.return() for the normal-completion case, swallowing
+// any error/result (IteratorClose, 7.4.8).
+func (rt *Runtime) iteratorClose(iter Value) {
+	if !iter.IsObjectType() {
+		return
+	}
+	if rf, e := rt.getField(iter, "return"); e == nil && rt.isCallable(rf) {
+		rt.callValue(rf, iter, nil)
+	}
+}
+
+// iterateWithClose drives source's iterator, calling fn per value. If fn returns
+// an error or stop=true, the iterator is closed (return()) before returning —
+// this is the spec pattern for operations that may abort mid-iteration
+// (AddEntriesFromIterable, Array.from, destructuring, …).
+func (rt *Runtime) iterateWithClose(source Value, fn func(v Value) (stop bool, err *ThrowError)) *ThrowError {
+	iter, e := rt.getSyncIterator(source)
+	if e != nil {
+		return e
+	}
+	for {
+		nextFn, e := rt.getField(iter, "next")
+		if e != nil {
+			return e
+		}
+		r, e := rt.callValue(nextFn, iter, nil)
+		if e != nil {
+			return e
+		}
+		if !r.IsObjectType() {
+			return rt.typeError("iterator result is not an object")
+		}
+		if d, _ := rt.getField(r, "done"); rt.toBoolean(d) {
+			return nil
+		}
+		val, _ := rt.getField(r, "value")
+		stop, ferr := fn(val)
+		if ferr != nil {
+			rt.iteratorClose(iter)
+			return ferr
+		}
+		if stop {
+			rt.iteratorClose(iter)
+			return nil
+		}
+	}
+}
+
 // getAsyncIterator implements GetIterator(obj, async): prefer @@asyncIterator,
 // otherwise wrap the sync @@iterator via CreateAsyncFromSyncIterator. The
 // returned object's next() yields a promise of an IteratorResult.

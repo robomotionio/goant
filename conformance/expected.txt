@@ -263,6 +263,7 @@ compat-table/es6/annex-b.String.prototype.html.lowercase.js
 compat-table/es6/annex-b.String.prototype.html.quotes-escaped.js
 compat-table/es6/Array.from.array-like.js
 compat-table/es6/Array.from.generator.js
+compat-table/es6/Array.from.iterator-closing.js
 compat-table/es6/Array.from.map.array-like.js
 compat-table/es6/Array.from.map.generator.js
 compat-table/es6/Array.iterator-prototype-chain.js
@@ -622,6 +623,7 @@ compat-table/es6/Set.constructor-accepts-null.js
 compat-table/es6/Set.constructor-arguments.js
 compat-table/es6/Set.constructor-invokes-add.js
 compat-table/es6/Set.constructor-requires-new.js
+compat-table/es6/Set.iterator-closing.js
 compat-table/es6/Set.iterator-prototype-chain.js
 compat-table/es6/Set.prototype.add-returns-this.js
 compat-table/es6/Set.prototype.clear.js
@@ -727,6 +729,7 @@ compat-table/es6/WeakMap.constructor-arguments.js
 compat-table/es6/WeakMap.constructor-invokes-set.js
 compat-table/es6/WeakMap.constructor-requires-new.js
 compat-table/es6/WeakMap.frozen-keys.js
+compat-table/es6/WeakMap.iterator-closing.js
 compat-table/es6/WeakMap.no-clear.js
 compat-table/es6/WeakMap.prototype.delete.js
 compat-table/es6/WeakMap.prototype-not-instance.js
@@ -736,6 +739,7 @@ compat-table/es6/WeakSet.constructor-accepts-null.js
 compat-table/es6/WeakSet.constructor-arguments.js
 compat-table/es6/WeakSet.constructor-invokes-add.js
 compat-table/es6/WeakSet.constructor-requires-new.js
+compat-table/es6/WeakSet.iterator-closing.js
 compat-table/es6/WeakSet.no-clear.js
 compat-table/es6/WeakSet.prototype.add-returns-this.js
 compat-table/es6/WeakSet.prototype.delete.js

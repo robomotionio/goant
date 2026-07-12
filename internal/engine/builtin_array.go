@@ -1017,47 +1017,58 @@ func (rt *Runtime) initArrayBuiltin() {
 	rt.defMethod(cobj, "from", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		src := arg(args, 0)
 		mapFn := arg(args, 1)
-		var items []Value
-		// Iterable (Symbol.iterator: array/string/Map/Set/generators/user) takes
-		// precedence over the array-like (length-indexed) path.
+		mapEach := func(it Value, i int) (Value, *ThrowError) {
+			if rt.isCallable(mapFn) {
+				return rt.callValue(mapFn, arg(args, 2), []Value{it, mknum(float64(i))})
+			}
+			return it, nil
+		}
+		// Iterable (Symbol.iterator) takes precedence; the mapper runs per element
+		// so a throw closes the iterator (Array.from iterator-closing).
 		if rt.isIterable(src) {
-			it, e := rt.iterableValues(src)
+			res, e := rt.arrayFromCtor(this, 0)
 			if e != nil {
 				return mkundef(), e
 			}
-			items = it
-		} else if o := rt.objPtr(src); o != nil {
-			n, e := rt.lengthOf(src)
-			if e != nil {
+			i := 0
+			if e := rt.iterateWithClose(src, func(it Value) (bool, *ThrowError) {
+				v, e := mapEach(it, i)
+				if e != nil {
+					return false, e
+				}
+				if e := rt.createDataProperty(res, mknum(float64(i)), v); e != nil {
+					return false, e
+				}
+				i++
+				return false, nil
+			}); e != nil {
 				return mkundef(), e
 			}
-			for i := 0; i < n; i++ {
-				el, _ := rt.getElement(src, mknum(float64(i)))
-				items = append(items, el)
-			}
-		} else if src.IsNullish() {
+			rt.setField(res, "length", mknum(float64(i)))
+			return res, nil
+		}
+		if src.IsNullish() {
 			return mkundef(), rt.typeError("Array.from requires an array-like or iterable object")
 		}
-		res, e := rt.arrayFromCtor(this, len(items))
+		n, e := rt.lengthOf(src)
 		if e != nil {
 			return mkundef(), e
 		}
-		for i, it := range items {
-			v := it
-			if rt.isCallable(mapFn) {
-				mv, e := rt.callValue(mapFn, arg(args, 2), []Value{it, mknum(float64(i))})
-				if e != nil {
-					return mkundef(), e
-				}
-				v = mv
+		res, e := rt.arrayFromCtor(this, n)
+		if e != nil {
+			return mkundef(), e
+		}
+		for i := 0; i < n; i++ {
+			el, _ := rt.getElement(src, mknum(float64(i)))
+			v, e := mapEach(el, i)
+			if e != nil {
+				return mkundef(), e
 			}
 			if e := rt.createDataProperty(res, mknum(float64(i)), v); e != nil {
 				return mkundef(), e
 			}
 		}
-		if e := rt.setField(res, "length", mknum(float64(len(items)))); e != nil {
-			return mkundef(), e
-		}
+		rt.setField(res, "length", mknum(float64(n)))
 		return res, nil
 	})
 	// Array.prototype[Symbol.unscopables] (with-statement exclusion list).

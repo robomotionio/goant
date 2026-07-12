@@ -210,17 +210,14 @@ func (rt *Runtime) initMapBuiltin() {
 		}
 		o.coll = &collection{index: map[string]int{}}
 		if it := arg(args, 0); !it.IsNullish() {
-			vals, e := rt.iterableValues(it)
-			if e != nil {
-				return mkundef(), e
-			}
 			setFn, _ := rt.getField(this, "set")
-			for _, entry := range vals {
+			if e := rt.iterateWithClose(it, func(entry Value) (bool, *ThrowError) {
 				k, _ := rt.getElement(entry, mknum(0))
 				v, _ := rt.getElement(entry, mknum(1))
-				if _, e := rt.callValue(setFn, this, []Value{k, v}); e != nil {
-					return mkundef(), e
-				}
+				_, e := rt.callValue(setFn, this, []Value{k, v})
+				return false, e
+			}); e != nil {
+				return mkundef(), e
 			}
 		}
 		return this, nil
@@ -354,15 +351,12 @@ func (rt *Runtime) initSetBuiltin() {
 		}
 		o.coll = &collection{index: map[string]int{}, isSet: true}
 		if it := arg(args, 0); !it.IsNullish() {
-			vals, e := rt.iterableValues(it)
-			if e != nil {
-				return mkundef(), e
-			}
 			addFn, _ := rt.getField(this, "add")
-			for _, v := range vals {
-				if _, e := rt.callValue(addFn, this, []Value{v}); e != nil {
-					return mkundef(), e
-				}
+			if e := rt.iterateWithClose(it, func(v Value) (bool, *ThrowError) {
+				_, e := rt.callValue(addFn, this, []Value{v})
+				return false, e
+			}); e != nil {
+				return mkundef(), e
 			}
 		}
 		return this, nil
