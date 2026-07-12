@@ -146,6 +146,7 @@ func New() *Runtime {
 	rt.initRegExpBuiltin()
 	rt.initJSONBuiltin()
 	rt.initCollections()
+	rt.initWeakCollections()
 	rt.initPromiseBuiltin()
 	rt.initGeneratorBuiltin()
 	rt.initReflectBuiltin()

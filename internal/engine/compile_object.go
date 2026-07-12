@@ -110,6 +110,39 @@ func (c *compiler) compileMemberAssign(n *Node) {
 		return
 	}
 
+	// Logical member assignment (obj.x &&=/||=/??= v): short-circuit so the RHS
+	// and the [[Set]] (its setter) run only when needed.
+	if jmpOp, isLogical := logicalAssignJmp(n.Op); isLogical {
+		tSlot := c.tempLocal()
+		kSlot := -1
+		c.compileExpr(member.Left)
+		c.emitOpU16(OpPutLocal, uint16(tSlot))
+		if computed {
+			kSlot = c.tempLocal()
+			c.compileExpr(member.Right)
+			c.emitOpU16(OpPutLocal, uint16(kSlot))
+		}
+		c.loadMember(member, tSlot, kSlot) // [old]
+		c.emit(OpDup)                      // [old, old]
+		skip := c.emitJump(jmpOp)          // short-circuit: leave [old]
+		c.emit(OpPop)                      // []
+		c.compileExpr(n.Right)             // [rhs]
+		vSlot := c.tempLocal()
+		c.emitOpU16(OpSetLocal, uint16(vSlot)) // keep [rhs]
+		if computed {
+			c.emitOpU16(OpGetLocal, uint16(tSlot))
+			c.emitOpU16(OpGetLocal, uint16(kSlot))
+			c.emitOpU16(OpGetLocal, uint16(vSlot))
+			c.emit(OpPutElem)
+		} else {
+			c.emitOpU16(OpGetLocal, uint16(tSlot))
+			c.emitOpU16(OpGetLocal, uint16(vSlot))
+			c.emitFieldOp(OpPutField, member.Right.Str)
+		}
+		c.patchJump(skip)
+		return
+	}
+
 	// Compound member assignment obj.x op= v via temp locals.
 	op, ok := compoundOpcode(n.Op)
 	if !ok {

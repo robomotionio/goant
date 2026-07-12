@@ -92,6 +92,7 @@ type collection struct {
 	vals  []Value // parallel to keys; unused (undefined) for Set
 	index map[string]int
 	isSet bool
+	weak  bool // WeakMap/WeakSet: object-only keys, no iteration/size/clear
 }
 
 // nativeFunc is a built-in function implemented in Go (ant ant_cfunc_t).

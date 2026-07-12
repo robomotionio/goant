@@ -679,6 +679,46 @@ func (c *compiler) compileAssign(n *Node) {
 		uv = c.resolveUpvalue(name)
 	}
 
+	loadVar := func() {
+		switch {
+		case slot >= 0:
+			c.emitOpU16(OpGetLocal, uint16(slot))
+		case uv >= 0:
+			c.emitOpU16(OpGetUpval, uint16(uv))
+		case c.withDepth > 0:
+			c.emitWithVar(OpWithGetVar, name)
+		default:
+			c.emitGlobalGet(name)
+		}
+	}
+	storeVar := func() {
+		switch {
+		case slot >= 0:
+			c.emitOpU16(OpSetLocal, uint16(slot))
+		case uv >= 0:
+			c.emitOpU16(OpSetUpval, uint16(uv))
+		case c.withDepth > 0:
+			c.emit(OpDup)
+			c.emitWithVar(OpWithPutVar, name)
+		default:
+			c.emit(OpDup)
+			c.emitGlobalPut(name)
+		}
+	}
+
+	// Logical assignment (&&= ||= ??=): short-circuit — the RHS (and the store)
+	// runs only when the current value requires it.
+	if jmpOp, ok := logicalAssignJmp(n.Op); ok {
+		loadVar()
+		c.emit(OpDup)
+		skip := c.emitJump(jmpOp)
+		c.emit(OpPop)
+		c.compileExpr(n.Right)
+		storeVar()
+		c.patchJump(skip)
+		return
+	}
+
 	// Evaluate the value to assign, leaving it on the stack.
 	if n.Op == TokAssign {
 		c.compileExpr(n.Right)
@@ -715,6 +755,20 @@ func (c *compiler) compileAssign(n *Node) {
 		c.emit(OpDup)
 		c.emitGlobalPut(name)
 	}
+}
+
+// logicalAssignJmp maps a logical-assignment operator to the branch that skips
+// the assignment when the current value already short-circuits it.
+func logicalAssignJmp(t Token) (Opcode, bool) {
+	switch t {
+	case TokLandAssign:
+		return OpJmpFalse, true // a &&= b: skip when a is falsy
+	case TokLorAssign:
+		return OpJmpTrue, true // a ||= b: skip when a is truthy
+	case TokNullishAssign:
+		return OpJmpNotNullish, true // a ??= b: skip when a is non-nullish
+	}
+	return 0, false
 }
 
 func compoundOpcode(t Token) (Opcode, bool) {
