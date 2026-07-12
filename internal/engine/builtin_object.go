@@ -662,6 +662,10 @@ func (rt *Runtime) objectToStringTag(v Value) string {
 	switch v.Type() {
 	case TArr:
 		builtin = "Array"
+		// The arguments object is array-backed but tags as "Arguments".
+		if o := rt.objPtr(v); o != nil && o.hasOwn("callee") {
+			builtin = "Arguments"
+		}
 	case TFunc, TCFunc:
 		builtin = "Function"
 	case TStr:

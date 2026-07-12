@@ -190,6 +190,7 @@ compat-table/es5/immutable-globals.Infinity.js
 compat-table/es5/immutable-globals.NaN.js
 compat-table/es5/immutable-globals.undefined.js
 compat-table/es5/JSON.js
+compat-table/es5/misc.Arguments.toStringTag.js
 compat-table/es5/misc.Function.apply.array-likes.js
 compat-table/es5/misc.Function.prototype.non-enumerable.js
 compat-table/es5/misc.parseInt.ignores-leading-zeros.js
