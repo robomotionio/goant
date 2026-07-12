@@ -127,6 +127,9 @@ compat-table/es2023/hashbang.js
 compat-table/es2023/TypedArray.prototype.toReversed.js
 compat-table/es2023/TypedArray.prototype.toSorted.js
 compat-table/es2023/TypedArray.prototype.with.js
+compat-table/es2024/ArrayBuffer.prototype.detached.js
+compat-table/es2024/ArrayBuffer.prototype.transfer.js
+compat-table/es2024/ArrayBuffer.prototype.transferToFixedLength.js
 compat-table/es2024/Map.groupBy.js
 compat-table/es2024/Object.groupBy.js
 compat-table/es2024/Promise.withResolvers.js

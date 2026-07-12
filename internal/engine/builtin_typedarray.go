@@ -290,6 +290,27 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 		}
 		return mknum(0), nil
 	}), mkundef(), true, false, attrConfigurable)
+	// detached: an ArrayBuffer whose bytes have been transferred away (abuf nil).
+	po.defineAccessor("detached", rt.newNativeFunc("detached", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		return mkbool(o != nil && o.abuf == nil), nil
+	}), mkundef(), true, false, attrConfigurable)
+	transfer := func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || o.abuf == nil {
+			return mkundef(), rt.typeError("Cannot transfer a detached ArrayBuffer")
+		}
+		newLen := len(o.abuf)
+		if a := arg(args, 0); a.IsNumber() {
+			newLen = int(a.Number())
+		}
+		nb := rt.newArrayBuffer(newLen)
+		copy(rt.objPtr(nb).abuf, o.abuf)
+		o.abuf = nil // detach the source
+		return nb, nil
+	}
+	rt.defMethod(po, "transfer", 0, transfer)
+	rt.defMethod(po, "transferToFixedLength", 0, transfer)
 	rt.defMethod(po, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		if o == nil || o.abuf == nil {
