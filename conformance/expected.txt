@@ -802,6 +802,7 @@ compat-table/intl/Number.prototype.toLocaleString.js
 compat-table/intl/Object.prototype.toLocaleString.js
 compat-table/intl/String.prototype.localeCompare.js
 compat-table/next/Array.isTemplateObject.js
+compat-table/next/AsyncDisposableStack.js
 compat-table/next/AsyncIterator.extends.js
 compat-table/next/AsyncIterator.from.async-iterable.js
 compat-table/next/AsyncIterator.from.iterable.js
@@ -820,6 +821,7 @@ compat-table/next/AsyncIterator.prototype.Symbol.toStringTag.js
 compat-table/next/AsyncIterator.prototype.take.js
 compat-table/next/AsyncIterator.prototype.toArray.js
 compat-table/next/await-using.js
+compat-table/next/DisposableStack.js
 compat-table/next/Map.prototype.upsert.js
 compat-table/next/RegExp.1-9.js
 compat-table/next/SuppressedError.js

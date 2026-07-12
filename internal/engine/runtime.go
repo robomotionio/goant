@@ -225,6 +225,7 @@ func New() *Runtime {
 	rt.initTypedArrays()
 	rt.initIteratorHelpers()
 	rt.initAsyncIterator()
+	rt.initDisposableStack()
 	rt.initSharedArrayBuffer()
 	rt.initAtomics()
 	rt.initAnnexB()
