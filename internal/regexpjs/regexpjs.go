@@ -44,6 +44,42 @@ type Match struct {
 }
 
 // Compile validates flags and compiles pattern under ECMAScript semantics.
+// translateAnnexBEscapes rewrites the JS identity escapes that regexp2 would
+// otherwise misread. `\A \Z \z \G` (regexp2 anchors) become the literal letter,
+// and `\c` not followed by an ASCII control letter becomes a literal backslash +
+// c (Annex B ExtendedAtom). All other escapes — including `\\` — pass through
+// verbatim; the two-rune advance on `\\` keeps a literal backslash from being
+// rescanned.
+func translateAnnexBEscapes(src string) string {
+	rs := []rune(src)
+	var b strings.Builder
+	for i := 0; i < len(rs); i++ {
+		if rs[i] != '\\' || i+1 >= len(rs) {
+			b.WriteRune(rs[i])
+			continue
+		}
+		switch n := rs[i+1]; n {
+		case 'A', 'Z', 'z', 'G':
+			b.WriteRune(n)
+		case 'c':
+			if i+2 < len(rs) && isASCIILetter(rs[i+2]) {
+				b.WriteString(`\c`)
+			} else {
+				b.WriteString(`\\c`)
+			}
+		default:
+			b.WriteRune('\\')
+			b.WriteRune(n)
+		}
+		i++ // consumed the escaped rune too
+	}
+	return b.String()
+}
+
+func isASCIILetter(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
 func Compile(pattern, flags string) (*Regexp, error) {
 	r := &Regexp{Source: pattern, Flags: flags}
 	seen := map[rune]bool{}
@@ -84,6 +120,12 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	}
 	// An empty pattern matches the empty string; ECMAScript spells it (?:).
 	src := pattern
+	// Annex B identity escapes: outside Unicode mode, `\A \Z \z \G` are literal
+	// letters in JS (regexp2/.NET would read them as anchors), and `\c` not
+	// followed by a control letter is a literal backslash + c.
+	if !r.Unicode {
+		src = translateAnnexBEscapes(src)
+	}
 	// Under the u/v flag, translate ES Unicode property escapes (\p{…}) into
 	// explicit code-point classes regexp2 can compile.
 	if r.UnicodeSets {
