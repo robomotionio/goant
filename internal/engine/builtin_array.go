@@ -145,9 +145,21 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), nil
 		}
 		first, _ := rt.getElement(this, mknum(0))
-		for i := 1; i < n; i++ {
-			v, _ := rt.getElement(this, mknum(float64(i)))
-			rt.setElement(this, mknum(float64(i-1)), v)
+		// 23.1.3.27: shift each element down one; a hole propagates as a Delete of
+		// the destination rather than an overwrite.
+		for k := 1; k < n; k++ {
+			from := mknum(float64(k))
+			to := mknum(float64(k - 1))
+			if rt.hasElem(this, k) {
+				v, _ := rt.getElement(this, from)
+				if e := rt.setElement(this, to, v); e != nil {
+					return mkundef(), e
+				}
+			} else {
+				if _, e := rt.deleteElement(this, to); e != nil {
+					return mkundef(), e
+				}
+			}
 		}
 		rt.deleteElement(this, mknum(float64(n-1)))
 		rt.setField(this, "length", mknum(float64(n-1)))
@@ -158,13 +170,29 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		// 23.1.3.32: shift the tail up by argCount (holes Delete their target),
+		// then prepend the new items.
 		k := len(args)
-		for i := n - 1; i >= 0; i-- {
-			v, _ := rt.getElement(this, mknum(float64(i)))
-			rt.setElement(this, mknum(float64(i+k)), v)
-		}
-		for i := 0; i < k; i++ {
-			rt.setElement(this, mknum(float64(i)), args[i])
+		if k > 0 {
+			for i := n; i > 0; i-- {
+				from := i - 1
+				to := i - 1 + k
+				if rt.hasElem(this, from) {
+					v, _ := rt.getElement(this, mknum(float64(from)))
+					if e := rt.setElement(this, mknum(float64(to)), v); e != nil {
+						return mkundef(), e
+					}
+				} else {
+					if _, e := rt.deleteElement(this, mknum(float64(to))); e != nil {
+						return mkundef(), e
+					}
+				}
+			}
+			for i := 0; i < k; i++ {
+				if e := rt.setElement(this, mknum(float64(i)), args[i]); e != nil {
+					return mkundef(), e
+				}
+			}
 		}
 		rt.setField(this, "length", mknum(float64(n+k)))
 		return mknum(float64(n + k)), nil
@@ -326,13 +354,29 @@ func (rt *Runtime) initArrayBuiltin() {
 		if count > n-to {
 			count = n - to
 		}
-		buf := make([]Value, 0, count)
-		for i := 0; i < count; i++ {
-			el, _ := rt.getElement(this, mknum(float64(from+i)))
-			buf = append(buf, el)
+		// 23.1.3.4: copy in place with a direction chosen to avoid clobbering the
+		// source when the ranges overlap; a hole in the source Deletes the target.
+		dir := 1
+		if from < to && to < from+count {
+			dir = -1
+			from += count - 1
+			to += count - 1
 		}
-		for i := 0; i < count; i++ {
-			rt.setElement(this, mknum(float64(to+i)), buf[i])
+		for ; count > 0; count-- {
+			fromP := mknum(float64(from))
+			toP := mknum(float64(to))
+			if rt.hasElem(this, from) {
+				v, _ := rt.getElement(this, fromP)
+				if e := rt.setElement(this, toP, v); e != nil {
+					return mkundef(), e
+				}
+			} else {
+				if _, e := rt.deleteElement(this, toP); e != nil {
+					return mkundef(), e
+				}
+			}
+			from += dir
+			to += dir
 		}
 		return this, nil
 	})
@@ -485,20 +529,48 @@ func (rt *Runtime) initArrayBuiltin() {
 		return res, nil
 	})
 	rt.defMethod(proto, "reverse", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		// Generic: works on arrays and array-likes via length + element access.
+		// Generic (23.1.3.26): honors holes via HasProperty so a hole reverses to
+		// a hole (Delete), routing every step through Proxy traps.
 		n, e := rt.lengthOf(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		for i := 0; i < n/2; i++ {
-			j := n - 1 - i
-			a, _ := rt.getElement(this, mknum(float64(i)))
-			b, _ := rt.getElement(this, mknum(float64(j)))
-			if e := rt.setElement(this, mknum(float64(i)), b); e != nil {
-				return mkundef(), e
+		for lower := 0; lower < n/2; lower++ {
+			upper := n - 1 - lower
+			lowerP := mknum(float64(lower))
+			upperP := mknum(float64(upper))
+			lowerExists := rt.hasElem(this, lower)
+			var lowerVal Value
+			if lowerExists {
+				lowerVal, _ = rt.getElement(this, lowerP)
 			}
-			if e := rt.setElement(this, mknum(float64(j)), a); e != nil {
-				return mkundef(), e
+			upperExists := rt.hasElem(this, upper)
+			var upperVal Value
+			if upperExists {
+				upperVal, _ = rt.getElement(this, upperP)
+			}
+			switch {
+			case lowerExists && upperExists:
+				if e := rt.setElement(this, lowerP, upperVal); e != nil {
+					return mkundef(), e
+				}
+				if e := rt.setElement(this, upperP, lowerVal); e != nil {
+					return mkundef(), e
+				}
+			case upperExists:
+				if e := rt.setElement(this, lowerP, upperVal); e != nil {
+					return mkundef(), e
+				}
+				if _, e := rt.deleteElement(this, upperP); e != nil {
+					return mkundef(), e
+				}
+			case lowerExists:
+				if _, e := rt.deleteElement(this, lowerP); e != nil {
+					return mkundef(), e
+				}
+				if e := rt.setElement(this, upperP, lowerVal); e != nil {
+					return mkundef(), e
+				}
 			}
 		}
 		return this, nil
@@ -608,12 +680,18 @@ func (rt *Runtime) initArrayBuiltin() {
 		} else if len(args) == 0 {
 			delCount = 0
 		}
+		// 23.1.3.28: collect removed elements (holes stay holes), shift the tail to
+		// make room (Delete for holes), splice in the new items. HasProperty and
+		// the Get/Set/Delete steps route through Proxy traps.
 		removed := rt.newArray()
 		rmo := rt.objPtr(removed)
 		for i := 0; i < delCount; i++ {
-			el, _ := rt.getElement(this, mknum(float64(start+i)))
-			rt.arraySet(rmo, uint32(i), el)
+			if rt.hasElem(this, start+i) {
+				el, _ := rt.getElement(this, mknum(float64(start+i)))
+				rt.arraySet(rmo, uint32(i), el)
+			}
 		}
+		rmo.arrLen = uint32(delCount)
 		var items []Value
 		if len(args) > 2 {
 			items = args[2:]
@@ -622,16 +700,36 @@ func (rt *Runtime) initArrayBuiltin() {
 		switch {
 		case itemCount < delCount:
 			for i := start; i < n-delCount; i++ {
-				v, _ := rt.getElement(this, mknum(float64(i+delCount)))
-				rt.setElement(this, mknum(float64(i+itemCount)), v)
+				from := i + delCount
+				to := i + itemCount
+				if rt.hasElem(this, from) {
+					v, _ := rt.getElement(this, mknum(float64(from)))
+					if e := rt.setElement(this, mknum(float64(to)), v); e != nil {
+						return mkundef(), e
+					}
+				} else {
+					if _, e := rt.deleteElement(this, mknum(float64(to))); e != nil {
+						return mkundef(), e
+					}
+				}
 			}
 			for i := n; i > n-delCount+itemCount; i-- {
 				rt.deleteElement(this, mknum(float64(i-1)))
 			}
 		case itemCount > delCount:
 			for i := n - delCount; i > start; i-- {
-				v, _ := rt.getElement(this, mknum(float64(i+delCount-1)))
-				rt.setElement(this, mknum(float64(i+itemCount-1)), v)
+				from := i + delCount - 1
+				to := i + itemCount - 1
+				if rt.hasElem(this, from) {
+					v, _ := rt.getElement(this, mknum(float64(from)))
+					if e := rt.setElement(this, mknum(float64(to)), v); e != nil {
+						return mkundef(), e
+					}
+				} else {
+					if _, e := rt.deleteElement(this, mknum(float64(to))); e != nil {
+						return mkundef(), e
+					}
+				}
 			}
 		}
 		for i := 0; i < itemCount; i++ {
@@ -685,16 +783,19 @@ func (rt *Runtime) initArrayBuiltin() {
 		return mknum(-1), nil
 	})
 	rt.defMethod(proto, "fill", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(this)
-		if o == nil {
-			return this, nil
+		// Generic (23.1.3.6): reads length, then Set for each index in range —
+		// works on array-likes and routes element writes through Proxy traps.
+		n, e := rt.lengthOf(this)
+		if e != nil {
+			return mkundef(), e
 		}
 		val := arg(args, 0)
-		n := int(o.arrLen)
 		start := relIndex(rt, arg(args, 1), n, 0)
 		end := relIndex(rt, arg(args, 2), n, n)
 		for i := start; i < end; i++ {
-			rt.arraySet(o, uint32(i), val)
+			if e := rt.setElement(this, mknum(float64(i)), val); e != nil {
+				return mkundef(), e
+			}
 		}
 		return this, nil
 	})

@@ -450,8 +450,41 @@ func (rt *Runtime) hasProp(obj Value, key string) bool {
 		has, _ := rt.proxyHas(o.proxy, rt.internString(key))
 		return has
 	}
+	// Integer-indexed elements live in the array/typed-array/string backing
+	// store, not the shape, so resolveProp alone would miss them.
+	if idx, ok := canonicalIndex(key); ok {
+		for cur := obj; ; {
+			o := rt.objPtr(cur)
+			if o == nil {
+				break
+			}
+			if rt.hasOwnIndex(cur, o, idx) {
+				return true
+			}
+			if s := o.shape.lookupInterned(key); s >= 0 {
+				return true
+			}
+			cur = o.proto
+		}
+		return false
+	}
 	_, _, found := rt.resolveProp(obj, key)
 	return found
+}
+
+// hasOwnIndex reports whether obj owns integer index idx in its element backing
+// store (array elements, typed-array slots, or string code units).
+func (rt *Runtime) hasOwnIndex(obj Value, o *object, idx uint32) bool {
+	switch obj.Type() {
+	case TArr:
+		return idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty()
+	case TTypedArray:
+		_, ok := rt.taGet(o, int(idx))
+		return ok
+	case TStr:
+		return int(idx) < utf16Len(rt.strBytes(obj))
+	}
+	return false
 }
 
 // isAccessorSlot reports whether a shape slot is an accessor property.

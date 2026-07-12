@@ -166,6 +166,13 @@ func (rt *Runtime) lengthOf(v Value) (int, *ThrowError) {
 	return int(n), nil
 }
 
+// hasElem implements the spec HasProperty(O, i) for an integer index, used by
+// the generic array algorithms to skip holes (and to route through a Proxy's
+// [[HasProperty]] trap).
+func (rt *Runtime) hasElem(obj Value, i int) bool {
+	return rt.hasProp(obj, numberToString(float64(i)))
+}
+
 // inspect renders a value for console output. quoted controls whether strings
 // nested inside containers are quoted (top-level strings print bare).
 func (rt *Runtime) inspect(v Value, quoted bool) string {
