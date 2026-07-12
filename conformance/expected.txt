@@ -620,6 +620,7 @@ compat-table/es6/Set.prototype.Symbol.iterator.js
 compat-table/es6/Set.prototype.values.js
 compat-table/es6/Set.Symbol.species.js
 compat-table/es6/String.fromCodePoint.js
+compat-table/es6/String.iterator-prototype-chain.js
 compat-table/es6/String.prototype.codePointAt.js
 compat-table/es6/String.prototype.endsWith.js
 compat-table/es6/String.prototype.endsWith.throws-regex.js

@@ -237,9 +237,14 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 	return rt.getField(obj, name)
 }
 
-// getFieldSymbol reads a symbol-keyed property through the prototype chain.
+// getFieldSymbol reads a symbol-keyed property through the prototype chain. For
+// a primitive receiver the walk begins at its wrapper prototype (so e.g.
+// ""[Symbol.iterator] resolves through String.prototype).
 func (rt *Runtime) getFieldSymbol(obj Value, sym uint32) Value {
 	cur := obj
+	if !obj.IsObjectType() && obj.Type() != TTypedArray && !obj.IsNullish() {
+		cur = rt.primitiveProto(obj)
+	}
 	for depth := 0; depth < maxProtoChainDepth; depth++ {
 		o := rt.objPtr(cur)
 		if o == nil {
