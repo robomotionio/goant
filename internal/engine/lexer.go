@@ -124,7 +124,10 @@ func isUnicodeIDStart(r rune) bool {
 	if r == 0x2E2F {
 		return false
 	}
-	return unicode.In(r, unicode.Lu, unicode.Ll, unicode.Lt, unicode.Lm, unicode.Lo, unicode.Nl)
+	if unicode.In(r, unicode.Lu, unicode.Ll, unicode.Lt, unicode.Lm, unicode.Lo, unicode.Nl) {
+		return true
+	}
+	return isOtherIDStart(r)
 }
 
 func isUnicodeIDContinue(r rune) bool {
@@ -134,7 +137,33 @@ func isUnicodeIDContinue(r rune) bool {
 	if r == 0x200C || r == 0x200D {
 		return true
 	}
-	return unicode.In(r, unicode.Mn, unicode.Mc, unicode.Nd, unicode.Pc)
+	if unicode.In(r, unicode.Mn, unicode.Mc, unicode.Nd, unicode.Pc) {
+		return true
+	}
+	return isOtherIDContinue(r)
+}
+
+// isOtherIDStart / isOtherIDContinue implement Unicode's Other_ID_Start and
+// Other_ID_Continue property sets (PropList.txt). ECMAScript's ID_Start/
+// ID_Continue include these grandfathered characters (e.g. ℘ U+2118, the
+// Ethiopic digits) even though their general category (Sm/So/Sk/Po/No) is not a
+// letter/mark/number-letter — so a plain-category check misses them.
+func isOtherIDStart(r rune) bool {
+	switch r {
+	case 0x1885, 0x1886, 0x2118, 0x212E, 0x309B, 0x309C:
+		return true
+	}
+	return false
+}
+
+func isOtherIDContinue(r rune) bool {
+	switch {
+	case r == 0x00B7, r == 0x0387, r == 0x19DA:
+		return true
+	case r >= 0x1369 && r <= 0x1371:
+		return true
+	}
+	return false
 }
 
 // isUnicodeSpace mirrors ant is_unicode_space: returns the byte width of a
