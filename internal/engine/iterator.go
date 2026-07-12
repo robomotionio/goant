@@ -47,6 +47,22 @@ func (rt *Runtime) iterableValues(v Value) ([]Value, *ThrowError) {
 	}
 }
 
+// isIterable reports whether v can be iterated (has a Symbol.iterator method or
+// is a built-in iterable: array, string, Map, Set).
+func (rt *Runtime) isIterable(v Value) bool {
+	switch v.Type() {
+	case TArr, TStr:
+		return true
+	}
+	if o := rt.objPtr(v); o != nil && o.coll != nil {
+		return true
+	}
+	if v.IsObjectType() && rt.symIterator != 0 {
+		return rt.isCallable(rt.getFieldSymbol(v, rt.symIterator.handle()))
+	}
+	return false
+}
+
 // iterateProtocol drains an object implementing the Symbol.iterator protocol,
 // returning (values, true, nil). ok is false when v has no Symbol.iterator
 // method (so the caller can fall through to the not-iterable error).

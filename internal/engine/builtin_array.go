@@ -560,11 +560,14 @@ func (rt *Runtime) initArrayBuiltin() {
 		res := rt.newArray()
 		ro := rt.objPtr(res)
 		var items []Value
-		// Iterable (array/string/Map/Set) or array-like (has length).
-		if src.Type() == TArr || src.Type() == TStr {
-			items, _ = rt.iterableValues(src)
-		} else if o := rt.objPtr(src); o != nil && o.coll != nil {
-			items, _ = rt.iterableValues(src)
+		// Iterable (Symbol.iterator: array/string/Map/Set/generators/user) takes
+		// precedence over the array-like (length-indexed) path.
+		if rt.isIterable(src) {
+			it, e := rt.iterableValues(src)
+			if e != nil {
+				return mkundef(), e
+			}
+			items = it
 		} else if o := rt.objPtr(src); o != nil {
 			n, e := rt.lengthOf(src)
 			if e != nil {
@@ -574,8 +577,8 @@ func (rt *Runtime) initArrayBuiltin() {
 				el, _ := rt.getElement(src, mknum(float64(i)))
 				items = append(items, el)
 			}
-		} else if !src.IsNullish() {
-			items, _ = rt.iterableValues(src)
+		} else if src.IsNullish() {
+			return mkundef(), rt.typeError("Array.from requires an array-like or iterable object")
 		}
 		for i, it := range items {
 			v := it
