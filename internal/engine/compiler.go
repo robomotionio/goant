@@ -546,7 +546,17 @@ func (c *compiler) compileExpr(n *Node) {
 	case NTaggedTemplate:
 		c.compileTaggedTemplate(n)
 	case NTypeof:
-		c.compileExpr(n.Right)
+		// `typeof x` where x is a bare (possibly-undeclared) global must not throw:
+		// read it leniently so an absent binding yields "undefined".
+		if r := n.Right; r != nil && r.Kind == NIdent &&
+			c.resolveLocal(r.Str) < 0 && c.resolveUpvalue(r.Str) < 0 && c.withDepth == 0 {
+			idx := c.constant(c.rt.internString(r.Str))
+			c.emit(OpGetGlobalUndef)
+			c.emitU32(uint32(idx))
+			c.emitU16(0)
+		} else {
+			c.compileExpr(n.Right)
+		}
 		c.emit(OpTypeof)
 	case NVoid:
 		c.compileExpr(n.Right)

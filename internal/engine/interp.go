@@ -482,7 +482,20 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			ip += 3
 		case OpGetGlobal:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
-			v, _ := rt.getProp(rt.global, name) // lenient: undefined if absent (ReferenceError later)
+			// GetValue on an unresolvable reference throws (a bare undeclared name);
+			// typeof reads via GET_GLOBAL_UNDEF instead, so it never reaches here.
+			if !rt.hasProp(rt.global, name) {
+				thrown = rt.referenceError(name + " is not defined")
+				goto unwind
+			}
+			v, _ := rt.getProp(rt.global, name)
+			push(v)
+			ip += 7
+		case OpGetGlobalUndef:
+			// Lenient global read (typeof of a possibly-undeclared global): absent
+			// names yield undefined rather than a ReferenceError.
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			v, _ := rt.getProp(rt.global, name)
 			push(v)
 			ip += 7
 		case OpPutGlobal:
