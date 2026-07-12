@@ -358,13 +358,19 @@ func (o *object) deleteSlot(slot int32) bool {
 		return false
 	}
 	o.ensureUniqueShape()
-	swappedFrom, ok := o.shape.removeSlot(uint32(slot))
-	if !ok {
+	// Order-preserving removal shifts every slot after the removed one down by
+	// one; capture their stored values before mutating the shape (getInobjLimit
+	// is fixed per shape, so the slot→storage mapping is stable), then restore.
+	n := o.shape.count()
+	tail := make([]Value, 0, n-int(slot)-1)
+	for i := int(slot) + 1; i < n; i++ {
+		tail = append(tail, o.slotGet(uint32(i)))
+	}
+	if !o.shape.removeSlot(uint32(slot)) {
 		return false
 	}
-	// Mirror the shape's swap-with-last on the object's stored values.
-	if swappedFrom != uint32(slot) {
-		o.slotSet(uint32(slot), o.slotGet(swappedFrom))
+	for i, v := range tail {
+		o.slotSet(uint32(int(slot)+i), v)
 	}
 	return true
 }

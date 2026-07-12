@@ -259,24 +259,23 @@ func (s *shape) setAttrs(key propKey, attrs uint8) bool {
 	return true
 }
 
-// removeSlot deletes a slot via swap-with-last, returning the slot that was
-// moved into the hole (ant ant_shape_remove_slot). Callers move the object's
-// stored value the same way. Bumps the IC epoch.
-func (s *shape) removeSlot(slot uint32) (swappedFrom uint32, ok bool) {
+// removeSlot deletes a slot, shifting every following property down by one so
+// the surviving keys keep their insertion order (ES OrdinaryDelete preserves
+// relative order — swap-with-last would corrupt enumeration after a delete).
+// Callers shift the object's stored values for slots > slot down the same way.
+// Bumps the IC epoch.
+func (s *shape) removeSlot(slot uint32) (ok bool) {
 	if s == nil || int(slot) >= len(s.props) {
-		return 0, false
+		return false
 	}
-	swappedFrom = slot
 	delete(s.index, s.props[slot].key)
-	last := uint32(len(s.props) - 1)
-	if slot != last {
-		s.props[slot] = s.props[last]
-		s.index[s.props[slot].key] = slot
-		swappedFrom = last
+	copy(s.props[slot:], s.props[slot+1:])
+	s.props = s.props[:len(s.props)-1]
+	for i := int(slot); i < len(s.props); i++ {
+		s.index[s.props[i].key] = uint32(i)
 	}
-	s.props = s.props[:last]
 	icEpochBump()
-	return swappedFrom, true
+	return true
 }
 
 // clearAccessor clears getter/setter on a slot (ant ant_shape_clear_accessor_slot).

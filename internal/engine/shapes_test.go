@@ -89,20 +89,17 @@ func TestShapeSymbolKeys(t *testing.T) {
 }
 
 func TestShapeRemoveSlot(t *testing.T) {
-	// removeSlot uses swap-with-last; the returned index is the slot the last
-	// element moved from.
+	// removeSlot is order-preserving: removing a slot shifts every following
+	// property down by one, keeping the surviving keys in insertion order (ES
+	// OrdinaryDelete). Removing "a" from [a,b,c] yields [b,c] at slots 0,1.
 	s := newShape()
 	addInternedTr(&s, "a", attrDefault)
 	addInternedTr(&s, "b", attrDefault)
 	addInternedTr(&s, "c", attrDefault)
 	// Clone to a private shape so we can mutate.
 	priv := s.clone()
-	swappedFrom, ok := priv.removeSlot(0) // remove "a"
-	if !ok {
+	if !priv.removeSlot(0) { // remove "a"
 		t.Fatal("remove failed")
-	}
-	if swappedFrom != 2 {
-		t.Errorf("swappedFrom=%d want 2 (c moved into slot 0)", swappedFrom)
 	}
 	if priv.count() != 2 {
 		t.Errorf("count=%d want 2", priv.count())
@@ -110,11 +107,11 @@ func TestShapeRemoveSlot(t *testing.T) {
 	if priv.lookupInterned("a") != -1 {
 		t.Error("'a' should be gone")
 	}
-	if priv.lookupInterned("c") != 0 {
-		t.Errorf("'c' should now be slot 0, got %d", priv.lookupInterned("c"))
+	if priv.lookupInterned("b") != 0 {
+		t.Errorf("'b' should now be slot 0 (order preserved), got %d", priv.lookupInterned("b"))
 	}
-	if priv.lookupInterned("b") != 1 {
-		t.Errorf("'b' should still be slot 1, got %d", priv.lookupInterned("b"))
+	if priv.lookupInterned("c") != 1 {
+		t.Errorf("'c' should now be slot 1 (order preserved), got %d", priv.lookupInterned("c"))
 	}
 }
 
