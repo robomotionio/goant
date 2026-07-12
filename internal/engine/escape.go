@@ -5,8 +5,6 @@ package engine
 // backslash escape and returns the extra bytes consumed beyond the leading
 // two-char `\X`.
 
-import "unicode/utf8"
-
 func charAt(in string, i, end int) byte {
 	if i < end {
 		return in[i]
@@ -15,7 +13,8 @@ func charAt(in string, i, end int) byte {
 }
 
 func appendRuneUTF8(out []byte, cp uint32) []byte {
-	return utf8.AppendRune(out, rune(cp))
+	// WTF-8 so lone surrogates from \uXXXX escapes round-trip (not RuneError).
+	return wtf8Encode(out, cp)
 }
 
 func decodeHexEscape(in string, pos int, out []byte) ([]byte, int) {

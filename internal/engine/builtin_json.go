@@ -206,10 +206,33 @@ func (st *jsonStringifier) stringifyObject(v Value, indent string) (string, bool
 
 // jsonQuote produces a JSON string literal.
 func jsonQuote(s string) string {
+	const hexd = "0123456789abcdef"
 	var b strings.Builder
 	b.WriteByte('"')
-	for _, r := range s {
-		switch r {
+	src := []byte(s)
+	i := 0
+	for i < len(src) {
+		c := src[i]
+		// Decode one WTF-8 code point (may be a lone surrogate, unlike UTF-8).
+		var cp rune
+		size := 1
+		switch {
+		case c < 0x80:
+			cp = rune(c)
+		case c < 0xE0 && i+1 < len(src):
+			cp = rune(c&0x1F)<<6 | rune(src[i+1]&0x3F)
+			size = 2
+		case c < 0xF0 && i+2 < len(src):
+			cp = rune(c&0x0F)<<12 | rune(src[i+1]&0x3F)<<6 | rune(src[i+2]&0x3F)
+			size = 3
+		case i+3 < len(src):
+			cp = rune(c&0x07)<<18 | rune(src[i+1]&0x3F)<<12 | rune(src[i+2]&0x3F)<<6 | rune(src[i+3]&0x3F)
+			size = 4
+		default:
+			cp = rune(c)
+		}
+		i += size
+		switch cp {
 		case '"':
 			b.WriteString("\\\"")
 		case '\\':
@@ -225,15 +248,15 @@ func jsonQuote(s string) string {
 		case '\f':
 			b.WriteString("\\f")
 		default:
-			if r < 0x20 {
+			// Control chars and lone surrogates (ES2019 well-formed JSON) escape.
+			if cp < 0x20 || (cp >= 0xD800 && cp <= 0xDFFF) {
 				b.WriteString("\\u")
-				const hexd = "0123456789abcdef"
-				b.WriteByte(hexd[(r>>12)&0xF])
-				b.WriteByte(hexd[(r>>8)&0xF])
-				b.WriteByte(hexd[(r>>4)&0xF])
-				b.WriteByte(hexd[r&0xF])
+				b.WriteByte(hexd[(cp>>12)&0xF])
+				b.WriteByte(hexd[(cp>>8)&0xF])
+				b.WriteByte(hexd[(cp>>4)&0xF])
+				b.WriteByte(hexd[cp&0xF])
 			} else {
-				b.WriteRune(r)
+				b.WriteRune(cp)
 			}
 		}
 	}
