@@ -56,6 +56,31 @@ func (rt *Runtime) initAnnexBObject() {
 				if o == nil {
 					break
 				}
+				// A Proxy in the chain must have its [[GetOwnProperty]] and
+				// [[GetPrototypeOf]] traps invoked (annex-b.Proxy.__lookupGetter__).
+				if o.proxy != nil {
+					descV, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, key)
+					if e != nil {
+						return mkundef(), e
+					}
+					if !descV.IsUndefined() {
+						g, _ := rt.getField(descV, "get")
+						s, _ := rt.getField(descV, "set")
+						if wantGetter && rt.isCallable(g) {
+							return g, nil
+						}
+						if !wantGetter && rt.isCallable(s) {
+							return s, nil
+						}
+						return mkundef(), nil // property found: shadows
+					}
+					proto, e := rt.proxyGetPrototypeOf(o.proxy)
+					if e != nil {
+						return mkundef(), e
+					}
+					cur = proto
+					continue
+				}
 				var d ownDesc
 				if key.IsSymbol() {
 					d = o.ownDescriptorSym(key.handle())

@@ -123,6 +123,17 @@ func (rt *Runtime) initIntl() {
 			}), nil
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
+		// resolvedOptions reports the resolved timeZone (defaulting to the host's,
+		// which this runtime treats as UTC) and calendar/numberingSystem.
+		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			o := rt.newPlainObject()
+			oo := rt.objPtr(o)
+			oo.defineOwn("locale", rt.newString("en-US"), attrDefault)
+			oo.defineOwn("calendar", rt.newString("gregory"), attrDefault)
+			oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
+			oo.defineOwn("timeZone", rt.newString("UTC"), attrDefault)
+			return o, nil
+		})
 	})
 
 	rt.defGlobal("Intl", intl)

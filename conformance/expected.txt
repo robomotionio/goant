@@ -31,6 +31,8 @@ compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.symbols.js
 compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.ToObject.js
 compat-table/es2017/annex-b.Proxy.__defineGetter__.js
 compat-table/es2017/annex-b.Proxy.__defineSetter__.js
+compat-table/es2017/annex-b.Proxy.__lookupGetter__.js
+compat-table/es2017/annex-b.Proxy.__lookupSetter__.js
 compat-table/es2017/async.arrow-in-class.js
 compat-table/es2017/async.arrow.js
 compat-table/es2017/async.await.js
@@ -1027,6 +1029,7 @@ compat-table/intl/Intl.DateTimeFormat.iana-timezones.js
 compat-table/intl/Intl.DateTimeFormat.js
 compat-table/intl/Intl.DateTimeFormat.new-instances.js
 compat-table/intl/Intl.DateTimeFormat.rejects-invalid-tags.js
+compat-table/intl/Intl.DateTimeFormat.resolvedOptions.timeZone-default.js
 compat-table/intl/Intl.DateTimeFormat.valid-tags.js
 compat-table/intl/Intl.DateTimeFormat.without-new.js
 compat-table/intl/Intl.js
