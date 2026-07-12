@@ -138,6 +138,23 @@ func (c *compiler) compileForIn(n *Node) { c.compileForArray(n, OpForIn) }
 // each step calls iter.next() and, on an abrupt `break`, closes the iterator via
 // its return() (IteratorClose). Normal exhaustion does not close (already done).
 func (c *compiler) compileForOf(n *Node) {
+	// `for (using x of iter)` disposes each element at the end of its iteration.
+	// Rewrite to `for (const $tmp of iter) { using x = $tmp; body }` so the body's
+	// using-block drives the per-iteration disposal.
+	if n.Left != nil && n.Left.Kind == NVar &&
+		(n.Left.VarKind == VarUsing || n.Left.VarKind == VarAwaitUsing) &&
+		len(n.Left.Args) == 1 && n.Left.Args[0].Left != nil {
+		binding := n.Left.Args[0].Left
+		loopVar := &Node{Kind: NVar, VarKind: VarLet, Args: []*Node{{Kind: NVarDecl, Left: &Node{Kind: NIdent, Str: "*forusing*"}}}}
+		usingVar := &Node{Kind: NVar, VarKind: n.Left.VarKind, Args: []*Node{{Kind: NVarDecl, Left: binding, Right: &Node{Kind: NIdent, Str: "*forusing*"}}}}
+		body := n.Body
+		if body == nil {
+			body = &Node{Kind: NEmpty}
+		}
+		newBody := &Node{Kind: NBlock, Args: []*Node{usingVar, body}}
+		c.compileForOf(&Node{Kind: NForOf, Left: loopVar, Right: n.Right, Body: newBody})
+		return
+	}
 	c.scopeDepth++
 	store, lexSlot := c.forInStore(n.Left)
 	if store == nil {
