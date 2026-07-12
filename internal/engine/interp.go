@@ -357,6 +357,15 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			}
 			ip += 6
 
+		case OpDefineMethodComp:
+			// [target, key, func] -> [target]. flags: 0=data method, 1=getter,
+			// 2=setter. The key is any property key (string index or symbol).
+			flags := code[ip+1]
+			accFn := pop()
+			key := pop()
+			rt.defineMethodComputed(peek(), key, accFn, flags)
+			ip += 2
+
 		case OpGetField:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			v, e := rt.getField(pop(), name)

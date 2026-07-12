@@ -394,8 +394,18 @@ func (c *compiler) compileClass(n *Node) {
 		}
 		if m.Flags&fnComputed != 0 {
 			if m.Flags&(fnGetter|fnSetter) != 0 {
-				c.errorf("computed class accessor names not yet supported (slice)")
-				return
+				// Computed accessor: [target, key, func] -> DEFINE_METHOD_COMP.
+				c.emitOpU16(OpGetLocal, uint16(target))
+				c.compileExpr(m.Left)
+				c.compileFunc(m.Right)
+				flags := byte(1)
+				if m.Flags&fnSetter != 0 {
+					flags = 2
+				}
+				c.emit(OpDefineMethodComp)
+				c.emitByte(flags)
+				c.emit(OpPop)
+				continue
 			}
 			// Computed data method / field: target[key] = value.
 			c.emitOpU16(OpGetLocal, uint16(target)) // [target]

@@ -540,6 +540,59 @@ func (o *object) ownSymbolKeys() []uint32 {
 	return out
 }
 
+// defineMethodComputed installs a class/object-literal member whose name was
+// computed at runtime. flags: 0=data method (non-enumerable, writable,
+// configurable), 1=getter, 2=setter (merged with an existing accessor). The key
+// may be a symbol or a string (numeric keys become array/index properties).
+func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
+	o := rt.objPtr(target)
+	if o == nil {
+		return
+	}
+	k := rt.toPropertyKeyValue(key)
+	if k.IsSymbol() {
+		sym := k.handle()
+		if flags == 0 {
+			o.defineOwnSymbol(sym, accFn, attrWritable|attrConfigurable)
+			return
+		}
+		g, s := mkundef(), mkundef()
+		hg, hs := false, false
+		if d := o.ownDescriptorSym(sym); d.exists && d.isAccessor {
+			g, s = d.getter, d.setter
+			hg, hs = !d.getter.IsUndefined(), !d.setter.IsUndefined()
+		}
+		if flags == 1 {
+			g, hg = accFn, true
+		} else {
+			s, hs = accFn, true
+		}
+		o.defineAccessorSymbol(sym, g, s, hg, hs, attrConfigurable)
+		return
+	}
+	name, e := rt.propKeyString(k)
+	if e != nil {
+		return
+	}
+	if flags == 0 {
+		rt.setField(target, name, accFn)
+		o.setAttrsOwn(name, attrWritable|attrConfigurable)
+		return
+	}
+	g, s := mkundef(), mkundef()
+	hg, hs := false, false
+	if d := o.ownDescriptor(name); d.exists && d.isAccessor {
+		g, s = d.getter, d.setter
+		hg, hs = !d.getter.IsUndefined(), !d.setter.IsUndefined()
+	}
+	if flags == 1 {
+		g, hg = accFn, true
+	} else {
+		s, hs = accFn, true
+	}
+	o.defineAccessor(name, g, s, hg, hs, attrConfigurable)
+}
+
 // ownDescriptorSym is ownDescriptor for a symbol-keyed property.
 func (o *object) ownDescriptorSym(off uint32) ownDesc {
 	slot := o.shape.lookupSymbol(off)

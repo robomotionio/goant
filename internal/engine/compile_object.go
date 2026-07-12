@@ -18,16 +18,22 @@ func (c *compiler) compileObject(n *Node) {
 			continue
 		}
 		if prop.Flags&(fnGetter|fnSetter) != 0 {
-			name, ok := propKeyName(prop.Left)
-			if !ok {
-				c.errorf("computed accessor keys not yet supported (slice)")
-				return
-			}
 			flags := byte(1) // getter
 			prefix := "get "
 			if prop.Flags&fnSetter != 0 {
 				flags = 2 // setter
 				prefix = "set "
+			}
+			name, ok := propKeyName(prop.Left)
+			if prop.Flags&fnComputed != 0 || !ok {
+				// Computed accessor: [obj, key, func] -> DEFINE_METHOD_COMP.
+				c.emit(OpDup)
+				c.compileExpr(prop.Left)
+				c.compileFunc(prop.Right)
+				c.emit(OpDefineMethodComp)
+				c.emitByte(flags)
+				c.emit(OpPop)
+				continue
 			}
 			if prop.Right.Str == "" {
 				prop.Right.Str = prefix + name
