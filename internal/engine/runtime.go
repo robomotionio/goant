@@ -158,6 +158,7 @@ func New() *Runtime {
 	rt.initReflectBuiltin()
 	rt.initProxyBuiltin()
 	rt.initTypedArrays()
+	rt.initAnnexB()
 	return rt
 }
 

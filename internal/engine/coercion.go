@@ -118,6 +118,20 @@ func (rt *Runtime) toPrimitive(v Value, hint string) (Value, *ThrowError) {
 	return mkundef(), rt.typeError("cannot convert object to primitive value")
 }
 
+// toObjectValue implements ES ToObject: objects pass through; primitives box
+// into a fresh wrapper with the matching prototype; null/undefined throw.
+func (rt *Runtime) toObjectValue(v Value) (Value, *ThrowError) {
+	if v.IsNullish() {
+		return mkundef(), rt.typeError("Cannot convert undefined or null to object")
+	}
+	if v.IsObjectType() || v.Type() == TTypedArray {
+		return v, nil
+	}
+	w := rt.newObject(rt.primitiveProto(v))
+	rt.objPtr(w).boxed = v
+	return w, nil
+}
+
 // toStringValue implements the full ToString (objects via ToPrimitive+toString).
 func (rt *Runtime) toStringValue(v Value) (Value, *ThrowError) {
 	if v.IsObjectType() || v.Type() == TTypedArray {
