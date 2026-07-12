@@ -149,6 +149,7 @@ compat-table/es2022/class-fields.private-instance.optional-deep-access.js
 compat-table/es2022/class-fields.private-static.js
 compat-table/es2022/class-fields.public-instance.js
 compat-table/es2022/class-fields.public-static.js
+compat-table/es2022/class-fields.static.define.js
 compat-table/es2022/class-methods.private-accessor.js
 compat-table/es2022/class-methods.private-instance.js
 compat-table/es2022/class-methods.private-static-accessor.js

@@ -42,10 +42,13 @@ function dedent(src) {
 function extractExec(fn) {
   if (typeof fn !== 'function') return null;
   const s = fn.toString();
-  const open = s.indexOf('{/*');
+  // es6+ style: the runnable body is a block comment — `function () {/* CODE */}`
+  // — possibly with whitespace between the brace and the comment.
+  const open = s.search(/\{\s*\/\*/);
   if (open !== -1) {
-    const close = s.indexOf('*/}', open);
-    if (close !== -1) return dedent(s.slice(open + 3, close));
+    const cs = s.indexOf('/*', open) + 2;
+    const ce = s.lastIndexOf('*/');
+    if (ce >= cs) return dedent(s.slice(cs, ce));
   }
   // Plain function: take everything between the first '{' and the last '}'.
   const b = s.indexOf('{');
