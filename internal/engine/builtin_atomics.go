@@ -46,6 +46,7 @@ func (rt *Runtime) initSharedArrayBuffer() {
 	})
 	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	rt.defSpeciesGetter(ctor)
 	rt.defGlobal("SharedArrayBuffer", ctor)
 }
 

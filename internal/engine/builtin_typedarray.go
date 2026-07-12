@@ -345,6 +345,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 		return mkbool(o != nil && (o.ta != nil || o.dv != nil)), nil
 	})
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	rt.defSpeciesGetter(ctor)
 	rt.defGlobal("ArrayBuffer", ctor)
 }
 

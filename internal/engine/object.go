@@ -235,6 +235,20 @@ func (o *object) getOwnSymbol(sym uint32) (Value, bool) {
 // hasOwn reports whether key is an own property.
 func (o *object) hasOwn(key string) bool { return o.shape.lookupInterned(key) >= 0 }
 
+// defSpeciesGetter installs a `get [Symbol.species]() { return this }` accessor
+// on a constructor (the default @@species that derived-object creation uses).
+func (rt *Runtime) defSpeciesGetter(ctor Value) {
+	if rt.symSpecies == 0 {
+		return
+	}
+	getter := rt.newNativeFunc("get [Symbol.species]", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return this, nil
+	})
+	if o := rt.objPtr(ctor); o != nil {
+		o.defineAccessorSymbol(rt.symSpecies.handle(), getter, mkundef(), true, false, attrConfigurable)
+	}
+}
+
 // setStringTag installs a non-writable Symbol.toStringTag on obj (for the
 // Object.prototype.toString brand of namespace/collection builtins).
 func (rt *Runtime) setStringTag(obj Value, name string) {

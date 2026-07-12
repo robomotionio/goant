@@ -59,6 +59,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", proto, 0)
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	rt.defSpeciesGetter(ctor)
 	rt.defGlobal("RegExp", ctor)
 
 	rt.initStringRegexpMethods()

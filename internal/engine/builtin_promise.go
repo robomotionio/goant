@@ -294,6 +294,7 @@ func (rt *Runtime) initPromiseBuiltin() {
 		return rt.promiseRace(arg(args, 0), true)
 	})
 
+	rt.defSpeciesGetter(ctor)
 	rt.defGlobal("Promise", ctor)
 }
 

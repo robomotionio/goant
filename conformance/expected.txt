@@ -45,6 +45,7 @@ compat-table/es2017/SharedArrayBuffer.js
 compat-table/es2017/SharedArrayBuffer.prototype.byteLength.js
 compat-table/es2017/SharedArrayBuffer.prototype.slice.js
 compat-table/es2017/SharedArrayBuffer.prototype.Symbol.toStringTag.js
+compat-table/es2017/SharedArrayBuffer.Symbol.species.js
 compat-table/es2017/String.prototype.padEnd.js
 compat-table/es2017/String.prototype.padStart.js
 compat-table/es2018/object-rest.js
@@ -236,6 +237,7 @@ compat-table/es6/Array.prototype.keys.js
 compat-table/es6/Array.prototype.splice.js
 compat-table/es6/Array.prototype.Symbol.iterator.js
 compat-table/es6/Array.prototype.values.js
+compat-table/es6/Array.Symbol.species.js
 compat-table/es6/arrow.0-params.js
 compat-table/es6/arrow.lexical-arguments.js
 compat-table/es6/arrow.lexical-super.constructor.js
@@ -369,6 +371,7 @@ compat-table/es6/Map.prototype.set-returns-this.js
 compat-table/es6/Map.prototype.size.js
 compat-table/es6/Map.prototype.Symbol.iterator.js
 compat-table/es6/Map.prototype.values.js
+compat-table/es6/Map.Symbol.species.js
 compat-table/es6/Math.acosh.js
 compat-table/es6/Math.asinh.js
 compat-table/es6/Math.atanh.js
@@ -439,6 +442,7 @@ compat-table/es6/Object.is.js
 compat-table/es6/Object.setPrototypeOf.js
 compat-table/es6/Promise.constructor-requires-new.js
 compat-table/es6/Promise.prototype-not-instance.js
+compat-table/es6/Promise.Symbol.species.js
 compat-table/es6/Proxy.handler.apply.invariants.js
 compat-table/es6/Proxy.handler.apply.js
 compat-table/es6/Proxy.handler.construct.js
@@ -475,6 +479,7 @@ compat-table/es6/RegExp.prototype.Symbol.match.js
 compat-table/es6/RegExp.prototype.Symbol.replace.js
 compat-table/es6/RegExp.prototype.Symbol.search.js
 compat-table/es6/RegExp.prototype.Symbol.split.js
+compat-table/es6/RegExp.Symbol.species.js
 compat-table/es6/rest-params.basic.js
 compat-table/es6/rest-params.new-function.js
 compat-table/es6/Set.constructor-accepts-null.js
@@ -491,6 +496,7 @@ compat-table/es6/Set.prototype-not-instance.js
 compat-table/es6/Set.prototype.size.js
 compat-table/es6/Set.prototype.Symbol.iterator.js
 compat-table/es6/Set.prototype.values.js
+compat-table/es6/Set.Symbol.species.js
 compat-table/es6/String.fromCodePoint.js
 compat-table/es6/String.prototype.codePointAt.js
 compat-table/es6/String.prototype.endsWith.js
@@ -523,6 +529,7 @@ compat-table/es6/Symbol.typeof.js
 compat-table/es6/template.basic.js
 compat-table/es6/template.line-break.js
 compat-table/es6/template.tagged.js
+compat-table/es6/typed-arrays.ArrayBuffer.Symbol.species.js
 compat-table/es6/typed-arrays.constructor-iterables.js
 compat-table/es6/typed-arrays.DataView.Float32.js
 compat-table/es6/typed-arrays.DataView.Float64.js

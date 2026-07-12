@@ -897,6 +897,7 @@ func (rt *Runtime) initArrayBuiltin() {
 		}
 		return res, nil
 	})
+	rt.defSpeciesGetter(ctor)
 	rt.defGlobal("Array", ctor)
 }
 
