@@ -62,6 +62,13 @@ func (rt *Runtime) newNativeFunc(name string, length int, fn nativeFunc) Value {
 // is the constructor's .prototype, run the constructor with it as `this`, and
 // return the constructor's object result (if any) or the new object.
 func (rt *Runtime) construct(fnVal Value, args []Value) (Value, *ThrowError) {
+	return rt.constructWithTarget(fnVal, args, fnVal)
+}
+
+// constructWithTarget implements [[Construct]] with an explicit new.target: the
+// new object's prototype comes from newTarget.prototype, and new.target inside
+// the constructor is newTarget (Reflect.construct's third argument).
+func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Value) (Value, *ThrowError) {
 	o := rt.objPtr(fnVal)
 	if o == nil || !o.flags.isCallable {
 		return mkundef(), rt.typeError("value is not a constructor")
@@ -76,12 +83,17 @@ func (rt *Runtime) construct(fnVal Value, args []Value) (Value, *ThrowError) {
 		}
 		return mkundef(), rt.typeError(nm + " is not a constructor")
 	}
+	if newTarget == 0 {
+		newTarget = fnVal
+	}
 	proto := mknull()
-	if p, e := rt.getField(fnVal, "prototype"); e == nil && p.IsObjectType() {
+	if p, e := rt.getField(newTarget, "prototype"); e == nil && p.IsObjectType() {
 		proto = p
 	}
 	thisObj := rt.newObject(proto)
+	rt.pendingNewTarget = newTarget
 	ret, e := rt.callValue(fnVal, thisObj, args)
+	rt.pendingNewTarget = mkundef()
 	if e != nil {
 		return mkundef(), e
 	}

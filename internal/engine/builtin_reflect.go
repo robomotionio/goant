@@ -164,7 +164,11 @@ func (rt *Runtime) initReflectBuiltin() {
 				return mkundef(), e
 			}
 		}
-		return rt.construct(fn, callArgs)
+		newTarget := fn
+		if nt := arg(args, 2); !nt.IsUndefined() {
+			newTarget = nt
+		}
+		return rt.constructWithTarget(fn, callArgs, newTarget)
 	})
 
 	rt.defGlobal("Reflect", reflect)

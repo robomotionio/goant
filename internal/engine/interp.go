@@ -55,6 +55,11 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		thisVal = rt.global
 	}
 
+	// new.target for this invocation: set by construct just before the call and
+	// consumed here so nested ordinary calls see undefined.
+	newTarget := rt.pendingNewTarget
+	rt.pendingNewTarget = mkundef()
+
 	code := fn.code
 	stack := make([]Value, 0, fn.maxStack+16)
 	// Locals start as undefined (the zero Value 0x0 would decode as the number
@@ -206,6 +211,8 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 				push(a)
 			case 1: // current function value (named function self-reference)
 				push(fnVal)
+			case 2: // new.target
+				push(newTarget)
 			default:
 				push(mkundef())
 			}

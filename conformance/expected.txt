@@ -380,6 +380,8 @@ compat-table/es6/misc.Proxy.set.Array.push.js
 compat-table/es6/misc.Proxy.set.Array.splice.js
 compat-table/es6/misc.Proxy.set.Object.assign.js
 compat-table/es6/misc.RegExp-alter-flags.js
+compat-table/es6/new-target.assignment-error.js
+compat-table/es6/new-target.constructor.js
 compat-table/es6/Number.EPSILON.js
 compat-table/es6/Number.isFinite.js
 compat-table/es6/Number.isInteger.js
@@ -411,6 +413,8 @@ compat-table/es6/Proxy.no-prototype.js
 compat-table/es6/Proxy.revocable.js
 compat-table/es6/Reflect.apply.js
 compat-table/es6/Reflect.construct.js
+compat-table/es6/Reflect.construct.new-target.js
+compat-table/es6/Reflect.construct.third-argument.js
 compat-table/es6/Reflect.deleteProperty.js
 compat-table/es6/Reflect.get.js
 compat-table/es6/Reflect.getOwnPropertyDescriptor.js

@@ -377,6 +377,9 @@ func (c *compiler) compileExpr(n *Node) {
 		c.emit(OpRegexp)
 	case NGlobalThis:
 		c.emit(OpGlobal)
+	case NNewTarget:
+		c.emit(OpSpecialObj)
+		c.emitByte(2)
 	case NThis:
 		// `this` reads the synthetic *this* binding; arrows resolve it as an
 		// upvalue, giving them the enclosing function's `this` (lexical this).

@@ -83,6 +83,9 @@ type Runtime struct {
 	// arguments (ES5 §13.2.3).
 	poison Value
 
+	// pendingNewTarget carries new.target from construct into the next runFrame.
+	pendingNewTarget Value
+
 	// frameDepth tracks native call depth for the stack-overflow guard.
 	frameDepth int
 
