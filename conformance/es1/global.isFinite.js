@@ -1,0 +1,1 @@
+function check(a,b){if(a!==b&&!(a!==a&&b!==b))throw a+" !== "+b;} check(isFinite(42),true);check(isFinite(Infinity),false);check(isFinite(NaN),false);check(isFinite(-Infinity),false);console.log('PASS');

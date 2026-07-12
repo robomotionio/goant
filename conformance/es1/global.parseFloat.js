@@ -1,0 +1,1 @@
+function check(a,b){if(a!==b&&!(a!==a&&b!==b))throw a+" !== "+b;} check(parseFloat('3.14'),3.14);check(parseFloat('3.14xyz'),3.14);check(parseFloat('1e3'),1000);check(parseFloat('.5'),0.5);console.log('PASS');

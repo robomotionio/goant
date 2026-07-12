@@ -1,0 +1,1 @@
+function check(a,b){if(a!==b)throw a+" !== "+b;} check(JSON.stringify({a:1,b:2,c:3},['a','c']),'{"a":1,"c":3}');check(JSON.stringify({x:1},function(k,v){return typeof v==='number'?v+1:v;}),'{"x":2}');console.log('PASS');

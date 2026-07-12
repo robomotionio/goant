@@ -1,0 +1,304 @@
+package engine
+
+// Port of ant src/utf8.c (UTF-16-over-WTF-8 machinery) + flat-string storage.
+//
+// JS strings are sequences of UTF-16 code units, but ant stores them as WTF-8
+// (UTF-8 extended to encode lone surrogates), which keeps every string builtin
+// byte-oriented. The bridge is the code-unit ↔ byte-offset mapping below: each
+// WTF-8 sequence contributes 1 UTF-16 unit, except a 4-byte (astral) sequence
+// which contributes a surrogate *pair* (2 units).
+//
+// ant's thread-local scan cursor cache is a performance optimization; this port
+// starts with correct linear scans and can add caching in a later perf pass.
+
+import "unicode/utf8"
+
+// ---- flat string storage ----
+
+// string payload low-2-bit tag packing: Value data = (handle << 2) | tag.
+func mkFlatStr(h Handle) Value { return mkval(TStr, uint64(h)<<2|strHeapTagFlat) }
+func strHandle(v Value) Handle { return Handle(v.Data() >> 2) }
+func strTagOf(v Value) uint64  { return v.Data() & strHeapTagMask }
+
+const (
+	strAsciiUnknown = 0
+	strAsciiYes     = 1
+	strAsciiNo      = 2
+)
+
+// newStringBytes creates a flat string from raw WTF-8 bytes.
+func (rt *Runtime) newStringBytes(b []byte) Value {
+	h, fs := rt.strings.alloc()
+	fs.bytes = b
+	fs.isASCII = strAsciiUnknown
+	return mkFlatStr(h)
+}
+
+// newString creates a flat string from a Go (UTF-8) string.
+func (rt *Runtime) newString(s string) Value {
+	return rt.newStringBytes([]byte(s))
+}
+
+// flatOf returns the flat-string payload for a T_STR flat Value (nil otherwise).
+func (rt *Runtime) flatOf(v Value) *flatString {
+	if v.Type() != TStr || strTagOf(v) != strHeapTagFlat {
+		return nil
+	}
+	return rt.strings.get(strHandle(v))
+}
+
+// strBytes returns the WTF-8 bytes of a flat string.
+func (rt *Runtime) strBytes(v Value) []byte {
+	if fs := rt.flatOf(v); fs != nil {
+		return fs.bytes
+	}
+	return nil
+}
+
+// strIsASCII reports whether the flat string is pure ASCII (tri-state cached).
+func (rt *Runtime) strIsASCII(v Value) bool {
+	fs := rt.flatOf(v)
+	if fs == nil {
+		return false
+	}
+	if fs.isASCII == strAsciiUnknown {
+		fs.isASCII = strAsciiYes
+		for _, b := range fs.bytes {
+			if b >= 0x80 {
+				fs.isASCII = strAsciiNo
+				break
+			}
+		}
+	}
+	return fs.isASCII == strAsciiYes
+}
+
+// internString returns a canonical flat string for s (ant intern_string).
+func (rt *Runtime) internString(s string) Value {
+	if h, ok := rt.interned[s]; ok {
+		return mkFlatStr(h)
+	}
+	hv := rt.newString(s)
+	rt.interned[s] = strHandle(hv)
+	return hv
+}
+
+// ---- WTF-8 / UTF-16 mapping (ant utf8.c) ----
+
+// wtf8Decode reports the WTF-8 byte length, UTF-16 unit count, and code point
+// of the sequence at b[i:] (ant utf16_scan_decode). Truncated sequences decode
+// as a single byte, matching ant.
+func wtf8Decode(b []byte, i int) (slen, units int, cp uint32) {
+	c := b[i]
+	if c < 0x80 {
+		return 1, 1, uint32(c)
+	}
+	switch {
+	case c&0xE0 == 0xC0:
+		if i+1 < len(b) {
+			return 2, 1, uint32(c&0x1F)<<6 | uint32(b[i+1]&0x3F)
+		}
+	case c&0xF0 == 0xE0:
+		if i+2 < len(b) {
+			return 3, 1, uint32(c&0x0F)<<12 | uint32(b[i+1]&0x3F)<<6 | uint32(b[i+2]&0x3F)
+		}
+	case c&0xF8 == 0xF0:
+		if i+3 < len(b) {
+			return 4, 2, uint32(c&0x07)<<18 | uint32(b[i+1]&0x3F)<<12 | uint32(b[i+2]&0x3F)<<6 | uint32(b[i+3]&0x3F)
+		}
+	}
+	return 1, 1, uint32(c)
+}
+
+func isASCIIBytes(b []byte) bool {
+	for _, c := range b {
+		if c >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// utf16Len returns the UTF-16 code-unit length of a WTF-8 string (ant utf16_strlen).
+func utf16Len(b []byte) int {
+	if isASCIIBytes(b) {
+		return len(b)
+	}
+	n := 0
+	for i := 0; i < len(b); {
+		slen, units, _ := wtf8Decode(b, i)
+		n += units
+		i += slen
+	}
+	return n
+}
+
+// utf16CodeUnitAt returns the UTF-16 code unit at index (0xFFFFFFFF if out of
+// range) (ant utf16_code_unit_at).
+func utf16CodeUnitAt(b []byte, idx int) uint32 {
+	if isASCIIBytes(b) {
+		if idx < 0 || idx >= len(b) {
+			return 0xFFFFFFFF
+		}
+		return uint32(b[idx])
+	}
+	pos := 0
+	for i := 0; i < len(b); {
+		slen, units, cp := wtf8Decode(b, i)
+		if pos == idx {
+			if units == 2 {
+				return 0xD800 + ((cp - 0x10000) >> 10)
+			}
+			return cp
+		}
+		if units == 2 && pos+1 == idx {
+			return 0xDC00 + ((cp - 0x10000) & 0x3FF)
+		}
+		i += slen
+		pos += units
+	}
+	return 0xFFFFFFFF
+}
+
+// utf16CodepointAt returns the full code point at a UTF-16 index (combining a
+// surrogate pair when idx starts one) (ant utf16_codepoint_at).
+func utf16CodepointAt(b []byte, idx int) uint32 {
+	if isASCIIBytes(b) {
+		if idx < 0 || idx >= len(b) {
+			return 0xFFFFFFFF
+		}
+		return uint32(b[idx])
+	}
+	pos := 0
+	for i := 0; i < len(b); {
+		slen, units, cp := wtf8Decode(b, i)
+		if pos == idx {
+			return cp
+		}
+		if units == 2 && pos+1 == idx {
+			return 0xDC00 + ((cp - 0x10000) & 0x3FF)
+		}
+		i += slen
+		pos += units
+	}
+	return 0xFFFFFFFF
+}
+
+// utf16IndexToByteOffset maps a UTF-16 index to a WTF-8 byte offset, also
+// returning the byte length of the char there (ant utf16_index_to_byte_offset).
+// ok=false when idx is past the end.
+func utf16IndexToByteOffset(b []byte, idx int) (off, charBytes int, ok bool) {
+	if isASCIIBytes(b) {
+		if idx > len(b) {
+			return 0, 0, false
+		}
+		cb := 0
+		if idx < len(b) {
+			cb = 1
+		}
+		return idx, cb, true
+	}
+	pos := 0
+	i := 0
+	for i < len(b) && pos < idx {
+		slen, units, _ := wtf8Decode(b, i)
+		i += slen
+		pos += units
+	}
+	if i >= len(b) {
+		if pos == idx {
+			return len(b), 0, true
+		}
+		return 0, 0, false
+	}
+	slen, _, _ := wtf8Decode(b, i)
+	return i, slen, true
+}
+
+// byteOffsetToUtf16 maps a WTF-8 byte offset to a UTF-16 index
+// (ant byte_offset_to_utf16).
+func byteOffsetToUtf16(b []byte, byteOff int) int {
+	if byteOff > len(b) {
+		byteOff = len(b)
+	}
+	if isASCIIBytes(b[:byteOff]) {
+		return byteOff
+	}
+	pos := 0
+	for i := 0; i < byteOff; {
+		slen, units, _ := wtf8Decode(b, i)
+		if i+slen > byteOff {
+			break
+		}
+		i += slen
+		pos += units
+	}
+	return pos
+}
+
+// utf16RangeToByteRange maps a UTF-16 [start,end) range to a byte range
+// (ant utf16_range_to_byte_range). Indices are assumed clamped by the caller.
+func utf16RangeToByteRange(b []byte, start, end int) (bStart, bEnd int) {
+	if isASCIIBytes(b) {
+		bStart = min(start, len(b))
+		bEnd = min(end, len(b))
+		return
+	}
+	bStart, bEnd = len(b), len(b)
+	foundStart, foundEnd := false, false
+	pos, i := 0, 0
+	for i < len(b) {
+		if pos == start {
+			bStart = i
+			foundStart = true
+		}
+		if pos == end {
+			bEnd = i
+			foundEnd = true
+			break
+		}
+		slen, units, _ := wtf8Decode(b, i)
+		i += slen
+		pos += units
+	}
+	if !foundStart && start >= pos {
+		bStart = len(b)
+	}
+	if !foundEnd && end >= pos {
+		bEnd = len(b)
+	}
+	return
+}
+
+// wtf8Encode appends the WTF-8 encoding of a code point to out. Unlike Go's
+// utf8.AppendRune, lone surrogates (U+D800..U+DFFF) are encoded as their raw
+// 3-byte form rather than replaced with U+FFFD.
+func wtf8Encode(out []byte, cp uint32) []byte {
+	if cp >= 0xD800 && cp <= 0xDFFF {
+		return append(out,
+			byte(0xE0|cp>>12),
+			byte(0x80|(cp>>6)&0x3F),
+			byte(0x80|cp&0x3F))
+	}
+	return utf8.AppendRune(out, rune(cp))
+}
+
+// utf16ToWTF8 encodes a sequence of UTF-16 code units to WTF-8, combining
+// surrogate pairs into astral code points (used by String.fromCharCode etc.).
+func utf16ToWTF8(units []uint16) []byte {
+	out := make([]byte, 0, len(units))
+	for i := 0; i < len(units); i++ {
+		u := uint32(units[i])
+		if u >= 0xD800 && u <= 0xDBFF && i+1 < len(units) {
+			lo := uint32(units[i+1])
+			if lo >= 0xDC00 && lo <= 0xDFFF {
+				cp := 0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00)
+				out = utf8.AppendRune(out, rune(cp))
+				i++
+				continue
+			}
+		}
+		out = wtf8Encode(out, u)
+	}
+	return out
+}

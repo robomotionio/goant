@@ -1,0 +1,1 @@
+function check(a,b){if(a!==b)throw a+" !== "+b;} var o={a:1};Object.defineProperty(o,'b',{value:2,enumerable:false});var n=Object.getOwnPropertyNames(o);check(n.indexOf('a')>=0,true);check(n.indexOf('b')>=0,true);console.log('PASS');

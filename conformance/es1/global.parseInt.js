@@ -1,0 +1,1 @@
+function check(a,b){if(a!==b&&!(a!==a&&b!==b))throw a+" !== "+b;} check(parseInt('42'),42);check(parseInt('42px'),42);check(parseInt('  10  '),10);check(parseInt('abc')!==parseInt('abc'),true);console.log('PASS');

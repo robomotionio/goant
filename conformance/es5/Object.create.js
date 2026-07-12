@@ -1,0 +1,1 @@
+function check(a,b){if(a!==b)throw a+" !== "+b;} var p={x:1};var o=Object.create(p);check(o.x,1);check(Object.getPrototypeOf(o),p);var o2=Object.create(null);check(Object.getPrototypeOf(o2),null);console.log('PASS');

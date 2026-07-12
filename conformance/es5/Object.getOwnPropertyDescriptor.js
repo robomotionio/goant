@@ -1,0 +1,1 @@
+function check(a,b){if(a!==b)throw a+" !== "+b;} var o={x:1};var d=Object.getOwnPropertyDescriptor(o,'x');check(d.value,1);check(d.writable,true);check(d.enumerable,true);check(d.configurable,true);console.log('PASS');

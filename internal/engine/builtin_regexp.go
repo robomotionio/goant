@@ -1,0 +1,460 @@
+package engine
+
+// RegExp constructor + RegExp.prototype (ant modules/regex.c + builtin_regexp),
+// backed by internal/regexpjs. Also the String↔RegExp methods match/replace/
+// search/split.
+
+import (
+	"strings"
+
+	"goant/internal/regexpjs"
+)
+
+func (rt *Runtime) initRegExpBuiltin() {
+	proto := rt.newObject(rt.objectProto)
+	rt.regexpProto = proto
+	po := rt.objPtr(proto)
+
+	rt.defMethod(po, "exec", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.regexpExec(this, arg(args, 0))
+	})
+	rt.defMethod(po, "test", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		res, e := rt.regexpExec(this, arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		return mkbool(!res.IsNull()), nil
+	})
+	rt.defMethod(po, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || o.regex == nil {
+			return rt.internString("/(?:)/"), nil
+		}
+		return rt.newString("/" + o.regex.Source + "/" + o.regex.Flags), nil
+	})
+
+	ctor := rt.newNativeFunc("RegExp", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		pattern := ""
+		flags := ""
+		p := arg(args, 0)
+		if o := rt.objPtr(p); o != nil && o.regex != nil {
+			pattern = o.regex.Source
+			flags = o.regex.Flags
+		} else if !p.IsUndefined() {
+			s, e := rt.toStringValue(p)
+			if e != nil {
+				return mkundef(), e
+			}
+			pattern = string(rt.strBytes(s))
+		}
+		if !arg(args, 1).IsUndefined() {
+			s, e := rt.toStringValue(args[1])
+			if e != nil {
+				return mkundef(), e
+			}
+			flags = string(rt.strBytes(s))
+		}
+		return rt.newRegExp(pattern, flags)
+	})
+	cobj := rt.objPtr(ctor)
+	cobj.defineOwn("prototype", proto, 0)
+	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	rt.defGlobal("RegExp", ctor)
+
+	rt.initStringRegexpMethods()
+}
+
+// newRegExp compiles a pattern/flags pair into a RegExp object.
+func (rt *Runtime) newRegExp(pattern, flags string) (Value, *ThrowError) {
+	re, err := regexpjs.Compile(pattern, flags)
+	if err != nil {
+		return mkundef(), &ThrowError{Value: rt.makeError(rt.errors.syntaxProto, "SyntaxError", err.Error()), rt: rt}
+	}
+	v := rt.newObject(rt.regexpProto)
+	o := rt.objPtr(v)
+	o.regex = re
+	o.setSlot(slotBrand, mknum(brandRegExp))
+	o.defineOwn("source", rt.internString(nonEmptySource(pattern)), 0)
+	o.defineOwn("flags", rt.internString(flags), 0)
+	o.defineOwn("global", mkbool(re.Global), 0)
+	o.defineOwn("ignoreCase", mkbool(re.IgnoreCase), 0)
+	o.defineOwn("multiline", mkbool(re.Multiline), 0)
+	o.defineOwn("lastIndex", mknum(0), attrWritable)
+	return v, nil
+}
+
+const brandRegExp = 1001
+
+func nonEmptySource(p string) string {
+	if p == "" {
+		return "(?:)"
+	}
+	return p
+}
+
+// regexpExec runs RegExp.prototype.exec, returning a match-result array or null.
+func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
+	o := rt.objPtr(this)
+	if o == nil || o.regex == nil {
+		return mkundef(), rt.typeError("Method RegExp.prototype.exec called on incompatible receiver")
+	}
+	s, e := rt.toStringValue(strVal)
+	if e != nil {
+		return mkundef(), e
+	}
+	input := []rune(string(rt.strBytes(s)))
+	re := o.regex
+
+	start := 0
+	if re.Global || re.Sticky {
+		liv, _ := rt.getField(this, "lastIndex")
+		n, _ := rt.toNumberPrimitive(liv)
+		start = int(n)
+	}
+	m, err := re.Exec(input, start)
+	if err != nil {
+		return mkundef(), rt.typeError("regexp exec error: " + err.Error())
+	}
+	if m == nil {
+		if re.Global || re.Sticky {
+			rt.setField(this, "lastIndex", mknum(0))
+		}
+		return mknull(), nil
+	}
+	if re.Global || re.Sticky {
+		rt.setField(this, "lastIndex", mknum(float64(m.Index+m.Groups[0].Length)))
+	}
+
+	res := rt.newArray()
+	ro := rt.objPtr(res)
+	for i, g := range m.Groups {
+		if g.Index < 0 && i > 0 {
+			rt.arraySet(ro, uint32(i), mkundef())
+		} else {
+			rt.arraySet(ro, uint32(i), rt.newString(g.Value))
+		}
+	}
+	ro.defineOwn("index", mknum(float64(m.Index)), attrDefault)
+	ro.defineOwn("input", s, attrDefault)
+	return res, nil
+}
+
+// initStringRegexpMethods installs match/replace/search/split on String.prototype.
+func (rt *Runtime) initStringRegexpMethods() {
+	sp := rt.objPtr(rt.stringProto)
+
+	rt.defMethod(sp, "search", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		b, e := rt.thisStringBytes(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		re, e := rt.coerceRegExp(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		m, err := re.Exec([]rune(string(b)), 0)
+		if err != nil || m == nil {
+			return mknum(-1), nil
+		}
+		return mknum(float64(m.Index)), nil
+	})
+
+	rt.defMethod(sp, "match", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.toStringValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		reObj, e := rt.regexpArg(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		re := rt.objPtr(reObj).regex
+		if !re.Global {
+			return rt.regexpExec(reObj, s)
+		}
+		// Global match: collect all whole-match strings.
+		input := []rune(string(rt.strBytes(s)))
+		res := rt.newArray()
+		ro := rt.objPtr(res)
+		pos := 0
+		any := false
+		for {
+			m, err := re.Exec(input, pos)
+			if err != nil || m == nil {
+				break
+			}
+			any = true
+			rt.arraySet(ro, ro.arrLen, rt.newString(m.Groups[0].Value))
+			adv := m.Index + m.Groups[0].Length
+			if adv <= pos {
+				adv = pos + 1
+			}
+			pos = adv
+		}
+		if !any {
+			return mknull(), nil
+		}
+		return res, nil
+	})
+
+	rt.defMethod(sp, "replace", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.stringReplace(this, arg(args, 0), arg(args, 1))
+	})
+
+	rt.defMethod(sp, "split", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		sep := arg(args, 0)
+		if o := rt.objPtr(sep); o != nil && o.regex != nil {
+			return rt.stringSplitRegexp(this, o.regex, arg(args, 1))
+		}
+		return rt.stringSplitString(this, args)
+	})
+}
+
+// coerceRegExp turns a value into a compiled regex (compiling a string pattern).
+func (rt *Runtime) coerceRegExp(v Value) (*regexpjs.Regexp, *ThrowError) {
+	if o := rt.objPtr(v); o != nil && o.regex != nil {
+		return o.regex, nil
+	}
+	pat := ""
+	if !v.IsUndefined() {
+		s, e := rt.toStringValue(v)
+		if e != nil {
+			return nil, e
+		}
+		pat = string(rt.strBytes(s))
+	}
+	re, err := regexpjs.Compile(pat, "")
+	if err != nil {
+		return nil, rt.typeError(err.Error())
+	}
+	return re, nil
+}
+
+// regexpArg returns a RegExp object (wrapping a string pattern if needed).
+func (rt *Runtime) regexpArg(v Value) (Value, *ThrowError) {
+	if o := rt.objPtr(v); o != nil && o.regex != nil {
+		return v, nil
+	}
+	pat := ""
+	if !v.IsUndefined() {
+		s, e := rt.toStringValue(v)
+		if e != nil {
+			return mkundef(), e
+		}
+		pat = string(rt.strBytes(s))
+	}
+	return rt.newRegExp(pat, "")
+}
+
+// stringReplace implements String.prototype.replace for string and regex
+// patterns with string or function replacements.
+func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError) {
+	s, e := rt.toStringValue(this)
+	if e != nil {
+		return mkundef(), e
+	}
+	subject := string(rt.strBytes(s))
+
+	replaceOne := func(match string, groups []regexpjs.Group, index int) (string, *ThrowError) {
+		if rt.isCallable(repl) {
+			callArgs := make([]Value, 0, len(groups)+2)
+			for _, g := range groups {
+				if g.Index < 0 {
+					callArgs = append(callArgs, mkundef())
+				} else {
+					callArgs = append(callArgs, rt.newString(g.Value))
+				}
+			}
+			callArgs = append(callArgs, mknum(float64(index)), s)
+			rv, terr := rt.callValue(repl, mkundef(), callArgs)
+			if terr != nil {
+				return "", terr
+			}
+			rs, terr := rt.toStringValue(rv)
+			if terr != nil {
+				return "", terr
+			}
+			return string(rt.strBytes(rs)), nil
+		}
+		rs, terr := rt.toStringValue(repl)
+		if terr != nil {
+			return "", terr
+		}
+		return expandReplacement(string(rt.strBytes(rs)), match, groups), nil
+	}
+
+	o := rt.objPtr(pattern)
+	if o != nil && o.regex != nil {
+		re := o.regex
+		input := []rune(subject)
+		var out strings.Builder
+		pos := 0
+		bytePos := 0
+		_ = bytePos
+		for {
+			m, err := re.Exec(input, pos)
+			if err != nil || m == nil {
+				break
+			}
+			out.WriteString(string(input[pos:m.Index]))
+			rep, terr := replaceOne(m.Groups[0].Value, m.Groups, m.Index)
+			if terr != nil {
+				return mkundef(), terr
+			}
+			out.WriteString(rep)
+			adv := m.Index + m.Groups[0].Length
+			pos = m.Index + m.Groups[0].Length
+			if !re.Global {
+				break
+			}
+			if m.Groups[0].Length == 0 {
+				if adv < len(input) {
+					out.WriteRune(input[adv])
+				}
+				pos = adv + 1
+			}
+			if pos > len(input) {
+				break
+			}
+		}
+		if pos <= len(input) {
+			out.WriteString(string(input[pos:]))
+		}
+		return rt.newString(out.String()), nil
+	}
+
+	// String pattern: replace the first occurrence.
+	ps, e := rt.toStringValue(pattern)
+	if e != nil {
+		return mkundef(), e
+	}
+	pat := string(rt.strBytes(ps))
+	idx := strings.Index(subject, pat)
+	if idx < 0 {
+		return s, nil
+	}
+	utf16idx := byteOffsetToUtf16([]byte(subject), idx)
+	rep, terr := replaceOne(pat, []regexpjs.Group{{Index: utf16idx, Value: pat}}, utf16idx)
+	if terr != nil {
+		return mkundef(), terr
+	}
+	return rt.newString(subject[:idx] + rep + subject[idx+len(pat):]), nil
+}
+
+// expandReplacement handles $&, $1..$9, $`, $', $$ in a string replacement.
+func expandReplacement(tmpl, match string, groups []regexpjs.Group) string {
+	var out strings.Builder
+	for i := 0; i < len(tmpl); i++ {
+		if tmpl[i] != '$' || i+1 >= len(tmpl) {
+			out.WriteByte(tmpl[i])
+			continue
+		}
+		c := tmpl[i+1]
+		switch {
+		case c == '$':
+			out.WriteByte('$')
+			i++
+		case c == '&':
+			out.WriteString(match)
+			i++
+		case c >= '1' && c <= '9':
+			n := int(c - '0')
+			// Two-digit group reference when valid.
+			if i+2 < len(tmpl) && tmpl[i+2] >= '0' && tmpl[i+2] <= '9' {
+				two := n*10 + int(tmpl[i+2]-'0')
+				if two < len(groups) {
+					n = two
+					i++
+				}
+			}
+			if n < len(groups) && groups[n].Index >= 0 {
+				out.WriteString(groups[n].Value)
+			}
+			i++
+		default:
+			out.WriteByte('$')
+		}
+	}
+	return out.String()
+}
+
+// stringSplitRegexp implements String.prototype.split with a regex separator.
+func (rt *Runtime) stringSplitRegexp(this Value, re *regexpjs.Regexp, limitV Value) (Value, *ThrowError) {
+	s, e := rt.toStringValue(this)
+	if e != nil {
+		return mkundef(), e
+	}
+	input := []rune(string(rt.strBytes(s)))
+	res := rt.newArray()
+	ro := rt.objPtr(res)
+	limit := -1
+	if !limitV.IsUndefined() {
+		limit = rt.intArg([]Value{limitV}, 0)
+	}
+	last := 0
+	pos := 0
+	for pos <= len(input) {
+		m, err := re.Exec(input, pos)
+		if err != nil || m == nil || m.Index >= len(input) {
+			break
+		}
+		end := m.Index + m.Groups[0].Length
+		if end == last {
+			pos = m.Index + 1
+			continue
+		}
+		rt.arraySet(ro, ro.arrLen, rt.newString(string(input[last:m.Index])))
+		if limit >= 0 && int(ro.arrLen) >= limit {
+			return res, nil
+		}
+		for gi := 1; gi < len(m.Groups); gi++ {
+			if m.Groups[gi].Index < 0 {
+				rt.arraySet(ro, ro.arrLen, mkundef())
+			} else {
+				rt.arraySet(ro, ro.arrLen, rt.newString(m.Groups[gi].Value))
+			}
+		}
+		last = end
+		pos = end
+	}
+	rt.arraySet(ro, ro.arrLen, rt.newString(string(input[last:])))
+	return res, nil
+}
+
+// stringSplitString is the plain-string split path (moved from builtin_string).
+func (rt *Runtime) stringSplitString(this Value, args []Value) (Value, *ThrowError) {
+	b, e := rt.thisStringBytes(this)
+	if e != nil {
+		return mkundef(), e
+	}
+	res := rt.newArray()
+	ro := rt.objPtr(res)
+	if arg(args, 0).IsUndefined() {
+		rt.arraySet(ro, 0, rt.newStringBytes(append([]byte{}, b...)))
+		return res, nil
+	}
+	sep, e := rt.stringArg(args, 0)
+	if e != nil {
+		return mkundef(), e
+	}
+	limit := -1
+	if !arg(args, 1).IsUndefined() {
+		limit = int(toUint32(float64(rt.intArg(args, 1))))
+	}
+	if len(sep) == 0 {
+		for i := 0; i < utf16Len(b); i++ {
+			if limit >= 0 && int(ro.arrLen) >= limit {
+				break
+			}
+			rt.arraySet(ro, ro.arrLen, rt.charAt(b, i))
+		}
+		return res, nil
+	}
+	for p := range strings.SplitSeq(string(b), string(sep)) {
+		if limit >= 0 && int(ro.arrLen) >= limit {
+			break
+		}
+		rt.arraySet(ro, ro.arrLen, rt.newString(p))
+	}
+	return res, nil
+}

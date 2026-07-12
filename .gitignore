@@ -1,0 +1,6 @@
+/goant
+/goant-conf
+*.test
+*.out
+/out.txt
+/scratch/

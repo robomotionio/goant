@@ -1,0 +1,1 @@
+"use strict";function check(a,b){if(a!==b)throw a+" !== "+b;} function expectErr(fn,type){var t=false;try{fn();}catch(e){t=e instanceof type;}if(!t)throw "expected "+type.name;} var o={};Object.defineProperty(o,'x',{value:1,writable:false});expectErr(function(){o.x=2;},TypeError);console.log('PASS');

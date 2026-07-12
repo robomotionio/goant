@@ -1,0 +1,1 @@
+function check(a,b){if(a!==b&&!(a!==a&&b!==b))throw a+" !== "+b;} check(true&&true,true);check(true&&false,false);check(false||true,true);check(1&&2,2);check(0||3,3);check(null||'x','x');console.log('PASS');

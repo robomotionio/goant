@@ -1,0 +1,1010 @@
+package engine
+
+// Port of ant's dispatch loop (src/silver/engine.c) + the shared opcode bodies
+// (src/silver/ops/*.h). The Phase 3 vertical slice implements the ops the slice
+// compiler emits, proving execution end-to-end. Full opcode coverage, frames,
+// closures, calls, exception unwinding, and TCO land as the port continues.
+//
+// DIVERGENCE (slice only): jumps use absolute byte targets; the full port
+// adopts ant's exact branch encoding (reconciled via the bytecode-diff harness).
+
+import "math"
+
+// ThrowError wraps a thrown JS value surfaced as a Go error. When control is
+// set it is a non-catchable control-flow signal (e.g. process.exit) that
+// bypasses catch handlers.
+type ThrowError struct {
+	Value   Value
+	rt      *Runtime
+	control bool
+}
+
+func (e *ThrowError) Error() string {
+	if s, terr := e.rt.toStringValue(e.Value); terr == nil {
+		return "Uncaught " + string(e.rt.strBytes(s))
+	}
+	return "Uncaught " + e.rt.inspect(e.Value, false)
+}
+
+// maxFrameDepth guards native recursion depth (ant maxFrames RangeError guard).
+const maxFrameDepth = 8192
+
+// execute runs the top-level script function, returning its completion value.
+func (rt *Runtime) execute(fn *svFunc) (Value, error) {
+	v, terr := rt.runFrame(fn, nil, mkundef(), rt.global, nil)
+	if terr != nil {
+		return mkundef(), terr
+	}
+	return v, nil
+}
+
+// runFrame executes a compiled function with a this-binding and arguments,
+// returning its return value (ant sv_execute_frame). JS call depth maps onto
+// the Go stack; open upvalues capturing this frame's locals are closed on exit.
+func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args []Value) (Value, *ThrowError) {
+	rt.frameDepth++
+	if rt.frameDepth > maxFrameDepth {
+		rt.frameDepth--
+		return mkundef(), rt.rangeError("Maximum call stack size exceeded")
+	}
+	defer func() { rt.frameDepth-- }()
+
+	// In sloppy mode a nullish `this` is coerced to the global object; strict
+	// functions keep it as-is (strict.this-undefined-in-function).
+	if !fn.isStrict && thisVal.IsNullish() {
+		thisVal = rt.global
+	}
+
+	code := fn.code
+	stack := make([]Value, 0, fn.maxStack+16)
+	// Locals start as undefined (the zero Value 0x0 would decode as the number
+	// 0.0, so an unread local must not be left zeroed).
+	locals := make([]Value, fn.maxLocals)
+	for i := range locals {
+		locals[i] = mkundef()
+	}
+	// Parameters occupy the first slots (ant frame arg layout).
+	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
+		if i < len(args) {
+			locals[i] = args[i]
+		}
+	}
+	var openUpvals map[int]*upvalue
+	var handlers []tryHandler
+	var pendingThrow Value
+	var withStack []Value
+	ip := 0
+
+	push := func(v Value) { stack = append(stack, v) }
+	pop := func() Value {
+		v := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		return v
+	}
+	peek := func() Value { return stack[len(stack)-1] }
+
+	// captureUpvalue returns the open upvalue for a local slot, creating it on
+	// first use so multiple closures over the same slot share one cell.
+	captureUpvalue := func(slot int) *upvalue {
+		if openUpvals == nil {
+			openUpvals = map[int]*upvalue{}
+		}
+		if u, ok := openUpvals[slot]; ok {
+			return u
+		}
+		u := &upvalue{location: &locals[slot]}
+		openUpvals[slot] = u
+		return u
+	}
+	closeAll := func() {
+		for _, u := range openUpvals {
+			u.closeUp()
+		}
+	}
+
+	var thrown *ThrowError
+
+	for {
+		op := Opcode(code[ip])
+		switch op {
+		case OpUndef:
+			push(mkundef())
+			ip++
+		case OpNull:
+			push(mknull())
+			ip++
+		case OpGlobal:
+			push(rt.global)
+			ip++
+		case OpEmpty:
+			push(tEmpty)
+			ip++
+		case OpForIn:
+			push(rt.forInKeys(pop()))
+			ip++
+		case OpForOf:
+			vals, e := rt.iterableValues(pop())
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			arr := rt.newArray()
+			ao := rt.objPtr(arr)
+			ao.arr = vals
+			ao.arrLen = uint32(len(vals))
+			push(arr)
+			ip++
+		case OpRegexp:
+			flags := string(rt.strBytes(pop()))
+			pattern := string(rt.strBytes(pop()))
+			v, e := rt.newRegExp(pattern, flags)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip++
+		case OpEnterWith:
+			withStack = append(withStack, pop())
+			ip++
+		case OpExitWith:
+			withStack = withStack[:len(withStack)-1]
+			ip++
+		case OpWithGetVar:
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			found := false
+			for k := len(withStack) - 1; k >= 0; k-- {
+				if rt.hasProp(withStack[k], name) {
+					v, e := rt.getField(withStack[k], name)
+					if e != nil {
+						thrown = e
+						goto unwind
+					}
+					push(v)
+					found = true
+					break
+				}
+			}
+			if !found {
+				v, _ := rt.getProp(rt.global, name)
+				push(v)
+			}
+			ip += 8
+		case OpWithPutVar:
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			val := pop()
+			stored := false
+			for k := len(withStack) - 1; k >= 0; k-- {
+				if rt.hasProp(withStack[k], name) {
+					if e := rt.setField(withStack[k], name, val); e != nil {
+						thrown = e
+						goto unwind
+					}
+					stored = true
+					break
+				}
+			}
+			if !stored {
+				rt.setProp(rt.global, name, val)
+			}
+			ip += 8
+		case OpSpecialObj:
+			kind := code[ip+1]
+			switch kind {
+			case 0: // arguments
+				a := rt.newArray()
+				ao := rt.objPtr(a)
+				for i, v := range args {
+					rt.arraySet(ao, uint32(i), v)
+				}
+				if fn.isStrict {
+					// Strict arguments: `callee` is a poison-pill accessor.
+					ao.defineAccessor("callee", rt.poison, rt.poison, true, true, 0)
+				} else {
+					ao.defineOwn("callee", fnVal, attrWritable|attrConfigurable)
+				}
+				push(a)
+			case 1: // current function value (named function self-reference)
+				push(fnVal)
+			default:
+				push(mkundef())
+			}
+			ip += 2
+		case OpThis:
+			push(thisVal)
+			ip++
+		case OpSetProto:
+			// obj proto -> obj
+			proto := pop()
+			objV := peek()
+			if o := rt.objPtr(objV); o != nil && (proto.IsObjectType() || proto.IsNull()) {
+				o.proto = proto
+			}
+			ip++
+		case OpIsUndef:
+			push(mkbool(pop().IsUndefined()))
+			ip++
+		case OpRest:
+			start := int(readU16(code, ip+1))
+			restArr := rt.newArray()
+			ro := rt.objPtr(restArr)
+			for i := start; i < len(args); i++ {
+				rt.arraySet(ro, uint32(i-start), args[i])
+			}
+			push(restArr)
+			ip += 3
+		case OpTrue:
+			push(mktrue())
+			ip++
+		case OpFalse:
+			push(mkfalse())
+			ip++
+		case OpConst:
+			idx := readU32(code, ip+1)
+			push(fn.constants[idx])
+			ip += 5
+		case OpConstI8:
+			push(mknum(float64(int8(code[ip+1]))))
+			ip += 2
+		case OpPop:
+			pop()
+			ip++
+		case OpDup:
+			push(peek())
+			ip++
+		case OpInsert2:
+			// obj a -> a obj a
+			a := pop()
+			obj := pop()
+			push(a)
+			push(obj)
+			push(a)
+			ip++
+		case OpInsert3:
+			// obj prop a -> a obj prop a
+			a := pop()
+			prop := pop()
+			obj := pop()
+			push(a)
+			push(obj)
+			push(prop)
+			push(a)
+			ip++
+
+		case OpObject:
+			push(rt.newPlainObject())
+			ip++
+		case OpArray:
+			n := int(readU16(code, ip+1))
+			arrv := rt.newArray()
+			ao := rt.objPtr(arrv)
+			ao.arr = make([]Value, n)
+			ao.arrLen = uint32(n)
+			for i := n - 1; i >= 0; i-- {
+				ao.arr[i] = pop()
+			}
+			push(arrv)
+			ip += 3
+		case OpDefineField:
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			val := pop()
+			if o := rt.objPtr(peek()); o != nil {
+				o.defineOwn(name, val, attrDefault)
+			}
+			ip += 5
+		case OpDefineMethod:
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			flags := code[ip+5]
+			accFn := pop()
+			if o := rt.objPtr(peek()); o != nil {
+				switch flags {
+				case 0: // data method: non-enumerable, writable, configurable
+					o.defineOwn(name, accFn, attrWritable|attrConfigurable)
+				default: // accessor: 1=getter, 2=setter (merging with existing)
+					g, s := mkundef(), mkundef()
+					hg, hs := false, false
+					if d := o.ownDescriptor(name); d.exists && d.isAccessor {
+						g, s = d.getter, d.setter
+						hg, hs = !d.getter.IsUndefined(), !d.setter.IsUndefined()
+					}
+					if flags == 1 {
+						g, hg = accFn, true
+					} else {
+						s, hs = accFn, true
+					}
+					// Class prototype accessors are non-enumerable.
+					o.defineAccessor(name, g, s, hg, hs, attrConfigurable)
+				}
+			}
+			ip += 6
+
+		case OpGetField:
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			v, e := rt.getField(pop(), name)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip += 7
+		case OpGetField2:
+			// obj -> obj val (keeps the receiver for a following method call)
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			obj := peek()
+			v, e := rt.getField(obj, name)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip += 7
+		case OpPutField:
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			val := pop()
+			obj := pop()
+			ok, e := rt.setFieldR(obj, name, val)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			if !ok && fn.isStrict {
+				thrown = rt.typeError("Cannot assign to read only property '" + name + "'")
+				goto unwind
+			}
+			ip += 7
+		case OpGetElem:
+			key := pop()
+			v, e := rt.getElement(pop(), key)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip++
+		case OpPutElem:
+			val := pop()
+			key := pop()
+			obj := pop()
+			if e := rt.setElement(obj, key, val); e != nil {
+				thrown = e
+				goto unwind
+			}
+			ip++
+		case OpGetLength:
+			v, e := rt.getField(pop(), "length")
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip++
+		case OpCallMethod:
+			argc := int(readU16(code, ip+1))
+			callArgs := make([]Value, argc)
+			for i := argc - 1; i >= 0; i-- {
+				callArgs[i] = pop()
+			}
+			fnVal := pop()
+			thisArg := pop()
+			ret, e := rt.callValue(fnVal, thisArg, callArgs)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(ret)
+			ip += 3
+		case OpGetGlobal:
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			v, _ := rt.getProp(rt.global, name) // lenient: undefined if absent (ReferenceError later)
+			push(v)
+			ip += 7
+		case OpPutGlobal:
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			val := pop()
+			if fn.isStrict && !rt.hasProp(rt.global, name) {
+				thrown = rt.referenceError(name + " is not defined")
+				goto unwind
+			}
+			ok := rt.setProp(rt.global, name, val)
+			if !ok && fn.isStrict {
+				thrown = rt.typeError("Cannot assign to read only property '" + name + "'")
+				goto unwind
+			}
+			ip += 5
+		case OpGetLocal:
+			push(locals[readU16(code, ip+1)])
+			ip += 3
+		case OpPutLocal:
+			locals[readU16(code, ip+1)] = pop()
+			ip += 3
+		case OpSetLocal:
+			locals[readU16(code, ip+1)] = peek()
+			ip += 3
+
+		case OpAdd:
+			b, a := pop(), pop()
+			v, e := rt.jsAdd(a, b)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip++
+		case OpSub, OpMul, OpDiv, OpMod, OpExp:
+			b, a := pop(), pop()
+			v, e := rt.jsArith(op, a, b)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip++
+		case OpNeg:
+			a := pop()
+			n, e := rt.toNumber(a)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(mknum(-n))
+			ip++
+		case OpUplus:
+			a := pop()
+			n, e := rt.toNumber(a)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(mknum(n))
+			ip++
+		case OpInc:
+			a := pop()
+			n, e := rt.toNumber(a)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(mknum(n + 1))
+			ip++
+		case OpDec:
+			a := pop()
+			n, e := rt.toNumber(a)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(mknum(n - 1))
+			ip++
+		case OpNot:
+			push(mkbool(!rt.toBoolean(pop())))
+			ip++
+		case OpTypeof:
+			push(rt.internString(rt.typeofString(pop())))
+			ip++
+		case OpVoid:
+			pop()
+			push(mkundef())
+			ip++
+		case OpDelete:
+			key := pop()
+			obj := pop()
+			ok, e := rt.deleteElement(obj, key)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			if !ok && fn.isStrict {
+				thrown = rt.typeError("Cannot delete property of a non-configurable object")
+				goto unwind
+			}
+			push(mkbool(ok))
+			ip++
+		case OpIn:
+			obj := pop()
+			key := pop()
+			res, e := rt.jsIn(key, obj)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(mkbool(res))
+			ip++
+		case OpInstanceof:
+			r := pop()
+			l := pop()
+			res, e := rt.jsInstanceof(l, r)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(mkbool(res))
+			ip += 3
+		case OpBnot:
+			a := pop()
+			n, e := rt.toInt32(a)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(mknum(float64(^n)))
+			ip++
+		case OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr:
+			b, a := pop(), pop()
+			v, e := rt.jsBitwise(op, a, b)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip++
+
+		case OpLt, OpLe, OpGt, OpGe:
+			b, a := pop(), pop()
+			v, e := rt.jsRelational(op, a, b)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip++
+		case OpEq:
+			b, a := pop(), pop()
+			push(mkbool(rt.abstractEquals(a, b)))
+			ip++
+		case OpNe:
+			b, a := pop(), pop()
+			push(mkbool(!rt.abstractEquals(a, b)))
+			ip++
+		case OpSeq:
+			b, a := pop(), pop()
+			push(mkbool(rt.strictEquals(a, b)))
+			ip++
+		case OpSne:
+			b, a := pop(), pop()
+			push(mkbool(!rt.strictEquals(a, b)))
+			ip++
+
+		case OpJmp:
+			ip = int(readU32(code, ip+1))
+		case OpJmpFalse:
+			if !rt.toBoolean(pop()) {
+				ip = int(readU32(code, ip+1))
+			} else {
+				ip += 5
+			}
+		case OpJmpTrue:
+			if rt.toBoolean(pop()) {
+				ip = int(readU32(code, ip+1))
+			} else {
+				ip += 5
+			}
+		case OpJmpNotNullish:
+			if !peek().IsNullish() {
+				ip = int(readU32(code, ip+1))
+			} else {
+				ip += 5
+			}
+
+		case OpThrow:
+			thrown = &ThrowError{Value: pop(), rt: rt}
+			goto unwind
+		case OpTryPush:
+			handlers = append(handlers, tryHandler{catchIP: int(readU32(code, ip+1)), stackDepth: len(stack)})
+			ip += 5
+		case OpTryPop:
+			handlers = handlers[:len(handlers)-1]
+			ip++
+		case OpCatch:
+			push(pendingThrow)
+			ip += 5
+
+		case OpGetUpval:
+			push(cl.upvalues[readU16(code, ip+1)].get())
+			ip += 3
+		case OpPutUpval:
+			cl.upvalues[readU16(code, ip+1)].set(pop())
+			ip += 3
+		case OpSetUpval:
+			cl.upvalues[readU16(code, ip+1)].set(peek())
+			ip += 3
+
+		case OpClosure:
+			child := fn.childFuncs[readU32(code, ip+1)]
+			upvals := make([]*upvalue, len(child.upvalDescs))
+			for i, d := range child.upvalDescs {
+				if d.isLocal {
+					upvals[i] = captureUpvalue(d.index)
+				} else {
+					upvals[i] = cl.upvalues[d.index]
+				}
+			}
+			push(rt.newFunction(child, upvals))
+			ip += 5
+
+		case OpCall:
+			argc := int(readU16(code, ip+1))
+			callArgs := make([]Value, argc)
+			for i := argc - 1; i >= 0; i-- {
+				callArgs[i] = pop()
+			}
+			fnVal := pop()
+			ret, e := rt.callValue(fnVal, mkundef(), callArgs)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(ret)
+			ip += 3
+		case OpApply:
+			// func this argsArray -> result
+			argsArr := pop()
+			thisArg := pop()
+			fnVal := pop()
+			var callArgs []Value
+			if ao := rt.objPtr(argsArr); ao != nil {
+				callArgs = make([]Value, ao.arrLen)
+				for i := uint32(0); i < ao.arrLen; i++ {
+					if int(i) < len(ao.arr) {
+						callArgs[i] = ao.arr[i]
+					}
+				}
+			}
+			ret, e := rt.callValue(fnVal, thisArg, callArgs)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(ret)
+			ip += 3
+		case OpSpread:
+			// arr iterable -> (appends iterable's values to arr)
+			iterable := pop()
+			arrV := pop()
+			vals, e := rt.iterableValues(iterable)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			ao := rt.objPtr(arrV)
+			for _, v := range vals {
+				rt.arraySet(ao, ao.arrLen, v)
+			}
+			ip++
+		case OpNew:
+			argc := int(readU16(code, ip+1))
+			callArgs := make([]Value, argc)
+			for i := argc - 1; i >= 0; i-- {
+				callArgs[i] = pop()
+			}
+			fnVal := pop()
+			ret, e := rt.construct(fnVal, callArgs)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(ret)
+			ip += 3
+
+		case OpReturn:
+			closeAll()
+			return pop(), nil
+		case OpReturnUndef:
+			closeAll()
+			return mkundef(), nil
+		case OpHalt:
+			closeAll()
+			return mkundef(), nil
+		default:
+			closeAll()
+			return mkundef(), &ThrowError{Value: rt.newString("InternalError: unimplemented opcode " + op.Name()), rt: rt}
+		}
+		continue
+
+	unwind:
+		// Route the thrown value to the innermost catch handler in this frame;
+		// if there is none (or this is a control-flow signal), propagate up.
+		if len(handlers) > 0 && !thrown.control {
+			h := handlers[len(handlers)-1]
+			handlers = handlers[:len(handlers)-1]
+			stack = stack[:h.stackDepth]
+			pendingThrow = thrown.Value
+			thrown = nil
+			ip = h.catchIP
+			continue
+		}
+		closeAll()
+		return mkundef(), thrown
+	}
+}
+
+// tryHandler records a live catch handler (ant try-handler stack).
+type tryHandler struct {
+	catchIP    int
+	stackDepth int
+}
+
+// ---- operator semantics ----
+
+func (rt *Runtime) toNumber(v Value) (float64, *ThrowError) {
+	if v.IsObjectType() || v.Type() == TTypedArray {
+		p, e := rt.toPrimitive(v, "number")
+		if e != nil {
+			return 0, e
+		}
+		v = p
+	}
+	n, ok := rt.toNumberPrimitive(v)
+	if !ok {
+		if v.IsSymbol() {
+			return 0, rt.typeError("cannot convert a Symbol value to a number")
+		}
+		return 0, rt.typeError("cannot convert value to number")
+	}
+	return n, nil
+}
+
+func (rt *Runtime) toInt32(v Value) (int32, *ThrowError) {
+	n, e := rt.toNumber(v)
+	if e != nil {
+		return 0, e
+	}
+	return toInt32(n), nil
+}
+
+func (rt *Runtime) toUint32(v Value) (uint32, *ThrowError) {
+	n, e := rt.toNumber(v)
+	if e != nil {
+		return 0, e
+	}
+	return toUint32(n), nil
+}
+
+// jsAdd implements the ECMAScript "+" operator for primitive operands: string
+// concatenation if either side is a string, otherwise numeric addition.
+func (rt *Runtime) jsAdd(a, b Value) (Value, *ThrowError) {
+	pa, e := rt.toPrimitive(a, "default")
+	if e != nil {
+		return mkundef(), e
+	}
+	pb, e := rt.toPrimitive(b, "default")
+	if e != nil {
+		return mkundef(), e
+	}
+	if pa.IsString() || pb.IsString() {
+		sa, e := rt.toStringValue(pa)
+		if e != nil {
+			return mkundef(), e
+		}
+		sb, e := rt.toStringValue(pb)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newStringBytes(append(append([]byte{}, rt.strBytes(sa)...), rt.strBytes(sb)...)), nil
+	}
+	na, ea := rt.toNumberPrimitive(pa)
+	if !ea {
+		return mkundef(), rt.typeError("cannot convert to number")
+	}
+	nb, eb := rt.toNumberPrimitive(pb)
+	if !eb {
+		return mkundef(), rt.typeError("cannot convert to number")
+	}
+	return mknum(na + nb), nil
+}
+
+func (rt *Runtime) jsArith(op Opcode, a, b Value) (Value, *ThrowError) {
+	na, ea := rt.toNumber(a)
+	if ea != nil {
+		return mkundef(), ea
+	}
+	nb, eb := rt.toNumber(b)
+	if eb != nil {
+		return mkundef(), eb
+	}
+	switch op {
+	case OpSub:
+		return mknum(na - nb), nil
+	case OpMul:
+		return mknum(na * nb), nil
+	case OpDiv:
+		return mknum(na / nb), nil
+	case OpMod:
+		return mknum(jsMod(na, nb)), nil
+	case OpExp:
+		return mknum(jsExp(na, nb)), nil
+	}
+	return mkundef(), rt.typeError("bad arithmetic op")
+}
+
+func (rt *Runtime) jsBitwise(op Opcode, a, b Value) (Value, *ThrowError) {
+	if op == OpUshr {
+		ua, e := rt.toUint32(a)
+		if e != nil {
+			return mkundef(), e
+		}
+		sb, e := rt.toUint32(b)
+		if e != nil {
+			return mkundef(), e
+		}
+		return mknum(float64(ua >> (sb & 31))), nil
+	}
+	ia, e := rt.toInt32(a)
+	if e != nil {
+		return mkundef(), e
+	}
+	ib, e := rt.toInt32(b)
+	if e != nil {
+		return mkundef(), e
+	}
+	switch op {
+	case OpBand:
+		return mknum(float64(ia & ib)), nil
+	case OpBor:
+		return mknum(float64(ia | ib)), nil
+	case OpBxor:
+		return mknum(float64(ia ^ ib)), nil
+	case OpShl:
+		return mknum(float64(ia << (uint32(ib) & 31))), nil
+	case OpShr:
+		return mknum(float64(ia >> (uint32(ib) & 31))), nil
+	}
+	return mkundef(), rt.typeError("bad bitwise op")
+}
+
+// jsRelational implements abstract relational comparison for primitives.
+func (rt *Runtime) jsRelational(op Opcode, a, b Value) (Value, *ThrowError) {
+	if a.IsString() && b.IsString() {
+		cmp := compareStrings(rt.strBytes(a), rt.strBytes(b))
+		switch op {
+		case OpLt:
+			return mkbool(cmp < 0), nil
+		case OpLe:
+			return mkbool(cmp <= 0), nil
+		case OpGt:
+			return mkbool(cmp > 0), nil
+		case OpGe:
+			return mkbool(cmp >= 0), nil
+		}
+	}
+	na, ea := rt.toNumber(a)
+	if ea != nil {
+		return mkundef(), ea
+	}
+	nb, eb := rt.toNumber(b)
+	if eb != nil {
+		return mkundef(), eb
+	}
+	if math.IsNaN(na) || math.IsNaN(nb) {
+		return mkfalse(), nil // any relation with NaN is false
+	}
+	switch op {
+	case OpLt:
+		return mkbool(na < nb), nil
+	case OpLe:
+		return mkbool(na <= nb), nil
+	case OpGt:
+		return mkbool(na > nb), nil
+	case OpGe:
+		return mkbool(na >= nb), nil
+	}
+	return mkfalse(), nil
+}
+
+// abstractEquals implements the ECMAScript "==" algorithm for primitives.
+func (rt *Runtime) abstractEquals(a, b Value) bool {
+	ta, tb := a.Type(), b.Type()
+	if ta == tb {
+		return rt.strictEquals(a, b)
+	}
+	// null == undefined
+	if (ta == TNull && tb == TUndef) || (ta == TUndef && tb == TNull) {
+		return true
+	}
+	// number == string
+	if ta == TNum && tb == TStr {
+		return a.Number() == stringToNumber(string(rt.strBytes(b)))
+	}
+	if ta == TStr && tb == TNum {
+		return stringToNumber(string(rt.strBytes(a))) == b.Number()
+	}
+	// boolean coerces to number, then re-compare
+	if ta == TBool {
+		return rt.abstractEquals(mknum(boolToNum(a)), b)
+	}
+	if tb == TBool {
+		return rt.abstractEquals(a, mknum(boolToNum(b)))
+	}
+	// object vs primitive requires ToPrimitive (Phase 3+); bigint later.
+	return false
+}
+
+func boolToNum(v Value) float64 {
+	if v.Bool() {
+		return 1
+	}
+	return 0
+}
+
+// ---- numeric helpers (ant numbers.cc) ----
+
+// toInt32 implements ECMAScript ToInt32.
+func toInt32(d float64) int32 {
+	if math.IsNaN(d) || math.IsInf(d, 0) {
+		return 0
+	}
+	return int32(uint32(int64(math.Trunc(d))))
+}
+
+// toUint32 implements ECMAScript ToUint32.
+func toUint32(d float64) uint32 {
+	if math.IsNaN(d) || math.IsInf(d, 0) {
+		return 0
+	}
+	return uint32(int64(math.Trunc(d)))
+}
+
+// jsMod implements the ECMAScript "%" (remainder) operator.
+func jsMod(a, b float64) float64 {
+	if math.IsNaN(a) || math.IsNaN(b) || math.IsInf(a, 0) || b == 0 {
+		return math.NaN()
+	}
+	if math.IsInf(b, 0) {
+		return a
+	}
+	if a == 0 {
+		return a
+	}
+	return math.Mod(a, b)
+}
+
+// jsExp implements the ECMAScript "**" operator (differs from math.Pow for a
+// few NaN edge cases mandated by the spec).
+func jsExp(base, exp float64) float64 {
+	if math.IsNaN(exp) {
+		return math.NaN()
+	}
+	if exp == 0 {
+		return 1
+	}
+	// base = ±1, exp = ±Inf → NaN (spec), unlike C pow which returns 1.
+	if math.IsInf(exp, 0) && (base == 1 || base == -1) {
+		return math.NaN()
+	}
+	return math.Pow(base, exp)
+}
+
+// compareStrings compares two WTF-8 strings by UTF-16 code unit (JS ordering).
+func compareStrings(a, b []byte) int {
+	la, lb := utf16Len(a), utf16Len(b)
+	n := min(la, lb)
+	for i := 0; i < n; i++ {
+		ca := utf16CodeUnitAt(a, i)
+		cb := utf16CodeUnitAt(b, i)
+		if ca != cb {
+			if ca < cb {
+				return -1
+			}
+			return 1
+		}
+	}
+	switch {
+	case la < lb:
+		return -1
+	case la > lb:
+		return 1
+	}
+	return 0
+}
+
+func (rt *Runtime) typeError(msg string) *ThrowError {
+	return &ThrowError{Value: rt.makeError(rt.errors.typeProto, "TypeError", msg), rt: rt}
+}
+
+func (rt *Runtime) rangeError(msg string) *ThrowError {
+	return &ThrowError{Value: rt.makeError(rt.errors.rangeProto, "RangeError", msg), rt: rt}
+}
+
+func (rt *Runtime) referenceError(msg string) *ThrowError {
+	ev, _ := rt.construct(rt.errors.refErr, []Value{rt.newString(msg)})
+	return &ThrowError{Value: ev, rt: rt}
+}

@@ -1,0 +1,1 @@
+function check(a,b){if(a!==b&&!(a!==a&&b!==b))throw a+" !== "+b;} check([1,2,3].length,3);check(new Array(3).length,3);check(Array(1,2).length,2);check(Array.isArray([]),true);check(Array.isArray({}),false);console.log('PASS');

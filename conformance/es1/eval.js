@@ -1,0 +1,1 @@
+function check(a,b){if(a!==b&&!(a!==a&&b!==b))throw a+" !== "+b;} check(eval('1+2'),3);check(eval('2*3+4'),10);check(eval('"a"+"b"'),'ab');check(eval(42),42);var r=eval('var q=5; q*2;');check(r,10);console.log('PASS');

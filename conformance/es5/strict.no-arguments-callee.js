@@ -1,0 +1,1 @@
+"use strict";function check(a,b){if(a!==b)throw a+" !== "+b;} function expectErr(fn,type){var t=false;try{fn();}catch(e){t=e instanceof type;}if(!t)throw "expected "+type.name;} function f(){expectErr(function(){return arguments.callee;},TypeError);}f();console.log('PASS');

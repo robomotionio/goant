@@ -1,0 +1,206 @@
+package engine
+
+// Object/array literal and member-access compilation (ant compiler.c
+// compile_object / compile_array / compile_member / compile_call). Method calls
+// route the receiver as `this`. Accessor properties, spread, and computed
+// method names in literals are added as the port continues.
+
+func (c *compiler) compileObject(n *Node) {
+	c.emit(OpObject)
+	for _, prop := range n.Args {
+		if prop.Kind == NSpread {
+			c.errorf("object spread not yet supported (slice)")
+			return
+		}
+		if prop.Flags&(fnGetter|fnSetter) != 0 {
+			name, ok := propKeyName(prop.Left)
+			if !ok {
+				c.errorf("computed accessor keys not yet supported (slice)")
+				return
+			}
+			c.compileFunc(prop.Right) // the accessor function
+			flags := byte(1)          // getter
+			if prop.Flags&fnSetter != 0 {
+				flags = 2 // setter
+			}
+			idx := c.constant(c.rt.internString(name))
+			c.emit(OpDefineMethod)
+			c.emitU32(uint32(idx))
+			c.emitByte(flags)
+			continue
+		}
+		if prop.Flags&fnComputed != 0 {
+			// obj stays on stack; DUP it for the element store.
+			c.emit(OpDup)
+			c.compileExpr(prop.Left) // computed key
+			c.compileExpr(prop.Right)
+			c.emit(OpPutElem) // obj key val ->
+			continue
+		}
+		name, ok := propKeyName(prop.Left)
+		if !ok {
+			c.errorf("unsupported object literal key (slice)")
+			return
+		}
+		c.compileExpr(prop.Right)
+		c.emitDefineField(name) // obj val -> obj
+	}
+}
+
+func (c *compiler) compileArray(n *Node) {
+	if hasSpread(n.Args) {
+		c.buildSpreadArray(n.Args)
+		return
+	}
+	for _, el := range n.Args {
+		if el.Kind == NEmpty {
+			c.emit(OpEmpty)
+		} else {
+			c.compileExpr(el)
+		}
+	}
+	c.emit(OpArray)
+	c.emitU16(uint16(len(n.Args)))
+}
+
+// compileMember compiles a member read (obj.name or obj[expr]).
+func (c *compiler) compileMember(n *Node) {
+	c.compileExpr(n.Left)
+	if n.Flags&1 != 0 { // computed
+		c.compileExpr(n.Right)
+		c.emit(OpGetElem)
+		return
+	}
+	c.emitFieldOp(OpGetField, n.Right.Str)
+}
+
+// tempLocal allocates a fresh anonymous local slot.
+func (c *compiler) tempLocal() int { return c.addLocal("*tmp*", false) }
+
+// loadMember reads the member into the accumulator, given the receiver in tSlot
+// (and, for computed members, the key in kSlot).
+func (c *compiler) loadMember(member *Node, tSlot, kSlot int) {
+	c.emitOpU16(OpGetLocal, uint16(tSlot))
+	if member.Flags&1 != 0 {
+		c.emitOpU16(OpGetLocal, uint16(kSlot))
+		c.emit(OpGetElem)
+	} else {
+		c.emitFieldOp(OpGetField, member.Right.Str)
+	}
+}
+
+// compileMemberAssign compiles obj.name = v / obj[k] = v (and compound forms)
+// as an expression, leaving the assigned value on the stack.
+func (c *compiler) compileMemberAssign(n *Node) {
+	member := n.Left
+	computed := member.Flags&1 != 0
+
+	if n.Op == TokAssign {
+		c.compileExpr(member.Left) // obj
+		if computed {              // obj[key] = v
+			c.compileExpr(member.Right)
+			c.compileExpr(n.Right)
+			c.emit(OpInsert3) // obj key val -> val obj key val
+			c.emit(OpPutElem)
+			return
+		}
+		c.compileExpr(n.Right) // obj val
+		c.emit(OpInsert2)      // obj val -> val obj val
+		c.emitFieldOp(OpPutField, member.Right.Str)
+		return
+	}
+
+	// Compound member assignment obj.x op= v via temp locals.
+	op, ok := compoundOpcode(n.Op)
+	if !ok {
+		c.errorf("unsupported compound member assignment %v (slice)", n.Op)
+		return
+	}
+	tSlot := c.tempLocal()
+	kSlot := -1
+	c.compileExpr(member.Left)
+	c.emitOpU16(OpPutLocal, uint16(tSlot))
+	if computed {
+		kSlot = c.tempLocal()
+		c.compileExpr(member.Right)
+		c.emitOpU16(OpPutLocal, uint16(kSlot))
+	}
+	c.loadMember(member, tSlot, kSlot) // [old]
+	c.compileExpr(n.Right)             // [old, rhs]
+	c.emit(op)                         // [new]
+	vSlot := c.tempLocal()
+	c.emitOpU16(OpSetLocal, uint16(vSlot)) // keep new on stack, save to vSlot
+	// store new into member
+	if computed {
+		c.emitOpU16(OpGetLocal, uint16(tSlot))
+		c.emitOpU16(OpGetLocal, uint16(kSlot))
+		c.emitOpU16(OpGetLocal, uint16(vSlot))
+		c.emit(OpPutElem)
+	} else {
+		c.emitOpU16(OpGetLocal, uint16(tSlot))
+		c.emitOpU16(OpGetLocal, uint16(vSlot))
+		c.emitFieldOp(OpPutField, member.Right.Str)
+	}
+	// new value already on stack (from SetLocal above)
+}
+
+// compileMemberUpdate compiles obj.x++/--/++obj.x on a member target.
+func (c *compiler) compileMemberUpdate(n *Node) {
+	member := n.Right
+	computed := member.Flags&1 != 0
+	prefix := n.Flags == 1
+	incOp := OpInc
+	if n.Op == TokPostDec {
+		incOp = OpDec
+	}
+
+	tSlot := c.tempLocal()
+	kSlot := -1
+	c.compileExpr(member.Left)
+	c.emitOpU16(OpPutLocal, uint16(tSlot))
+	if computed {
+		kSlot = c.tempLocal()
+		c.compileExpr(member.Right)
+		c.emitOpU16(OpPutLocal, uint16(kSlot))
+	}
+
+	oldSlot := c.tempLocal()
+	c.loadMember(member, tSlot, kSlot) // [val]
+	c.emit(OpUplus)                    // ToNumber
+	c.emitOpU16(OpPutLocal, uint16(oldSlot))
+
+	newSlot := c.tempLocal()
+	c.emitOpU16(OpGetLocal, uint16(oldSlot))
+	c.emit(incOp)
+	c.emitOpU16(OpPutLocal, uint16(newSlot))
+
+	// store new into member
+	if computed {
+		c.emitOpU16(OpGetLocal, uint16(tSlot))
+		c.emitOpU16(OpGetLocal, uint16(kSlot))
+		c.emitOpU16(OpGetLocal, uint16(newSlot))
+		c.emit(OpPutElem)
+	} else {
+		c.emitOpU16(OpGetLocal, uint16(tSlot))
+		c.emitOpU16(OpGetLocal, uint16(newSlot))
+		c.emitFieldOp(OpPutField, member.Right.Str)
+	}
+
+	// result: old (postfix) or new (prefix)
+	if prefix {
+		c.emitOpU16(OpGetLocal, uint16(newSlot))
+	} else {
+		c.emitOpU16(OpGetLocal, uint16(oldSlot))
+	}
+}
+
+// propKeyName extracts a static property-key string from a literal key node.
+func propKeyName(key *Node) (string, bool) {
+	switch key.Kind {
+	case NIdent, NString:
+		return key.Str, true
+	case NNumber:
+		return numberToString(key.Num), true
+	}
+	return "", false
+}
