@@ -109,6 +109,10 @@ type Runtime struct {
 	// frameDepth tracks native call depth for the stack-overflow guard.
 	frameDepth int
 
+	// frameStrict is the strictness of the currently executing JS frame, so a
+	// direct eval() (native call) inherits the caller's strict mode.
+	frameStrict bool
+
 	// exitCode is set by process.exit() to request termination.
 	exitCode *int
 

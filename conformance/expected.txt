@@ -239,7 +239,10 @@ compat-table/es5/Object.preventExtensions.js
 compat-table/es5/Object.seal.js
 compat-table/es5/strict.arguments-callee-error.js
 compat-table/es5/strict.arguments-unmapped.js
+compat-table/es5/strict.assignment-eval-arguments-error.js
+compat-table/es5/strict.eval-arguments-bindings-error.js
 compat-table/es5/strict.function-caller-arguments-error.js
+compat-table/es5/strict.reserved-words.js
 compat-table/es5/strict.this-not-coerced-accessors.js
 compat-table/es5/strict.this-not-coerced-methods.js
 compat-table/es5/strict.this-undefined.js
@@ -459,6 +462,7 @@ compat-table/es6/Math.trunc.js
 compat-table/es6/misc.bound-function-prototype.arrow.js
 compat-table/es6/misc.bound-function-prototype.generator.js
 compat-table/es6/misc.do-while-no-semicolon.js
+compat-table/es6/misc.for-in-no-assignment-strict.js
 compat-table/es6/misc.function-length-configurable.js
 compat-table/es6/misc.identifier-syntax.no-escaped-reserved.js
 compat-table/es6/misc.identifier-syntax.var-1.js

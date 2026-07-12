@@ -49,6 +49,12 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	}
 	defer func() { rt.frameDepth-- }()
 
+	// Track the executing frame's strictness so a direct eval() (a native call,
+	// so rt.frameStrict still reflects this frame) can inherit it.
+	savedStrict := rt.frameStrict
+	rt.frameStrict = fn.isStrict
+	defer func() { rt.frameStrict = savedStrict }()
+
 	// In sloppy mode a nullish `this` is coerced to the global object; strict
 	// functions keep it as-is (strict.this-undefined-in-function).
 	if !fn.isStrict && thisVal.IsNullish() {
