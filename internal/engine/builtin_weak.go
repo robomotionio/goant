@@ -9,6 +9,75 @@ package engine
 func (rt *Runtime) initWeakCollections() {
 	rt.initWeakMapBuiltin()
 	rt.initWeakSetBuiltin()
+	rt.initWeakRefBuiltin()
+	rt.initFinalizationRegistryBuiltin()
+}
+
+// initWeakRefBuiltin installs WeakRef. Without a tracing GC the referent is held
+// strongly (in o.boxed) and deref always returns it — sufficient for the program-
+// observable contract short of collection timing.
+func (rt *Runtime) initWeakRefBuiltin() {
+	proto := rt.newObject(rt.objectProto)
+	po := rt.objPtr(proto)
+	rt.defMethod(po, "deref", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil {
+			return mkundef(), rt.typeError("WeakRef.prototype.deref called on incompatible receiver")
+		}
+		return o.boxed, nil
+	})
+	ctor := rt.newNativeFunc("WeakRef", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || !rt.constructing() {
+			return mkundef(), rt.typeError("Constructor WeakRef requires 'new'")
+		}
+		target := arg(args, 0)
+		if !validWeakKey(target) {
+			return mkundef(), rt.typeError("WeakRef: target must be an object or symbol")
+		}
+		o.boxed = target
+		return this, nil
+	})
+	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
+	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	if rt.symToStringTag != 0 {
+		po.defineOwnSymbol(rt.symToStringTag.handle(), rt.internString("WeakRef"), attrConfigurable)
+	}
+	rt.defGlobal("WeakRef", ctor)
+}
+
+// initFinalizationRegistryBuiltin installs FinalizationRegistry. Cleanup
+// callbacks never fire (no tracing GC), so register/unregister are inert; the
+// constructor and prototype shape match the spec.
+func (rt *Runtime) initFinalizationRegistryBuiltin() {
+	proto := rt.newObject(rt.objectProto)
+	po := rt.objPtr(proto)
+	rt.defMethod(po, "register", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !arg(args, 0).IsObjectType() && arg(args, 0).Type() != TSymbol {
+			return mkundef(), rt.typeError("FinalizationRegistry.register: target must be an object or symbol")
+		}
+		return mkundef(), nil
+	})
+	rt.defMethod(po, "unregister", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return mkfalse(), nil
+	})
+	ctor := rt.newNativeFunc("FinalizationRegistry", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || !rt.constructing() {
+			return mkundef(), rt.typeError("Constructor FinalizationRegistry requires 'new'")
+		}
+		if !rt.isCallable(arg(args, 0)) {
+			return mkundef(), rt.typeError("FinalizationRegistry: cleanup callback must be callable")
+		}
+		o.boxed = arg(args, 0)
+		return this, nil
+	})
+	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
+	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	if rt.symToStringTag != 0 {
+		po.defineOwnSymbol(rt.symToStringTag.handle(), rt.internString("FinalizationRegistry"), attrConfigurable)
+	}
+	rt.defGlobal("FinalizationRegistry", ctor)
 }
 
 // weakCollOf returns the receiver's weak collection, or a TypeError.

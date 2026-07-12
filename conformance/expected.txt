@@ -138,6 +138,7 @@ compat-table/es2020/optional-chaining.spread-params.js
 compat-table/es2020/Promise.allSettled.js
 compat-table/es2020/String.prototype.matchAll.js
 compat-table/es2020/String.prototype.matchAll.throws-non-global.js
+compat-table/es2021/FinalizationRegistry.js
 compat-table/es2021/logical-assignment.and.js
 compat-table/es2021/logical-assignment.and.setter-not-invoked.js
 compat-table/es2021/logical-assignment.and.short-circuit.js
@@ -151,6 +152,7 @@ compat-table/es2021/numeric-separators.js
 compat-table/es2021/Promise.any.AggregateError.js
 compat-table/es2021/Promise.any.fulfillment.js
 compat-table/es2021/String.prototype.replaceAll.js
+compat-table/es2021/WeakRef.js
 compat-table/es2022/at-method.Array.js
 compat-table/es2022/at-method.String.js
 compat-table/es2022/at-method.TypedArray.js
@@ -1057,6 +1059,12 @@ compat-table/next/throw-expr.arrow.js
 compat-table/next/throw-expr.conditional.js
 compat-table/next/throw-expr.logical.js
 compat-table/next/throw-expr.param-init.js
+compat-table/next/Uint8Array.fromBase64.js
+compat-table/next/Uint8Array.fromHex.js
+compat-table/next/Uint8Array.setFromBase64.js
+compat-table/next/Uint8Array.setFromHex.js
+compat-table/next/Uint8Array.toBase64.js
+compat-table/next/Uint8Array.toHex.js
 compat-table/next/using.for-of.js
 compat-table/next/using.js
 compat-table/next/WeakMap.prototype.upsert.js

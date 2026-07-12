@@ -7,7 +7,9 @@ package engine
 // element coercion). DataView provides explicit typed, endianness-aware access.
 
 import (
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"math"
 	"math/big"
 	"sort"
@@ -319,6 +321,9 @@ func (rt *Runtime) initTypedArrays() {
 			}
 			return arrV, nil
 		})
+		if info.name == "Uint8Array" {
+			rt.defUint8ArrayBase64Hex(cobj, rt.objPtr(proto), kind)
+		}
 		rt.defSpeciesGetter(ctor) // <Kind>[Symbol.species] getter (returns this)
 		rt.defGlobal(info.name, ctor)
 	}
@@ -326,6 +331,85 @@ func (rt *Runtime) initTypedArrays() {
 
 	rt.initArrayBufferBuiltin()
 	rt.initDataViewBuiltin()
+}
+
+// defUint8ArrayBase64Hex installs the Uint8Array base64/hex conversions
+// (toBase64/fromBase64/setFromBase64, toHex/fromHex/setFromHex — TC39 stage 4).
+func (rt *Runtime) defUint8ArrayBase64Hex(cobj, proto *object, kind taKind) {
+	readBytes := func(this Value) []byte {
+		o := rt.objPtr(this)
+		n := rt.taLength(o)
+		b := make([]byte, n)
+		for i := 0; i < n; i++ {
+			v, _ := rt.taGet(o, i)
+			b[i] = byte(uint8(v.Number()))
+		}
+		return b
+	}
+	newFrom := func(b []byte) Value {
+		arrV, _ := rt.newTypedArray(kind, []Value{mknum(float64(len(b)))})
+		ao := rt.objPtr(arrV)
+		for i, by := range b {
+			rt.taSet(ao, i, float64(by))
+		}
+		return arrV
+	}
+	// setInto writes decoded bytes into `this`, returning {read, written} where
+	// written is capped at the receiver's length.
+	setInto := func(this Value, decoded []byte, srcLen int) Value {
+		o := rt.objPtr(this)
+		n := rt.taLength(o)
+		written := len(decoded)
+		if written > n {
+			written = n
+		}
+		for i := 0; i < written; i++ {
+			rt.taSet(o, i, float64(decoded[i]))
+		}
+		res := rt.newObject(rt.objectProto)
+		ro := rt.objPtr(res)
+		ro.defineOwn("read", mknum(float64(srcLen)), attrDefault)
+		ro.defineOwn("written", mknum(float64(written)), attrDefault)
+		return res
+	}
+
+	rt.defMethod(proto, "toHex", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.newString(hex.EncodeToString(readBytes(this))), nil
+	})
+	rt.defMethod(proto, "toBase64", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.newString(base64.StdEncoding.EncodeToString(readBytes(this))), nil
+	})
+	rt.defMethod(cobj, "fromHex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s := string(rt.strBytes(arg(args, 0)))
+		b, err := hex.DecodeString(s)
+		if err != nil {
+			return mkundef(), rt.syntaxError("Invalid hex string")
+		}
+		return newFrom(b), nil
+	})
+	rt.defMethod(cobj, "fromBase64", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		b, err := base64.StdEncoding.DecodeString(string(rt.strBytes(arg(args, 0))))
+		if err != nil {
+			return mkundef(), rt.syntaxError("Invalid base64 string")
+		}
+		return newFrom(b), nil
+	})
+	rt.defMethod(proto, "setFromHex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s := string(rt.strBytes(arg(args, 0)))
+		b, err := hex.DecodeString(s)
+		if err != nil {
+			return mkundef(), rt.syntaxError("Invalid hex string")
+		}
+		return setInto(this, b, len(s)), nil
+	})
+	rt.defMethod(proto, "setFromBase64", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s := string(rt.strBytes(arg(args, 0)))
+		b, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			return mkundef(), rt.syntaxError("Invalid base64 string")
+		}
+		return setInto(this, b, len(s)), nil
+	})
 }
 
 func (rt *Runtime) initArrayBufferBuiltin() {
