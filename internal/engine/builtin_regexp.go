@@ -79,6 +79,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 	rt.defSpeciesGetter(ctor)
 	rt.defGlobal("RegExp", ctor)
 
+	rt.initRegExpAccessors()
 	rt.initStringRegexpMethods()
 
 	// RegExp.prototype[Symbol.match/replace/search/split] delegate to the String
@@ -166,13 +167,84 @@ func (rt *Runtime) newRegExp(pattern, flags string) (Value, *ThrowError) {
 	o := rt.objPtr(v)
 	o.regex = re
 	o.setSlot(slotBrand, mknum(brandRegExp))
-	o.defineOwn("source", rt.internString(nonEmptySource(pattern)), 0)
-	o.defineOwn("flags", rt.internString(canonicalFlags(flags)), 0)
-	o.defineOwn("global", mkbool(re.Global), 0)
-	o.defineOwn("ignoreCase", mkbool(re.IgnoreCase), 0)
-	o.defineOwn("multiline", mkbool(re.Multiline), 0)
+	// source/flags/global/… are accessor getters on RegExp.prototype (installed
+	// in initRegExpAccessors); only lastIndex is an own data property.
 	o.defineOwn("lastIndex", mknum(0), attrWritable)
 	return v, nil
+}
+
+// initRegExpAccessors installs source/flags and the per-flag boolean getters on
+// RegExp.prototype (ES 22.2.6). Each reads the receiver's [[OriginalFlags]];
+// on the prototype itself they return undefined, and flags is fully generic
+// (reads the individual flag getters via [[Get]]).
+func (rt *Runtime) initRegExpAccessors() {
+	po := rt.objPtr(rt.regexpProto)
+	flagGetter := func(name string, ch byte, read func(*regexpjs.Regexp) bool) {
+		g := rt.newNativeFunc("get "+name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			o := rt.objPtr(this)
+			if o == nil {
+				return mkundef(), rt.typeError("RegExp.prototype." + name + " getter called on non-object")
+			}
+			if o.regex == nil {
+				if this == rt.regexpProto {
+					return mkundef(), nil
+				}
+				return mkundef(), rt.typeError("RegExp.prototype." + name + " getter called on incompatible receiver")
+			}
+			if read != nil {
+				return mkbool(read(o.regex)), nil
+			}
+			return mkbool(strings.IndexByte(o.regex.Flags, ch) >= 0), nil
+		})
+		po.defineAccessor(name, g, mkundef(), true, false, attrConfigurable)
+	}
+	flagGetter("global", 'g', func(re *regexpjs.Regexp) bool { return re.Global })
+	flagGetter("ignoreCase", 'i', func(re *regexpjs.Regexp) bool { return re.IgnoreCase })
+	flagGetter("multiline", 'm', func(re *regexpjs.Regexp) bool { return re.Multiline })
+	flagGetter("dotAll", 's', func(re *regexpjs.Regexp) bool { return re.DotAll })
+	flagGetter("unicode", 'u', func(re *regexpjs.Regexp) bool { return re.Unicode })
+	flagGetter("sticky", 'y', func(re *regexpjs.Regexp) bool { return re.Sticky })
+	flagGetter("hasIndices", 'd', nil)
+	flagGetter("unicodeSets", 'v', nil)
+
+	srcGetter := rt.newNativeFunc("get source", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil {
+			return mkundef(), rt.typeError("RegExp.prototype.source getter called on non-object")
+		}
+		if o.regex == nil {
+			if this == rt.regexpProto {
+				return rt.internString("(?:)"), nil
+			}
+			return mkundef(), rt.typeError("RegExp.prototype.source getter called on incompatible receiver")
+		}
+		return rt.internString(nonEmptySource(o.regex.Source)), nil
+	})
+	po.defineAccessor("source", srcGetter, mkundef(), true, false, attrConfigurable)
+
+	// flags is generic: it reads each flag getter through [[Get]] and concatenates
+	// the letters, so it works on any object (and observes Proxy traps).
+	order := []struct {
+		name string
+		ch   byte
+	}{{"hasIndices", 'd'}, {"global", 'g'}, {"ignoreCase", 'i'}, {"multiline", 'm'}, {"dotAll", 's'}, {"unicode", 'u'}, {"unicodeSets", 'v'}, {"sticky", 'y'}}
+	flagsGetter := rt.newNativeFunc("get flags", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("RegExp.prototype.flags getter called on non-object")
+		}
+		var b []byte
+		for _, f := range order {
+			v, e := rt.getField(this, f.name)
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.toBoolean(v) {
+				b = append(b, f.ch)
+			}
+		}
+		return rt.internString(string(b)), nil
+	})
+	po.defineAccessor("flags", flagsGetter, mkundef(), true, false, attrConfigurable)
 }
 
 // canonicalFlags reorders regexp flag characters into the ES canonical order

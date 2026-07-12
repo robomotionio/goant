@@ -143,6 +143,7 @@ compat-table/es2022/Error.cause.URIError.js
 compat-table/es2022/Error.cause.URIError-prototype-lacks.js
 compat-table/es2022/Object.hasOwn.js
 compat-table/es2022/Object.hasOwn.ToObject-first.js
+compat-table/es2022/regex.flags.d.shows-in-flags.js
 compat-table/es2023/Array.prototype.findLastIndex.js
 compat-table/es2023/Array.prototype.findLast.js
 compat-table/es2023/Array.prototype.toReversed.js
@@ -159,6 +160,7 @@ compat-table/es2024/ArrayBuffer.prototype.transferToFixedLength.js
 compat-table/es2024/Map.groupBy.js
 compat-table/es2024/Object.groupBy.js
 compat-table/es2024/Promise.withResolvers.js
+compat-table/es2024/regex.flags.v.shows-in-flags.js
 compat-table/es2025/Iterator.from.iterable.js
 compat-table/es2025/Iterator.instanceof.js
 compat-table/es2025/Iterator.prototype.drop.js
@@ -484,6 +486,7 @@ compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Object.assign.js
 compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Object.hasOwnProperty.js
 compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Set.js
 compat-table/es6/misc.Proxy.get.Promise.resolve.js
+compat-table/es6/misc.Proxy.get.RegExp.flags.js
 compat-table/es6/misc.Proxy.get.RegExp.test.js
 compat-table/es6/misc.Proxy.get.RegExp.toString.js
 compat-table/es6/misc.Proxy.get.String.match.js
