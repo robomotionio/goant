@@ -7,14 +7,21 @@ package engine
 // parameters, `arguments`, generators, and async land as the port continues.
 
 // hoistFunctions pre-binds function declarations in a statement list so they are
-// callable before their textual position (ant function hoisting).
-func (c *compiler) hoistFunctions(list []*Node) {
+// callable before their textual position (ant function hoisting). blockScoped
+// marks a nested block: in strict mode its function declarations are lexically
+// scoped to the block rather than the enclosing function.
+func (c *compiler) hoistFunctions(list []*Node, blockScoped bool) {
 	for _, stmt := range list {
 		if stmt == nil || stmt.Kind != NFunc || stmt.Str == "" || stmt.Flags&fnArrow != 0 {
 			continue
 		}
 		c.compileFunc(stmt)
-		c.bindDeclared(stmt.Str)
+		if blockScoped && c.fn.isStrict {
+			slot := c.declareLexical(stmt.Str, false)
+			c.emitOpU16(OpPutLocal, uint16(slot))
+		} else {
+			c.bindDeclared(stmt.Str)
+		}
 	}
 }
 
@@ -210,7 +217,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 				c.addLocal(name, false)
 			}
 		}
-		c.hoistFunctions(n.Body.Args)
+		c.hoistFunctions(n.Body.Args, false)
 		c.compileStmts(n.Body.Args)
 		c.emit(OpReturnUndef)
 	} else {

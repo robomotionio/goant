@@ -381,6 +381,7 @@ compat-table/es6/for-of.generator.js
 compat-table/es6/for-of.iterator-closing-break.js
 compat-table/es6/for-of.iterator-closing-throw.js
 compat-table/es6/for-of.sparse-array.js
+compat-table/es6/function.block-level-decl.js
 compat-table/es6/Function.name.accessor.js
 compat-table/es6/Function.name.bound.js
 compat-table/es6/Function.name.class-expression.js

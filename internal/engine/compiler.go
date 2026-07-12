@@ -124,7 +124,7 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval bo
 		}
 	}
 
-	c.hoistFunctions(prog.Args)
+	c.hoistFunctions(prog.Args, false)
 	c.compileStmts(prog.Args)
 	if c.err != nil {
 		return nil, c.err
@@ -270,7 +270,7 @@ func (c *compiler) compileStmt(n *Node) {
 			return
 		}
 		c.scopeDepth++
-		c.hoistFunctions(n.Args)
+		c.hoistFunctions(n.Args, true)
 		c.compileStmts(n.Args)
 		c.scopeDepth--
 		c.popBlockScope()
@@ -348,7 +348,7 @@ func blockHasUsing(stmts []*Node) bool {
 // goant's existing try/finally limitation.
 func (c *compiler) compileBlockWithUsing(n *Node) {
 	c.scopeDepth++
-	c.hoistFunctions(n.Args)
+	c.hoistFunctions(n.Args, true)
 
 	c.emit(OpArray)
 	c.emitU16(0)
