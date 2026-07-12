@@ -362,18 +362,28 @@ func (rt *Runtime) initPromiseBuiltin() {
 		if !rt.isCallable(cb) {
 			return rt.promiseThen(cb, cb, o), nil
 		}
+		// onFinally's result is wrapped in a promise and awaited before the value
+		// (or reason) is passed through, so a rejected promise from onFinally
+		// changes the outcome (ES2018 Promise.prototype.finally).
 		onF := rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			v := arg(args, 0)
-			if _, e := rt.callValue(cb, mkundef(), nil); e != nil {
+			result, e := rt.callValue(cb, mkundef(), nil)
+			if e != nil {
 				return mkundef(), e
 			}
-			return v, nil
+			thunk := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) { return v, nil })
+			return rt.promiseThen(thunk, mkundef(), rt.objPtr(rt.resolvedPromise(result))), nil
 		})
 		onR := rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			if _, e := rt.callValue(cb, mkundef(), nil); e != nil {
+			reason := arg(args, 0)
+			result, e := rt.callValue(cb, mkundef(), nil)
+			if e != nil {
 				return mkundef(), e
 			}
-			return mkundef(), &ThrowError{Value: arg(args, 0), rt: rt}
+			thrower := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
+				return mkundef(), &ThrowError{Value: reason, rt: rt}
+			})
+			return rt.promiseThen(thrower, mkundef(), rt.objPtr(rt.resolvedPromise(result))), nil
 		})
 		return rt.promiseThen(onF, onR, o), nil
 	})

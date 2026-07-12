@@ -71,6 +71,7 @@ compat-table/es2018/misc.Proxy-ownKeys-duplicate-keys.js
 compat-table/es2018/misc.template-literal-revision.js
 compat-table/es2018/object-rest.js
 compat-table/es2018/object-spread.js
+compat-table/es2018/Promise.prototype.finally.change-rejection.js
 compat-table/es2018/Promise.prototype.finally.js
 compat-table/es2018/Promise.prototype.finally.no-change-resolution.js
 compat-table/es2018/regex.named-capture-groups.js
