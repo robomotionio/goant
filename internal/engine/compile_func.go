@@ -65,6 +65,7 @@ func (c *compiler) compileFunc(n *Node) {
 			isAsync:     n.Flags&fnAsync != 0,
 			isGenerator: n.Flags&fnGenerator != 0,
 			isClassCtor: n.Flags&fnClassCtor != 0,
+			isMethod:    n.Flags&(fnMethod|fnGetter|fnSetter) != 0 && n.Flags&fnClassCtor == 0,
 			isStrict:    c.fn.isStrict,
 			srcStart:    int(n.SrcOff),
 			srcEnd:      int(n.SrcEnd),

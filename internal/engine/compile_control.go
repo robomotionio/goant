@@ -545,8 +545,14 @@ func (c *compiler) compileCatchBody(n *Node) {
 		c.emitOpU16(OpPutLocal, uint16(slot))
 		c.compileStmt(n.CatchBody)
 		c.scopeDepth--
+	} else if n.CatchParam != nil && (n.CatchParam.Kind == NArray || n.CatchParam.Kind == NObject) {
+		// Destructuring catch binding: bind the pattern from the thrown value.
+		c.scopeDepth++
+		c.destructureTarget(n.CatchParam, VarLet)
+		c.compileStmt(n.CatchBody)
+		c.scopeDepth--
 	} else {
-		c.emit(OpPop) // discard thrown value (optional / unsupported binding)
+		c.emit(OpPop) // discard thrown value (optional binding)
 		c.compileStmt(n.CatchBody)
 	}
 }

@@ -793,6 +793,26 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		}
 		return out, nil
 	})
+	m("at", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		l := length(this)
+		d, e := rt.toNumber(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		if math.IsNaN(d) {
+			d = 0
+		}
+		k := int(math.Trunc(d))
+		if k < 0 {
+			k += l
+		}
+		if k < 0 || k >= l {
+			return mkundef(), nil
+		}
+		v, _ := rt.taGet(o, k)
+		return v, nil
+	})
 	m("subarray", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		l := length(this)

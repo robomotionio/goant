@@ -285,6 +285,27 @@ func (rt *Runtime) initArrayBuiltin() {
 		}
 		return mkfalse(), nil
 	})
+	rt.defMethod(proto, "at", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		n, e := rt.lengthOf(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		d, e := rt.toNumber(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		if math.IsNaN(d) {
+			d = 0
+		}
+		k := int(math.Trunc(d))
+		if k < 0 {
+			k += n
+		}
+		if k < 0 || k >= n {
+			return mkundef(), nil
+		}
+		return rt.getElement(this, mknum(float64(k)))
+	})
 	rt.defMethod(proto, "flatMap", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		cb := arg(args, 0)
 		if !rt.isCallable(cb) {

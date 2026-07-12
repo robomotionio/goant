@@ -34,6 +34,7 @@ type svFunc struct {
 	isAsync     bool
 	isGenerator bool
 	isClassCtor bool
+	isMethod    bool // concise method / getter / setter: no [[Construct]], no .prototype
 }
 
 // ---- bytecode emission (compiler side) ----

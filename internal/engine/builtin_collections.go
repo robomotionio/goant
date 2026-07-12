@@ -38,6 +38,15 @@ func (rt *Runtime) canonicalKey(v Value) string {
 	}
 }
 
+// normMapKey normalizes a would-be Map/Set key: -0 is stored as +0 so iteration
+// yields +0 (Map/Set CanonicalizeKeyedCollectionKey). Other values pass through.
+func normMapKey(v Value) Value {
+	if v.Type() == TNum && v.Number() == 0 {
+		return mknum(0)
+	}
+	return v
+}
+
 func (rt *Runtime) initCollections() {
 	rt.initMapBuiltin()
 	rt.initSetBuiltin()
@@ -64,7 +73,7 @@ func (rt *Runtime) initMapBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		k := arg(args, 0)
+		k := normMapKey(arg(args, 0))
 		ck := rt.canonicalKey(k)
 		if idx, ok := m.index[ck]; ok {
 			m.vals[idx] = arg(args, 1)
@@ -92,7 +101,7 @@ func (rt *Runtime) initMapBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		k := arg(args, 0)
+		k := normMapKey(arg(args, 0))
 		ck := rt.canonicalKey(k)
 		if idx, ok := m.index[ck]; ok {
 			return m.vals[idx], nil
@@ -108,7 +117,7 @@ func (rt *Runtime) initMapBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		k := arg(args, 0)
+		k := normMapKey(arg(args, 0))
 		cb := arg(args, 1)
 		if !rt.isCallable(cb) {
 			return mkundef(), rt.typeError("getOrInsertComputed callbackfn is not a function")
@@ -278,7 +287,7 @@ func (rt *Runtime) initSetBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		k := arg(args, 0)
+		k := normMapKey(arg(args, 0))
 		ck := rt.canonicalKey(k)
 		if _, ok := s.index[ck]; !ok {
 			s.index[ck] = len(s.keys)

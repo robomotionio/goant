@@ -33,9 +33,10 @@ func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 	obj.defineOwn("name", rt.internString(fn.name), attrConfigurable)
 
 	fnVal := mkval(TFunc, uint64(oh))
-	// Ordinary and generator functions carry a .prototype; arrow and async
-	// functions do not.
-	if !fn.isArrow && !fn.isAsync {
+	// Ordinary and generator functions carry a .prototype; arrow, async, and
+	// concise methods / accessors do not (and methods/accessors have no
+	// [[Construct]]).
+	if !fn.isArrow && !fn.isAsync && !fn.isMethod {
 		obj.flags.isConstructor = true
 		protoParent := rt.objectProto
 		if fn.isGenerator {
@@ -123,7 +124,7 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 		}
 		return rt.proxyConstruct(o.proxy, args, nt)
 	}
-	if cl := rt.closures.get(o.closure); cl != nil && (cl.fn.isGenerator || cl.fn.isAsync || cl.fn.isArrow) {
+	if cl := rt.closures.get(o.closure); cl != nil && (cl.fn.isGenerator || cl.fn.isAsync || cl.fn.isArrow || cl.fn.isMethod) {
 		nm := cl.fn.name
 		if nm == "" {
 			nm = "Function"

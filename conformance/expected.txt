@@ -151,7 +151,9 @@ compat-table/es2021/numeric-separators.js
 compat-table/es2021/Promise.any.AggregateError.js
 compat-table/es2021/Promise.any.fulfillment.js
 compat-table/es2021/String.prototype.replaceAll.js
+compat-table/es2022/at-method.Array.js
 compat-table/es2022/at-method.String.js
+compat-table/es2022/at-method.TypedArray.js
 compat-table/es2022/class-fields.computed-instance.js
 compat-table/es2022/class-fields.computed-static.js
 compat-table/es2022/class-fields.instance.parent-scope.js
@@ -442,6 +444,7 @@ compat-table/es6/destructuring-assign.trailing-comma-iterable.js
 compat-table/es6/destructuring-assign.trailing-comma-object.js
 compat-table/es6/destructuring-decl.array.js
 compat-table/es6/destructuring-decl.astral-string.js
+compat-table/es6/destructuring-decl.catch.js
 compat-table/es6/destructuring-decl.computed-properties.js
 compat-table/es6/destructuring-decl.defaults.js
 compat-table/es6/destructuring-decl.defaults-tdz.js
@@ -584,6 +587,7 @@ compat-table/es6/Map.prototype.size.js
 compat-table/es6/Map.prototype.Symbol.iterator.js
 compat-table/es6/Map.prototype.values.js
 compat-table/es6/Map.Symbol.species.js
+compat-table/es6/Map.zero-key.js
 compat-table/es6/Math.acosh.js
 compat-table/es6/Math.asinh.js
 compat-table/es6/Math.atanh.js
@@ -601,6 +605,7 @@ compat-table/es6/Math.sign.js
 compat-table/es6/Math.sinh.js
 compat-table/es6/Math.tanh.js
 compat-table/es6/Math.trunc.js
+compat-table/es6/misc.accessors-no-constructor.js
 compat-table/es6/misc.bound-function-prototype.arrow.js
 compat-table/es6/misc.bound-function-prototype.class.js
 compat-table/es6/misc.bound-function-prototype.function.js
@@ -807,6 +812,7 @@ compat-table/es6/Set.prototype.size.js
 compat-table/es6/Set.prototype.Symbol.iterator.js
 compat-table/es6/Set.prototype.values.js
 compat-table/es6/Set.Symbol.species.js
+compat-table/es6/Set.zero-key.js
 compat-table/es6/spread.array-call.js
 compat-table/es6/spread.array-literal.js
 compat-table/es6/spread.astral-call.js
