@@ -96,7 +96,7 @@ var emojiEmoji = &unicode.RangeTable{
 		{0x1F6F3, 0x1F6FC, 1}, {0x1F7E0, 0x1F7EB, 1}, {0x1F7F0, 0x1F7F0, 1},
 		{0x1F90C, 0x1F93A, 1}, {0x1F93C, 0x1F945, 1}, {0x1F947, 0x1F9FF, 1},
 		{0x1FA70, 0x1FA7C, 1}, {0x1FA80, 0x1FA88, 1}, {0x1FA90, 0x1FABD, 1},
-		{0x1FABF, 0x1FAC5, 1}, {0x1FACE, 0x1FADB, 1}, {0x1FAE0, 0x1FAE8, 1},
+		{0x1FABF, 0x1FAC5, 1}, {0x1FACD, 0x1FADC, 1}, {0x1FADF, 0x1FAE9, 1},
 		{0x1FAF0, 0x1FAF8, 1},
 	},
 }
@@ -105,4 +105,18 @@ var emojiEmoji = &unicode.RangeTable{
 var emojiProperties = map[string]*unicode.RangeTable{
 	"Extended_Pictographic": emojiExtendedPictographic,
 	"Emoji":                 emojiEmoji,
+}
+
+// supplementaryScripts adds scripts newer than the toolchain's Unicode version.
+var supplementaryScripts = map[string]*unicode.RangeTable{
+	"Todhri":  {R32: []unicode.Range32{{0x105C0, 0x105FF, 1}}},   // Unicode 16.0
+	"Sidetic": {R32: []unicode.Range32{{0x10940, 0x1097F, 1}}},   // Unicode 17.0
+	"Kawi":    {R32: []unicode.Range32{{0x11F00, 0x11F5A, 1}}},   // Unicode 15.0 (belt-and-braces)
+	"Nag_Mundari": {R32: []unicode.Range32{{0x1E4D0, 0x1E4FF, 1}}},
+}
+
+// supplementaryUnifiedIdeograph covers CJK ideographs added after Unicode 15.0
+// (Extension I onward), which the toolchain's Unified_Ideograph table lacks.
+var supplementaryUnifiedIdeograph = &unicode.RangeTable{
+	R32: []unicode.Range32{{0x2EBF0, 0x2EE5F, 1}},
 }

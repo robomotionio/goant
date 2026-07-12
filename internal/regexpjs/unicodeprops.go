@@ -369,12 +369,18 @@ func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
 		val := strings.TrimSpace(name[eq+1:])
 		switch prop {
 		case "Script", "sc", "Script_Extensions", "scx":
-			rt, ok := unicode.Scripts[val]
+			if rt, ok := unicode.Scripts[val]; ok {
+				return rt, true
+			}
+			rt, ok := supplementaryScripts[val]
 			return rt, ok
 		case "General_Category", "gc":
 			return lookupCategory(val)
 		}
 		return nil, false
+	}
+	if name == "Unified_Ideograph" {
+		return mergeTables(unicode.Properties["Unified_Ideograph"], supplementaryUnifiedIdeograph), true
 	}
 	switch name {
 	case "ASCII":
@@ -402,6 +408,21 @@ func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
 // codePointSet is a simple sorted set of code points used to evaluate the `v`
 // flag's class set operations (intersection &&, difference --, union).
 type codePointSet map[rune]bool
+
+// mergeTables concatenates two RangeTables' ranges (order is irrelevant for the
+// class-emission use here).
+func mergeTables(a, b *unicode.RangeTable) *unicode.RangeTable {
+	m := &unicode.RangeTable{}
+	if a != nil {
+		m.R16 = append(m.R16, a.R16...)
+		m.R32 = append(m.R32, a.R32...)
+	}
+	if b != nil {
+		m.R16 = append(m.R16, b.R16...)
+		m.R32 = append(m.R32, b.R32...)
+	}
+	return m
+}
 
 func setFromTable(rt *unicode.RangeTable) codePointSet {
 	s := codePointSet{}

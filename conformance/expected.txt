@@ -84,7 +84,10 @@ compat-table/es2018/regex.unicode-property-escapes.unicode-12.1.js
 compat-table/es2018/regex.unicode-property-escapes.unicode-12.js
 compat-table/es2018/regex.unicode-property-escapes.unicode-13.js
 compat-table/es2018/regex.unicode-property-escapes.unicode-14.js
+compat-table/es2018/regex.unicode-property-escapes.unicode-15.1.js
 compat-table/es2018/regex.unicode-property-escapes.unicode-15.js
+compat-table/es2018/regex.unicode-property-escapes.unicode-16.0.js
+compat-table/es2018/regex.unicode-property-escapes.unicode-17.0.js
 compat-table/es2019/annex-b.String.prototype.trimLeft.js
 compat-table/es2019/annex-b.String.prototype.trimRight.js
 compat-table/es2019/Array.prototype.flat-flatMap.unscopables.js
