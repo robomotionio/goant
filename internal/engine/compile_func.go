@@ -130,6 +130,33 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	}
 	c.fn.paramCount = paramCount
 
+	// Bind `this` / self-name / arguments BEFORE evaluating parameter defaults,
+	// since default expressions may reference them (e.g. `m(o = this)`).
+	//
+	// Non-arrow functions bind their own `this` in *this* (arrows inherit the
+	// enclosing one lexically via upvalue capture).
+	if n.Flags&fnArrow == 0 {
+		slot := c.declareVar("*this*", false)
+		c.emit(OpThis)
+		c.emitOpU16(OpPutLocal, uint16(slot))
+	}
+	// A named function is self-bound: its name refers to itself inside the body
+	// (named function expressions; also enables recursion for declarations). A
+	// name assigned by NamedEvaluation does NOT create this binding.
+	if n.Str != "" && n.Flags&fnArrow == 0 && n.Flags&fnInferredName == 0 {
+		slot := c.declareVar(n.Str, false)
+		c.emit(OpSpecialObj)
+		c.emitByte(1) // current function value
+		c.emitOpU16(OpPutLocal, uint16(slot))
+	}
+	// If a non-arrow function references `arguments`, bind it at entry.
+	if n.Flags&fnArrow == 0 && referencesArguments(n.Body) {
+		slot := c.declareVar("arguments", false)
+		c.emit(OpSpecialObj)
+		c.emitByte(0)
+		c.emitOpU16(OpPutLocal, uint16(slot))
+	}
+
 	// Rest parameter: collect args[restIndex:] into an array.
 	if restParam != nil {
 		slot := c.declareVar(restParam.Right.Str, false)
@@ -153,32 +180,6 @@ func (c *compiler) compileFunctionBody(n *Node) {
 			c.applyDefault(dp.def)
 		}
 		c.destructureTarget(dp.pattern, VarLet)
-	}
-
-	// Non-arrow functions bind their own `this` in *this* (arrows inherit the
-	// enclosing one lexically via upvalue capture).
-	if n.Flags&fnArrow == 0 {
-		slot := c.declareVar("*this*", false)
-		c.emit(OpThis)
-		c.emitOpU16(OpPutLocal, uint16(slot))
-	}
-
-	// A named function is self-bound: its name refers to itself inside the body
-	// (named function expressions; also enables recursion for declarations). A
-	// name assigned by NamedEvaluation does NOT create this binding.
-	if n.Str != "" && n.Flags&fnArrow == 0 && n.Flags&fnInferredName == 0 {
-		slot := c.declareVar(n.Str, false)
-		c.emit(OpSpecialObj)
-		c.emitByte(1) // current function value
-		c.emitOpU16(OpPutLocal, uint16(slot))
-	}
-
-	// If a non-arrow function references `arguments`, bind it at entry.
-	if n.Flags&fnArrow == 0 && referencesArguments(n.Body) {
-		slot := c.declareVar("arguments", false)
-		c.emit(OpSpecialObj)
-		c.emitByte(0)
-		c.emitOpU16(OpPutLocal, uint16(slot))
 	}
 
 	if n.Body == nil {
