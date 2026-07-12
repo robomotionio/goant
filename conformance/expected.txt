@@ -163,7 +163,9 @@ compat-table/es2024/Map.groupBy.js
 compat-table/es2024/Object.groupBy.js
 compat-table/es2024/Promise.withResolvers.js
 compat-table/es2024/regex.flags.v.shows-in-flags.js
+compat-table/es2025/Iterator.extends.js
 compat-table/es2025/Iterator.from.iterable.js
+compat-table/es2025/Iterator.from.iterator.js
 compat-table/es2025/Iterator.instanceof.js
 compat-table/es2025/Iterator.prototype.drop.js
 compat-table/es2025/Iterator.prototype.every.js
@@ -758,6 +760,7 @@ compat-table/intl/Date.prototype.toLocaleTimeString.js
 compat-table/intl/Number.prototype.toLocaleString.js
 compat-table/intl/Object.prototype.toLocaleString.js
 compat-table/intl/String.prototype.localeCompare.js
+compat-table/next/AsyncIterator.extends.js
 compat-table/next/AsyncIterator.from.async-iterable.js
 compat-table/next/AsyncIterator.from.iterable.js
 compat-table/next/AsyncIterator.from.iterator.js

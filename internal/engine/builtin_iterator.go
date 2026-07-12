@@ -237,31 +237,82 @@ func (rt *Runtime) initIteratorHelpers() {
 		return mkundef(), nil
 	})
 
-	// Iterator global: prototype is %IteratorPrototype%; Iterator.from(x).
-	ctor := rt.newNativeFunc("Iterator", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return mkundef(), rt.typeError("Abstract class Iterator not directly constructable")
+	// Iterator global: an abstract constructor (throws unless subclassed) whose
+	// prototype is %IteratorPrototype%; Iterator.from(x).
+	var ctor Value
+	ctor = rt.newNativeFunc("Iterator", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// Direct `new Iterator()` / a plain call is a TypeError; a subclass
+		// (new.target ≠ Iterator) constructs normally. new.target comes from the
+		// construct (pendingNewTarget) or a super() call (activeNewTarget).
+		nt := rt.pendingNewTarget
+		if nt.IsUndefined() {
+			nt = rt.activeNewTarget
+		}
+		if nt.IsUndefined() || nt == ctor {
+			return mkundef(), rt.typeError("Abstract class Iterator not directly constructable")
+		}
+		return this, nil
 	})
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", rt.iteratorProto, 0)
 	proto.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 	rt.defMethod(cobj, "from", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		src := arg(args, 0)
-		// Already an iterator with a next method: wrap so it inherits helpers.
-		if o := rt.objPtr(src); o != nil {
-			if nx, _ := rt.getField(src, "next"); rt.isCallable(nx) && !rt.isIterable(src) {
-				return src, nil
+		if !src.IsObjectType() {
+			vs, e := rt.iterableValues(src)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.sliceIterator(vs), nil
+		}
+		// Resolve the underlying iterator (via @@iterator when present).
+		it := src
+		if rt.symIterator != 0 {
+			if m, _ := rt.getElement(src, rt.symIterator); rt.isCallable(m) {
+				r, e := rt.callValue(m, src, nil)
+				if e != nil {
+					return mkundef(), e
+				}
+				it = r
 			}
 		}
-		vs, e := rt.iterableValues(src)
-		if e != nil {
-			return mkundef(), e
+		// If it already inherits %IteratorPrototype%, return it; else wrap so the
+		// Iterator helpers apply (%WrapForValidIteratorPrototype%).
+		if rt.hasInProtoChain(it, rt.iteratorProto) {
+			return it, nil
 		}
-		return rt.sliceIterator(vs), nil
+		return rt.wrapIterator(it), nil
 	})
 	if rt.symToStringTag != 0 {
 		proto.defineOwnSymbol(rt.symToStringTag.handle(), rt.newString("Iterator"), attrConfigurable)
 	}
 	rt.defGlobal("Iterator", ctor)
+}
+
+// wrapIterator wraps a raw iterator (an object with a next method) so it
+// inherits %IteratorPrototype% and thus the Iterator helpers, delegating
+// next()/return() to the underlying iterator (%WrapForValidIteratorPrototype%).
+func (rt *Runtime) wrapIterator(src Value) Value {
+	wrap := rt.newObject(rt.iteratorProto)
+	o := rt.objPtr(wrap)
+	rt.defMethod(o, "next", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		nx, e := rt.getField(src, "next")
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.callValue(nx, src, args)
+	})
+	rt.defMethod(o, "return", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		rf, e := rt.getField(src, "return")
+		if e != nil {
+			return mkundef(), e
+		}
+		if rt.isCallable(rf) {
+			return rt.callValue(rf, src, args)
+		}
+		return rt.genResult(arg(args, 0), true), nil
+	})
+	return wrap
 }
 
 // newIteratorObject wraps a producer closure as a spec IteratorResult-yielding

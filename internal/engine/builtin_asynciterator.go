@@ -178,8 +178,13 @@ func (rt *Runtime) initAsyncIterator() {
 	})
 
 	// AsyncIterator abstract constructor + AsyncIterator.from.
-	ctor := rt.newNativeFunc("AsyncIterator", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if !rt.constructing() {
+	var ctor Value
+	ctor = rt.newNativeFunc("AsyncIterator", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		nt := rt.pendingNewTarget
+		if nt.IsUndefined() {
+			nt = rt.activeNewTarget
+		}
+		if nt.IsUndefined() || nt == ctor {
 			return mkundef(), rt.typeError("Abstract class AsyncIterator not directly constructable")
 		}
 		return this, nil
