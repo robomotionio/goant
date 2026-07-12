@@ -232,10 +232,27 @@ func (c *compiler) compileStmt(n *Node) {
 	case NEmpty, NDebugger:
 		return
 	case NFunc:
-		// Function declarations are hoisted (bound before the body runs); a
-		// bare function *expression* statement is a no-op value.
+		// Function declarations are hoisted (bound before the body runs). A
+		// parenthesized function *expression* statement contributes a completion
+		// value (used by eval); a bare one is a no-op.
+		if n.Flags&fnParen != 0 {
+			c.compileExpr(n)
+			if c.isScript {
+				c.emitOpU16(OpSetLocal, uint16(c.completionSlot))
+			}
+			c.emit(OpPop)
+		}
 		return
 	case NClass:
+		if n.Flags&fnParen != 0 {
+			// Parenthesized class *expression* statement (completion value).
+			c.compileClass(n)
+			if c.isScript {
+				c.emitOpU16(OpSetLocal, uint16(c.completionSlot))
+			}
+			c.emit(OpPop)
+			return
+		}
 		// Class declaration: compile and bind to the class name.
 		c.compileClass(n)
 		c.bindDeclared(n.Str)

@@ -312,6 +312,12 @@ func (c *compiler) compileClass(n *Node) {
 	} else {
 		ctorFn.Str = n.Str
 	}
+	// Function.prototype.toString of a class returns the whole class source, so
+	// the constructor function's source span covers the class declaration.
+	if n.SrcEnd > n.SrcOff {
+		ctorFn.SrcOff = n.SrcOff
+		ctorFn.SrcEnd = n.SrcEnd
+	}
 	// Bind super BEFORE compiling the constructor/methods so their bodies can
 	// capture *superctor* / *superproto* as upvalues (for super() / super.x).
 	superSlot, superProtoSlot := -1, -1
