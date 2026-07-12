@@ -40,6 +40,7 @@ type Runtime struct {
 	booleanProto          Value
 	errorProto            Value
 	regexpProto           Value
+	regexpCtor            Value // %RegExp% constructor (SpeciesConstructor default)
 	mapProto              Value
 	setProto              Value
 	symbolProto           Value

@@ -793,6 +793,7 @@ compat-table/es6/well-known.species.Array.slice.js
 compat-table/es6/well-known.species.Array.splice.js
 compat-table/es6/well-known.species.js
 compat-table/es6/well-known.species.Promise.then.js
+compat-table/es6/well-known.species.RegExp.split.js
 compat-table/es6/well-known.split.js
 compat-table/es6/well-known.toPrimitive.js
 compat-table/es6/well-known.toStringTag.existing-builtins.js

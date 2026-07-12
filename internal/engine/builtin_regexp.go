@@ -107,6 +107,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 		cobj.defineOwn("$"+itoaSmall(i), rt.internString(""), attrConfigurable)
 	}
 	rt.defSpeciesGetter(ctor)
+	rt.regexpCtor = ctor
 	rt.defGlobal("RegExp", ctor)
 
 	rt.initRegExpAccessors()
@@ -217,12 +218,45 @@ func (rt *Runtime) initRegExpBuiltin() {
 		return rt.getField(result, "index")
 	})
 	defSym(rt.symSplit, func(this Value, args []Value) (Value, *ThrowError) {
-		str := arg(args, 0)
-		re := rt.objPtr(this)
-		if re == nil || re.regex == nil {
+		if this.IsNullish() || !this.IsObjectType() {
 			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.split] called on incompatible receiver")
 		}
-		return rt.stringSplitRegexp(str, re.regex, arg(args, 1))
+		// Fast path: an ordinary RegExp whose @@species is the default RegExp ctor.
+		if re := rt.objPtr(this); re != nil && re.regex != nil {
+			if C, e := rt.speciesConstructor(this, rt.regexpCtor); e == nil && C == rt.regexpCtor {
+				return rt.stringSplitRegexp(arg(args, 0), re.regex, arg(args, 1))
+			}
+		}
+		// Generic path: SpeciesConstructor(this, %RegExp%) supplies the splitter.
+		C, e := rt.speciesConstructor(this, rt.regexpCtor)
+		if e != nil {
+			return mkundef(), e
+		}
+		flagsV, e := rt.getField(this, "flags")
+		if e != nil {
+			return mkundef(), e
+		}
+		flagsS, e := rt.toStringValue(flagsV)
+		if e != nil {
+			return mkundef(), e
+		}
+		newFlags := string(rt.strBytes(flagsS))
+		if !strings.Contains(newFlags, "y") {
+			newFlags += "y"
+		}
+		splitter, e := rt.construct(C, []Value{this, rt.newString(newFlags)})
+		if e != nil {
+			return mkundef(), e
+		}
+		if so := rt.objPtr(splitter); so != nil && so.regex != nil {
+			return rt.stringSplitRegexp(arg(args, 0), so.regex, arg(args, 1))
+		}
+		// A non-RegExp splitter would need the fully generic exec-driven algorithm;
+		// fall back to returning the whole string as a single segment.
+		res := rt.newArray()
+		s, _ := rt.toStringValue(arg(args, 0))
+		rt.arraySet(rt.objPtr(res), 0, s)
+		return res, nil
 	})
 }
 
