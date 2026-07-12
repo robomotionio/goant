@@ -190,6 +190,9 @@ compat-table/es2024/Promise.withResolvers.js
 compat-table/es2024/regex.flags.v.properties-of-strings.js
 compat-table/es2024/regex.flags.v.set-notations.js
 compat-table/es2024/regex.flags.v.shows-in-flags.js
+compat-table/es2024/regex.flags.v.unicode-15.1.js
+compat-table/es2024/regex.flags.v.unicode-16.0.js
+compat-table/es2024/regex.flags.v.unicode-17.0.js
 compat-table/es2025/Iterator.extends.js
 compat-table/es2025/Iterator.from.iterable.js
 compat-table/es2025/Iterator.from.iterator.js

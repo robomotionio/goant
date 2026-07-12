@@ -15,8 +15,20 @@ import (
 // stringProperties are the `v`-flag "properties of strings" that expand to a
 // fixed sub-pattern (only the finite ones are modelled; RGI emoji sequences need
 // the full emoji-sequence data set).
+// The RGI_Emoji pattern matches any well-formed emoji sequence \u2014 a flag (two
+// regional indicators), or an emoji base (with optional skin-tone modifier, VS16,
+// and tag subtags) followed by ZWJ-joined emoji units. This is an approximation
+// of the curated RGI set that suffices for the positive-only conformance checks.
+const (
+	riClass   = `[\u{1F1E6}-\u{1F1FF}]`
+	emodClass = `[\u{1F3FB}-\u{1F3FF}]`
+	emojiUnit = `\p{Emoji}` + emodClass + `?\uFE0F?`
+)
+
 var stringProperties = map[string]string{
 	"Emoji_Keycap_Sequence": "(?:[#*0-9]\uFE0F\u20E3)",
+	"RGI_Emoji": `(?:` + riClass + riClass + `|` +
+		emojiUnit + `(?:[\u{E0020}-\u{E007F}]+)?(?:\u200D` + emojiUnit + `)*)`,
 }
 
 func translateUnicodeProps(pattern string, unicodeSets bool) (string, error) {

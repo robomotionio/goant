@@ -93,10 +93,15 @@ func Compile(pattern, flags string) (*Regexp, error) {
 		}
 		src = t
 	}
-	if r.Unicode && (strings.Contains(src, `\p`) || strings.Contains(src, `\P`)) {
+	// Property escapes may expand to sub-patterns that themselves contain \p (a
+	// string property built from \p{Emoji}), so translate repeatedly to a fixpoint.
+	for pass := 0; r.Unicode && pass < 4 && (strings.Contains(src, `\p`) || strings.Contains(src, `\P`)); pass++ {
 		t, terr := translateUnicodeProps(src, r.UnicodeSets)
 		if terr != nil {
 			return nil, fmt.Errorf("invalid regular expression: %v", terr)
+		}
+		if t == src {
+			break
 		}
 		src = t
 	}
