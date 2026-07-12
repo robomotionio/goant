@@ -131,4 +131,6 @@ func (rt *Runtime) initSymbolBuiltin() {
 	})
 
 	rt.defGlobal("Symbol", ctor)
+	// Symbol.prototype[@@toStringTag] === "Symbol" (data property).
+	rt.setStringTag(proto, "Symbol")
 }

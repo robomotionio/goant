@@ -40,17 +40,20 @@ func (rt *Runtime) thisStringBytes(this Value) ([]byte, *ThrowError) {
 func (rt *Runtime) initStringBuiltin() {
 	proto := rt.objPtr(rt.stringProto)
 
-	rt.defMethod(proto, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	strThis := func(this Value) (Value, *ThrowError) {
 		if this.IsString() {
 			return this, nil
 		}
-		return mkundef(), rt.typeError("String.prototype.toString requires a string")
+		if o := rt.objPtr(this); o != nil && o.boxed.IsString() {
+			return o.boxed, nil
+		}
+		return mkundef(), rt.typeError("String.prototype method requires that 'this' be a String")
+	}
+	rt.defMethod(proto, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return strThis(this)
 	})
 	rt.defMethod(proto, "valueOf", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if this.IsString() {
-			return this, nil
-		}
-		return mkundef(), rt.typeError("String.prototype.valueOf requires a string")
+		return strThis(this)
 	})
 
 	rt.defMethod(proto, "charAt", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -377,19 +380,36 @@ func (rt *Runtime) initStringBuiltin() {
 
 	// String constructor.
 	ctor := rt.newNativeFunc("String", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if len(args) == 0 {
-			return rt.internString(""), nil
-		}
-		// String(symbol) is the one legal Symbol->string coercion: its description.
-		if args[0].IsSymbol() {
+		constructing := rt.objPtr(this) != nil
+		var sv Value
+		switch {
+		case len(args) == 0:
+			sv = rt.internString("")
+		case args[0].IsSymbol() && !constructing:
+			// String(symbol) is the one legal Symbol->string coercion (its
+			// description); new String(symbol) is a TypeError.
 			d := rt.symbolDesc(args[0])
 			ds := ""
 			if d.IsString() {
 				ds = string(rt.strBytes(d))
 			}
-			return rt.newString("Symbol(" + ds + ")"), nil
+			sv = rt.newString("Symbol(" + ds + ")")
+		default:
+			s, e := rt.toStringValue(args[0])
+			if e != nil {
+				return mkundef(), e
+			}
+			sv = s
 		}
-		return rt.toStringValue(args[0])
+		if constructing {
+			// new String(x): a String exotic object wrapping the primitive, with a
+			// non-writable, non-enumerable length own property.
+			o := rt.objPtr(this)
+			o.boxed = sv
+			o.defineOwn("length", mknum(float64(utf16Len(rt.strBytes(sv)))), 0)
+			return this, nil
+		}
+		return sv, nil
 	})
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", rt.stringProto, 0)

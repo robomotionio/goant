@@ -211,7 +211,26 @@ func (rt *Runtime) initTypedArrays() {
 	rt.typedArrayProto = taProto
 	tp := rt.objPtr(taProto)
 	rt.defineTypedArrayMethods(tp)
-	rt.setStringTag(taProto, "TypedArray")
+	// %TypedArray%.prototype[@@toStringTag] is a getter returning the element-kind
+	// name (e.g. "Int8Array"), or undefined for a non-typed-array receiver.
+	if rt.symToStringTag != 0 {
+		g := rt.newNativeFunc("get [Symbol.toStringTag]", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			o := rt.objPtr(this)
+			if o == nil || o.ta == nil {
+				return mkundef(), nil
+			}
+			return rt.internString(taKinds[o.ta.kind].name), nil
+		})
+		tp.defineAccessorSymbol(rt.symToStringTag.handle(), g, mkundef(), true, false, attrConfigurable)
+	}
+
+	// %TypedArray% — the abstract constructor each per-kind constructor inherits
+	// from (23.2.1); it can't be called directly.
+	taCtor := rt.newNativeFunc("TypedArray", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return mkundef(), rt.typeError("Abstract class TypedArray not directly constructable")
+	})
+	rt.objPtr(taCtor).defineOwn("prototype", taProto, 0)
+	tp.defineOwn("constructor", taCtor, attrWritable|attrConfigurable)
 
 	rt.typedArrayProtos = make([]Value, len(taKinds))
 	for k := range taKinds {
@@ -226,6 +245,7 @@ func (rt *Runtime) initTypedArrays() {
 			return rt.newTypedArray(kind, args)
 		})
 		cobj := rt.objPtr(ctor)
+		cobj.proto = taCtor // Int8Array.__proto__ === %TypedArray%
 		cobj.defineOwn("prototype", proto, 0)
 		cobj.defineOwn("BYTES_PER_ELEMENT", mknum(float64(info.size)), 0)
 		rt.objPtr(proto).defineOwn("constructor", ctor, attrWritable|attrConfigurable)

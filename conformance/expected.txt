@@ -653,6 +653,7 @@ compat-table/es6/template.permanent-caching.js
 compat-table/es6/template.tagged.js
 compat-table/es6/typed-arrays.ArrayBuffer.Symbol.species.js
 compat-table/es6/typed-arrays.constructor-iterables.js
+compat-table/es6/typed-arrays.correct-prototype-chains.js
 compat-table/es6/typed-arrays.DataView.Float32.js
 compat-table/es6/typed-arrays.DataView.Float64.js
 compat-table/es6/typed-arrays.DataView.Int16.js
@@ -736,6 +737,7 @@ compat-table/es6/well-known.toPrimitive.js
 compat-table/es6/well-known.toStringTag.existing-builtins.js
 compat-table/es6/well-known.toStringTag.js
 compat-table/es6/well-known.toStringTag.misc-builtins.js
+compat-table/es6/well-known.toStringTag.new-builtins.js
 compat-table/es6/well-known.unscopables.js
 compat-table/intl/Array.prototype.toLocaleString.js
 compat-table/intl/Date.prototype.toLocaleDateString.js
