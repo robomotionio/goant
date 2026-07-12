@@ -24,8 +24,9 @@ type Regexp struct {
 	IgnoreCase bool
 	Multiline  bool
 	DotAll     bool
-	Unicode    bool
-	Sticky     bool
+	Unicode     bool
+	UnicodeSets bool
+	Sticky      bool
 }
 
 // Group is one capture group in a match (Index is a rune offset; -1 = unmatched).
@@ -67,6 +68,12 @@ func Compile(pattern, flags string) (*Regexp, error) {
 		case 'u':
 			r.Unicode = true
 			opts |= regexp2.Unicode
+		case 'v':
+			// unicodeSets mode: treat like `u` and additionally resolve class set
+			// operations (&&, --) ahead of compilation.
+			r.Unicode = true
+			r.UnicodeSets = true
+			opts |= regexp2.Unicode
 		case 'y':
 			r.Sticky = true
 		case 'd':
@@ -79,6 +86,13 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	src := pattern
 	// Under the u/v flag, translate ES Unicode property escapes (\p{…}) into
 	// explicit code-point classes regexp2 can compile.
+	if r.UnicodeSets {
+		t, terr := translateVFlagSets(src)
+		if terr != nil {
+			return nil, fmt.Errorf("invalid regular expression: %v", terr)
+		}
+		src = t
+	}
 	if r.Unicode && (strings.Contains(src, `\p`) || strings.Contains(src, `\P`)) {
 		t, terr := translateUnicodeProps(src)
 		if terr != nil {

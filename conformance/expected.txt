@@ -187,6 +187,7 @@ compat-table/es2024/ArrayBuffer.prototype.transferToFixedLength.js
 compat-table/es2024/Map.groupBy.js
 compat-table/es2024/Object.groupBy.js
 compat-table/es2024/Promise.withResolvers.js
+compat-table/es2024/regex.flags.v.set-notations.js
 compat-table/es2024/regex.flags.v.shows-in-flags.js
 compat-table/es2025/Iterator.extends.js
 compat-table/es2025/Iterator.from.iterable.js
