@@ -568,7 +568,13 @@ restart:
 			}
 			ip += 5
 		case OpGetLocal:
-			push(locals[readU16(code, ip+1)])
+			lv := locals[readU16(code, ip+1)]
+			if lv.IsEmpty() {
+				// Reading a lexical binding still in its temporal dead zone.
+				thrown = rt.referenceError("Cannot access a lexical binding before initialization")
+				goto unwind
+			}
+			push(lv)
 			ip += 3
 		case OpPutLocal:
 			locals[readU16(code, ip+1)] = pop()
@@ -1022,7 +1028,12 @@ restart:
 			}
 			ip += 3
 		case OpGetUpval:
-			push(cl.upvalues[readU16(code, ip+1)].get())
+			uv := cl.upvalues[readU16(code, ip+1)].get()
+			if uv.IsEmpty() {
+				thrown = rt.referenceError("Cannot access a lexical binding before initialization")
+				goto unwind
+			}
+			push(uv)
 			ip += 3
 		case OpPutUpval:
 			cl.upvalues[readU16(code, ip+1)].set(pop())

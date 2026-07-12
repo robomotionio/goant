@@ -359,6 +359,20 @@ func (c *compiler) compileClass(n *Node) {
 	ctorSlot := c.tempLocal()
 	protoSlot := c.tempLocal()
 
+	// A named class has an inner, immutable binding of its own name scoped to the
+	// class body: methods close over it, and it is unaffected by reassignment of
+	// any outer binding of the same name (class.lexical-name).
+	classNameSlot := -1
+	if n.Str != "" {
+		c.scopeDepth++
+		classNameSlot = c.declareLexical(n.Str, true)
+		// The binding starts uninitialized (TDZ) so a computed member key that
+		// reads the class name throws (class.computed-names-tdz); it is filled with
+		// the constructor only after all members are defined.
+		c.emit(OpEmpty)
+		c.emitOpU16(OpPutLocal, uint16(classNameSlot))
+	}
+
 	// Find the constructor method, if any.
 	var ctorFn *Node
 	for _, m := range n.Args {
@@ -527,6 +541,16 @@ func (c *compiler) compileClass(n *Node) {
 		c.emitU32(uint32(idx))
 		c.emitByte(flags)
 		c.emit(OpPop)
+	}
+
+	// Now that all members (including computed keys) are defined, initialize the
+	// inner class-name binding to the constructor so method bodies see the class,
+	// then close its scope (the methods have already captured the binding).
+	if classNameSlot >= 0 {
+		c.emitOpU16(OpGetLocal, uint16(ctorSlot))
+		c.emitOpU16(OpPutLocal, uint16(classNameSlot))
+		c.scopeDepth--
+		c.popBlockScope()
 	}
 
 	// The class value is the constructor.

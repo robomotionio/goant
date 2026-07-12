@@ -392,6 +392,7 @@ compat-table/es6/class.extends-expressions.js
 compat-table/es6/class.extends.js
 compat-table/es6/class.extends-null.js
 compat-table/es6/class.implicit-strict.js
+compat-table/es6/class.lexical-name.js
 compat-table/es6/class.methods-not-enumerable.js
 compat-table/es6/class.new-target.js
 compat-table/es6/class.optional-semicolons.js
