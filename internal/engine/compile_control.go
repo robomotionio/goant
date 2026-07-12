@@ -80,9 +80,16 @@ func (c *compiler) compileDoWhile(n *Node) {
 func (c *compiler) compileFor(n *Node) {
 	c.scopeDepth++
 	// Initializer (a declaration or expression statement).
+	lexSlot := -1
 	if n.Init != nil {
 		if n.Init.Kind == NVar {
 			c.compileVarDecl(n.Init)
+			// A single let/const init variable gets a fresh per-iteration binding.
+			if (n.Init.VarKind == VarLet || n.Init.VarKind == VarConst) &&
+				len(n.Init.Args) == 1 && n.Init.Args[0].Left != nil &&
+				n.Init.Args[0].Left.Kind == NIdent {
+				lexSlot = c.resolveLocal(n.Init.Args[0].Left.Str)
+			}
 		} else {
 			c.compileExpr(n.Init)
 			c.emit(OpPop)
@@ -105,6 +112,11 @@ func (c *compiler) compileFor(n *Node) {
 	// Continue jumps target the update clause.
 	l.continueTarget = len(c.fn.code)
 	c.patchContinues(l)
+	// Per-iteration lexical binding: close the loop var's captures before the
+	// update mutates it for the next iteration.
+	if lexSlot >= 0 {
+		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
+	}
 	if n.Update != nil {
 		c.compileExpr(n.Update)
 		c.emit(OpPop)
@@ -130,7 +142,7 @@ func (c *compiler) compileForOf(n *Node) { c.compileForArray(n, OpForOf) }
 // the source into an array (keys or values), which is then iterated by index.
 func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	c.scopeDepth++
-	store := c.forInStore(n.Left)
+	store, lexSlot := c.forInStore(n.Left)
 	if store == nil {
 		c.errorf("unsupported for-in/of target (slice)")
 		c.scopeDepth--
@@ -167,6 +179,11 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	// continue target: i++
 	l.continueTarget = len(c.fn.code)
 	c.patchContinues(l)
+	// Per-iteration lexical binding: close any closure capture of the loop var
+	// before the next iteration reuses its slot.
+	if lexSlot >= 0 {
+		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
+	}
 	c.emitOpU16(OpGetLocal, uint16(iSlot))
 	c.emit(OpInc)
 	c.emitOpU16(OpPutLocal, uint16(iSlot))
@@ -179,8 +196,10 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 }
 
 // forInStore returns a closure that stores the top-of-stack value into the
-// for-in loop binding (declaring it if it is a fresh let/const/local var).
-func (c *compiler) forInStore(left *Node) func() {
+// for-in loop binding (declaring it if it is a fresh let/const/local var). The
+// second result is the loop variable's local slot when it is lexically block-
+// scoped (let/const), so the caller can close per-iteration captures; -1 else.
+func (c *compiler) forInStore(left *Node) (func(), int) {
 	var name string
 	switch {
 	case left.Kind == NVar && len(left.Args) == 1 && left.Args[0].Left != nil:
@@ -188,33 +207,35 @@ func (c *compiler) forInStore(left *Node) func() {
 		// Destructuring loop variable: for (var [k,v] of …).
 		if binding.Kind == NArray || binding.Kind == NObject {
 			kind := left.VarKind
-			return func() { c.destructureTarget(binding, kind) }
+			return func() { c.destructureTarget(binding, kind) }, -1
 		}
 		if binding.Kind != NIdent {
-			return nil
+			return nil, -1
 		}
 		name = binding.Str
 		if !(left.VarKind == VarVar && c.isScript) {
 			var slot int
+			lexSlot := -1
 			if left.VarKind == VarLet || left.VarKind == VarConst {
 				slot = c.declareLexical(name, left.VarKind == VarConst)
+				lexSlot = slot
 			} else {
 				slot = c.declareVar(name, false)
 			}
-			return func() { c.emitOpU16(OpPutLocal, uint16(slot)) }
+			return func() { c.emitOpU16(OpPutLocal, uint16(slot)) }, lexSlot
 		}
 	case left.Kind == NIdent:
 		name = left.Str
 	default:
-		return nil
+		return nil, -1
 	}
 	if slot := c.resolveLocal(name); slot >= 0 {
-		return func() { c.emitOpU16(OpPutLocal, uint16(slot)) }
+		return func() { c.emitOpU16(OpPutLocal, uint16(slot)) }, -1
 	}
 	if uv := c.resolveUpvalue(name); uv >= 0 {
-		return func() { c.emitOpU16(OpPutUpval, uint16(uv)) }
+		return func() { c.emitOpU16(OpPutUpval, uint16(uv)) }, -1
 	}
-	return func() { c.emitGlobalPut(name) }
+	return func() { c.emitGlobalPut(name) }, -1
 }
 
 func (c *compiler) compileBreak(n *Node) {

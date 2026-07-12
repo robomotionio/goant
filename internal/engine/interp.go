@@ -640,6 +640,17 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			push(pendingThrow)
 			ip += 5
 
+		case OpCloseUpval:
+			// Close any open upvalue over this local slot (per-iteration lexical
+			// binding: the next iteration captures a fresh cell).
+			slot := int(readU16(code, ip+1))
+			if openUpvals != nil {
+				if u, ok := openUpvals[slot]; ok {
+					u.closeUp()
+					delete(openUpvals, slot)
+				}
+			}
+			ip += 3
 		case OpGetUpval:
 			push(cl.upvalues[readU16(code, ip+1)].get())
 			ip += 3
