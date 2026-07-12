@@ -101,12 +101,19 @@ func (rt *Runtime) initNumberBuiltin() {
 	})
 
 	ctor := rt.newNativeFunc("Number", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if len(args) == 0 {
-			return mknum(0), nil
+		n := 0.0
+		if len(args) > 0 {
+			v, e := rt.toNumber(args[0])
+			if e != nil {
+				return mkundef(), e
+			}
+			n = v
 		}
-		n, e := rt.toNumber(args[0])
-		if e != nil {
-			return mkundef(), e
+		// new Number(x) (incl. `super(x)` from a subclass): a Number exotic object
+		// wrapping the primitive in its [[NumberData]] slot.
+		if o := rt.objPtr(this); o != nil {
+			o.boxed = mknum(n)
+			return this, nil
 		}
 		return mknum(n), nil
 	})
@@ -163,15 +170,26 @@ func (rt *Runtime) initNumberBuiltin() {
 
 func (rt *Runtime) initBooleanBuiltin() {
 	proto := rt.objPtr(rt.booleanProto)
-	rt.defMethod(proto, "valueOf", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	// thisBool resolves the receiver's boolean primitive: either a boolean value
+	// or the [[BooleanData]] of a Boolean wrapper object.
+	thisBool := func(this Value) (bool, bool) {
 		if this.Type() == TBool {
-			return this, nil
+			return this.Bool(), true
+		}
+		if o := rt.objPtr(this); o != nil && o.boxed.Type() == TBool {
+			return o.boxed.Bool(), true
+		}
+		return false, false
+	}
+	rt.defMethod(proto, "valueOf", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if b, ok := thisBool(this); ok {
+			return mkbool(b), nil
 		}
 		return mkundef(), rt.typeError("Boolean.prototype.valueOf requires a boolean")
 	})
 	rt.defMethod(proto, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if this.Type() == TBool {
-			if this.Bool() {
+		if b, ok := thisBool(this); ok {
+			if b {
 				return rt.internString("true"), nil
 			}
 			return rt.internString("false"), nil
@@ -179,7 +197,13 @@ func (rt *Runtime) initBooleanBuiltin() {
 		return mkundef(), rt.typeError("Boolean.prototype.toString requires a boolean")
 	})
 	ctor := rt.newNativeFunc("Boolean", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return mkbool(rt.toBoolean(arg(args, 0))), nil
+		b := rt.toBoolean(arg(args, 0))
+		// new Boolean(x) (incl. subclass `super(x)`): a Boolean wrapper object.
+		if o := rt.objPtr(this); o != nil {
+			o.boxed = mkbool(b)
+			return this, nil
+		}
+		return mkbool(b), nil
 	})
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", rt.booleanProto, 0)

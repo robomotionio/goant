@@ -394,6 +394,21 @@ func (o *object) ownKeysEnumerable() []string {
 	return orderOwnKeys(keys)
 }
 
+// ownKeysForIn returns own string keys in spec order together with a map of their
+// enumerability. for-in must add every own key to its "seen" set (so a shadowing
+// non-enumerable own property hides an inherited enumerable one) while only
+// yielding the enumerable ones.
+func (o *object) ownKeysForIn() ([]string, map[string]bool) {
+	enum := make(map[string]bool, o.shape.count())
+	for i := 0; i < o.shape.count(); i++ {
+		p := &o.shape.props[i]
+		if !p.key.sym {
+			enum[p.key.str] = p.attrs&attrEnumerable != 0
+		}
+	}
+	return o.ownKeys(), enum
+}
+
 // orderOwnKeys reorders own string keys into ES OwnPropertyKeys order: canonical
 // array-index keys first (ascending numeric), then the rest in insertion order.
 func orderOwnKeys(keys []string) []string {

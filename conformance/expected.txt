@@ -273,6 +273,7 @@ compat-table/es5/literals.setter-accessors.js
 compat-table/es5/literals.trailing-comma-array.js
 compat-table/es5/literals.trailing-comma-object.js
 compat-table/es5/misc.Arguments.toStringTag.js
+compat-table/es5/misc.enumerable-shadow.js
 compat-table/es5/misc.Function.apply.array-likes.js
 compat-table/es5/misc.Function.prototype.non-enumerable.js
 compat-table/es5/misc.parseInt.ignores-leading-zeros.js
@@ -862,9 +863,12 @@ compat-table/es6/subclassing.Function.prototype.apply.js
 compat-table/es6/subclassing.Function.prototype.bind.js
 compat-table/es6/subclassing.Function.prototype.call.js
 compat-table/es6/subclassing.Function.prototype-chain.js
+compat-table/es6/subclassing.misc.Boolean.js
 compat-table/es6/subclassing.misc.Error.js
 compat-table/es6/subclassing.misc.Map.js
+compat-table/es6/subclassing.misc.Number.js
 compat-table/es6/subclassing.misc.Set.js
+compat-table/es6/subclassing.misc.String.js
 compat-table/es6/subclassing.Promise.all.js
 compat-table/es6/subclassing.Promise.js
 compat-table/es6/subclassing.Promise.prototype-chain.js

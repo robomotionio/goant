@@ -120,9 +120,15 @@ func (rt *Runtime) forInKeys(obj Value) Value {
 				}
 			}
 		}
-		for _, k := range o.ownKeysEnumerable() {
-			if !seen[k] {
-				seen[k] = true
+		// Every own key (enumerable or not) shadows inherited keys of the same name;
+		// only enumerable own keys are actually enumerated.
+		keys, enum := o.ownKeysForIn()
+		for _, k := range keys {
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			if enum[k] {
 				rt.arraySet(ao, ao.arrLen, rt.internString(k))
 			}
 		}

@@ -233,6 +233,15 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 				return rt.charAt(b, int(idx)), nil
 			}
 			return mkundef(), nil
+		default:
+			// String exotic object (new String / a String subclass instance): an
+			// index in range reads the wrapped character.
+			if o := rt.objPtr(obj); o != nil && o.boxed.Type() == TStr {
+				b := rt.strBytes(o.boxed)
+				if int(idx) < utf16Len(b) {
+					return rt.charAt(b, int(idx)), nil
+				}
+			}
 		}
 	}
 	name, e := rt.propKeyString(key)
