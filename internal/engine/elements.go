@@ -101,6 +101,22 @@ func (rt *Runtime) setField(obj Value, name string, v Value) *ThrowError {
 	return e
 }
 
+// createDataProperty implements CreateDataProperty(O, P, V): defines a fresh
+// enumerable/writable/configurable own data property. On a Proxy this uses the
+// defineProperty trap (a plain [[Set]] would wrongly fire the set trap).
+func (rt *Runtime) createDataProperty(obj, key, v Value) *ThrowError {
+	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
+		desc := rt.newPlainObject()
+		do := rt.objPtr(desc)
+		do.defineOwn("value", v, attrDefault)
+		do.defineOwn("writable", mktrue(), attrDefault)
+		do.defineOwn("enumerable", mktrue(), attrDefault)
+		do.defineOwn("configurable", mktrue(), attrDefault)
+		return rt.proxyDefineProperty(o.proxy, rt.toPropertyKeyValue(key), desc)
+	}
+	return rt.setElement(obj, key, v)
+}
+
 // setFieldR writes obj.name = v, returning whether the write took effect (false
 // = rejected by a non-writable data property, a setter-less accessor, or a
 // non-extensible object). Callers in strict mode turn a false into a TypeError.

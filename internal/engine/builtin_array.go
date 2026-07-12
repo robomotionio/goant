@@ -971,7 +971,12 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), e
 		}
 		for i, a := range args {
-			rt.setElement(res, mknum(float64(i)), a)
+			if e := rt.createDataProperty(res, mknum(float64(i)), a); e != nil {
+				return mkundef(), e
+			}
+		}
+		if e := rt.setField(res, "length", mknum(float64(len(args)))); e != nil {
+			return mkundef(), e
 		}
 		return res, nil
 	})
@@ -1012,7 +1017,12 @@ func (rt *Runtime) initArrayBuiltin() {
 				}
 				v = mv
 			}
-			rt.setElement(res, mknum(float64(i)), v)
+			if e := rt.createDataProperty(res, mknum(float64(i)), v); e != nil {
+				return mkundef(), e
+			}
+		}
+		if e := rt.setField(res, "length", mknum(float64(len(items)))); e != nil {
+			return mkundef(), e
 		}
 		return res, nil
 	})

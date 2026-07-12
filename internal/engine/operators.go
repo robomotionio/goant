@@ -155,8 +155,13 @@ func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
 // Phase 5).
 func (rt *Runtime) jsInstanceof(l, r Value) (bool, *ThrowError) {
 	// A Symbol.hasInstance method on the RHS overrides the ordinary check.
+	// getElement routes the lookup through a Proxy's [[Get]] trap (GetMethod).
 	if rt.symHasInstance != 0 && r.IsObjectType() {
-		if hi := rt.getFieldSymbol(r, rt.symHasInstance.handle()); rt.isCallable(hi) {
+		hi, e := rt.getElement(r, rt.symHasInstance)
+		if e != nil {
+			return false, e
+		}
+		if rt.isCallable(hi) {
 			res, e := rt.callValue(hi, r, []Value{l})
 			if e != nil {
 				return false, e
