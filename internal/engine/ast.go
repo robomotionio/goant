@@ -196,6 +196,38 @@ func isUseStrict(n *Node) bool {
 	return n != nil && n.Kind == NString && n.Str == "use strict"
 }
 
+// bodyHasUseStrict reports whether a function body's directive prologue contains
+// a "use strict" directive (a leading run of string-literal statements).
+func bodyHasUseStrict(body *Node) bool {
+	if body == nil {
+		return false
+	}
+	for _, stmt := range body.Args {
+		if stmt == nil || stmt.Kind == NEmpty {
+			continue
+		}
+		if stmt.Kind != NString {
+			return false // prologue ended
+		}
+		if isUseStrict(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasNonSimpleParams reports whether any parameter is a rest, default, or
+// destructuring binding (i.e. the list is not a simple identifier list). Such a
+// list forbids an explicit "use strict" directive in the body.
+func hasNonSimpleParams(fn *Node) bool {
+	for _, p := range fn.Args {
+		if p == nil || p.Kind != NIdent {
+			return true
+		}
+	}
+	return false
+}
+
 // referencesArguments reports whether the subtree reads `arguments`, not
 // crossing into nested non-arrow functions (ant ast_references_arguments).
 func referencesArguments(n *Node) bool {

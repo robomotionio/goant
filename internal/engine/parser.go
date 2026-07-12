@@ -1333,6 +1333,11 @@ func (p *parser) parseFunc() *Node {
 	p.inAsync = isAsync // the body establishes the await context
 	fn.Body = p.parseBlock(true)
 	fn.SrcEnd = uint32(p.toff() + p.tlen())
+	// A function with a non-simple parameter list (rest / default / destructuring)
+	// may not carry an explicit "use strict" directive (ES2016 §14.1.2).
+	if bodyHasUseStrict(fn.Body) && hasNonSimpleParams(fn) {
+		p.errorf("Illegal 'use strict' directive in function with non-simple parameter list")
+	}
 	if fn.Flags&fnArrow == 0 && referencesArguments(fn.Body) {
 		fn.Flags |= fnUsesArgs
 	}
