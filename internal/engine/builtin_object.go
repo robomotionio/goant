@@ -89,9 +89,16 @@ func (rt *Runtime) initObjectBuiltin() {
 		return rt.objectKeys(arg(args, 0)), nil
 	})
 	rt.defMethod(cobj, "getPrototypeOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(arg(args, 0))
+		obj, e := rt.toObjectValue(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		o := rt.objPtr(obj)
 		if o == nil {
 			return mknull(), nil
+		}
+		if o.proxy != nil {
+			return rt.proxyGetPrototypeOf(o.proxy)
 		}
 		if o.proto.IsObjectType() {
 			return o.proto, nil
@@ -135,6 +142,9 @@ func (rt *Runtime) initObjectBuiltin() {
 		o := rt.objPtr(arg(args, 0))
 		if o == nil {
 			return mkundef(), nil
+		}
+		if o.proxy != nil {
+			return rt.proxyGetOwnPropertyDescriptor(o.proxy, arg(args, 1))
 		}
 		name, e := rt.propKeyString(arg(args, 1))
 		if e != nil {
@@ -195,12 +205,22 @@ func (rt *Runtime) initObjectBuiltin() {
 	})
 	rt.defMethod(cobj, "preventExtensions", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if o := rt.objPtr(arg(args, 0)); o != nil {
-			o.flags.extensible = false
+			if o.proxy != nil {
+				if e := rt.proxyPreventExtensions(o.proxy); e != nil {
+					return mkundef(), e
+				}
+			} else {
+				o.flags.extensible = false
+			}
 		}
 		return arg(args, 0), nil
 	})
 	rt.defMethod(cobj, "isExtensible", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(arg(args, 0))
+		if o != nil && o.proxy != nil {
+			ext, e := rt.proxyIsExtensible(o.proxy)
+			return mkbool(ext), e
+		}
 		return mkbool(o != nil && o.flags.extensible), nil
 	})
 	rt.defMethod(cobj, "seal", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -250,7 +270,11 @@ func (rt *Runtime) initObjectBuiltin() {
 		obj := arg(args, 0)
 		if o := rt.objPtr(obj); o != nil {
 			p := arg(args, 1)
-			if p.IsObjectType() || p.IsNull() {
+			if o.proxy != nil {
+				if e := rt.proxySetPrototypeOf(o.proxy, p); e != nil {
+					return mkundef(), e
+				}
+			} else if p.IsObjectType() || p.IsNull() {
 				o.proto = p
 			}
 		}
@@ -333,6 +357,9 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	o := rt.objPtr(obj)
 	if o == nil {
 		return rt.typeError("Object.defineProperty called on non-object")
+	}
+	if o.proxy != nil {
+		return rt.proxyDefineProperty(o.proxy, key, descVal)
 	}
 	sym := key.IsSymbol()
 	name := ""

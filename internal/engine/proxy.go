@@ -151,6 +151,92 @@ func (rt *Runtime) proxyGetPrototypeOf(p *proxyState) (Value, *ThrowError) {
 	return mknull(), nil
 }
 
+func (rt *Runtime) proxyGetOwnPropertyDescriptor(p *proxyState, key Value) (Value, *ThrowError) {
+	trap, e := p.trap(rt, "getOwnPropertyDescriptor")
+	if e != nil {
+		return mkundef(), e
+	}
+	if rt.isCallable(trap) {
+		return rt.callValue(trap, p.handler, []Value{p.target, rt.toPropertyKeyValue(key)})
+	}
+	// Forward to target.
+	to := rt.objPtr(p.target)
+	if to == nil {
+		return mkundef(), nil
+	}
+	var d ownDesc
+	if key.IsSymbol() {
+		d = to.ownDescriptorSym(key.handle())
+	} else {
+		name, _ := rt.propKeyString(key)
+		d = to.ownDescriptor(name)
+	}
+	if !d.exists {
+		return mkundef(), nil
+	}
+	return rt.descriptorToObject(d), nil
+}
+
+func (rt *Runtime) proxyDefineProperty(p *proxyState, key, desc Value) *ThrowError {
+	trap, e := p.trap(rt, "defineProperty")
+	if e != nil {
+		return e
+	}
+	if rt.isCallable(trap) {
+		_, e := rt.callValue(trap, p.handler, []Value{p.target, rt.toPropertyKeyValue(key), desc})
+		return e
+	}
+	return rt.objectDefinePropertyKey(p.target, rt.toPropertyKeyValue(key), desc)
+}
+
+func (rt *Runtime) proxySetPrototypeOf(p *proxyState, proto Value) *ThrowError {
+	trap, e := p.trap(rt, "setPrototypeOf")
+	if e != nil {
+		return e
+	}
+	if rt.isCallable(trap) {
+		_, e := rt.callValue(trap, p.handler, []Value{p.target, proto})
+		return e
+	}
+	if to := rt.objPtr(p.target); to != nil && (proto.IsObjectType() || proto.IsNull()) {
+		to.proto = proto
+	}
+	return nil
+}
+
+func (rt *Runtime) proxyIsExtensible(p *proxyState) (bool, *ThrowError) {
+	trap, e := p.trap(rt, "isExtensible")
+	if e != nil {
+		return false, e
+	}
+	if rt.isCallable(trap) {
+		r, e := rt.callValue(trap, p.handler, []Value{p.target})
+		if e != nil {
+			return false, e
+		}
+		return rt.toBoolean(r), nil
+	}
+	if to := rt.objPtr(p.target); to != nil {
+		return to.flags.extensible, nil
+	}
+	return false, nil
+}
+
+func (rt *Runtime) proxyPreventExtensions(p *proxyState) *ThrowError {
+	trap, e := p.trap(rt, "preventExtensions")
+	if e != nil {
+		return e
+	}
+	if rt.isCallable(trap) {
+		_, e := rt.callValue(trap, p.handler, []Value{p.target})
+		return e
+	}
+	if to := rt.objPtr(p.target); to != nil {
+		to.flags.extensible = false
+	}
+	return nil
+}
+
 func (rt *Runtime) proxyApply(p *proxyState, thisArg Value, args []Value) (Value, *ThrowError) {
 	trap, e := p.trap(rt, "apply")
 	if e != nil {
