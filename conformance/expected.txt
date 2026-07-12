@@ -551,6 +551,7 @@ compat-table/es6/Symbol.global-registry.js
 compat-table/es6/Symbol.hidden-keys.js
 compat-table/es6/Symbol.JSON.stringify.primitive.js
 compat-table/es6/Symbol.no-new.js
+compat-table/es6/Symbol.Object.js
 compat-table/es6/Symbol.prototype.js
 compat-table/es6/Symbol.String.js
 compat-table/es6/Symbol.typeof.js

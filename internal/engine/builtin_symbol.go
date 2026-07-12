@@ -13,6 +13,18 @@ func (rt *Runtime) newSymbol(desc Value) Value {
 	return mkval(TSymbol, uint64(h))
 }
 
+// thisSymbol unwraps a Symbol.prototype receiver: a raw symbol, or a boxed
+// Symbol wrapper object (from Object(symbol)).
+func (rt *Runtime) thisSymbol(this Value) (Value, bool) {
+	if this.IsSymbol() {
+		return this, true
+	}
+	if o := rt.objPtr(this); o != nil && o.boxed.IsSymbol() {
+		return o.boxed, true
+	}
+	return mkundef(), false
+}
+
 // symbolDesc returns a symbol's description Value (undefined if none).
 func (rt *Runtime) symbolDesc(v Value) Value {
 	if s := rt.symbols.get(Handle(v.handle())); s != nil {
@@ -27,10 +39,11 @@ func (rt *Runtime) initSymbolBuiltin() {
 	po := rt.objPtr(proto)
 
 	rt.defMethod(po, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if !this.IsSymbol() {
+		sym, ok := rt.thisSymbol(this)
+		if !ok {
 			return mkundef(), rt.typeError("Symbol.prototype.toString requires a symbol")
 		}
-		d := rt.symbolDesc(this)
+		d := rt.symbolDesc(sym)
 		ds := ""
 		if d.IsString() {
 			ds = string(rt.strBytes(d))
@@ -38,16 +51,18 @@ func (rt *Runtime) initSymbolBuiltin() {
 		return rt.newString("Symbol(" + ds + ")"), nil
 	})
 	rt.defMethod(po, "valueOf", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if !this.IsSymbol() {
+		sym, ok := rt.thisSymbol(this)
+		if !ok {
 			return mkundef(), rt.typeError("Symbol.prototype.valueOf requires a symbol")
 		}
-		return this, nil
+		return sym, nil
 	})
 	po.defineAccessor("description", rt.newNativeFunc("description", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if !this.IsSymbol() {
+		sym, ok := rt.thisSymbol(this)
+		if !ok {
 			return mkundef(), rt.typeError("Symbol.prototype.description requires a symbol")
 		}
-		return rt.symbolDesc(this), nil
+		return rt.symbolDesc(sym), nil
 	}), mkundef(), true, false, attrConfigurable)
 
 	// Symbol() constructor (not newable).

@@ -83,10 +83,11 @@ func (rt *Runtime) initObjectBuiltin() {
 		if v.IsNullish() {
 			return rt.newPlainObject(), nil
 		}
-		if v.IsObjectType() {
+		if v.IsObjectType() || v.Type() == TTypedArray {
 			return v, nil
 		}
-		return rt.newPlainObject(), nil // primitive wrapper boxing (Phase 4 refine)
+		// Box the primitive into its wrapper (String/Number/Boolean/Symbol).
+		return rt.toObjectValue(v)
 	})
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", rt.objectProto, 0)
