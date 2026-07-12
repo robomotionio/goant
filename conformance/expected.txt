@@ -558,6 +558,9 @@ compat-table/es6/well-known.hasInstance.js
 compat-table/es6/well-known.isConcatSpreadable.non-spreadable.js
 compat-table/es6/well-known.iterator.js
 compat-table/es6/well-known.match.js
+compat-table/es6/well-known.match.String.endsWith.js
+compat-table/es6/well-known.match.String.includes.js
+compat-table/es6/well-known.match.String.startsWith.js
 compat-table/es6/well-known.replace.js
 compat-table/es6/well-known.search.js
 compat-table/es6/well-known.species.Array.concat.js

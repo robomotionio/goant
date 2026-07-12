@@ -10,10 +10,19 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// isRegExpValue reports whether v is a RegExp object.
+// isRegExpValue implements ES IsRegExp: an object whose Symbol.match is truthy
+// is "regexp-like", otherwise the real [[RegExpMatcher]] (o.regex) decides.
 func (rt *Runtime) isRegExpValue(v Value) bool {
 	o := rt.objPtr(v)
-	return o != nil && o.regex != nil
+	if o == nil {
+		return false
+	}
+	if rt.symMatch != 0 {
+		if m := rt.getFieldSymbol(v, rt.symMatch.handle()); !m.IsUndefined() {
+			return rt.toBoolean(m)
+		}
+	}
+	return o.regex != nil
 }
 
 // thisStringBytes coerces a method receiver to its WTF-8 string bytes.
