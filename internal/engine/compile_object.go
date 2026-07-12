@@ -47,11 +47,14 @@ func (c *compiler) compileObject(n *Node) {
 			continue
 		}
 		if prop.Flags&fnComputed != 0 {
-			// obj stays on stack; DUP it for the element store.
+			// { [expr]: v }: CreateDataProperty (enumerable own data), bypassing any
+			// inherited setter (e.g. __proto__) that OpPutElem would trigger.
 			c.emit(OpDup)
 			c.compileExpr(prop.Left) // computed key
 			c.compileExpr(prop.Right)
-			c.emit(OpPutElem) // obj key val ->
+			c.emit(OpDefineMethodComp)
+			c.emitByte(3)
+			c.emit(OpPop) // DEFINE_METHOD_COMP leaves the target; drop the dup
 			continue
 		}
 		name, ok := propKeyName(prop.Left)

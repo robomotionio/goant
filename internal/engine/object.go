@@ -571,6 +571,10 @@ func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
 	k := rt.toPropertyKeyValue(key)
 	if k.IsSymbol() {
 		sym := k.handle()
+		if flags == 3 { // enumerable own data property (CreateDataProperty)
+			o.defineOwnSymbol(sym, accFn, attrWritable|attrEnumerable|attrConfigurable)
+			return
+		}
 		if flags == 0 {
 			o.defineOwnSymbol(sym, accFn, attrWritable|attrConfigurable)
 			return
@@ -591,6 +595,11 @@ func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
 	}
 	name, e := rt.propKeyString(k)
 	if e != nil {
+		return
+	}
+	if flags == 3 { // enumerable own data property (CreateDataProperty), bypassing
+		// any inherited setter such as Object.prototype's __proto__.
+		o.defineOwn(name, accFn, attrWritable|attrEnumerable|attrConfigurable)
 		return
 	}
 	if flags == 0 {
