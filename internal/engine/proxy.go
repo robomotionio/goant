@@ -316,23 +316,55 @@ func (rt *Runtime) proxyOwnKeys(p *proxyState) ([]Value, *ThrowError) {
 			}
 			seen[id] = true
 		}
-		return keys, nil
-	}
-	// Forward to target's own keys.
-	var out []Value
-	if to := rt.objPtr(p.target); to != nil {
-		if p.target.Type() == TArr {
-			for i := uint32(0); i < to.arrLen; i++ {
-				if int(i) < len(to.arr) && !to.arr[i].IsEmpty() {
-					out = append(out, rt.newString(itoaSmall(int(i))))
+		// Invariant: every non-configurable target key must appear; on a
+		// non-extensible target the result must be exactly the target's keys.
+		targetKeys := rt.targetOwnKeyList(p.target)
+		ext := rt.targetExtensible(p.target)
+		for _, tk := range targetKeys {
+			td, _ := rt.targetOwnDesc(p.target, tk)
+			inTrap := seen[rt.propKeyId(tk)]
+			if !inTrap && td.exists && !td.configable {
+				return nil, rt.typeError("'ownKeys' on proxy: trap result did not include a non-configurable property of the proxy target")
+			}
+			if !inTrap && !ext {
+				return nil, rt.typeError("'ownKeys' on proxy: trap result did not include a property of the non-extensible proxy target")
+			}
+		}
+		if !ext {
+			tset := make(map[string]bool, len(targetKeys))
+			for _, tk := range targetKeys {
+				tset[rt.propKeyId(tk)] = true
+			}
+			for _, k := range keys {
+				if !tset[rt.propKeyId(k)] {
+					return nil, rt.typeError("'ownKeys' on proxy: trap result included a property not present on the non-extensible proxy target")
 				}
 			}
 		}
-		for _, k := range to.ownKeys() {
-			out = append(out, rt.newString(k))
+		return keys, nil
+	}
+	return rt.targetOwnKeyList(p.target), nil
+}
+
+// targetOwnKeyList returns the target object's own keys (array indices first,
+// then string/symbol keys in insertion order) as property-key Values.
+func (rt *Runtime) targetOwnKeyList(target Value) []Value {
+	var out []Value
+	to := rt.objPtr(target)
+	if to == nil {
+		return out
+	}
+	if target.Type() == TArr {
+		for i := uint32(0); i < to.arrLen; i++ {
+			if int(i) < len(to.arr) && !to.arr[i].IsEmpty() {
+				out = append(out, rt.newString(itoaSmall(int(i))))
+			}
 		}
 	}
-	return out, nil
+	for _, k := range to.ownKeys() {
+		out = append(out, rt.newString(k))
+	}
+	return out
 }
 
 func (rt *Runtime) proxyGetPrototypeOf(p *proxyState) (Value, *ThrowError) {
@@ -434,8 +466,32 @@ func (rt *Runtime) proxyDefineProperty(p *proxyState, key, desc Value) *ThrowErr
 		return e
 	}
 	if rt.isCallable(trap) {
-		_, e := rt.callValue(trap, p.handler, []Value{p.target, rt.toPropertyKeyValue(key), desc})
-		return e
+		r, e := rt.callValue(trap, p.handler, []Value{p.target, rt.toPropertyKeyValue(key), desc})
+		if e != nil {
+			return e
+		}
+		if !rt.toBoolean(r) {
+			return nil
+		}
+		// [[DefineOwnProperty]] invariants (10.5.6).
+		td, texists := rt.targetOwnDesc(p.target, key)
+		ext := rt.targetExtensible(p.target)
+		settingConfigFalse := rt.hasProp(desc, "configurable")
+		if settingConfigFalse {
+			cf, _ := rt.getField(desc, "configurable")
+			settingConfigFalse = !rt.toBoolean(cf)
+		}
+		if !texists {
+			if !ext {
+				return rt.typeError("'defineProperty' on proxy: trap returned truish for adding a property to the non-extensible proxy target")
+			}
+			if settingConfigFalse {
+				return rt.typeError("'defineProperty' on proxy: trap returned truish for defining a non-configurable property that does not exist on the proxy target")
+			}
+		} else if settingConfigFalse && td.configable {
+			return rt.typeError("'defineProperty' on proxy: trap returned truish for defining a non-configurable property that is configurable on the proxy target")
+		}
+		return nil
 	}
 	return rt.objectDefinePropertyKey(p.target, rt.toPropertyKeyValue(key), desc)
 }
@@ -446,8 +502,21 @@ func (rt *Runtime) proxySetPrototypeOf(p *proxyState, proto Value) *ThrowError {
 		return e
 	}
 	if rt.isCallable(trap) {
-		_, e := rt.callValue(trap, p.handler, []Value{p.target, proto})
-		return e
+		r, e := rt.callValue(trap, p.handler, []Value{p.target, proto})
+		if e != nil {
+			return e
+		}
+		// Invariant: a non-extensible target's prototype cannot be changed.
+		if rt.toBoolean(r) && !rt.targetExtensible(p.target) {
+			actual := mknull()
+			if to := rt.objPtr(p.target); to != nil {
+				actual = to.proto
+			}
+			if !rt.sameValue(proto, actual) {
+				return rt.typeError("'setPrototypeOf' on proxy: trap returned truish for setting a new prototype on the non-extensible proxy target")
+			}
+		}
+		return nil
 	}
 	if to := rt.objPtr(p.target); to != nil && (proto.IsObjectType() || proto.IsNull()) {
 		to.proto = proto
@@ -523,6 +592,10 @@ func (rt *Runtime) proxyApply(p *proxyState, thisArg Value, args []Value) (Value
 }
 
 func (rt *Runtime) proxyConstruct(p *proxyState, args []Value) (Value, *ThrowError) {
+	// A proxy has a [[Construct]] method only if its target is a constructor.
+	if !rt.isCallable(p.target) {
+		return mkundef(), rt.typeError("proxy target is not a constructor")
+	}
 	trap, e := p.trap(rt, "construct")
 	if e != nil {
 		return mkundef(), e
@@ -533,7 +606,15 @@ func (rt *Runtime) proxyConstruct(p *proxyState, args []Value) (Value, *ThrowErr
 		for _, a := range args {
 			rt.arraySet(ao, ao.arrLen, a)
 		}
-		return rt.callValue(trap, p.handler, []Value{p.target, argsArr, p.target})
+		res, e := rt.callValue(trap, p.handler, []Value{p.target, argsArr, p.target})
+		if e != nil {
+			return mkundef(), e
+		}
+		// Invariant: the construct trap must return an object.
+		if !res.IsObjectType() {
+			return mkundef(), rt.typeError("'construct' on proxy: trap returned a non-object")
+		}
+		return res, nil
 	}
 	return rt.construct(p.target, args)
 }

@@ -525,7 +525,9 @@ compat-table/es6/Proxy.Array.isArray.js
 compat-table/es6/Proxy.constructor-requires-new.js
 compat-table/es6/Proxy.handler.apply.invariants.js
 compat-table/es6/Proxy.handler.apply.js
+compat-table/es6/Proxy.handler.construct.invariants.js
 compat-table/es6/Proxy.handler.construct.js
+compat-table/es6/Proxy.handler.defineProperty.invariants.js
 compat-table/es6/Proxy.handler.defineProperty.js
 compat-table/es6/Proxy.handler.deleteProperty.invariants.js
 compat-table/es6/Proxy.handler.deleteProperty.js
@@ -541,12 +543,14 @@ compat-table/es6/Proxy.handler.has.invariants.js
 compat-table/es6/Proxy.handler.has.js
 compat-table/es6/Proxy.handler.isExtensible.invariants.js
 compat-table/es6/Proxy.handler.isExtensible.js
+compat-table/es6/Proxy.handler.ownKeys.invariants.js
 compat-table/es6/Proxy.handler.ownKeys.js
 compat-table/es6/Proxy.handler.preventExtensions.invariants.js
 compat-table/es6/Proxy.handler.preventExtensions.js
 compat-table/es6/Proxy.handler.set.instances.js
 compat-table/es6/Proxy.handler.set.invariants.js
 compat-table/es6/Proxy.handler.set.js
+compat-table/es6/Proxy.handler.setPrototypeOf.invariants.js
 compat-table/es6/Proxy.handler.setPrototypeOf.js
 compat-table/es6/Proxy.no-prototype.js
 compat-table/es6/Proxy.revocable.js
