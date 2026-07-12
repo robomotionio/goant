@@ -438,6 +438,7 @@ compat-table/es6/Map.constructor-accepts-null.js
 compat-table/es6/Map.constructor-arguments.js
 compat-table/es6/Map.constructor-invokes-set.js
 compat-table/es6/Map.constructor-requires-new.js
+compat-table/es6/Map.iterator-closing.js
 compat-table/es6/Map.iterator-prototype-chain.js
 compat-table/es6/Map.prototype.clear.js
 compat-table/es6/Map.prototype.delete.js

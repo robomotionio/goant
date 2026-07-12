@@ -212,9 +212,20 @@ func (rt *Runtime) initMapBuiltin() {
 		if it := arg(args, 0); !it.IsNullish() {
 			setFn, _ := rt.getField(this, "set")
 			if e := rt.iterateWithClose(it, func(entry Value) (bool, *ThrowError) {
-				k, _ := rt.getElement(entry, mknum(0))
-				v, _ := rt.getElement(entry, mknum(1))
-				_, e := rt.callValue(setFn, this, []Value{k, v})
+				// Each iterator value must be an entry object; a primitive aborts
+				// the loop with a TypeError, which closes the iterator.
+				if !entry.IsObjectType() {
+					return false, rt.typeError("Iterator value " + rt.inspect(entry, false) + " is not an entry object")
+				}
+				k, e := rt.getElement(entry, mknum(0))
+				if e != nil {
+					return false, e
+				}
+				v, e := rt.getElement(entry, mknum(1))
+				if e != nil {
+					return false, e
+				}
+				_, e = rt.callValue(setFn, this, []Value{k, v})
 				return false, e
 			}); e != nil {
 				return mkundef(), e
