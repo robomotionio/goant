@@ -196,6 +196,7 @@ func New() *Runtime {
 	rt.setStringTag(rt.generatorFuncProto, "GeneratorFunction")
 	rt.asyncGeneratorFnProto = rt.newObject(rt.functionProto)
 	rt.setStringTag(rt.asyncGeneratorFnProto, "AsyncGeneratorFunction")
+	rt.initFunctionFamily()
 	rt.initBuiltins()
 	rt.initMath()
 	rt.initObjectBuiltin()

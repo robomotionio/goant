@@ -30,6 +30,7 @@ compat-table/es2017/async.arrow.js
 compat-table/es2017/async.await.js
 compat-table/es2017/async.await-non-promise.js
 compat-table/es2017/async.await-rejection.js
+compat-table/es2017/async.constructor.js
 compat-table/es2017/async.methods-class.js
 compat-table/es2017/async.methods-object.js
 compat-table/es2017/async.must-await-value.js
@@ -389,6 +390,7 @@ compat-table/es6/Function.name.shorthand.js
 compat-table/es6/Function.name.shorthand.no-lexical.js
 compat-table/es6/Function.name.statement.js
 compat-table/es6/generators.basic.js
+compat-table/es6/generators.constructor.js
 compat-table/es6/generators.no-new-this.js
 compat-table/es6/generators.prototype-chain.js
 compat-table/es6/generators.return.js

@@ -117,10 +117,44 @@ func (rt *Runtime) initFunctionBuiltin() {
 
 	// Function constructor: compile `function anonymous(params) { body }` in the
 	// global scope and return the resulting function (ant dynamic Function).
-	ctor := rt.newNativeFunc("Function", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	ctor := rt.newNativeFunc("Function", 1, rt.dynamicFunctionCtor("function", rt.functionProto))
+	cobj := rt.objPtr(ctor)
+	cobj.defineOwn("prototype", rt.functionProto, 0)
+	proto.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	rt.defGlobal("Function", ctor)
+}
+
+// initFunctionFamily wires the dynamic-function cousins — %GeneratorFunction%,
+// %AsyncFunction%, %AsyncGeneratorFunction% — which build `function*` /
+// `async function` / `async function*` sources respectively. Each is reachable
+// as `f.constructor` of the matching function kind (via its prototype's
+// constructor slot) and is itself a subclass of Function (its [[Prototype]] is
+// the Function constructor). It runs after the family prototypes are created.
+func (rt *Runtime) initFunctionFamily() {
+	ctorV, _ := rt.getField(rt.global, "Function")
+	installFamily := func(name, keyword string, famProto Value) {
+		fc := rt.newNativeFunc(name, 1, rt.dynamicFunctionCtor(keyword, famProto))
+		fo := rt.objPtr(fc)
+		fo.proto = ctorV // %GeneratorFunction% extends Function
+		fo.defineOwn("prototype", famProto, 0)
+		fo.defineOwn("name", rt.newString(name), attrConfigurable)
+		rt.objPtr(famProto).defineOwn("constructor", fc, attrConfigurable)
+	}
+	installFamily("GeneratorFunction", "function*", rt.generatorFuncProto)
+	installFamily("AsyncFunction", "async function", rt.asyncFunctionProto)
+	installFamily("AsyncGeneratorFunction", "async function*", rt.asyncGeneratorFnProto)
+}
+
+// dynamicFunctionCtor returns the native implementation shared by Function and
+// its %GeneratorFunction% / %AsyncFunction% / %AsyncGeneratorFunction% cousins.
+// keyword is the source prefix ("function", "function*", "async function",
+// "async function*"); defaultProto is the [[Prototype]] handed to the result
+// when new.target is absent.
+func (rt *Runtime) dynamicFunctionCtor(keyword string, defaultProto Value) nativeFunc {
+	return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		// Capture new.target's prototype now: compiling/executing the body below
 		// runs a frame that clears pendingNewTarget.
-		resultProto := rt.newTargetProto(rt.functionProto)
+		resultProto := rt.newTargetProto(defaultProto)
 		var params []string
 		body := ""
 		if len(args) > 0 {
@@ -141,7 +175,7 @@ func (rt *Runtime) initFunctionBuiltin() {
 		// global binding (the script completion value drops function-expression
 		// statements, so we read the binding back instead).
 		const tmp = "__goant_Function__"
-		src := "globalThis." + tmp + " = (function anonymous(" + strings.Join(params, ",") + "\n) {\n" + body + "\n});"
+		src := "globalThis." + tmp + " = (" + keyword + " anonymous(" + strings.Join(params, ",") + "\n) {\n" + body + "\n});"
 		prog, perr := Parse("<anonymous>", src)
 		if perr != nil {
 			return mkundef(), &ThrowError{Value: rt.makeError(rt.errors.syntaxProto, "SyntaxError", perr.Error()), rt: rt}
@@ -162,9 +196,5 @@ func (rt *Runtime) initFunctionBuiltin() {
 			o.proto = resultProto
 		}
 		return v, nil
-	})
-	cobj := rt.objPtr(ctor)
-	cobj.defineOwn("prototype", rt.functionProto, 0)
-	proto.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
-	rt.defGlobal("Function", ctor)
+	}
 }
