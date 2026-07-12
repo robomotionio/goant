@@ -12,7 +12,14 @@ import (
 // ES property syntax. Properties Go's unicode package cannot resolve (e.g. Emoji
 // data, scripts newer than the toolchain's Unicode version) yield an error, so
 // the regex simply fails to compile as it did before.
-func translateUnicodeProps(pattern string) (string, error) {
+// stringProperties are the `v`-flag "properties of strings" that expand to a
+// fixed sub-pattern (only the finite ones are modelled; RGI emoji sequences need
+// the full emoji-sequence data set).
+var stringProperties = map[string]string{
+	"Emoji_Keycap_Sequence": "(?:[#*0-9]\uFE0F\u20E3)",
+}
+
+func translateUnicodeProps(pattern string, unicodeSets bool) (string, error) {
 	var out strings.Builder
 	inClass := false
 	for i := 0; i < len(pattern); {
@@ -25,6 +32,13 @@ func translateUnicodeProps(pattern string) (string, error) {
 					return "", fmt.Errorf("incomplete \\p{X} character escape in `%s`", pattern)
 				}
 				name := pattern[i+3 : i+3+rel]
+				if unicodeSets && !inClass && n == 'p' {
+					if pat, ok := stringProperties[name]; ok {
+						out.WriteString(pat)
+						i += 3 + rel + 1
+						continue
+					}
+				}
 				rt, ok := resolveUnicodeProperty(name)
 				if !ok {
 					return "", fmt.Errorf("unknown unicode category or property `%s`", name)

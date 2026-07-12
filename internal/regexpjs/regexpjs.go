@@ -94,7 +94,7 @@ func Compile(pattern, flags string) (*Regexp, error) {
 		src = t
 	}
 	if r.Unicode && (strings.Contains(src, `\p`) || strings.Contains(src, `\P`)) {
-		t, terr := translateUnicodeProps(src)
+		t, terr := translateUnicodeProps(src, r.UnicodeSets)
 		if terr != nil {
 			return nil, fmt.Errorf("invalid regular expression: %v", terr)
 		}
