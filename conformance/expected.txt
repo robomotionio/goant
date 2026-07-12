@@ -752,6 +752,7 @@ compat-table/intl/Date.prototype.toLocaleTimeString.js
 compat-table/intl/Number.prototype.toLocaleString.js
 compat-table/intl/Object.prototype.toLocaleString.js
 compat-table/intl/String.prototype.localeCompare.js
+compat-table/next/Map.prototype.upsert.js
 compat-table/next/RegExp.1-9.js
 compat-table/next/throw-expr.logical.js
 es1/annex-b.Date.prototype.getYear.js

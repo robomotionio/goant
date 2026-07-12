@@ -85,6 +85,24 @@ func (rt *Runtime) initMapBuiltin() {
 		}
 		return mkundef(), nil
 	})
+	rt.defMethod(po, "getOrInsert", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// Map.prototype.getOrInsert(key, value): return the existing value or
+		// insert and return the default (upsert proposal).
+		m, e := rt.collOf(this, false)
+		if e != nil {
+			return mkundef(), e
+		}
+		k := arg(args, 0)
+		ck := rt.canonicalKey(k)
+		if idx, ok := m.index[ck]; ok {
+			return m.vals[idx], nil
+		}
+		v := arg(args, 1)
+		m.index[ck] = len(m.keys)
+		m.keys = append(m.keys, k)
+		m.vals = append(m.vals, v)
+		return v, nil
+	})
 	rt.defMethod(po, "has", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		m, e := rt.collOf(this, false)
 		if e != nil {
