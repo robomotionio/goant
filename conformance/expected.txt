@@ -506,6 +506,7 @@ compat-table/es6/misc.Proxy.deleteProperty.Array.shift.js
 compat-table/es6/misc.Proxy.deleteProperty.Array.splice.js
 compat-table/es6/misc.Proxy.deleteProperty.Array.unshift.js
 compat-table/es6/misc.Proxy.get.Array.concat.js
+compat-table/es6/misc.Proxy.get.Array.from.js
 compat-table/es6/misc.Proxy.get.Array.iteration.js
 compat-table/es6/misc.Proxy.get.Array.pop.js
 compat-table/es6/misc.Proxy.get.Array.reverse.js

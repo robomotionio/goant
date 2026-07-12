@@ -48,6 +48,14 @@ func (rt *Runtime) iterateWithClose(source Value, fn func(v Value) (stop bool, e
 	if e != nil {
 		return e
 	}
+	return rt.iterateIteratorWithClose(iter, fn)
+}
+
+// iterateIteratorWithClose drives an already-obtained iterator object with the
+// same close-on-abrupt-completion semantics as iterateWithClose. It lets a
+// caller that already performed GetMethod(@@iterator) (e.g. Array.from) avoid a
+// second observable [[Get]] of the iterator method.
+func (rt *Runtime) iterateIteratorWithClose(iter Value, fn func(v Value) (stop bool, err *ThrowError)) *ThrowError {
 	for {
 		nextFn, e := rt.getField(iter, "next")
 		if e != nil {

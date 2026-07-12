@@ -1042,16 +1042,33 @@ func (rt *Runtime) initArrayBuiltin() {
 			}
 			return it, nil
 		}
-		// Iterable (Symbol.iterator) takes precedence; the mapper runs per element
-		// so a throw closes the iterator (Array.from iterator-closing).
-		if rt.isIterable(src) {
+		// usingIterator = GetMethod(items, @@iterator) — an observable [[Get]] that
+		// precedes the array-like fallback (a Proxy's get trap sees @@iterator
+		// first). When it is callable, the iterable path takes precedence and the
+		// mapper runs per element so a throw closes the iterator.
+		var usingIterator Value = mkundef()
+		if !src.IsNullish() && rt.symIterator != 0 {
+			m, e := rt.getElement(src, rt.symIterator)
+			if e != nil {
+				return mkundef(), e
+			}
+			usingIterator = m
+		}
+		if rt.isCallable(usingIterator) {
 			res, e := rt.arrayFromCtor(this, 0)
 			if e != nil {
 				return mkundef(), e
 			}
+			it, e := rt.callValue(usingIterator, src, nil)
+			if e != nil {
+				return mkundef(), e
+			}
+			if !it.IsObjectType() {
+				return mkundef(), rt.typeError("[Symbol.iterator]() returned a non-object")
+			}
 			i := 0
-			if e := rt.iterateWithClose(src, func(it Value) (bool, *ThrowError) {
-				v, e := mapEach(it, i)
+			if e := rt.iterateIteratorWithClose(it, func(el Value) (bool, *ThrowError) {
+				v, e := mapEach(el, i)
 				if e != nil {
 					return false, e
 				}
