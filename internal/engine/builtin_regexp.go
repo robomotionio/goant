@@ -58,9 +58,10 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		// RegExp(re) called as a function (not `new`), with a regexp pattern and
-		// no flags override and pattern.constructor === RegExp, returns pattern.
-		if rt.objPtr(this) == nil && patternIsRegExp && flagsArg.IsUndefined() {
+		// RegExp(re) with no new.target, a regexp pattern, no flags override, and
+		// pattern.constructor === RegExp returns pattern unchanged. The constructor
+		// [[Get]] is observable (e.g. through a Proxy).
+		if !rt.constructing() && patternIsRegExp && flagsArg.IsUndefined() {
 			pc, e := rt.getField(p, "constructor")
 			if e != nil {
 				return mkundef(), e
@@ -72,8 +73,36 @@ func (rt *Runtime) initRegExpBuiltin() {
 		pattern := ""
 		flags := ""
 		if o := rt.objPtr(p); o != nil && o.regex != nil {
+			// A native RegExp: use its compiled source/flags directly.
 			pattern = o.regex.Source
 			flags = o.regex.Flags
+		} else if patternIsRegExp {
+			// A RegExp-like object (or Proxy): read source (and flags, unless
+			// overridden) via [[Get]] rather than coercing the object to a string.
+			srcV, e := rt.getField(p, "source")
+			if e != nil {
+				return mkundef(), e
+			}
+			if !srcV.IsUndefined() { // RegExpInitialize: undefined -> ""
+				sv, e := rt.toStringValue(srcV)
+				if e != nil {
+					return mkundef(), e
+				}
+				pattern = string(rt.strBytes(sv))
+			}
+			if flagsArg.IsUndefined() {
+				fV, e := rt.getField(p, "flags")
+				if e != nil {
+					return mkundef(), e
+				}
+				if !fV.IsUndefined() {
+					fv, e := rt.toStringValue(fV)
+					if e != nil {
+						return mkundef(), e
+					}
+					flags = string(rt.strBytes(fv))
+				}
+			}
 		} else if !p.IsUndefined() {
 			s, e := rt.toStringValue(p)
 			if e != nil {
