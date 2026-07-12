@@ -541,6 +541,20 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			}
 			push(mknum(n))
 			ip++
+		case OpGetSuperVal:
+			// [receiver(this), base(superproto), key] -> value. A super read starts
+			// the lookup at the home object's prototype but keeps `this` as the
+			// accessor receiver.
+			key := pop()
+			base := pop()
+			recv := pop()
+			v, e := rt.getSuperProp(base, key, recv)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip++
 		case OpSetNameComp:
 			// [key, func] (unchanged): NamedEvaluation for an anonymous function or
 			// class in a computed property — set func.name from the property key

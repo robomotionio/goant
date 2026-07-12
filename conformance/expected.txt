@@ -674,6 +674,7 @@ compat-table/es6/super.correct-constructor.js
 compat-table/es6/super.expression.js
 compat-table/es6/super.method-calls.js
 compat-table/es6/super.new-target-binding.js
+compat-table/es6/super.property-access.js
 compat-table/es6/super.statement.js
 compat-table/es6/super.this-binding.js
 compat-table/es6/Symbol.defineProperty.js

@@ -100,6 +100,10 @@ func (c *compiler) compileArray(n *Node) {
 
 // compileMember compiles a member read (obj.name or obj[expr]).
 func (c *compiler) compileMember(n *Node) {
+	if n.Left != nil && n.Left.Kind == NIdent && n.Left.Str == "super" {
+		c.compileSuperMember(n)
+		return
+	}
 	c.compileExpr(n.Left)
 	if n.Flags&1 != 0 { // computed
 		c.compileExpr(n.Right)
@@ -107,6 +111,25 @@ func (c *compiler) compileMember(n *Node) {
 		return
 	}
 	c.emitFieldOp(OpGetField, n.Right.Str)
+}
+
+// compileSuperMember compiles a super-property read `super.x` / `super[expr]`:
+// the lookup starts at the home object's prototype (*superproto*) but the
+// accessor receiver is the current `this`.
+func (c *compiler) compileSuperMember(n *Node) {
+	if !c.resolveClassBinding("*this*") { // receiver
+		c.emit(OpUndef)
+	}
+	if !c.resolveClassBinding("*superproto*") { // base
+		c.errorf("'super' keyword unexpected here")
+		return
+	}
+	if n.Flags&1 != 0 { // computed
+		c.compileExpr(n.Right)
+	} else {
+		c.emitConst(c.rt.internString(n.Right.Str))
+	}
+	c.emit(OpGetSuperVal)
 }
 
 // tempLocal allocates a fresh anonymous local slot.
