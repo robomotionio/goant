@@ -834,6 +834,28 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			}
 			push(ret)
 			ip += 3
+		case OpSuperApply:
+			// super(...): [superctor, argsArray] -> constructed object. The parent
+			// is [[Construct]]ed with the derived class's new.target, and the result
+			// becomes `this` (the compiler stores it into *this*).
+			argsArr := pop()
+			superctor := pop()
+			var callArgs []Value
+			if ao := rt.objPtr(argsArr); ao != nil {
+				callArgs = make([]Value, ao.arrLen)
+				for i := uint32(0); i < ao.arrLen; i++ {
+					if int(i) < len(ao.arr) {
+						callArgs[i] = ao.arr[i]
+					}
+				}
+			}
+			ret, e := rt.constructWithTarget(superctor, callArgs, rt.activeNewTarget)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(ret)
+			ip += 3
 		case OpApply:
 			// func this argsArray -> result
 			argsArr := pop()

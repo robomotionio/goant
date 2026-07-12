@@ -690,6 +690,9 @@ compat-table/es6/String.prototype.Symbol.iterator.js
 compat-table/es6/String.raw.js
 compat-table/es6/subclassing.Array.from.js
 compat-table/es6/subclassing.Array.prototype-chain.js
+compat-table/es6/subclassing.Function.prototype.apply.js
+compat-table/es6/subclassing.Function.prototype.bind.js
+compat-table/es6/subclassing.Function.prototype.call.js
 compat-table/es6/subclassing.Function.prototype-chain.js
 compat-table/es6/subclassing.Promise.all.js
 compat-table/es6/subclassing.Promise.prototype-chain.js

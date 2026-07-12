@@ -308,32 +308,22 @@ func (c *compiler) resolveClassBinding(name string) bool {
 // compileSuperCall compiles `super(...)` in a derived constructor: it invokes
 // the parent constructor with the current `this`.
 func (c *compiler) compileSuperCall(n *Node) {
-	// CALL_METHOD / APPLY expect the receiver (this) beneath the callee.
-	if hasSpread(n.Args) {
-		if !c.resolveClassBinding("*superctor*") {
-			c.errorf("'super' keyword unexpected here")
-			return
-		}
-		if !c.resolveClassBinding("*this*") {
-			c.emit(OpUndef)
-		}
-		c.buildSpreadArray(n.Args)
-		c.emit(OpApply) // [superctor, this, args] -> result
-		c.emitU16(0)
-		return
-	}
-	if !c.resolveClassBinding("*this*") { // this (receiver)
-		c.emit(OpUndef)
-	}
-	if !c.resolveClassBinding("*superctor*") { // func
+	// super(...) constructs the parent with the derived class's new.target and
+	// binds the resulting object as `this` (so subclassing an exotic native like
+	// Function/Array/Error yields the native object rather than an ordinary one).
+	if !c.resolveClassBinding("*superctor*") { // [superctor]
 		c.errorf("'super' keyword unexpected here")
 		return
 	}
-	for _, a := range n.Args {
-		c.compileExpr(a)
+	c.buildSpreadArray(n.Args) // [superctor, argsArray]
+	c.emit(OpSuperApply)       // -> [constructedThis]
+	c.emitU16(0)
+	// Bind the constructed object as `this`, leaving it as the call's value.
+	if slot := c.resolveLocal("*this*"); slot >= 0 {
+		c.emitOpU16(OpSetLocal, uint16(slot))
+	} else if uv := c.resolveUpvalue("*this*"); uv >= 0 {
+		c.emitOpU16(OpSetUpval, uint16(uv))
 	}
-	c.emit(OpCallMethod) // [this, superctor, args...] -> result
-	c.emitU16(uint16(len(n.Args)))
 }
 
 // compileSuperMethodCall compiles `super.method(...)`: it invokes the parent

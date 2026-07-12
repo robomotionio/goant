@@ -219,7 +219,19 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		}
 		c.hoistFunctions(n.Body.Args, false)
 		c.compileStmts(n.Body.Args)
-		c.emit(OpReturnUndef)
+		// A class constructor's implicit completion returns its (possibly
+		// super-rebound) `this`, so subclassing an exotic native yields the object
+		// super() constructed rather than the pre-allocated ordinary one.
+		if c.fn.isClassCtor {
+			if slot := c.resolveLocal("*this*"); slot >= 0 {
+				c.emitOpU16(OpGetLocal, uint16(slot))
+				c.emit(OpReturn)
+			} else {
+				c.emit(OpReturnUndef)
+			}
+		} else {
+			c.emit(OpReturnUndef)
+		}
 	} else {
 		// Concise arrow body: the expression is the return value.
 		c.compileExpr(n.Body)
