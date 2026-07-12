@@ -89,6 +89,11 @@ func (rt *Runtime) newTargetProto(fallback Value) Value {
 	if nt.IsUndefined() {
 		return fallback
 	}
+	// Reuse the prototype constructWithTarget already resolved for this
+	// construction (avoids a second observable [[Get]] of "prototype").
+	if rt.pendingNewTargetProto != 0 && rt.pendingNewTargetProto.IsObjectType() {
+		return rt.pendingNewTargetProto
+	}
 	if p, e := rt.getField(nt, "prototype"); e == nil && p.IsObjectType() {
 		return p
 	}
@@ -112,7 +117,11 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 		return mkundef(), rt.typeError("value is not a constructor")
 	}
 	if o.proxy != nil {
-		return rt.proxyConstruct(o.proxy, args)
+		nt := newTarget
+		if nt == 0 {
+			nt = fnVal
+		}
+		return rt.proxyConstruct(o.proxy, args, nt)
 	}
 	if cl := rt.closures.get(o.closure); cl != nil && (cl.fn.isGenerator || cl.fn.isAsync || cl.fn.isArrow) {
 		nm := cl.fn.name
@@ -130,8 +139,13 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 	}
 	thisObj := rt.newObject(proto)
 	rt.pendingNewTarget = newTarget
+	// Cache the resolved prototype so a native ctor's newTargetProto reuses it
+	// rather than re-reading newTarget.prototype (a second observable [[Get]]).
+	savedNTProto := rt.pendingNewTargetProto
+	rt.pendingNewTargetProto = proto
 	ret, e := rt.callValue(fnVal, thisObj, args)
 	rt.pendingNewTarget = mkundef()
+	rt.pendingNewTargetProto = savedNTProto
 	if e != nil {
 		return mkundef(), e
 	}

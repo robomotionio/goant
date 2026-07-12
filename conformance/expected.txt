@@ -513,6 +513,7 @@ compat-table/es6/misc.Proxy.get.Array.reverse.js
 compat-table/es6/misc.Proxy.get.Array.shift.js
 compat-table/es6/misc.Proxy.get.Array.toString.js
 compat-table/es6/misc.Proxy.get.ClassDefinitionEvaluation.js
+compat-table/es6/misc.Proxy.get.CreateDynamicFunction.js
 compat-table/es6/misc.Proxy.get.CreateListFromArrayLike.js
 compat-table/es6/misc.Proxy.get.Date.toJSON.js
 compat-table/es6/misc.Proxy.get.Error.toString.js

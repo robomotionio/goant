@@ -106,6 +106,12 @@ type Runtime struct {
 	pendingNewTarget Value
 	activeNewTarget  Value
 
+	// pendingNewTargetProto caches the [[Prototype]] that constructWithTarget
+	// already resolved from newTarget.prototype, so a native constructor's
+	// newTargetProto reuses it instead of performing a second observable [[Get]]
+	// of "prototype" (visible through a Proxy newTarget). 0 = not cached.
+	pendingNewTargetProto Value
+
 	// frameDepth tracks native call depth for the stack-overflow guard.
 	frameDepth int
 

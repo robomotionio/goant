@@ -591,7 +591,7 @@ func (rt *Runtime) proxyApply(p *proxyState, thisArg Value, args []Value) (Value
 	return rt.callValue(p.target, thisArg, args)
 }
 
-func (rt *Runtime) proxyConstruct(p *proxyState, args []Value) (Value, *ThrowError) {
+func (rt *Runtime) proxyConstruct(p *proxyState, args []Value, newTarget Value) (Value, *ThrowError) {
 	// A proxy has a [[Construct]] method only if its target is a constructor.
 	if !rt.isCallable(p.target) {
 		return mkundef(), rt.typeError("proxy target is not a constructor")
@@ -606,7 +606,8 @@ func (rt *Runtime) proxyConstruct(p *proxyState, args []Value) (Value, *ThrowErr
 		for _, a := range args {
 			rt.arraySet(ao, ao.arrLen, a)
 		}
-		res, e := rt.callValue(trap, p.handler, []Value{p.target, argsArr, p.target})
+		// The construct trap receives (target, argumentsList, newTarget).
+		res, e := rt.callValue(trap, p.handler, []Value{p.target, argsArr, newTarget})
 		if e != nil {
 			return mkundef(), e
 		}
@@ -616,7 +617,10 @@ func (rt *Runtime) proxyConstruct(p *proxyState, args []Value) (Value, *ThrowErr
 		}
 		return res, nil
 	}
-	return rt.construct(p.target, args)
+	// No trap: forward to the target's [[Construct]] preserving newTarget, so
+	// GetPrototypeFromConstructor reads "prototype" from the original newTarget
+	// (which may itself be this proxy).
+	return rt.constructWithTarget(p.target, args, newTarget)
 }
 
 // itoaSmall formats a small non-negative int without importing strconv here.
