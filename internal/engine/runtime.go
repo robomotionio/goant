@@ -168,6 +168,8 @@ func New() *Runtime {
 	rt.initProxyBuiltin()
 	rt.initTypedArrays()
 	rt.initIteratorHelpers()
+	rt.initSharedArrayBuffer()
+	rt.initAtomics()
 	rt.initAnnexB()
 	return rt
 }
