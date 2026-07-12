@@ -36,6 +36,20 @@ func (c *compiler) bindDeclared(name string) {
 	c.emitOpU16(OpPutLocal, uint16(slot))
 }
 
+// bindClassDecl binds a class declaration's name, consuming the class on the
+// stack. Class declarations are lexically (block) scoped: inside a nested block a
+// class binding gets a fresh slot that shadows any outer binding of the same name
+// and is hidden when the block exits (class.block-scoped). At function/script top
+// level it binds like any other declaration.
+func (c *compiler) bindClassDecl(name string) {
+	if c.scopeDepth > 0 {
+		slot := c.declareLexical(name, false)
+		c.emitOpU16(OpPutLocal, uint16(slot))
+		return
+	}
+	c.bindDeclared(name)
+}
+
 // compileFunc compiles a function/arrow expression into a child function and
 // emits CLOSURE, leaving the closure value on the stack.
 func (c *compiler) compileFunc(n *Node) {

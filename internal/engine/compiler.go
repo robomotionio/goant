@@ -279,9 +279,9 @@ func (c *compiler) compileStmt(n *Node) {
 			c.emit(OpPop)
 			return
 		}
-		// Class declaration: compile and bind to the class name.
+		// Class declaration: compile and bind to the (lexically scoped) class name.
 		c.compileClass(n)
-		c.bindDeclared(n.Str)
+		c.bindClassDecl(n.Str)
 		return
 	case NVar:
 		c.compileVarDecl(n)

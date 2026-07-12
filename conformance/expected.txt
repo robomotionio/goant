@@ -332,6 +332,7 @@ compat-table/es6/arrow.precedence.js
 compat-table/es6/arrow.this-call-apply.js
 compat-table/es6/class.accessor-properties.js
 compat-table/es6/class.anonymous.js
+compat-table/es6/class.block-scoped.js
 compat-table/es6/class.computed-accessor-properties.js
 compat-table/es6/class.computed-names-tdz.js
 compat-table/es6/class.computed-prototype-methods.js
