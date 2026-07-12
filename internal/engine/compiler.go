@@ -397,8 +397,16 @@ func (c *compiler) compileExpr(n *Node) {
 	case NGlobalThis:
 		c.emit(OpGlobal)
 	case NNewTarget:
-		c.emit(OpSpecialObj)
-		c.emitByte(2)
+		// An arrow resolves new.target as the enclosing function's *newtarget*
+		// binding (lexical); a non-arrow reads its own frame's new.target.
+		if slot := c.resolveLocal("*newtarget*"); slot >= 0 {
+			c.emitOpU16(OpGetLocal, uint16(slot))
+		} else if uv := c.resolveUpvalue("*newtarget*"); uv >= 0 {
+			c.emitOpU16(OpGetUpval, uint16(uv))
+		} else {
+			c.emit(OpSpecialObj)
+			c.emitByte(2)
+		}
 	case NThis:
 		// `this` reads the synthetic *this* binding; arrows resolve it as an
 		// upvalue, giving them the enclosing function's `this` (lexical this).

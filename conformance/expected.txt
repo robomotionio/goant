@@ -291,6 +291,7 @@ compat-table/es6/arrow.lexical-arguments.js
 compat-table/es6/arrow.lexical-super.constructor.js
 compat-table/es6/arrow.lexical-super.methods.js
 compat-table/es6/arrow.lexical-this.js
+compat-table/es6/arrow.new-target.js
 compat-table/es6/arrow.no-line-break.js
 compat-table/es6/arrow.no-prototype.js
 compat-table/es6/arrow.precedence.js

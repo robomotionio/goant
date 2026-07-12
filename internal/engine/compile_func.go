@@ -144,6 +144,15 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		slot := c.declareVar("*this*", false)
 		c.emit(OpThis)
 		c.emitOpU16(OpPutLocal, uint16(slot))
+		// Bind new.target in *newtarget* so a nested arrow can capture it lexically
+		// (arrows have no new.target of their own). Only when referenced (in the
+		// body or a nested arrow) to avoid the extra slot in the common case.
+		if referencesNewTarget(n.Body) {
+			ntSlot := c.declareVar("*newtarget*", false)
+			c.emit(OpSpecialObj)
+			c.emitByte(2)
+			c.emitOpU16(OpPutLocal, uint16(ntSlot))
+		}
 	}
 	// A named function is self-bound: its name refers to itself inside the body
 	// (named function expressions; also enables recursion for declarations). A
