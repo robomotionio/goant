@@ -101,6 +101,7 @@ compat-table/es2020/optional-chaining.bracket.js
 compat-table/es2020/optional-chaining.function-call.js
 compat-table/es2020/optional-chaining.method-call.js
 compat-table/es2020/optional-chaining.property.js
+compat-table/es2020/optional-chaining.spread-params.js
 compat-table/es2020/Promise.allSettled.js
 compat-table/es2020/String.prototype.matchAll.js
 compat-table/es2020/String.prototype.matchAll.throws-non-global.js

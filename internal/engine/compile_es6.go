@@ -653,6 +653,7 @@ func (c *compiler) compileChainLink(n *Node, bail *[]int) {
 // this-binding and threading the short-circuit bail.
 func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 	callee := n.Left
+	spread := hasSpread(n.Args)
 	isMethod := callee.Kind == NMember || (callee.Kind == NOptional && callee.Right != nil)
 	if isMethod {
 		c.compileChainLink(callee.Left, bail) // [recv]
@@ -661,14 +662,27 @@ func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 		}
 		tSlot := c.tempLocal()
 		c.emitOpU16(OpPutLocal, uint16(tSlot))
+		loadMethod := func() {
+			if callee.Flags&1 != 0 {
+				c.compileExpr(callee.Right)
+				c.emit(OpGetElem)
+			} else {
+				c.emitFieldOp(OpGetField, callee.Right.Str)
+			}
+		}
+		if spread {
+			// [method, this, argsArray] -> APPLY
+			c.emitOpU16(OpGetLocal, uint16(tSlot)) // [recv]
+			loadMethod()                           // [method]
+			c.emitOpU16(OpGetLocal, uint16(tSlot)) // [method, this]
+			c.buildSpreadArray(n.Args)             // [method, this, argsArray]
+			c.emit(OpApply)
+			c.emitU16(0)
+			return
+		}
 		c.emitOpU16(OpGetLocal, uint16(tSlot)) // [this]
 		c.emitOpU16(OpGetLocal, uint16(tSlot)) // [this, recv]
-		if callee.Flags&1 != 0 {
-			c.compileExpr(callee.Right)
-			c.emit(OpGetElem)
-		} else {
-			c.emitFieldOp(OpGetField, callee.Right.Str)
-		}
+		loadMethod()                           // [this, method]
 		for _, a := range n.Args {
 			c.compileExpr(a)
 		}
@@ -677,6 +691,13 @@ func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 		return
 	}
 	c.compileChainLink(callee, bail) // [fn] (guarded if callee is NOptional)
+	if spread {
+		c.emit(OpUndef) // [fn, this=undefined]
+		c.buildSpreadArray(n.Args)
+		c.emit(OpApply) // [fn, this, argsArray] -> result
+		c.emitU16(0)
+		return
+	}
 	for _, a := range n.Args {
 		c.compileExpr(a)
 	}
