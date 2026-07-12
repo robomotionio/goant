@@ -951,7 +951,19 @@ func (rt *Runtime) initArrayBuiltin() {
 	cobj.defineOwn("prototype", rt.arrayProto, 0)
 	proto.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 	rt.defMethod(cobj, "isArray", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return mkbool(arg(args, 0).Type() == TArr), nil
+		// IsArray follows a Proxy chain to its target (23.1.2.2 / 7.2.2).
+		v := arg(args, 0)
+		for i := 0; i < maxProtoChainDepth; i++ {
+			if v.Type() == TArr {
+				return mktrue(), nil
+			}
+			o := rt.objPtr(v)
+			if o == nil || o.proxy == nil {
+				return mkfalse(), nil
+			}
+			v = o.proxy.target
+		}
+		return mkfalse(), nil
 	})
 	rt.defMethod(cobj, "of", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		res, e := rt.arrayFromCtor(this, len(args))

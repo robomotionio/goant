@@ -34,18 +34,31 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 		}
 	}
 	if obj.IsObjectType() || obj.Type() == TTypedArray {
-		holder, slot, found := rt.resolveProp(obj, name)
-		if !found {
-			return mkundef(), nil
-		}
-		if holder.isAccessorSlot(slot) {
-			p := holder.shape.propAt(slot)
-			if !p.hasGetter {
+		// Ordinary [[Get]] walking the prototype chain with the original receiver.
+		// A Proxy encountered in the chain dispatches its [[Get]] trap (receiver
+		// stays obj), which resolveProp would otherwise walk straight past.
+		cur := obj
+		for depth := 0; depth < maxProtoChainDepth; depth++ {
+			o := rt.objPtr(cur)
+			if o == nil {
 				return mkundef(), nil
 			}
-			return rt.callValue(p.getter, obj, nil)
+			if o.proxy != nil {
+				return rt.proxyGet(o.proxy, rt.internString(name), obj)
+			}
+			if slot := o.shape.lookupInterned(name); slot >= 0 {
+				if o.isAccessorSlot(uint32(slot)) {
+					p := o.shape.propAt(uint32(slot))
+					if !p.hasGetter {
+						return mkundef(), nil
+					}
+					return rt.callValue(p.getter, obj, nil)
+				}
+				return o.slotGet(uint32(slot)), nil
+			}
+			cur = o.proto
 		}
-		return holder.slotGet(slot), nil
+		return mkundef(), nil
 	}
 	// Primitive property access resolves against the wrapper prototype, with the
 	// primitive itself passed as the accessor receiver.

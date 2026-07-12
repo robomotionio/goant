@@ -742,6 +742,13 @@ func (rt *Runtime) objectKeys(v Value) Value {
 		return arr
 	}
 	ao := rt.objPtr(arr)
+	if o.proxy != nil {
+		// Route through the ownKeys + getOwnPropertyDescriptor traps.
+		for _, k := range rt.enumerableOwnKeys(v) {
+			rt.arraySet(ao, ao.arrLen, rt.internString(k))
+		}
+		return arr
+	}
 	if v.Type() == TArr {
 		for i := uint32(0); i < o.arrLen; i++ {
 			if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
