@@ -286,6 +286,7 @@ compat-table/es5/String.property-access.js
 compat-table/es5/String.prototype.split.js
 compat-table/es5/String.prototype.trim.js
 compat-table/es6/annex-b.function.hoisted-block-level.js
+compat-table/es6/annex-b.html-comments.js
 compat-table/es6/annex-b.__proto__.literals.multiple-error.js
 compat-table/es6/annex-b.__proto__.literals.not-computed.js
 compat-table/es6/annex-b.__proto__.literals.not-shorthand-method.js

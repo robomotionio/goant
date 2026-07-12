@@ -261,10 +261,18 @@ func htmlCloseAtLineStart(code string, p int) bool {
 		if c == '\n' || c == '\r' {
 			return true
 		}
-		if c != ' ' && c != '\t' && c != '\f' && c != '\v' {
-			return false
+		if c == ' ' || c == '\t' || c == '\f' || c == '\v' {
+			p--
+			continue
 		}
-		p--
+		// Annex B leniency (as common engines accept): a contiguous `-->` after an
+		// opener/separator can never be a `--` decrement (its operand would be `>`),
+		// so it is treated as an HTML close comment rather than a syntax error.
+		switch c {
+		case '{', '(', '[', ';', ',':
+			return true
+		}
+		return false
 	}
 	return true
 }
