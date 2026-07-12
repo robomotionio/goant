@@ -134,6 +134,11 @@ func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
 	if !obj.IsObjectType() && obj.Type() != TTypedArray {
 		return false, rt.typeError("cannot use 'in' operator on a non-object")
 	}
+	// A proxy dispatches the has trap directly so its [[HasProperty]] invariant
+	// errors propagate (hasProp swallows them).
+	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
+		return rt.proxyHas(o.proxy, rt.toPropertyKeyValue(key))
+	}
 	if idx, ok := arrayIndex(key); ok && obj.Type() == TArr {
 		o := rt.objPtr(obj)
 		return idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty(), nil
