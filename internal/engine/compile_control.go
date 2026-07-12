@@ -392,6 +392,11 @@ func (c *compiler) forInStore(left *Node) (func(), int) {
 		}
 	case left.Kind == NIdent:
 		name = left.Str
+	case left.Kind == NArray || left.Kind == NObject || left.Kind == NMember:
+		// Assignment target with no declaration: for ([a,b] of …), for ({x} of …),
+		// for (obj.p of …). The head is a destructuring/member assignment to
+		// existing references, evaluated fresh each iteration.
+		return func() { c.destructureTarget(left, varAssign) }, -1
 	default:
 		return nil, -1
 	}
