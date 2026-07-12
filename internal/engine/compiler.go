@@ -145,6 +145,7 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval bo
 		}
 	}
 
+	c.hoistLexicals(prog.Args)
 	c.hoistFunctions(prog.Args, false)
 	c.compileStmts(prog.Args)
 	if c.err != nil {
@@ -291,6 +292,7 @@ func (c *compiler) compileStmt(n *Node) {
 			return
 		}
 		c.scopeDepth++
+		c.hoistLexicals(n.Args)
 		c.hoistFunctions(n.Args, true)
 		c.compileStmts(n.Args)
 		c.scopeDepth--
@@ -460,7 +462,13 @@ func (c *compiler) compileVarDecl(n *Node) {
 		}
 		var slot int
 		if n.VarKind == VarLet || n.VarKind == VarConst {
-			slot = c.declareLexical(name, n.VarKind == VarConst)
+			// Reuse the slot pre-declared by hoistLexicals (leaving the binding in
+			// TDZ until this store) when present; else declare it now.
+			if s := c.lexicalAtCurrentDepth(name); s >= 0 {
+				slot = s
+			} else {
+				slot = c.declareLexical(name, n.VarKind == VarConst)
+			}
 		} else {
 			slot = c.declareVar(name, false)
 		}

@@ -25,6 +25,46 @@ func (c *compiler) hoistFunctions(list []*Node, blockScoped bool) {
 	}
 }
 
+// hoistLexicals pre-declares the simple let/const bindings of a statement list at
+// the current scope, initializing each to an EMPTY hole. Running before function
+// hoisting lets nested functions capture the binding, and a read before the
+// declaration's initializer runs hits the hole and throws (temporal dead zone).
+// Destructuring targets are left to inline declaration (no TDZ) to stay
+// conservative. Top-level script `var`-scoped code is unaffected.
+func (c *compiler) hoistLexicals(list []*Node) {
+	for _, stmt := range list {
+		if stmt == nil || stmt.Kind != NVar {
+			continue
+		}
+		if stmt.VarKind != VarLet && stmt.VarKind != VarConst {
+			continue
+		}
+		for _, decl := range stmt.Args {
+			if decl.Left == nil || decl.Left.Kind != NIdent {
+				continue
+			}
+			if c.lexicalAtCurrentDepth(decl.Left.Str) >= 0 {
+				continue // already hoisted (duplicate — inline decl will store)
+			}
+			slot := c.declareLexical(decl.Left.Str, stmt.VarKind == VarConst)
+			c.emit(OpEmpty)
+			c.emitOpU16(OpPutLocal, uint16(slot))
+		}
+	}
+}
+
+// lexicalAtCurrentDepth returns the slot of a live block-scoped binding declared
+// at the current scope depth, or -1.
+func (c *compiler) lexicalAtCurrentDepth(name string) int {
+	for i := len(c.locals) - 1; i >= 0; i-- {
+		lv := &c.locals[i]
+		if !lv.dead && lv.blockScoped && lv.depth == c.scopeDepth && lv.name == name {
+			return i
+		}
+	}
+	return -1
+}
+
 // bindDeclared binds the value on top of the stack to a declared name (global
 // for the top-level script, otherwise a frame local), consuming it.
 func (c *compiler) bindDeclared(name string) {
@@ -238,6 +278,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 				c.addLocal(name, false)
 			}
 		}
+		c.hoistLexicals(n.Body.Args)
 		c.hoistFunctions(n.Body.Args, false)
 		c.compileStmts(n.Body.Args)
 		// A class constructor's implicit completion returns its (possibly

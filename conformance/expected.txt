@@ -417,6 +417,8 @@ compat-table/es6/const.strict.for-of.js
 compat-table/es6/const.strict.no-redefine.js
 compat-table/es6/const.strict.no-statement.js
 compat-table/es6/const.strict.shadow.js
+compat-table/es6/const.strict.tdz.js
+compat-table/es6/const.tdz.js
 compat-table/es6/Date.prototype.Symbol.toPrimitive.js
 compat-table/es6/default-params.arguments.js
 compat-table/es6/default-params.basic.js
@@ -566,6 +568,8 @@ compat-table/es6/let.strict.for-iteration.js
 compat-table/es6/let.strict.for-loop.js
 compat-table/es6/let.strict.no-statement.js
 compat-table/es6/let.strict.shadow.js
+compat-table/es6/let.strict.tdz.js
+compat-table/es6/let.tdz.js
 compat-table/es6/literals.binary.js
 compat-table/es6/literals.binary.Number.js
 compat-table/es6/literals.object.computed-accessors.js
