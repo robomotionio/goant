@@ -88,6 +88,9 @@ const (
 	VarConst
 	VarUsing
 	VarAwaitUsing
+	// varAssign marks destructuring-assignment targets (assign to existing
+	// bindings / member references rather than declaring).
+	varAssign VarKind = 0xFF
 )
 
 // Function/property flags (ant ast.h FN_*).

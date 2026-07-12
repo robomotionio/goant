@@ -670,6 +670,13 @@ func nameAnonExpr(rhs *Node, name string) {
 }
 
 func (c *compiler) compileAssign(n *Node) {
+	// Destructuring assignment: [a,b]=rhs / ({x}=rhs). Yields the RHS value.
+	if n.Op == TokAssign && n.Left != nil && (n.Left.Kind == NArray || n.Left.Kind == NObject) {
+		c.compileExpr(n.Right)
+		c.emit(OpDup)
+		c.destructureTarget(n.Left, varAssign)
+		return
+	}
 	if n.Left != nil && n.Left.Kind == NMember {
 		c.compileMemberAssign(n)
 		return

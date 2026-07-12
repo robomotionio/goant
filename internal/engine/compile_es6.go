@@ -32,6 +32,20 @@ func (c *compiler) destructureTarget(pattern *Node, kind VarKind) {
 		src := c.tempLocal()
 		c.emitOpU16(OpPutLocal, uint16(src))
 		c.destructureObject(pattern, src, kind)
+	case NMember:
+		// Assignment to a member reference (e.g. [obj.x] = …); value on top.
+		computed := pattern.Flags&1 != 0
+		vSlot := c.tempLocal()
+		c.emitOpU16(OpPutLocal, uint16(vSlot))
+		c.compileExpr(pattern.Left)
+		if computed {
+			c.compileExpr(pattern.Right)
+			c.emitOpU16(OpGetLocal, uint16(vSlot))
+			c.emit(OpPutElem)
+		} else {
+			c.emitOpU16(OpGetLocal, uint16(vSlot))
+			c.emitFieldOp(OpPutField, pattern.Right.Str)
+		}
 	case NEmpty:
 		c.emit(OpPop)
 	default:
@@ -55,7 +69,10 @@ func (c *compiler) destructureArray(pattern *Node, src int, kind VarKind) {
 			return
 		}
 		target, defExpr := elem, (*Node)(nil)
-		if elem.Kind == NAssignPat {
+		// A default spells as NAssignPat in declaration patterns and as a plain
+		// NAssign (`=`) when an array literal is reinterpreted as an assignment
+		// target.
+		if elem.Kind == NAssignPat || (elem.Kind == NAssign && elem.Op == TokAssign) {
 			target, defExpr = elem.Left, elem.Right
 		}
 		c.emitOpU16(OpGetLocal, uint16(src))
@@ -106,12 +123,32 @@ func (c *compiler) applyDefault(defExpr *Node) {
 
 // bindDeclName stores the top-of-stack value into a freshly declared binding.
 func (c *compiler) bindDeclName(name string, kind VarKind) {
+	if kind == varAssign {
+		// Assign to an existing binding (destructuring assignment leaf).
+		c.compileIdentStore(name)
+		return
+	}
 	if kind == VarVar && c.isScript && !c.isEval {
 		c.emitGlobalPut(name)
 		return
 	}
 	slot := c.declareVar(name, kind == VarConst)
 	c.emitOpU16(OpPutLocal, uint16(slot))
+}
+
+// compileIdentStore stores the top-of-stack value into an existing identifier
+// binding (local/upvalue/with/global), consuming it.
+func (c *compiler) compileIdentStore(name string) {
+	switch {
+	case c.resolveLocal(name) >= 0:
+		c.emitOpU16(OpPutLocal, uint16(c.resolveLocal(name)))
+	case c.resolveUpvalue(name) >= 0:
+		c.emitOpU16(OpPutUpval, uint16(c.resolveUpvalue(name)))
+	case c.withDepth > 0:
+		c.emitWithVar(OpWithPutVar, name)
+	default:
+		c.emitGlobalPut(name)
+	}
 }
 
 // hasSpread reports whether any element in the list is a spread.
