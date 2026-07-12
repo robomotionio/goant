@@ -19,10 +19,8 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Reflect
 // subtest: Reflect.construct
-var __ok = (function () {
-        return Reflect.construct(function (a, b, c) {
-          this.qux = a + b + c;
-        }, ["foo", "bar", "baz"]).qux === "foobarbaz";
-      
+var __ok = (function () {return Reflect.construct(function (a, b, c) {
+  this.qux = a + b + c;
+}, ["foo", "bar", "baz"]).qux === "foobarbaz";
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

@@ -19,13 +19,11 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: String padding
 // subtest: String.prototype.padStart
-var __ok = (function () {
-          return 'hello'.padStart(10) === '     hello'
-            && 'hello'.padStart(10, '1234') === '12341hello'
-            && 'hello'.padStart() === 'hello'
-            && 'hello'.padStart(6, '123') === '1hello'
-            && 'hello'.padStart(3) === 'hello'
-            && 'hello'.padStart(3, '123') === 'hello';
-         
+var __ok = (function () {return 'hello'.padStart(10) === '     hello'
+  && 'hello'.padStart(10, '1234') === '12341hello'
+  && 'hello'.padStart() === 'hello'
+  && 'hello'.padStart(6, '123') === '1hello'
+  && 'hello'.padStart(3) === 'hello'
+  && 'hello'.padStart(3, '123') === 'hello';
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

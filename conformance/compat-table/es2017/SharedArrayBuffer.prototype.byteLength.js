@@ -19,8 +19,6 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: shared memory and atomics
 // subtest: SharedArrayBuffer.prototype.byteLength
-var __ok = (function () {
-         return 'byteLength' in SharedArrayBuffer.prototype;
-         
+var __ok = (function () {return 'byteLength' in SharedArrayBuffer.prototype;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

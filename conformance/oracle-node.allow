@@ -1,0 +1,13 @@
+compat-table/es2022/class-fields.static.define.js
+compat-table/es6/annex-b.html-comments.js
+compat-table/es6/misc.Proxy.get.RegExp.flags.js
+compat-table/es6/tail-calls.direct.js
+compat-table/es6/tail-calls.mutual.js
+compat-table/es6/well-known.isConcatSpreadable.poisoned-getter.js
+compat-table/next/Array.isTemplateObject.js
+compat-table/next/AsyncIterator.extends.js
+compat-table/next/AsyncIterator.instanceof.js
+compat-table/next/AsyncIterator.prototype.Symbol.toStringTag.js
+compat-table/next/Map.prototype.upsert.js
+compat-table/next/throw-expr.logical.js
+compat-table/next/WeakMap.prototype.upsert.js

@@ -19,20 +19,18 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: String properties and methods
 // subtest: String.prototype.split
-var __ok = (function () {
-      // all of these tests reflect bugs that es5-shim patches
-      return typeof String.prototype.split === 'function'
-        && ''.split().length === 1 && ''.split()[0] === ''
-        && ''.split(undefined).length === 1 && ''.split(undefined)[0] === ''
-        && 'ab'.split().length === 1 && 'ab'.split()[0] === 'ab'
-        && 'ab'.split(undefined).length === 1 && 'ab'.split(undefined)[0] === 'ab'
-        && '0'.split(undefined, 0).length === 0
-        && 'ab'.split(/(?:ab)*/).length === 2
-        && '.'.split(/(.?)(.?)/).length === 4
-        && 'tesst'.split(/(s)*/)[1] !== 't'
-        && 'test'.split(/(?:)/, -1).length === 4
-        && ''.split(/.?/).length === 0
-        && '.'.split(/()()/).length === 1;
-    
+var __ok = (function () {// all of these tests reflect bugs that es5-shim patches
+return typeof String.prototype.split === 'function'
+  && ''.split().length === 1 && ''.split()[0] === ''
+  && ''.split(undefined).length === 1 && ''.split(undefined)[0] === ''
+  && 'ab'.split().length === 1 && 'ab'.split()[0] === 'ab'
+  && 'ab'.split(undefined).length === 1 && 'ab'.split(undefined)[0] === 'ab'
+  && '0'.split(undefined, 0).length === 0
+  && 'ab'.split(/(?:ab)*/).length === 2
+  && '.'.split(/(.?)(.?)/).length === 4
+  && 'tesst'.split(/(s)*/)[1] !== 't'
+  && 'test'.split(/(?:)/, -1).length === 4
+  && ''.split(/.?/).length === 0
+  && '.'.split(/()()/).length === 1;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

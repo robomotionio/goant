@@ -19,11 +19,9 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Reflect
 // subtest: Reflect.getOwnPropertyDescriptor
-var __ok = (function () {
-        var obj = { baz: 789 };
-        var desc = Reflect.getOwnPropertyDescriptor(obj, "baz");
-        return desc.value === 789 &&
-          desc.configurable && desc.writable && desc.enumerable;
-      
+var __ok = (function () {var obj = { baz: 789 };
+var desc = Reflect.getOwnPropertyDescriptor(obj, "baz");
+return desc.value === 789 &&
+  desc.configurable && desc.writable && desc.enumerable;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

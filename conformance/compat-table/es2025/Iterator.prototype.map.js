@@ -19,8 +19,6 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Iterator Helpers
 // subtest: Iterator.prototype.map
-var __ok = (function () {
-          return Array.from([1, 2, 3].values().map(it => it * it)).join() === '1,4,9';
-        
+var __ok = (function () {return Array.from([1, 2, 3].values().map(it => it * it)).join() === '1,4,9';
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

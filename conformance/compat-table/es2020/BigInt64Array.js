@@ -19,11 +19,9 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: BigInt
 // subtest: BigInt64Array
-var __ok = (function () {
-        var buffer = new ArrayBuffer(64);
-        var view = new BigInt64Array(buffer);
-        view[0] = 0x8000000000000000n;
-        return view[0] === -0x8000000000000000n;
-      
+var __ok = (function () {var buffer = new ArrayBuffer(64);
+var view = new BigInt64Array(buffer);
+view[0] = 0x8000000000000000n;
+return view[0] === -0x8000000000000000n;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

@@ -19,16 +19,14 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Object static methods
 // subtest: Object.getOwnPropertySymbols
-var __ok = (function () {
-        var o = {};
-        var sym = Symbol(), sym2 = Symbol(), sym3 = Symbol();
-        o[sym]  = true;
-        o[sym2] = true;
-        o[sym3] = true;
-        var result = Object.getOwnPropertySymbols(o);
-        return result[0] === sym
-          && result[1] === sym2
-          && result[2] === sym3;
-      
+var __ok = (function () {var o = {};
+var sym = Symbol(), sym2 = Symbol(), sym3 = Symbol();
+o[sym]  = true;
+o[sym2] = true;
+o[sym3] = true;
+var result = Object.getOwnPropertySymbols(o);
+return result[0] === sym
+  && result[1] === sym2
+  && result[2] === sym3;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

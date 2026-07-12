@@ -19,11 +19,9 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Math methods
 // subtest: Math.hypot
-var __ok = (function () {
-        return Math.hypot() === 0 &&
-          Math.hypot(1) === 1 &&
-          Math.hypot(9, 12, 20) === 25 &&
-          Math.hypot(27, 36, 60, 100) === 125;
-      
+var __ok = (function () {return Math.hypot() === 0 &&
+  Math.hypot(1) === 1 &&
+  Math.hypot(9, 12, 20) === 25 &&
+  Math.hypot(27, 36, 60, 100) === 125;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

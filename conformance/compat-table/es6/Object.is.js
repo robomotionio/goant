@@ -19,10 +19,8 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Object static methods
 // subtest: Object.is
-var __ok = (function () {
-        return typeof Object.is === 'function' &&
-          Object.is(NaN, NaN) &&
-         !Object.is(-0, 0);
-      
+var __ok = (function () {return typeof Object.is === 'function' &&
+  Object.is(NaN, NaN) &&
+ !Object.is(-0, 0);
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

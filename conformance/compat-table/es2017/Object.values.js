@@ -19,13 +19,11 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Object static methods
 // subtest: Object.values
-var __ok = (function () {
-          var obj = Object.create({ a: "qux", d: "qux" });
-          obj.a = "foo";
-          obj.b = "bar";
-          obj.c = "baz";
-          var v = Object.values(obj);
-          return Array.isArray(v) && String(v) === "foo,bar,baz";
-        
+var __ok = (function () {var obj = Object.create({ a: "qux", d: "qux" });
+obj.a = "foo";
+obj.b = "bar";
+obj.c = "baz";
+var v = Object.values(obj);
+return Array.isArray(v) && String(v) === "foo,bar,baz";
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

@@ -19,16 +19,14 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Proxy
 // subtest: Proxy.revocable
-var __ok = (function () {
-        var obj = Proxy.revocable({}, { get: function () { return 5; } });
-        var passed = (obj.proxy.foo === 5);
-        obj.revoke();
-        try {
-          obj.proxy.foo;
-        } catch(e) {
-          passed &= e instanceof TypeError;
-        }
-        return passed;
-      
+var __ok = (function () {var obj = Proxy.revocable({}, { get: function () { return 5; } });
+var passed = (obj.proxy.foo === 5);
+obj.revoke();
+try {
+  obj.proxy.foo;
+} catch(e) {
+  passed &= e instanceof TypeError;
+}
+return passed;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

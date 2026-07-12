@@ -19,17 +19,15 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Explicit Resource Management
 // subtest: using
-var __ok = (function () {
-        var resource = {
-          disposed: false,
-          [Symbol.dispose]() {
-            this.disposed = true;
-          }
-        };
-        {
-          using _ = resource;
-        }
-        return resource.disposed
-      
+var __ok = (function () {var resource = {
+  disposed: false,
+  [Symbol.dispose]() {
+    this.disposed = true;
+  }
+};
+{
+  using _ = resource;
+}
+return resource.disposed
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

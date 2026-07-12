@@ -19,16 +19,14 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Object static methods
 // subtest: Object.getOwnPropertyDescriptors
-var __ok = (function () {
-          var object = {a: 1};
-          var B = typeof Symbol === 'function' ? Symbol('b') : 'b';
-          object[B] = 2;
-          var O = Object.defineProperty(object, 'c', {value: 3});
-          var D = Object.getOwnPropertyDescriptors(O);
+var __ok = (function () {var object = {a: 1};
+var B = typeof Symbol === 'function' ? Symbol('b') : 'b';
+object[B] = 2;
+var O = Object.defineProperty(object, 'c', {value: 3});
+var D = Object.getOwnPropertyDescriptors(O);
 
-          return D.a.value === 1 && D.a.enumerable === true && D.a.configurable === true && D.a.writable === true
-            && D[B].value === 2 && D[B].enumerable === true && D[B].configurable === true && D[B].writable === true
-            && D.c.value === 3 && D.c.enumerable === false && D.c.configurable === false && D.c.writable === false;
-        
+return D.a.value === 1 && D.a.enumerable === true && D.a.configurable === true && D.a.writable === true
+  && D[B].value === 2 && D[B].enumerable === true && D[B].configurable === true && D[B].writable === true
+  && D.c.value === 3 && D.c.enumerable === false && D.c.configurable === false && D.c.writable === false;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

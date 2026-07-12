@@ -19,21 +19,19 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Explicit Resource Management
 // subtest: DisposableStack
-var __ok = (function () {
-        var stack1 = new DisposableStack();
-        var resource1 = { disposed: false };
-        var resource2 = { disposed: false };
-        var resource3 = { disposed: false, [Symbol.dispose]() { this.disposed = true } };
-        var adopted = stack1.adopt(resource1, function (r) { r.disposed = true });
-        var deferred = stack1.defer(function (r) { resource2.disposed = true });
-        var stack2 = stack1.move();
-        var used = stack2.use(resource3);
-        stack2.dispose();
-        return (
-          resource1.disposed && adopted === resource1
-          && resource2.disposed && deferred === undefined
-          && resource3.disposed && used === resource3
-        );
-      
+var __ok = (function () {var stack1 = new DisposableStack();
+var resource1 = { disposed: false };
+var resource2 = { disposed: false };
+var resource3 = { disposed: false, [Symbol.dispose]() { this.disposed = true } };
+var adopted = stack1.adopt(resource1, function (r) { r.disposed = true });
+var deferred = stack1.defer(function (r) { resource2.disposed = true });
+var stack2 = stack1.move();
+var used = stack2.use(resource3);
+stack2.dispose();
+return (
+  resource1.disposed && adopted === resource1
+  && resource2.disposed && deferred === undefined
+  && resource3.disposed && used === resource3
+);
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

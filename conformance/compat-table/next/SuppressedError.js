@@ -19,23 +19,21 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Explicit Resource Management
 // subtest: SuppressedError
-var __ok = (function () {
-        var err1 = new Error();
-        var err2 = new Error();
-        var err3 = new Error();
-        try {
-          using _1 = { [Symbol.dispose]() { throw err1 } },
-                _2 = { [Symbol.dispose]() { throw err2 } };
-          throw err3;
-        } catch (e) {
-          return (
-            e instanceof SuppressedError
-            && e.error === err1
-            && e.suppressed instanceof SuppressedError
-            && e.suppressed.error === err2
-            && e.suppressed.suppressed === err3
-          );
-        }
-      
+var __ok = (function () {var err1 = new Error();
+var err2 = new Error();
+var err3 = new Error();
+try {
+  using _1 = { [Symbol.dispose]() { throw err1 } },
+        _2 = { [Symbol.dispose]() { throw err2 } };
+  throw err3;
+} catch (e) {
+  return (
+    e instanceof SuppressedError
+    && e.error === err1
+    && e.suppressed instanceof SuppressedError
+    && e.suppressed.error === err2
+    && e.suppressed.suppressed === err3
+  );
+}
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

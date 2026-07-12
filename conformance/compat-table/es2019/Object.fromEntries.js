@@ -18,9 +18,7 @@ global.__createIterableObject = function (arr, methods) {
 };
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Object.fromEntries
-var __ok = (function () {
-    var object = Object.fromEntries(new Map([['foo', 42], ['bar', 23]]));
-    return object.foo === 42 && object.bar === 23;
-  
+var __ok = (function () {var object = Object.fromEntries(new Map([['foo', 42], ['bar', 23]]));
+return object.foo === 42 && object.bar === 23;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

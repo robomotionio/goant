@@ -19,9 +19,7 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Object static methods
 // subtest: Object.assign
-var __ok = (function () {
-        var o = Object.assign({a:true}, {b:true}, {c:true});
-        return "a" in o && "b" in o && "c" in o;
-      
+var __ok = (function () {var o = Object.assign({a:true}, {b:true}, {c:true});
+return "a" in o && "b" in o && "c" in o;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

@@ -18,12 +18,10 @@ global.__createIterableObject = function (arr, methods) {
 };
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Promise.withResolvers
-var __ok = (function () {
-      var obj = Promise.withResolvers();
-      return obj instanceof Object
-        && obj.promise instanceof Promise
-        && typeof obj.resolve === 'function'
-        && typeof obj.reject === 'function';
-    
+var __ok = (function () {var obj = Promise.withResolvers();
+return obj instanceof Object
+  && obj.promise instanceof Promise
+  && typeof obj.resolve === 'function'
+  && typeof obj.reject === 'function';
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

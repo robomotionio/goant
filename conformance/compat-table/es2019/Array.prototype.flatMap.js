@@ -19,10 +19,8 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Array.prototype.{flat, flatMap}
 // subtest: Array.prototype.flatMap
-var __ok = (function () {
-        return [{a: 1, b: 2}, {a: 3, b: 4}].flatMap(function (it) {
-          return [it.a, it.b];
-        }).join('') === '1234';
-      
+var __ok = (function () {return [{a: 1, b: 2}, {a: 3, b: 4}].flatMap(function (it) {
+  return [it.a, it.b];
+}).join('') === '1234';
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

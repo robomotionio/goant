@@ -22,6 +22,21 @@ const DATA_FILES = [
   'data-esintl.js',
 ];
 
+// dedent strips the common leading indentation shared by all non-blank lines.
+// compat-table execs are indented to their source column; that indentation must
+// be removed or it leaks into template literals (whitespace-sensitive).
+function dedent(src) {
+  const lines = src.replace(/^\n/, '').replace(/\s+$/, '').split('\n');
+  let min = Infinity;
+  for (const ln of lines) {
+    if (!ln.trim()) continue;
+    const m = ln.match(/^[ \t]*/)[0].length;
+    if (m < min) min = m;
+  }
+  if (!isFinite(min) || min === 0) return lines.join('\n');
+  return lines.map((ln) => ln.slice(min)).join('\n');
+}
+
 // extractExec turns a compat-table exec function into its runnable source. The
 // es6+ style hides the body in a block comment; data-es5 uses a real function.
 function extractExec(fn) {
@@ -30,12 +45,12 @@ function extractExec(fn) {
   const open = s.indexOf('{/*');
   if (open !== -1) {
     const close = s.indexOf('*/}', open);
-    if (close !== -1) return s.slice(open + 3, close);
+    if (close !== -1) return dedent(s.slice(open + 3, close));
   }
   // Plain function: take everything between the first '{' and the last '}'.
   const b = s.indexOf('{');
   const e = s.lastIndexOf('}');
-  if (b !== -1 && e > b) return s.slice(b + 1, e);
+  if (b !== -1 && e > b) return dedent(s.slice(b + 1, e));
   return null;
 }
 

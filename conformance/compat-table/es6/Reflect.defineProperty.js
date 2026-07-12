@@ -19,11 +19,9 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Reflect
 // subtest: Reflect.defineProperty
-var __ok = (function () {
-        var obj = {};
-        Reflect.defineProperty(obj, "foo", { value: 123 });
-        return obj.foo === 123 &&
-          Reflect.defineProperty(Object.freeze({}), "foo", { value: 123 }) === false;
-      
+var __ok = (function () {var obj = {};
+Reflect.defineProperty(obj, "foo", { value: 123 });
+return obj.foo === 123 &&
+  Reflect.defineProperty(Object.freeze({}), "foo", { value: 123 }) === false;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

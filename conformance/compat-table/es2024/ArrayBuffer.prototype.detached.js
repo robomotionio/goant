@@ -19,10 +19,8 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: ArrayBuffer.prototype.transfer
 // subtest: ArrayBuffer.prototype.detached
-var __ok = (function () {
-          const buffer1 = new Uint8Array([1, 2]).buffer;
-          const buffer2 = buffer1.transfer();
-          return buffer1.detached && !buffer2.detached;
-        
+var __ok = (function () {const buffer1 = new Uint8Array([1, 2]).buffer;
+const buffer2 = buffer1.transfer();
+return buffer1.detached && !buffer2.detached;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

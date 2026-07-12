@@ -19,8 +19,6 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Reflect
 // subtest: Reflect.apply
-var __ok = (function () {
-        return Reflect.apply(Array.prototype.push, [1,2], [3,4,5]) === 5;
-      
+var __ok = (function () {return Reflect.apply(Array.prototype.push, [1,2], [3,4,5]) === 5;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

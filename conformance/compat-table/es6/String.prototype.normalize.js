@@ -19,10 +19,8 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: String.prototype methods
 // subtest: String.prototype.normalize
-var __ok = (function () {
-        return typeof String.prototype.normalize === "function"
-          && "c\u0327\u0301".normalize("NFC") === "\u1e09"
-          && "\u1e09".normalize("NFD") === "c\u0327\u0301";
-      
+var __ok = (function () {return typeof String.prototype.normalize === "function"
+  && "c\u0327\u0301".normalize("NFC") === "\u1e09"
+  && "\u1e09".normalize("NFD") === "c\u0327\u0301";
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

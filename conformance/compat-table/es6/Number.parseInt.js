@@ -19,10 +19,8 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Number properties
 // subtest: Number.parseInt
-var __ok = (function () {
-        var actualGlobal = Function('return this')();
-        return typeof Number.parseInt === 'function'
-          && Number.parseInt === actualGlobal.parseInt;
-      
+var __ok = (function () {var actualGlobal = Function('return this')();
+return typeof Number.parseInt === 'function'
+  && Number.parseInt === actualGlobal.parseInt;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

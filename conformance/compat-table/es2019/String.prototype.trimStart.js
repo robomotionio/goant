@@ -19,8 +19,6 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: string trimming
 // subtest: String.prototype.trimStart
-var __ok = (function () {
-        return ' \t \n abc   \t\n'.trimStart() === 'abc   \t\n';
-      
+var __ok = (function () {return ' \t \n abc   \t\n'.trimStart() === 'abc   \t\n';
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }

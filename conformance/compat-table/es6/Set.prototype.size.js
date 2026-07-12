@@ -19,15 +19,13 @@ global.__createIterableObject = function (arr, methods) {
 // pin: 1bcd416b9f4399c71d3234c06bd0441074195743
 // feature: Set
 // subtest: Set.prototype.size
-var __ok = (function () {
-        var obj = {};
-        var set = new Set();
+var __ok = (function () {var obj = {};
+var set = new Set();
 
-        set.add(123);
-        set.add(123);
-        set.add(456);
+set.add(123);
+set.add(123);
+set.add(456);
 
-        return set.size === 2;
-      
+return set.size === 2;
 })();
-if (__ok !== true) { throw new Error("compat-table check failed: " + __ok); }
+if (!__ok) { throw new Error("compat-table check failed: " + __ok); }
