@@ -544,35 +544,24 @@ func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 
 func (c *compiler) compileTaggedTemplate(n *Node) {
 	segs := n.Right.Args
-	var cooked, raw []string
+	// Build the frozen template-strings array (with frozen .raw) once, at compile
+	// time, and store it as a constant: the same object is passed on every
+	// evaluation (permanent caching) and it is frozen.
+	cooked := c.rt.newArray()
+	co := c.rt.objPtr(cooked)
+	raw := c.rt.newArray()
+	ro := c.rt.objPtr(raw)
 	for i := 0; i < len(segs); i += 2 {
-		cooked = append(cooked, segs[i].Str)
-		raw = append(raw, segs[i].Aux)
+		c.rt.arraySet(co, co.arrLen, c.rt.internString(segs[i].Str))
+		c.rt.arraySet(ro, ro.arrLen, c.rt.internString(segs[i].Aux))
 	}
-	strSlot := c.tempLocal()
-	// cooked array
-	for _, s := range cooked {
-		c.emitConst(c.rt.internString(s))
-	}
-	c.emit(OpArray)
-	c.emitU16(uint16(len(cooked)))
-	c.emitOpU16(OpPutLocal, uint16(strSlot))
-	// raw array
-	for _, s := range raw {
-		c.emitConst(c.rt.internString(s))
-	}
-	c.emit(OpArray)
-	c.emitU16(uint16(len(raw)))
-	rawSlot := c.tempLocal()
-	c.emitOpU16(OpPutLocal, uint16(rawSlot))
-	// strings.raw = rawArray.
-	c.emitOpU16(OpGetLocal, uint16(strSlot))
-	c.emitOpU16(OpGetLocal, uint16(rawSlot))
-	c.emitFieldOp(OpPutField, "raw")
+	co.defineOwn("raw", raw, 0)
+	c.rt.sealObject(raw, true)
+	c.rt.sealObject(cooked, true)
 
 	// tag(strings, ...substitutions)
 	c.compileExpr(n.Left)
-	c.emitOpU16(OpGetLocal, uint16(strSlot))
+	c.emitConst(cooked)
 	nsubs := 0
 	for i := 1; i < len(segs); i += 2 {
 		c.compileExpr(segs[i])
