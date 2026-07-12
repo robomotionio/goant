@@ -64,7 +64,22 @@ type compiler struct {
 	// tryDepth > 0 inside a try/catch/finally body, where a `return` must run the
 	// pending finally rather than tail-call away.
 	tryDepth int
+
+	// unwindKinds is the stack of live try/finally scopes at compile time (ant
+	// c->unwind_kinds). break/continue crossing a `finally` must route through it
+	// (OP_UNWIND_JMP) so the finally runs; crossing a plain try just pops handlers.
+	unwindKinds []uint8
 }
+
+// unwind-scope kinds tracked while compiling (ant UNW_*).
+const (
+	unwTryCatch uint8 = iota
+	unwTryFinally
+	unwFinallyBody
+)
+
+func (c *compiler) unwindPush(k uint8) { c.unwindKinds = append(c.unwindKinds, k) }
+func (c *compiler) unwindPop()         { c.unwindKinds = c.unwindKinds[:len(c.unwindKinds)-1] }
 
 func (c *compiler) consumeLabel() string {
 	s := c.pendingLabel
@@ -84,6 +99,7 @@ type loopCtx struct {
 	continueTarget int   // resolved continue target (-1 until known)
 	label          string
 	isSwitch       bool
+	unwindDepth    int // len(unwindKinds) when the loop was entered
 }
 
 // Compile compiles a parsed program to a bytecode function (script mode).

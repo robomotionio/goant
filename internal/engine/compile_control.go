@@ -6,7 +6,7 @@ package engine
 // and finally land as the port continues.
 
 func (c *compiler) pushLoop(label string, isSwitch bool) *loopCtx {
-	l := &loopCtx{continueTarget: -1, label: label, isSwitch: isSwitch}
+	l := &loopCtx{continueTarget: -1, label: label, isSwitch: isSwitch, unwindDepth: len(c.unwindKinds)}
 	c.loops = append(c.loops, l)
 	return l
 }
@@ -410,7 +410,7 @@ func (c *compiler) compileBreak(n *Node) {
 		c.errorf("illegal break statement")
 		return
 	}
-	off := c.emitJump(OpJmp)
+	off := c.emitLoopExitJump(l)
 	l.breaks = append(l.breaks, off)
 }
 
@@ -420,8 +420,47 @@ func (c *compiler) compileContinue(n *Node) {
 		c.errorf("illegal continue statement")
 		return
 	}
-	off := c.emitJump(OpJmp)
+	off := c.emitLoopExitJump(l)
 	l.continues = append(l.continues, off)
+}
+
+// emitLoopExitJump emits the jump for a break/continue targeting loop l, running
+// any `finally` scopes and popping any plain try/finally handlers the jump exits
+// (ant emit_loop_exit_jump). When no finally intervenes it drops handlers with
+// TRY_POP / FINALLY_DISCARD then a plain JMP; otherwise it emits UNWIND_JMP so the
+// interpreter runs the finallies before landing at the target. Returns the operand
+// offset of the branch to patch to the loop exit / continue target.
+func (c *compiler) emitLoopExitJump(l *loopCtx) int {
+	nPop := len(c.unwindKinds) - l.unwindDepth
+	nFin := 0
+	for i := len(c.unwindKinds) - 1; i >= l.unwindDepth; i-- {
+		if c.unwindKinds[i] == unwTryFinally {
+			nFin++
+		}
+	}
+	if nPop <= 0 {
+		return c.emitJump(OpJmp)
+	}
+	if nFin == 0 {
+		for i := len(c.unwindKinds) - 1; i >= l.unwindDepth; i-- {
+			if c.unwindKinds[i] == unwFinallyBody {
+				c.emit(OpFinallyDiscard)
+			} else {
+				c.emit(OpTryPop)
+			}
+		}
+		return c.emitJump(OpJmp)
+	}
+	if nFin > 255 {
+		nFin = 255
+	}
+	if nPop > 255 {
+		nPop = 255
+	}
+	off := c.emitJump(OpUnwindJmp)
+	c.emitByte(byte(nFin))
+	c.emitByte(byte(nPop))
+	return off
 }
 
 // targetLoop returns the innermost enclosing loop/switch (or the one matching a
@@ -497,34 +536,90 @@ func (c *compiler) compileSwitch(n *Node) {
 	_ = l
 }
 
+// compileCatchBody binds the catch parameter (if any) and compiles the catch
+// body. On entry the thrown value is on the stack (pushed by OP_CATCH).
+func (c *compiler) compileCatchBody(n *Node) {
+	if n.CatchParam != nil && n.CatchParam.Kind == NIdent {
+		c.scopeDepth++
+		slot := c.declareVar(n.CatchParam.Str, false)
+		c.emitOpU16(OpPutLocal, uint16(slot))
+		c.compileStmt(n.CatchBody)
+		c.scopeDepth--
+	} else {
+		c.emit(OpPop) // discard thrown value (optional / unsupported binding)
+		c.compileStmt(n.CatchBody)
+	}
+}
+
+// compileFinallyBlock emits the finally body as a subroutine: OP_FINALLY marks it
+// (installing a finally handler whose landing is the code after OP_FINALLY_RET),
+// the body runs, and OP_FINALLY_RET resumes the pending completion (normal / throw
+// / return / break-continue) recorded when the block was entered.
+func (c *compiler) compileFinallyBlock(body *Node) {
+	finallyJump := c.emitJump(OpFinally)
+	c.unwindPush(unwFinallyBody)
+	c.compileStmt(body)
+	c.unwindPop()
+	c.emit(OpFinallyRet)
+	c.patchJump(finallyJump)
+}
+
 func (c *compiler) compileTry(n *Node) {
 	c.tryDepth++
 	defer func() { c.tryDepth-- }()
-	// TRY_PUSH marks a catch handler; on throw the interpreter jumps there.
-	handler := c.emitJump(OpTryPush)
-	c.compileStmt(n.Body)
+
+	hasCatch := n.CatchBody != nil
+	hasFinally := n.FinallyBody != nil
+
+	// The outer handler protects the try (and catch) body. With a finally it is a
+	// TRY_PUSH_FINALLY so abrupt completions route through the finally.
+	var tryJump int
+	if hasFinally {
+		tryJump = c.emitJump(OpTryPushFinally)
+		c.unwindPush(unwTryFinally)
+	} else {
+		tryJump = c.emitJump(OpTryPush)
+		c.unwindPush(unwTryCatch)
+	}
+
+	if hasCatch && hasFinally {
+		// A separate inner TRY_PUSH catches into the catch body; the outer
+		// TRY_PUSH_FINALLY then still runs the finally on the way out.
+		innerJump := c.emitJump(OpTryPush)
+		c.unwindPush(unwTryCatch)
+		c.compileStmt(n.Body)
+		c.emit(OpTryPop)
+		c.unwindPop()
+		innerEnd := c.emitJump(OpJmp)
+		c.patchJump(innerJump)
+		catchTag := c.emitJump(OpCatch)
+		c.compileCatchBody(n)
+		c.patchJump(catchTag)
+		c.patchJump(innerEnd)
+	} else {
+		c.compileStmt(n.Body)
+	}
+
 	c.emit(OpTryPop)
-	skip := c.emitJump(OpJmp) // no exception: skip the catch block
+	c.unwindPop()
 
-	c.patchJump(handler)
-	if n.CatchBody != nil {
-		// CATCH pushes the thrown value; bind it to the catch parameter local.
-		c.emit(OpCatch)
-		c.emitU32(0) // finally addr (unused in the slice)
-		if n.CatchParam != nil && n.CatchParam.Kind == NIdent {
-			c.scopeDepth++
-			slot := c.declareVar(n.CatchParam.Str, false)
-			c.emitOpU16(OpPutLocal, uint16(slot))
-			c.compileStmt(n.CatchBody)
-			c.scopeDepth--
+	if !hasFinally {
+		endJump := c.emitJump(OpJmp)
+		c.patchJump(tryJump)
+		catchTag := c.emitJump(OpCatch)
+		if hasCatch {
+			c.compileCatchBody(n)
 		} else {
-			c.emit(OpPop) // discard thrown value (optional catch binding)
-			c.compileStmt(n.CatchBody)
+			c.emit(OpPop)
 		}
+		c.patchJump(catchTag)
+		c.patchJump(endJump)
+		return
 	}
-	c.patchJump(skip)
 
-	if n.FinallyBody != nil {
-		c.compileStmt(n.FinallyBody)
-	}
+	// Finally: the normal path falls through into OP_FINALLY; abrupt completions
+	// (throw/return/break/continue) land here too via the TRY_PUSH_FINALLY handler,
+	// with the completion recorded so OP_FINALLY_RET can resume it.
+	c.patchJump(tryJump)
+	c.compileFinallyBlock(n.FinallyBody)
 }

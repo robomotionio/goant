@@ -70,6 +70,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		withStack    []Value
 		newTarget    Value
 		thrown       *ThrowError
+		comp         completion
 		ip           int
 	)
 	savedActiveNT := rt.activeNewTarget
@@ -99,6 +100,50 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		for _, u := range openUpvals {
 			u.closeUp()
 		}
+	}
+	// doReturn implements ant sv_vm_unwind_for_return: if a finally scope lies
+	// between here and the frame exit, record a RETURN completion, unwind to it,
+	// and return its finally-entry ip (ok=true). Otherwise the frame truly returns.
+	doReturn := func(r Value) (int, bool) {
+		for i := len(handlers) - 1; i >= 0; i-- {
+			if handlers[i].kind != hTryFinally {
+				continue
+			}
+			h := handlers[i]
+			handlers = handlers[:i]
+			stack = stack[:h.stackDepth]
+			comp = completion{kind: compReturn, value: r}
+			return h.catchIP, true
+		}
+		return 0, false
+	}
+	// doJump implements ant sv_vm_unwind_for_jump for break/continue crossing
+	// finally scopes: run the nearest finally (recording a JUMP completion for the
+	// rest), or, when none remain, pop the crossed handlers and fall through.
+	doJump := func(target, nFin, nPop int) int {
+		if nFin > 0 {
+			for i := len(handlers) - 1; i >= 0; i-- {
+				if handlers[i].kind != hTryFinally {
+					continue
+				}
+				h := handlers[i]
+				used := len(handlers) - i
+				handlers = handlers[:i]
+				stack = stack[:h.stackDepth]
+				pops := nPop - used
+				if pops < 0 {
+					pops = 0
+				}
+				comp = completion{kind: compJump, jumpIP: target, jumpFin: nFin - 1, jumpPops: pops}
+				return h.catchIP
+			}
+		}
+		for nPop > 0 && len(handlers) > 0 {
+			handlers = handlers[:len(handlers)-1]
+			nPop--
+		}
+		comp = completion{}
+		return -1
 	}
 
 restart:
@@ -798,6 +843,8 @@ restart:
 			}
 			sent := mkundef()
 			kind := genNext
+			ipSet := false // set when a genReturn routes into an enclosing finally
+		yieldStar:
 			for {
 				var result Value
 				var re *ThrowError
@@ -813,8 +860,14 @@ restart:
 				case genReturn:
 					returnFn, _ := rt.getField(inner, "return")
 					if !rt.isCallable(returnFn) {
+						// No return method: propagate the return, running any finally.
+						if fip, ok := doReturn(sent); ok {
+							ip = fip
+							ipSet = true
+							break yieldStar
+						}
 						closeAll()
-						return sent, nil // no return method: propagate the return
+						return sent, nil
 					}
 					result, re = rt.callValue(returnFn, inner, []Value{sent})
 				default:
@@ -833,8 +886,14 @@ restart:
 				value, _ := rt.getField(result, "value")
 				if rt.toBoolean(doneV) {
 					if kind == genReturn {
+						// Inner honored return: propagate it, running any finally.
+						if fip, ok := doReturn(value); ok {
+							ip = fip
+							ipSet = true
+							break yieldStar
+						}
 						closeAll()
-						return value, nil // inner honored return: propagate it
+						return value, nil
 					}
 					push(value)
 					break
@@ -845,7 +904,9 @@ restart:
 					sent, kind = inject.val, inject.kind
 				}
 			}
-			ip += 3
+			if !ipSet {
+				ip += 3
+			}
 		case OpYield, OpAwait:
 			// Suspend this coroutine, handing the operand to its driver and
 			// blocking until resumed. A throw/return injection unwinds instead of
@@ -857,6 +918,11 @@ restart:
 					thrown = &ThrowError{Value: inject.val, rt: rt}
 					goto unwind
 				case genReturn:
+					// A forced return runs any enclosing finally before exiting.
+					if fip, ok := doReturn(inject.val); ok {
+						ip = fip
+						continue
+					}
 					closeAll()
 					return inject.val, nil
 				}
@@ -864,14 +930,85 @@ restart:
 			push(resumed)
 			ip++
 		case OpTryPush:
-			handlers = append(handlers, tryHandler{catchIP: int(readU32(code, ip+1)), stackDepth: len(stack)})
+			handlers = append(handlers, tryHandler{kind: hTry, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack)})
+			ip += 5
+		case OpTryPushFinally:
+			handlers = append(handlers, tryHandler{kind: hTryFinally, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack)})
 			ip += 5
 		case OpTryPop:
-			handlers = handlers[:len(handlers)-1]
+			// Pop the innermost catch / try-finally handler (skipping any executing
+			// finally handler, which is unwound by OP_FINALLY_RET).
+			for i := len(handlers) - 1; i >= 0; i-- {
+				if handlers[i].kind == hFinally {
+					continue
+				}
+				handlers = append(handlers[:i], handlers[i+1:]...)
+				break
+			}
 			ip++
 		case OpCatch:
 			push(pendingThrow)
+			comp = completion{}
 			ip += 5
+		case OpFinally:
+			// Enter a finally body: install a finally handler whose landing is the
+			// code after OP_FINALLY_RET (the normal-completion continuation).
+			handlers = append(handlers, tryHandler{kind: hFinally, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack)})
+			ip += 5
+		case OpFinallyDiscard:
+			// Leave a finally body abnormally (break/continue): drop its handler and
+			// any recorded completion.
+			if len(handlers) > 0 && handlers[len(handlers)-1].kind == hFinally {
+				handlers = handlers[:len(handlers)-1]
+			}
+			comp = completion{}
+			ip++
+		case OpFinallyRet:
+			// Resume the completion recorded when the finally was entered.
+			landing := ip + 1
+			if len(handlers) > 0 && handlers[len(handlers)-1].kind == hFinally {
+				landing = handlers[len(handlers)-1].catchIP
+				handlers = handlers[:len(handlers)-1]
+			}
+			switch comp.kind {
+			case compThrow:
+				thrown = &ThrowError{Value: comp.value, rt: rt}
+				comp = completion{}
+				goto unwind
+			case compReturn:
+				r := comp.value
+				comp = completion{}
+				if fip, ok := doReturn(r); ok {
+					ip = fip
+					continue
+				}
+				closeAll()
+				return r, nil
+			case compJump:
+				target, nFin, nPop := comp.jumpIP, comp.jumpFin, comp.jumpPops
+				comp = completion{}
+				if fip := doJump(target, nFin, nPop); fip >= 0 {
+					ip = fip
+				} else {
+					ip = target
+				}
+			default:
+				ip = landing
+			}
+		case OpUnwindJmp:
+			target := int(readU32(code, ip+1))
+			nFin := int(code[ip+5])
+			nPop := int(code[ip+6])
+			if fip := doJump(target, nFin, nPop); fip >= 0 {
+				ip = fip
+			} else {
+				ip = target
+			}
+		case OpNipCatch:
+			a := pop()
+			pop()
+			push(a)
+			ip++
 
 		case OpCloseUpval:
 			// Close any open upvalue over this local slot (per-iteration lexical
@@ -1023,9 +1160,18 @@ restart:
 			ip += 3
 
 		case OpReturn:
+			r := pop()
+			if fip, ok := doReturn(r); ok {
+				ip = fip
+				continue
+			}
 			closeAll()
-			return pop(), nil
+			return r, nil
 		case OpReturnUndef:
+			if fip, ok := doReturn(mkundef()); ok {
+				ip = fip
+				continue
+			}
 			closeAll()
 			return mkundef(), nil
 		case OpHalt:
@@ -1038,26 +1184,70 @@ restart:
 		continue
 
 	unwind:
-		// Route the thrown value to the innermost catch handler in this frame;
-		// if there is none (or this is a control-flow signal), propagate up.
-		if len(handlers) > 0 && !thrown.control {
-			h := handlers[len(handlers)-1]
-			handlers = handlers[:len(handlers)-1]
-			stack = stack[:h.stackDepth]
-			pendingThrow = thrown.Value
-			thrown = nil
-			ip = h.catchIP
-			continue
+		// Route the thrown value to the innermost catch / try-finally handler in
+		// this frame (skipping executing finally bodies); if there is none, or this
+		// is a control-flow signal, propagate up.
+		if !thrown.control {
+			for len(handlers) > 0 {
+				h := handlers[len(handlers)-1]
+				handlers = handlers[:len(handlers)-1]
+				if h.kind == hFinally {
+					// A throw inside a finally body overrides its pending completion
+					// and propagates to the next outer handler.
+					comp = completion{}
+					continue
+				}
+				stack = stack[:h.stackDepth]
+				if h.kind == hTryFinally {
+					// Run the finally with the throw pending; OP_FINALLY_RET re-raises.
+					comp = completion{kind: compThrow, value: thrown.Value}
+					thrown = nil
+					ip = h.catchIP
+					goto resumed
+				}
+				pendingThrow = thrown.Value
+				thrown = nil
+				ip = h.catchIP
+				goto resumed
+			}
 		}
 		closeAll()
 		return mkundef(), thrown
+	resumed:
+		continue
 	}
 }
 
-// tryHandler records a live catch handler (ant try-handler stack).
+// tryHandler records a live catch/finally handler (ant handler stack).
 type tryHandler struct {
-	catchIP    int
-	stackDepth int
+	kind       uint8 // hTry / hTryFinally / hFinally
+	catchIP    int   // landing ip (catch tag, finally entry, or post-finally)
+	stackDepth int   // stack length to restore on entry
+}
+
+// handler kinds (ant SV_HANDLER_*).
+const (
+	hTry        uint8 = iota // catch handler
+	hTryFinally              // try protected by a finally (abrupt exits run finally)
+	hFinally                 // an executing finally body
+)
+
+// completion kinds recorded when an abrupt exit enters a finally (ant
+// SV_COMPLETION_*); the finally's OP_FINALLY_RET resumes it.
+const (
+	compNone uint8 = iota
+	compThrow
+	compReturn
+	compJump
+)
+
+// completion is the pending abrupt completion a finally must resume.
+type completion struct {
+	kind     uint8
+	value    Value
+	jumpIP   int
+	jumpFin  int // remaining finallies for a pending break/continue jump
+	jumpPops int // remaining handler pops for a pending break/continue jump
 }
 
 // ---- operator semantics ----
