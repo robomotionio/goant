@@ -68,6 +68,50 @@ func (rt *Runtime) initErrorBuiltin() {
 	rt.errors.evalErr, _ = mk("EvalError")
 	rt.errors.uriErr, _ = mk("URIError")
 
+	// AggregateError(errors, message, options): errors is an iterable; message
+	// is the second argument (not the first).
+	aggProto := rt.newObject(errProto)
+	apo := rt.objPtr(aggProto)
+	apo.defineOwn("name", rt.internString("AggregateError"), attrWritable|attrConfigurable)
+	apo.defineOwn("message", rt.internString(""), attrWritable|attrConfigurable)
+	aggCtor := rt.newNativeFunc("AggregateError", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		errObj := this
+		if !this.IsObjectType() {
+			errObj = rt.newObject(aggProto)
+		}
+		eo := rt.objPtr(errObj)
+		errsArr := rt.newArray()
+		if it := arg(args, 0); !it.IsNullish() {
+			vals, e := rt.iterableValues(it)
+			if e != nil {
+				return mkundef(), e
+			}
+			ea := rt.objPtr(errsArr)
+			for _, v := range vals {
+				rt.arraySet(ea, ea.arrLen, v)
+			}
+		}
+		eo.defineOwn("errors", errsArr, attrWritable|attrConfigurable)
+		if msg := arg(args, 1); !msg.IsUndefined() {
+			s, e := rt.toStringValue(msg)
+			if e != nil {
+				return mkundef(), e
+			}
+			eo.defineOwn("message", s, attrWritable|attrConfigurable)
+		}
+		if opts := arg(args, 2); opts.IsObjectType() && rt.hasProp(opts, "cause") {
+			cause, e := rt.getField(opts, "cause")
+			if e != nil {
+				return mkundef(), e
+			}
+			eo.defineOwn("cause", cause, attrWritable|attrConfigurable)
+		}
+		return errObj, nil
+	})
+	rt.objPtr(aggCtor).defineOwn("prototype", aggProto, 0)
+	apo.defineOwn("constructor", aggCtor, attrWritable|attrConfigurable)
+	rt.defGlobal("AggregateError", aggCtor)
+
 	rt.defGlobal("Error", base)
 	rt.defGlobal("TypeError", rt.errors.typeErr)
 	rt.defGlobal("RangeError", rt.errors.rangeErr)
