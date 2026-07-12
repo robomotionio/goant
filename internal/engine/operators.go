@@ -39,6 +39,12 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
 		return rt.proxyDelete(o.proxy, rt.toPropertyKeyValue(key))
 	}
+	if key.IsSymbol() {
+		if o := rt.objPtr(obj); o != nil {
+			return o.deleteOwnSymbol(key.handle()), nil
+		}
+		return true, nil
+	}
 	if idx, ok := arrayIndex(key); ok && obj.Type() == TArr {
 		o := rt.objPtr(obj)
 		if int(idx) < len(o.arr) {

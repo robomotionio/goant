@@ -323,7 +323,15 @@ func (o *object) setOwn(key string, v Value) bool {
 // deleteOwn removes an own property (ant js_delete_prop core). Uses shape
 // swap-with-last removal, mirroring the moved slot's stored value.
 func (o *object) deleteOwn(key string) bool {
-	slot := o.shape.lookupInterned(key)
+	return o.deleteSlot(o.shape.lookupInterned(key))
+}
+
+// deleteOwnSymbol removes a symbol-keyed own property.
+func (o *object) deleteOwnSymbol(off uint32) bool {
+	return o.deleteSlot(o.shape.lookupSymbol(off))
+}
+
+func (o *object) deleteSlot(slot int32) bool {
 	if slot < 0 {
 		return true // deleting an absent property succeeds
 	}

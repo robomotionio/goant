@@ -556,6 +556,7 @@ compat-table/es6/WeakSet.prototype.delete.js
 compat-table/es6/WeakSet.prototype-not-instance.js
 compat-table/es6/well-known.hasInstance.js
 compat-table/es6/well-known.isConcatSpreadable.non-spreadable.js
+compat-table/es6/well-known.iterator.arguments.js
 compat-table/es6/well-known.iterator.js
 compat-table/es6/well-known.match.js
 compat-table/es6/well-known.match.String.endsWith.js
@@ -570,6 +571,7 @@ compat-table/es6/well-known.species.Array.slice.js
 compat-table/es6/well-known.species.js
 compat-table/es6/well-known.split.js
 compat-table/es6/well-known.toPrimitive.js
+compat-table/es6/well-known.toStringTag.existing-builtins.js
 compat-table/es6/well-known.toStringTag.js
 compat-table/es6/well-known.toStringTag.misc-builtins.js
 compat-table/intl/Array.prototype.toLocaleString.js

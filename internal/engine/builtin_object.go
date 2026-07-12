@@ -10,9 +10,16 @@ func (rt *Runtime) initObjectBuiltin() {
 	proto := rt.objPtr(rt.objectProto)
 
 	rt.defMethod(proto, "hasOwnProperty", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(this)
+		obj, e0 := rt.toObjectValue(this)
+		if e0 != nil {
+			return mkundef(), e0
+		}
+		o := rt.objPtr(obj)
 		if o == nil {
 			return mkfalse(), nil
+		}
+		if key := arg(args, 0); key.IsSymbol() {
+			return mkbool(o.shape.lookupSymbol(key.handle()) >= 0), nil
 		}
 		name, e := rt.propKeyString(arg(args, 0))
 		if e != nil {

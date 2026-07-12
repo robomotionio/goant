@@ -208,6 +208,12 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 				} else {
 					ao.defineOwn("callee", fnVal, attrWritable|attrConfigurable)
 				}
+				// The arguments object has its OWN @@iterator (%Array.prototype.values%).
+				if rt.symIterator != 0 {
+					if vals, e := rt.getField(rt.arrayProto, "values"); e == nil {
+						ao.defineOwnSymbol(rt.symIterator.handle(), vals, attrWritable|attrConfigurable)
+					}
+				}
 				push(a)
 			case 1: // current function value (named function self-reference)
 				push(fnVal)
