@@ -210,7 +210,12 @@ func (rt *Runtime) initRegExpBuiltin() {
 		}
 	})
 	defSym(rt.symReplace, func(this Value, args []Value) (Value, *ThrowError) {
-		return rt.stringReplace(arg(args, 0), this, arg(args, 1))
+		// A native RegExp uses the fast substring path; any other object (a
+		// RegExp-like or a Proxy) runs the generic exec-driven algorithm.
+		if o := rt.objPtr(this); o != nil && o.regex != nil {
+			return rt.stringReplace(arg(args, 0), this, arg(args, 1))
+		}
+		return rt.regexpSymbolReplace(this, arg(args, 0), arg(args, 1))
 	})
 	defSym(rt.symSearch, func(this Value, args []Value) (Value, *ThrowError) {
 		// Generic RegExp.prototype[@@search] (22.2.6.11): saves/restores lastIndex
@@ -800,6 +805,161 @@ func (rt *Runtime) regexpArg(v Value) (Value, *ThrowError) {
 
 // stringReplace implements String.prototype.replace for string and regex
 // patterns with string or function replacements.
+// abstractRegExpExec implements RegExpExec(R, S): call R.exec if it is callable
+// (routing through [[Get]] so a Proxy trap observes it), else the builtin exec.
+func (rt *Runtime) abstractRegExpExec(rx, s Value) (Value, *ThrowError) {
+	exec, e := rt.getField(rx, "exec")
+	if e != nil {
+		return mkundef(), e
+	}
+	if rt.isCallable(exec) {
+		r, e := rt.callValue(exec, rx, []Value{s})
+		if e != nil {
+			return mkundef(), e
+		}
+		if !r.IsNull() && !r.IsObjectType() {
+			return mkundef(), rt.typeError("RegExp exec method returned something other than an Object or null")
+		}
+		return r, nil
+	}
+	return rt.regexpExec(rx, s)
+}
+
+// regexpSymbolReplace is the generic RegExp.prototype[@@replace] for a non-native
+// receiver (RegExp-like objects and Proxies): it drives matches through the
+// abstract RegExpExec so every property access (global, unicode, exec, …) is
+// observable, then builds the replacement.
+func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowError) {
+	if !rx.IsObjectType() {
+		return mkundef(), rt.typeError("RegExp.prototype[Symbol.replace] called on incompatible receiver")
+	}
+	sV, e := rt.toStringValue(strVal)
+	if e != nil {
+		return mkundef(), e
+	}
+	Srunes := []rune(string(rt.strBytes(sV)))
+	functional := rt.isCallable(repl)
+	replStr := ""
+	if !functional {
+		rs, e := rt.toStringValue(repl)
+		if e != nil {
+			return mkundef(), e
+		}
+		replStr = string(rt.strBytes(rs))
+	}
+	gv, e := rt.getField(rx, "global")
+	if e != nil {
+		return mkundef(), e
+	}
+	global := rt.toBoolean(gv)
+	fullUnicode := false
+	if global {
+		uv, e := rt.getField(rx, "unicode")
+		if e != nil {
+			return mkundef(), e
+		}
+		fullUnicode = rt.toBoolean(uv)
+		if e := rt.setField(rx, "lastIndex", mknum(0)); e != nil {
+			return mkundef(), e
+		}
+	}
+	var results []Value
+	for {
+		result, e := rt.abstractRegExpExec(rx, sV)
+		if e != nil {
+			return mkundef(), e
+		}
+		if result.IsNull() {
+			break
+		}
+		results = append(results, result)
+		if !global {
+			break
+		}
+		m0, e := rt.getElement(result, mknum(0))
+		if e != nil {
+			return mkundef(), e
+		}
+		ms, e := rt.toStringValue(m0)
+		if e != nil {
+			return mkundef(), e
+		}
+		if len(rt.strBytes(ms)) == 0 {
+			li, _ := rt.getField(rx, "lastIndex")
+			liN, _ := rt.toNumber(li)
+			if e := rt.setField(rx, "lastIndex", mknum(rt.advanceStringIndex(sV, liN, fullUnicode))); e != nil {
+				return mkundef(), e
+			}
+		}
+	}
+	var out strings.Builder
+	nextPos := 0
+	for _, result := range results {
+		lenV, _ := rt.getField(result, "length")
+		ln, _ := rt.toNumber(lenV)
+		nCaptures := max(int(ln)-1, 0)
+		m0, e := rt.getElement(result, mknum(0))
+		if e != nil {
+			return mkundef(), e
+		}
+		matchedV, e := rt.toStringValue(m0)
+		if e != nil {
+			return mkundef(), e
+		}
+		matched := string(rt.strBytes(matchedV))
+		idxV, _ := rt.getField(result, "index")
+		pos, _ := rt.toNumber(idxV)
+		position := min(max(int(pos), 0), len(Srunes))
+		caps := make([]Value, nCaptures)
+		groups := make([]regexpjs.Group, nCaptures+1)
+		groups[0] = regexpjs.Group{Index: position, Length: len([]rune(matched)), Value: matched}
+		for i := 1; i <= nCaptures; i++ {
+			cv, e := rt.getElement(result, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
+			if cv.IsUndefined() {
+				caps[i-1] = mkundef()
+				groups[i] = regexpjs.Group{Index: -1}
+			} else {
+				cs, e := rt.toStringValue(cv)
+				if e != nil {
+					return mkundef(), e
+				}
+				caps[i-1] = cs
+				groups[i] = regexpjs.Group{Index: 0, Value: string(rt.strBytes(cs))}
+			}
+		}
+		var replacement string
+		if functional {
+			callArgs := make([]Value, 0, nCaptures+3)
+			callArgs = append(callArgs, matchedV)
+			callArgs = append(callArgs, caps...)
+			callArgs = append(callArgs, mknum(float64(position)), sV)
+			rv, e := rt.callValue(repl, mkundef(), callArgs)
+			if e != nil {
+				return mkundef(), e
+			}
+			rs, e := rt.toStringValue(rv)
+			if e != nil {
+				return mkundef(), e
+			}
+			replacement = string(rt.strBytes(rs))
+		} else {
+			replacement = expandReplacement(replStr, matched, groups)
+		}
+		if position >= nextPos {
+			out.WriteString(string(Srunes[nextPos:position]))
+			out.WriteString(replacement)
+			nextPos = position + len([]rune(matched))
+		}
+	}
+	if nextPos < len(Srunes) {
+		out.WriteString(string(Srunes[nextPos:]))
+	}
+	return rt.newString(out.String()), nil
+}
+
 func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError) {
 	s, e := rt.toStringValue(this)
 	if e != nil {
