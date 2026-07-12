@@ -32,6 +32,37 @@ func (rt *Runtime) relativeIndex(v Value, n int) int {
 	return k
 }
 
+// sortValues sorts a slice in place with JS Array.prototype.sort semantics
+// (undefined last; comparator or default ToString ordering).
+func (rt *Runtime) sortValues(vs []Value, cmp Value) *ThrowError {
+	var sortErr *ThrowError
+	sort.SliceStable(vs, func(i, j int) bool {
+		if sortErr != nil {
+			return false
+		}
+		a, b := vs[i], vs[j]
+		if a.IsUndefined() {
+			return false
+		}
+		if b.IsUndefined() {
+			return true
+		}
+		if rt.isCallable(cmp) {
+			r, e := rt.callValue(cmp, mkundef(), []Value{a, b})
+			if e != nil {
+				sortErr = e
+				return false
+			}
+			nv, _ := rt.toNumberPrimitive(r)
+			return nv < 0
+		}
+		sa, _ := rt.toStringValue(a)
+		sb, _ := rt.toStringValue(b)
+		return compareStrings(rt.strBytes(sa), rt.strBytes(sb)) < 0
+	})
+	return sortErr
+}
+
 func (rt *Runtime) initArrayBuiltin() {
 	proto := rt.objPtr(rt.arrayProto)
 
@@ -281,6 +312,89 @@ func (rt *Runtime) initArrayBuiltin() {
 	if rt.symIterator != 0 {
 		proto.defineOwnSymbol(rt.symIterator.handle(), valuesFn, attrWritable|attrConfigurable)
 	}
+	// ES2023 change-array-by-copy: non-mutating variants returning a new array.
+	readAll := func(this Value) ([]Value, *ThrowError) {
+		n, e := rt.lengthOf(this)
+		if e != nil {
+			return nil, e
+		}
+		out := make([]Value, n)
+		for i := 0; i < n; i++ {
+			out[i], _ = rt.getElement(this, mknum(float64(i)))
+		}
+		return out, nil
+	}
+	fromSlice := func(vs []Value) Value {
+		res := rt.newArray()
+		ro := rt.objPtr(res)
+		for i, v := range vs {
+			rt.arraySet(ro, uint32(i), v)
+		}
+		return res
+	}
+	rt.defMethod(proto, "toReversed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		vs, e := readAll(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		for i, j := 0, len(vs)-1; i < j; i, j = i+1, j-1 {
+			vs[i], vs[j] = vs[j], vs[i]
+		}
+		return fromSlice(vs), nil
+	})
+	rt.defMethod(proto, "toSorted", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		vs, e := readAll(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		cmp := arg(args, 0)
+		if e := rt.sortValues(vs, cmp); e != nil {
+			return mkundef(), e
+		}
+		return fromSlice(vs), nil
+	})
+	rt.defMethod(proto, "with", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		vs, e := readAll(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		idx := int(argNum(rt, args, 0))
+		if idx < 0 {
+			idx += len(vs)
+		}
+		if idx < 0 || idx >= len(vs) {
+			return mkundef(), rt.rangeError("Invalid index")
+		}
+		vs[idx] = arg(args, 1)
+		return fromSlice(vs), nil
+	})
+	rt.defMethod(proto, "toSpliced", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		vs, e := readAll(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		n := len(vs)
+		start := rt.relativeIndex(arg(args, 0), n)
+		del := n - start
+		if len(args) > 1 {
+			del = int(argNum(rt, args, 1))
+			if del < 0 {
+				del = 0
+			}
+			if del > n-start {
+				del = n - start
+			}
+		}
+		var inserts []Value
+		if len(args) > 2 {
+			inserts = args[2:]
+		}
+		out := make([]Value, 0, n-del+len(inserts))
+		out = append(out, vs[:start]...)
+		out = append(out, inserts...)
+		out = append(out, vs[start+del:]...)
+		return fromSlice(out), nil
+	})
 
 	rt.defMethod(proto, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		n, e := rt.lengthOf(this)

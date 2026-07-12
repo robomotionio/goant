@@ -271,6 +271,7 @@ func (rt *Runtime) initSetBuiltin() {
 	if rt.symIterator != 0 {
 		po.defineOwnSymbol(rt.symIterator.handle(), valuesFn, attrWritable|attrConfigurable)
 	}
+	rt.defineSetOperations(po)
 
 	ctor := rt.newNativeFunc("Set", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
@@ -326,4 +327,185 @@ func (c *collection) clear() {
 	c.keys = nil
 	c.vals = nil
 	c.index = map[string]int{}
+}
+
+// setElements returns a Set's live element values (skipping tombstones).
+func (rt *Runtime) setElements(s *collection) []Value {
+	out := make([]Value, 0, len(s.keys))
+	for _, k := range s.keys {
+		if !k.IsEmpty() {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// setLikeElements extracts elements from a Set or any iterable "set-like".
+func (rt *Runtime) setLikeElements(v Value) ([]Value, *ThrowError) {
+	if o := rt.objPtr(v); o != nil && o.coll != nil && o.coll.isSet {
+		return rt.setElements(o.coll), nil
+	}
+	return rt.iterableValues(v)
+}
+
+// newSetFrom builds a fresh Set populated with the given elements.
+func (rt *Runtime) newSetFrom(elems []Value) Value {
+	v := rt.newObject(rt.setProto)
+	c := &collection{index: map[string]int{}, isSet: true}
+	rt.objPtr(v).coll = c
+	for _, e := range elems {
+		ck := rt.canonicalKey(e)
+		if _, ok := c.index[ck]; !ok {
+			c.index[ck] = len(c.keys)
+			c.keys = append(c.keys, e)
+			c.vals = append(c.vals, mkundef())
+		}
+	}
+	return v
+}
+
+// defineSetOperations installs the ES2024/2025 Set-theory methods.
+func (rt *Runtime) defineSetOperations(po *object) {
+	rt.defMethod(po, "union", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.collOf(this, true)
+		if e != nil {
+			return mkundef(), e
+		}
+		other, e := rt.setLikeElements(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newSetFrom(append(rt.setElements(s), other...)), nil
+	})
+	rt.defMethod(po, "intersection", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.collOf(this, true)
+		if e != nil {
+			return mkundef(), e
+		}
+		other, e := rt.setLikeElements(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		om := map[string]bool{}
+		for _, v := range other {
+			om[rt.canonicalKey(v)] = true
+		}
+		var out []Value
+		for _, v := range rt.setElements(s) {
+			if om[rt.canonicalKey(v)] {
+				out = append(out, v)
+			}
+		}
+		return rt.newSetFrom(out), nil
+	})
+	rt.defMethod(po, "difference", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.collOf(this, true)
+		if e != nil {
+			return mkundef(), e
+		}
+		other, e := rt.setLikeElements(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		om := map[string]bool{}
+		for _, v := range other {
+			om[rt.canonicalKey(v)] = true
+		}
+		var out []Value
+		for _, v := range rt.setElements(s) {
+			if !om[rt.canonicalKey(v)] {
+				out = append(out, v)
+			}
+		}
+		return rt.newSetFrom(out), nil
+	})
+	rt.defMethod(po, "symmetricDifference", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.collOf(this, true)
+		if e != nil {
+			return mkundef(), e
+		}
+		other, e := rt.setLikeElements(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		sm := map[string]bool{}
+		for _, v := range rt.setElements(s) {
+			sm[rt.canonicalKey(v)] = true
+		}
+		om := map[string]bool{}
+		var out []Value
+		for _, v := range other {
+			ck := rt.canonicalKey(v)
+			om[ck] = true
+			if !sm[ck] {
+				out = append(out, v)
+			}
+		}
+		for _, v := range rt.setElements(s) {
+			if !om[rt.canonicalKey(v)] {
+				out = append(out, v)
+			}
+		}
+		return rt.newSetFrom(out), nil
+	})
+	rt.defMethod(po, "isSubsetOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.collOf(this, true)
+		if e != nil {
+			return mkundef(), e
+		}
+		other, e := rt.setLikeElements(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		om := map[string]bool{}
+		for _, v := range other {
+			om[rt.canonicalKey(v)] = true
+		}
+		for _, v := range rt.setElements(s) {
+			if !om[rt.canonicalKey(v)] {
+				return mkfalse(), nil
+			}
+		}
+		return mktrue(), nil
+	})
+	rt.defMethod(po, "isSupersetOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.collOf(this, true)
+		if e != nil {
+			return mkundef(), e
+		}
+		other, e := rt.setLikeElements(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		sm := map[string]bool{}
+		for _, v := range rt.setElements(s) {
+			sm[rt.canonicalKey(v)] = true
+		}
+		for _, v := range other {
+			if !sm[rt.canonicalKey(v)] {
+				return mkfalse(), nil
+			}
+		}
+		return mktrue(), nil
+	})
+	rt.defMethod(po, "isDisjointFrom", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.collOf(this, true)
+		if e != nil {
+			return mkundef(), e
+		}
+		other, e := rt.setLikeElements(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		sm := map[string]bool{}
+		for _, v := range rt.setElements(s) {
+			sm[rt.canonicalKey(v)] = true
+		}
+		for _, v := range other {
+			if sm[rt.canonicalKey(v)] {
+				return mkfalse(), nil
+			}
+		}
+		return mktrue(), nil
+	})
 }
