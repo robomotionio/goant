@@ -585,6 +585,18 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	if hasVal {
 		val = valV
 	}
+	// Array exotic [[DefineOwnProperty]]: a plain data descriptor on a canonical
+	// index writes the element storage (which reads prefer over a named property),
+	// and a value on "length" retargets the array's length.
+	if obj.Type() == TArr && !sym {
+		if name == "length" && hasVal && !hasGet && !hasSet {
+			return rt.setArrayLength(obj, val)
+		}
+		if idx, ok := canonicalIndex(name); ok && writable && enumerable && configurable {
+			rt.arraySet(o, idx, val)
+			return nil
+		}
+	}
 	if sym {
 		o.defineOwnSymbol(symOff, val, attrs)
 	} else {

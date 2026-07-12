@@ -524,6 +524,7 @@ compat-table/es6/misc.Proxy.get.Array.iteration.js
 compat-table/es6/misc.Proxy.get.Array.pop.js
 compat-table/es6/misc.Proxy.get.Array.reverse.js
 compat-table/es6/misc.Proxy.get.Array.shift.js
+compat-table/es6/misc.Proxy.get.Array.splice.js
 compat-table/es6/misc.Proxy.get.Array.toString.js
 compat-table/es6/misc.Proxy.get.ClassDefinitionEvaluation.js
 compat-table/es6/misc.Proxy.get.CreateDynamicFunction.js
