@@ -19,7 +19,14 @@ func (rt *Runtime) initRegExpBuiltin() {
 		return rt.regexpExec(this, arg(args, 0))
 	})
 	rt.defMethod(po, "test", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		res, e := rt.regexpExec(this, arg(args, 0))
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("RegExp.prototype.test called on non-object")
+		}
+		s, e := rt.toStringValue(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		res, e := rt.regExpExecAbstract(this, s)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -193,6 +200,28 @@ func nonEmptySource(p string) string {
 }
 
 // regexpExec runs RegExp.prototype.exec, returning a match-result array or null.
+// regExpExecAbstract is the spec RegExpExec(R, S) abstract operation: it reads
+// R.exec via [[Get]] (routing through a Proxy trap / a user-supplied exec) and
+// calls it when callable, otherwise falls back to the builtin exec. S must be
+// already coerced to a string by the caller.
+func (rt *Runtime) regExpExecAbstract(r, s Value) (Value, *ThrowError) {
+	exec, e := rt.getField(r, "exec")
+	if e != nil {
+		return mkundef(), e
+	}
+	if rt.isCallable(exec) {
+		res, e := rt.callValue(exec, r, []Value{s})
+		if e != nil {
+			return mkundef(), e
+		}
+		if !res.IsNull() && !res.IsObjectType() {
+			return mkundef(), rt.typeError("exec method returned neither an object nor null")
+		}
+		return res, nil
+	}
+	return rt.regexpExec(r, s)
+}
+
 func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	o := rt.objPtr(this)
 	if o == nil || o.regex == nil {
@@ -325,12 +354,19 @@ func (rt *Runtime) initStringRegexpMethods() {
 	})
 
 	rt.defMethod(sp, "replace", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if m := rt.getFieldSymbol(arg(args, 0), symOrZero(rt.symReplace)); rt.isCallable(m) {
-			s, e := rt.toStringValue(this)
+		// GetMethod(searchValue, @@replace) via [[Get]] so a Proxy trap sees it.
+		if pat := arg(args, 0); !pat.IsNullish() {
+			m, e := rt.getElement(pat, rt.symReplace)
 			if e != nil {
 				return mkundef(), e
 			}
-			return rt.callValue(m, arg(args, 0), []Value{s, arg(args, 1)})
+			if rt.isCallable(m) {
+				s, e := rt.toStringValue(this)
+				if e != nil {
+					return mkundef(), e
+				}
+				return rt.callValue(m, pat, []Value{s, arg(args, 1)})
+			}
 		}
 		return rt.stringReplace(this, arg(args, 0), arg(args, 1))
 	})
@@ -427,12 +463,19 @@ func (rt *Runtime) initStringRegexpMethods() {
 	})
 
 	rt.defMethod(sp, "split", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if m := rt.getFieldSymbol(arg(args, 0), symOrZero(rt.symSplit)); rt.isCallable(m) {
-			s, e := rt.toStringValue(this)
+		// GetMethod(separator, @@split) via [[Get]] so a Proxy trap sees it.
+		if pat := arg(args, 0); !pat.IsNullish() {
+			m, e := rt.getElement(pat, rt.symSplit)
 			if e != nil {
 				return mkundef(), e
 			}
-			return rt.callValue(m, arg(args, 0), []Value{s, arg(args, 1)})
+			if rt.isCallable(m) {
+				s, e := rt.toStringValue(this)
+				if e != nil {
+					return mkundef(), e
+				}
+				return rt.callValue(m, pat, []Value{s, arg(args, 1)})
+			}
 		}
 		sep := arg(args, 0)
 		if o := rt.objPtr(sep); o != nil && o.regex != nil {
@@ -459,7 +502,12 @@ func (rt *Runtime) delegateSymbolMethod(sym, pattern, str Value) (Value, bool, *
 	if sym == 0 || pattern.IsNullish() {
 		return mkundef(), false, nil
 	}
-	m := rt.getFieldSymbol(pattern, sym.handle())
+	// GetMethod routes through [[Get]] so a Proxy's trap observes the well-known
+	// symbol lookup (String.prototype.match/replace/search/split spec step 2a).
+	m, e := rt.getElement(pattern, sym)
+	if e != nil {
+		return mkundef(), true, e
+	}
 	if !rt.isCallable(m) {
 		return mkundef(), false, nil
 	}

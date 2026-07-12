@@ -80,8 +80,13 @@ func (rt *Runtime) toPrimitive(v Value, hint string) (Value, *ThrowError) {
 		return v, nil
 	}
 	// A Symbol.toPrimitive method overrides the ordinary valueOf/toString order.
+	// getElement routes the symbol lookup through a Proxy's [[Get]] trap.
 	if rt.symToPrimitive != 0 {
-		if exotic := rt.getFieldSymbol(v, rt.symToPrimitive.handle()); rt.isCallable(exotic) {
+		exotic, e := rt.getElement(v, rt.symToPrimitive)
+		if e != nil {
+			return mkundef(), e
+		}
+		if rt.isCallable(exotic) {
 			h := hint
 			if h == "" {
 				h = "default"

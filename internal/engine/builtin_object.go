@@ -400,6 +400,25 @@ func (rt *Runtime) enumerableOwnKeys(v Value) []string {
 	if o == nil {
 		return nil
 	}
+	if o.proxy != nil {
+		// EnumerableOwnPropertyNames: [[OwnPropertyKeys]] then filter the string
+		// keys by the enumerability reported by [[GetOwnProperty]] (both traps).
+		ks, _ := rt.proxyOwnKeys(o.proxy)
+		var out []string
+		for _, kv := range ks {
+			if !kv.IsString() {
+				continue
+			}
+			desc, _ := rt.proxyGetOwnPropertyDescriptor(o.proxy, kv)
+			if desc.IsUndefined() {
+				continue
+			}
+			if en, _ := rt.getField(desc, "enumerable"); rt.toBoolean(en) {
+				out = append(out, string(rt.strBytes(kv)))
+			}
+		}
+		return out
+	}
 	var keys []string
 	if v.Type() == TArr {
 		for i := uint32(0); i < o.arrLen; i++ {
