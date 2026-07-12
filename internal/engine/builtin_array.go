@@ -84,20 +84,34 @@ func (rt *Runtime) arrayFromCtor(this Value, length int) (Value, *ThrowError) {
 }
 
 func (rt *Runtime) arraySpeciesCreate(this Value, length int) (Value, *ThrowError) {
-	if this.Type() == TArr && rt.symSpecies != 0 {
-		ctor, e := rt.getField(this, "constructor")
+	// ArraySpeciesCreate (23.1.3.1): a non-array uses a plain array; otherwise
+	// read constructor and its @@species (both via [[Get]], so a Proxy observes
+	// them) and construct from it.
+	if !rt.isArrayValue(this) {
+		return rt.newArray(), nil
+	}
+	ctor, e := rt.getField(this, "constructor")
+	if e != nil {
+		return mkundef(), e
+	}
+	if ctor.IsObjectType() && rt.symSpecies != 0 {
+		sp, e := rt.getElement(ctor, rt.symSpecies)
 		if e != nil {
 			return mkundef(), e
 		}
-		if ctor.IsObjectType() {
-			sp := rt.getFieldSymbol(ctor, rt.symSpecies.handle())
-			if sp.IsObjectType() && rt.isCallable(sp) {
-				return rt.construct(sp, []Value{mknum(float64(length))})
-			}
+		if sp.IsNull() {
+			ctor = mkundef()
+		} else if !sp.IsUndefined() {
+			ctor = sp
 		}
 	}
-	res := rt.newArray()
-	return res, nil
+	if ctor.IsUndefined() {
+		return rt.newArray(), nil
+	}
+	if rt.isCallable(ctor) {
+		return rt.construct(ctor, []Value{mknum(float64(length))})
+	}
+	return rt.newArray(), nil
 }
 
 func (rt *Runtime) initArrayBuiltin() {
@@ -502,30 +516,53 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), e
 		}
 		idx := 0
-		appendVal := func(v Value) {
-			// Arrays (and isConcatSpreadable objects) are spread; else appended.
-			spread := v.Type() == TArr
-			if o := rt.objPtr(v); o != nil && rt.symIsConcatSpreadable != 0 {
-				if s := rt.getFieldSymbol(v, rt.symIsConcatSpreadable.handle()); !s.IsUndefined() {
+		appendVal := func(v Value) *ThrowError {
+			// IsConcatSpreadable: @@isConcatSpreadable (via [[Get]]) overrides the
+			// default, which is IsArray(v).
+			spread := rt.isArrayValue(v)
+			if v.IsObjectType() && rt.symIsConcatSpreadable != 0 {
+				s, e := rt.getElement(v, rt.symIsConcatSpreadable)
+				if e != nil {
+					return e
+				}
+				if !s.IsUndefined() {
 					spread = rt.toBoolean(s)
 				}
 			}
 			if spread {
-				vn, _ := rt.lengthOf(v)
+				vn, e := rt.lengthOf(v)
+				if e != nil {
+					return e
+				}
 				for i := 0; i < vn; i++ {
-					el, _ := rt.getElement(v, mknum(float64(i)))
-					rt.setElement(res, mknum(float64(idx)), el)
+					if rt.hasElem(v, i) {
+						el, e := rt.getElement(v, mknum(float64(i)))
+						if e != nil {
+							return e
+						}
+						if e := rt.createDataProperty(res, mknum(float64(idx)), el); e != nil {
+							return e
+						}
+					}
 					idx++
 				}
 			} else {
-				rt.setElement(res, mknum(float64(idx)), v)
+				if e := rt.createDataProperty(res, mknum(float64(idx)), v); e != nil {
+					return e
+				}
 				idx++
 			}
+			return nil
 		}
-		appendVal(this)
+		if e := appendVal(this); e != nil {
+			return mkundef(), e
+		}
 		for _, a := range args {
-			appendVal(a)
+			if e := appendVal(a); e != nil {
+				return mkundef(), e
+			}
 		}
+		rt.setField(res, "length", mknum(float64(idx)))
 		return res, nil
 	})
 	rt.defMethod(proto, "reverse", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -682,16 +719,24 @@ func (rt *Runtime) initArrayBuiltin() {
 		}
 		// 23.1.3.28: collect removed elements (holes stay holes), shift the tail to
 		// make room (Delete for holes), splice in the new items. HasProperty and
-		// the Get/Set/Delete steps route through Proxy traps.
-		removed := rt.newArray()
-		rmo := rt.objPtr(removed)
+		// the Get/Set/Delete steps route through Proxy traps; the removed array is
+		// built via ArraySpeciesCreate (reads constructor/@@species).
+		removed, e := rt.arraySpeciesCreate(this, delCount)
+		if e != nil {
+			return mkundef(), e
+		}
 		for i := 0; i < delCount; i++ {
 			if rt.hasElem(this, start+i) {
-				el, _ := rt.getElement(this, mknum(float64(start+i)))
-				rt.arraySet(rmo, uint32(i), el)
+				el, e := rt.getElement(this, mknum(float64(start+i)))
+				if e != nil {
+					return mkundef(), e
+				}
+				if e := rt.createDataProperty(removed, mknum(float64(i)), el); e != nil {
+					return mkundef(), e
+				}
 			}
 		}
-		rmo.arrLen = uint32(delCount)
+		rt.setField(removed, "length", mknum(float64(delCount)))
 		var items []Value
 		if len(args) > 2 {
 			items = args[2:]

@@ -464,6 +464,7 @@ compat-table/es6/misc.Proxy.deleteProperty.Array.reverse.js
 compat-table/es6/misc.Proxy.deleteProperty.Array.shift.js
 compat-table/es6/misc.Proxy.deleteProperty.Array.splice.js
 compat-table/es6/misc.Proxy.deleteProperty.Array.unshift.js
+compat-table/es6/misc.Proxy.get.Array.concat.js
 compat-table/es6/misc.Proxy.get.Array.iteration.js
 compat-table/es6/misc.Proxy.get.Array.pop.js
 compat-table/es6/misc.Proxy.get.Array.reverse.js
@@ -707,6 +708,7 @@ compat-table/es6/WeakSet.prototype.delete.js
 compat-table/es6/WeakSet.prototype-not-instance.js
 compat-table/es6/well-known.hasInstance.js
 compat-table/es6/well-known.isConcatSpreadable.non-spreadable.js
+compat-table/es6/well-known.isConcatSpreadable.poisoned-getter.js
 compat-table/es6/well-known.iterator.arguments.js
 compat-table/es6/well-known.iterator.js
 compat-table/es6/well-known.match.js
@@ -719,6 +721,7 @@ compat-table/es6/well-known.species.Array.concat.js
 compat-table/es6/well-known.species.Array.filter.js
 compat-table/es6/well-known.species.Array.map.js
 compat-table/es6/well-known.species.Array.slice.js
+compat-table/es6/well-known.species.Array.splice.js
 compat-table/es6/well-known.species.js
 compat-table/es6/well-known.split.js
 compat-table/es6/well-known.toPrimitive.js
