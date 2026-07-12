@@ -395,6 +395,154 @@ func (c *compiler) compileTemplate(n *Node) {
 	}
 }
 
+// compileTaggedTemplate compiles `tag`...“ : tag(strings, ...substitutions)
+// where strings is the frozen cooked-segment array carrying a frozen `raw`.
+// containsOptional reports whether a member/call chain contains a `?.` link,
+// walking down the chain's left spine.
+func containsOptional(n *Node) bool {
+	for n != nil {
+		switch n.Kind {
+		case NOptional:
+			return true
+		case NMember, NCall:
+			n = n.Left
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// compileOptionalChain compiles an optional chain as a unit: any nullish `?.`
+// operand short-circuits the whole chain to undefined.
+func (c *compiler) compileOptionalChain(n *Node) {
+	var bail []int
+	c.compileChainLink(n, &bail)
+	done := c.emitJump(OpJmp)
+	for _, b := range bail {
+		c.patchJump(b)
+	}
+	c.emit(OpPop) // discard the guarded (nullish) value
+	c.emit(OpUndef)
+	c.patchJump(done)
+}
+
+// emitGuard checks the top-of-stack value: if nullish it jumps to the shared
+// bail (leaving that value for the bail handler to pop); else continues.
+func (c *compiler) emitGuard(bail *[]int) {
+	c.emit(OpDup)
+	cont := c.emitJump(OpJmpNotNullish)
+	bj := c.emitJump(OpJmp)
+	*bail = append(*bail, bj)
+	c.patchJump(cont)
+}
+
+// compileChainLink emits one link of an optional chain, leaving exactly one
+// value (the chain result so far) on the stack.
+func (c *compiler) compileChainLink(n *Node, bail *[]int) {
+	switch n.Kind {
+	case NOptional:
+		c.compileChainLink(n.Left, bail)
+		c.emitGuard(bail)
+		if n.Right == nil {
+			return // optional-call base: value is the callee itself
+		}
+		if n.Flags&1 != 0 {
+			c.compileExpr(n.Right)
+			c.emit(OpGetElem)
+		} else {
+			c.emitFieldOp(OpGetField, n.Right.Str)
+		}
+	case NMember:
+		c.compileChainLink(n.Left, bail)
+		if n.Flags&1 != 0 {
+			c.compileExpr(n.Right)
+			c.emit(OpGetElem)
+		} else {
+			c.emitFieldOp(OpGetField, n.Right.Str)
+		}
+	case NCall:
+		c.compileChainCall(n, bail)
+	default:
+		c.compileExpr(n)
+	}
+}
+
+// compileChainCall compiles a call inside an optional chain, preserving method
+// this-binding and threading the short-circuit bail.
+func (c *compiler) compileChainCall(n *Node, bail *[]int) {
+	callee := n.Left
+	isMethod := callee.Kind == NMember || (callee.Kind == NOptional && callee.Right != nil)
+	if isMethod {
+		c.compileChainLink(callee.Left, bail) // [recv]
+		if callee.Kind == NOptional {
+			c.emitGuard(bail)
+		}
+		tSlot := c.tempLocal()
+		c.emitOpU16(OpPutLocal, uint16(tSlot))
+		c.emitOpU16(OpGetLocal, uint16(tSlot)) // [this]
+		c.emitOpU16(OpGetLocal, uint16(tSlot)) // [this, recv]
+		if callee.Flags&1 != 0 {
+			c.compileExpr(callee.Right)
+			c.emit(OpGetElem)
+		} else {
+			c.emitFieldOp(OpGetField, callee.Right.Str)
+		}
+		for _, a := range n.Args {
+			c.compileExpr(a)
+		}
+		c.emit(OpCallMethod)
+		c.emitU16(uint16(len(n.Args)))
+		return
+	}
+	c.compileChainLink(callee, bail) // [fn] (guarded if callee is NOptional)
+	for _, a := range n.Args {
+		c.compileExpr(a)
+	}
+	c.emit(OpCall)
+	c.emitU16(uint16(len(n.Args)))
+}
+
+func (c *compiler) compileTaggedTemplate(n *Node) {
+	segs := n.Right.Args
+	var cooked, raw []string
+	for i := 0; i < len(segs); i += 2 {
+		cooked = append(cooked, segs[i].Str)
+		raw = append(raw, segs[i].Aux)
+	}
+	strSlot := c.tempLocal()
+	// cooked array
+	for _, s := range cooked {
+		c.emitConst(c.rt.internString(s))
+	}
+	c.emit(OpArray)
+	c.emitU16(uint16(len(cooked)))
+	c.emitOpU16(OpPutLocal, uint16(strSlot))
+	// raw array
+	for _, s := range raw {
+		c.emitConst(c.rt.internString(s))
+	}
+	c.emit(OpArray)
+	c.emitU16(uint16(len(raw)))
+	rawSlot := c.tempLocal()
+	c.emitOpU16(OpPutLocal, uint16(rawSlot))
+	// strings.raw = rawArray.
+	c.emitOpU16(OpGetLocal, uint16(strSlot))
+	c.emitOpU16(OpGetLocal, uint16(rawSlot))
+	c.emitFieldOp(OpPutField, "raw")
+
+	// tag(strings, ...substitutions)
+	c.compileExpr(n.Left)
+	c.emitOpU16(OpGetLocal, uint16(strSlot))
+	nsubs := 0
+	for i := 1; i < len(segs); i += 2 {
+		c.compileExpr(segs[i])
+		nsubs++
+	}
+	c.emit(OpCall)
+	c.emitU16(uint16(1 + nsubs))
+}
+
 // compileYield emits a yield expression. Plain `yield [expr]` suspends with the
 // operand and resumes with the injected value; `yield* expr` (Flags==1) delegates
 // to another iterable, yielding each of its values in turn.

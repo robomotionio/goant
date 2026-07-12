@@ -222,6 +222,11 @@ func (c *compiler) compileNew(n *Node) {
 
 // compileCall compiles a function or method call.
 func (c *compiler) compileCall(n *Node) {
+	// Optional-chain calls (a?.b(), a?.(), a?.b.c()) short-circuit as a unit.
+	if containsOptional(n) {
+		c.compileOptionalChain(n)
+		return
+	}
 	// super(...) and super.method(...) calls.
 	if n.Left != nil && n.Left.Kind == NIdent && n.Left.Str == "super" {
 		c.compileSuperCall(n)

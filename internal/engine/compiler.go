@@ -382,9 +382,17 @@ func (c *compiler) compileExpr(n *Node) {
 	case NArray:
 		c.compileArray(n)
 	case NMember:
-		c.compileMember(n)
+		if containsOptional(n) {
+			c.compileOptionalChain(n)
+		} else {
+			c.compileMember(n)
+		}
+	case NOptional:
+		c.compileOptionalChain(n)
 	case NTemplate:
 		c.compileTemplate(n)
+	case NTaggedTemplate:
+		c.compileTaggedTemplate(n)
 	case NTypeof:
 		c.compileExpr(n.Right)
 		c.emit(OpTypeof)
