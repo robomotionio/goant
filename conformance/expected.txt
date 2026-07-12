@@ -660,6 +660,7 @@ compat-table/es6/template.permanent-caching.js
 compat-table/es6/template.tagged.js
 compat-table/es6/typed-arrays.ArrayBuffer.Symbol.species.js
 compat-table/es6/typed-arrays.constructor-iterables.js
+compat-table/es6/typed-arrays.constructor-requires-new.js
 compat-table/es6/typed-arrays.correct-prototype-chains.js
 compat-table/es6/typed-arrays.DataView.Float32.js
 compat-table/es6/typed-arrays.DataView.Float64.js

@@ -80,6 +80,14 @@ func (rt *Runtime) construct(fnVal Value, args []Value) (Value, *ThrowError) {
 	return rt.constructWithTarget(fnVal, args, fnVal)
 }
 
+// constructing reports whether the current native builtin was invoked via
+// [[Construct]] (new.target is set). Native constructors read this first thing
+// to enforce "requires 'new'", since a method call like global.ArrayBuffer(n)
+// still passes an object `this`.
+func (rt *Runtime) constructing() bool {
+	return !rt.pendingNewTarget.IsUndefined()
+}
+
 // constructWithTarget implements [[Construct]] with an explicit new.target: the
 // new object's prototype comes from newTarget.prototype, and new.target inside
 // the constructor is newTarget (Reflect.construct's third argument).

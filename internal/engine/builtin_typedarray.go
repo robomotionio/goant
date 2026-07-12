@@ -239,7 +239,7 @@ func (rt *Runtime) initTypedArrays() {
 		rt.typedArrayProtos[k] = proto
 		info := taKinds[k]
 		ctor := rt.newNativeFunc(info.name, 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			if !this.IsObjectType() && this.Type() != TTypedArray {
+			if !rt.constructing() {
 				return mkundef(), rt.typeError("Constructor " + info.name + " requires 'new'")
 			}
 			return rt.newTypedArray(kind, args)
@@ -352,6 +352,9 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	rt.setStringTag(proto, "ArrayBuffer")
 
 	ctor := rt.newNativeFunc("ArrayBuffer", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !rt.constructing() {
+			return mkundef(), rt.typeError("Constructor ArrayBuffer requires 'new'")
+		}
 		n := 0
 		if a := arg(args, 0); a.IsNumber() {
 			n = int(a.Number())
@@ -433,6 +436,9 @@ func (rt *Runtime) initDataViewBuiltin() {
 	rt.setStringTag(proto, "DataView")
 
 	ctor := rt.newNativeFunc("DataView", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !rt.constructing() {
+			return mkundef(), rt.typeError("Constructor DataView requires 'new'")
+		}
 		bo := rt.objPtr(arg(args, 0))
 		if bo == nil || bo.abuf == nil {
 			return mkundef(), rt.typeError("First argument to DataView constructor must be an ArrayBuffer")
