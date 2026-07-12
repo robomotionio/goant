@@ -86,6 +86,11 @@ func Compile(pattern, flags string) (*Regexp, error) {
 		}
 		src = t
 	}
+	// Under the u+i flags, expand special-fold letters (S↔ſ, K↔K, …) into their
+	// full orbit so regexp2's IgnoreCase does not miss them.
+	if r.Unicode && r.IgnoreCase {
+		src = expandCaseFold(src)
+	}
 	if src == "" {
 		src = "(?:)"
 	}

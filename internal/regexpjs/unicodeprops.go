@@ -51,6 +51,58 @@ func translateUnicodeProps(pattern string) (string, error) {
 	return out.String(), nil
 }
 
+// expandCaseFold rewrites literal letters whose Unicode simple-fold orbit has
+// more than two members (e.g. S/s/ſ, K/k/K, Å/å/Å) into a character class of the
+// whole orbit, so that `iu` matching honours these special folds that regexp2's
+// IgnoreCase misses. Two-member orbits (ordinary upper/lower pairs) are left to
+// the engine's own case-insensitivity.
+func expandCaseFold(pattern string) string {
+	rs := []rune(pattern)
+	var out strings.Builder
+	inClass := false
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' && i+1 < len(rs) {
+			out.WriteRune(c)
+			out.WriteRune(rs[i+1])
+			i++
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+			out.WriteRune(c)
+			continue
+		case ']':
+			inClass = false
+			out.WriteRune(c)
+			continue
+		}
+		if !unicode.IsLetter(c) {
+			out.WriteRune(c)
+			continue
+		}
+		orbit := []rune{c}
+		for f := unicode.SimpleFold(c); f != c; f = unicode.SimpleFold(f) {
+			orbit = append(orbit, f)
+		}
+		if len(orbit) <= 2 {
+			out.WriteRune(c)
+			continue
+		}
+		if !inClass {
+			out.WriteByte('[')
+		}
+		for _, o := range orbit {
+			out.WriteString(esc(uint32(o)))
+		}
+		if !inClass {
+			out.WriteByte(']')
+		}
+	}
+	return out.String()
+}
+
 // resolveUnicodeProperty maps an ES property name — "Script=Greek", "gc=Lu",
 // a bare general category ("Lu"/"Letter"), a binary property ("White_Space"),
 // or a bare script ("Greek") — to a Unicode RangeTable.

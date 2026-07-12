@@ -60,6 +60,7 @@ compat-table/es2017/misc.arguments-caller-removed.js
 compat-table/es2017/Object.entries.js
 compat-table/es2017/Object.getOwnPropertyDescriptors.js
 compat-table/es2017/Object.values.js
+compat-table/es2017/regex.flags.u.case-folding.js
 compat-table/es2017/SharedArrayBuffer.js
 compat-table/es2017/SharedArrayBuffer.prototype.byteLength.js
 compat-table/es2017/SharedArrayBuffer.prototype.slice.js
