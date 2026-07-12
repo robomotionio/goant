@@ -897,6 +897,15 @@ func (rt *Runtime) initArrayBuiltin() {
 		}
 		return res, nil
 	})
+	// Array.prototype[Symbol.unscopables] (with-statement exclusion list).
+	if rt.symUnscopables != 0 {
+		unsc := rt.newObject(mknull())
+		uo := rt.objPtr(unsc)
+		for _, m := range []string{"at", "copyWithin", "entries", "fill", "find", "findIndex", "findLast", "findLastIndex", "flat", "flatMap", "includes", "keys", "toReversed", "toSorted", "toSpliced", "values"} {
+			uo.defineOwn(m, mktrue(), attrDefault)
+		}
+		proto.defineOwnSymbol(rt.symUnscopables.handle(), unsc, attrConfigurable)
+	}
 	rt.defSpeciesGetter(ctor)
 	rt.defGlobal("Array", ctor)
 }

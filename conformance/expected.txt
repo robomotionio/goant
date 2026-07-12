@@ -53,6 +53,7 @@ compat-table/es2018/object-spread.js
 compat-table/es2018/regex.named-capture-groups.js
 compat-table/es2019/annex-b.String.prototype.trimLeft.js
 compat-table/es2019/annex-b.String.prototype.trimRight.js
+compat-table/es2019/Array.prototype.flat-flatMap.unscopables.js
 compat-table/es2019/Array.prototype.flat.js
 compat-table/es2019/Array.prototype.flatMap.js
 compat-table/es2019/misc.Function-toString.arrows.js
@@ -236,6 +237,7 @@ compat-table/es6/Array.prototype.find.js
 compat-table/es6/Array.prototype.keys.js
 compat-table/es6/Array.prototype.splice.js
 compat-table/es6/Array.prototype.Symbol.iterator.js
+compat-table/es6/Array.prototype.Symbol.unscopables.js
 compat-table/es6/Array.prototype.values.js
 compat-table/es6/Array.Symbol.species.js
 compat-table/es6/arrow.0-params.js

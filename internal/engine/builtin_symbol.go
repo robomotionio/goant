@@ -86,7 +86,7 @@ func (rt *Runtime) initSymbolBuiltin() {
 	rt.symReplace = wk("replace")
 	rt.symSearch = wk("search")
 	rt.symSplit = wk("split")
-	wk("unscopables")
+	rt.symUnscopables = wk("unscopables")
 
 	// Symbol.for / Symbol.keyFor (global registry).
 	rt.defMethod(cobj, "for", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
