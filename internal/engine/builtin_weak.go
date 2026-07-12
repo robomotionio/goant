@@ -58,6 +58,59 @@ func (rt *Runtime) initWeakMapBuiltin() {
 		}
 		return mkundef(), nil
 	})
+	rt.defMethod(po, "getOrInsert", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// WeakMap.prototype.getOrInsert(key, value) (upsert proposal).
+		m, e := rt.weakCollOf(this, false, "WeakMap")
+		if e != nil {
+			return mkundef(), e
+		}
+		k := arg(args, 0)
+		if !validWeakKey(k) {
+			return mkundef(), rt.typeError("Invalid value used as weak map key")
+		}
+		ck := rt.canonicalKey(k)
+		if idx, ok := m.index[ck]; ok {
+			return m.vals[idx], nil
+		}
+		v := arg(args, 1)
+		m.index[ck] = len(m.keys)
+		m.keys = append(m.keys, k)
+		m.vals = append(m.vals, v)
+		return v, nil
+	})
+	rt.defMethod(po, "getOrInsertComputed", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// WeakMap.prototype.getOrInsertComputed(key, callbackfn): insert callbackfn(key)
+		// when absent (upsert proposal).
+		m, e := rt.weakCollOf(this, false, "WeakMap")
+		if e != nil {
+			return mkundef(), e
+		}
+		k := arg(args, 0)
+		if !validWeakKey(k) {
+			return mkundef(), rt.typeError("Invalid value used as weak map key")
+		}
+		cb := arg(args, 1)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("getOrInsertComputed callbackfn is not a function")
+		}
+		ck := rt.canonicalKey(k)
+		if idx, ok := m.index[ck]; ok {
+			return m.vals[idx], nil
+		}
+		v, e := rt.callValue(cb, mkundef(), []Value{k})
+		if e != nil {
+			return mkundef(), e
+		}
+		// Re-check after the callback (it may have inserted the key).
+		if idx, ok := m.index[ck]; ok {
+			m.vals[idx] = v
+			return v, nil
+		}
+		m.index[ck] = len(m.keys)
+		m.keys = append(m.keys, k)
+		m.vals = append(m.vals, v)
+		return v, nil
+	})
 	rt.defMethod(po, "has", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		m, e := rt.weakCollOf(this, false, "WeakMap")
 		if e != nil {

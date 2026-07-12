@@ -757,6 +757,7 @@ compat-table/intl/String.prototype.localeCompare.js
 compat-table/next/Map.prototype.upsert.js
 compat-table/next/RegExp.1-9.js
 compat-table/next/throw-expr.logical.js
+compat-table/next/WeakMap.prototype.upsert.js
 es1/annex-b.Date.prototype.getYear.js
 es1/annex-b.Date.prototype.setYear.js
 es1/annex-b.Date.prototype.toGMTString.js

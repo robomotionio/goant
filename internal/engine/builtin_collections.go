@@ -103,6 +103,33 @@ func (rt *Runtime) initMapBuiltin() {
 		m.vals = append(m.vals, v)
 		return v, nil
 	})
+	rt.defMethod(po, "getOrInsertComputed", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		m, e := rt.collOf(this, false)
+		if e != nil {
+			return mkundef(), e
+		}
+		k := arg(args, 0)
+		cb := arg(args, 1)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("getOrInsertComputed callbackfn is not a function")
+		}
+		ck := rt.canonicalKey(k)
+		if idx, ok := m.index[ck]; ok {
+			return m.vals[idx], nil
+		}
+		v, e := rt.callValue(cb, mkundef(), []Value{k})
+		if e != nil {
+			return mkundef(), e
+		}
+		if idx, ok := m.index[ck]; ok {
+			m.vals[idx] = v
+			return v, nil
+		}
+		m.index[ck] = len(m.keys)
+		m.keys = append(m.keys, k)
+		m.vals = append(m.vals, v)
+		return v, nil
+	})
 	rt.defMethod(po, "has", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		m, e := rt.collOf(this, false)
 		if e != nil {
