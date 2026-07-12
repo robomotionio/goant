@@ -65,6 +65,10 @@ func (rt *Runtime) initFunctionBuiltin() {
 			full := append(append([]Value{}, boundArgs...), callArgs...)
 			return rt.callValue(target, boundThis, full)
 		})
+		// A bound function's [[Prototype]] is the target's [[Prototype]] (19.2.3.2).
+		if to := rt.objPtr(target); to != nil {
+			rt.objPtr(bound).proto = to.proto
+		}
 		// Spec order: SetFunctionLength first (HasOwnProperty then Get "length"),
 		// then SetFunctionName (Get "name"). Both Gets are observable via a trap.
 		tlen := 0

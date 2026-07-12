@@ -450,6 +450,8 @@ compat-table/es6/Math.sign.js
 compat-table/es6/Math.sinh.js
 compat-table/es6/Math.tanh.js
 compat-table/es6/Math.trunc.js
+compat-table/es6/misc.bound-function-prototype.arrow.js
+compat-table/es6/misc.bound-function-prototype.generator.js
 compat-table/es6/misc.do-while-no-semicolon.js
 compat-table/es6/misc.function-length-configurable.js
 compat-table/es6/misc.identifier-syntax.no-escaped-reserved.js
