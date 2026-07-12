@@ -182,6 +182,34 @@ func (rt *Runtime) initMapBuiltin() {
 	})
 	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	rt.defMethod(rt.objPtr(ctor), "groupBy", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		items, e := rt.iterableValues(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		cb := arg(args, 0+1)
+		res := rt.newObject(proto)
+		c := &collection{index: map[string]int{}}
+		rt.objPtr(res).coll = c
+		for i, it := range items {
+			key, e := rt.callValue(cb, mkundef(), []Value{it, mknum(float64(i))})
+			if e != nil {
+				return mkundef(), e
+			}
+			ck := rt.canonicalKey(key)
+			idx, ok := c.index[ck]
+			if !ok {
+				grp := rt.newArray()
+				c.index[ck] = len(c.keys)
+				c.keys = append(c.keys, key)
+				c.vals = append(c.vals, grp)
+				idx = len(c.keys) - 1
+			}
+			go2 := rt.objPtr(c.vals[idx])
+			rt.arraySet(go2, go2.arrLen, it)
+		}
+		return res, nil
+	})
 	rt.defGlobal("Map", ctor)
 	rt.setStringTag(proto, "Map")
 	rt.mapProto = proto

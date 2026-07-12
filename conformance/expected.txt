@@ -112,6 +112,7 @@ compat-table/es2023/Array.prototype.toSorted.js
 compat-table/es2023/Array.prototype.toSpliced.js
 compat-table/es2023/Array.prototype.with.js
 compat-table/es2023/hashbang.js
+compat-table/es2024/Map.groupBy.js
 compat-table/es2024/Object.groupBy.js
 compat-table/es2024/Promise.withResolvers.js
 compat-table/es2025/Iterator.from.iterable.js
@@ -493,6 +494,7 @@ compat-table/es6/Symbol.hidden-keys.js
 compat-table/es6/Symbol.JSON.stringify.primitive.js
 compat-table/es6/Symbol.no-new.js
 compat-table/es6/Symbol.prototype.js
+compat-table/es6/Symbol.String.js
 compat-table/es6/Symbol.typeof.js
 compat-table/es6/template.basic.js
 compat-table/es6/template.line-break.js

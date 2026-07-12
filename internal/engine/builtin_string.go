@@ -380,6 +380,15 @@ func (rt *Runtime) initStringBuiltin() {
 		if len(args) == 0 {
 			return rt.internString(""), nil
 		}
+		// String(symbol) is the one legal Symbol->string coercion: its description.
+		if args[0].IsSymbol() {
+			d := rt.symbolDesc(args[0])
+			ds := ""
+			if d.IsString() {
+				ds = string(rt.strBytes(d))
+			}
+			return rt.newString("Symbol(" + ds + ")"), nil
+		}
 		return rt.toStringValue(args[0])
 	})
 	cobj := rt.objPtr(ctor)
