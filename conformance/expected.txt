@@ -573,9 +573,11 @@ compat-table/es6/Object.assign.js
 compat-table/es6/Object.getOwnPropertySymbols.js
 compat-table/es6/Object.is.js
 compat-table/es6/Object.setPrototypeOf.js
+compat-table/es6/Promise.all.iterable.js
 compat-table/es6/Promise.all.js
 compat-table/es6/Promise.constructor-requires-new.js
 compat-table/es6/Promise.prototype-not-instance.js
+compat-table/es6/Promise.race.iterable.js
 compat-table/es6/Promise.race.js
 compat-table/es6/Promise.Symbol.species.js
 compat-table/es6/Proxy.Array.isArray.js

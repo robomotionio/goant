@@ -107,6 +107,25 @@ func (rt *Runtime) makePromise() (Value, *object) {
 	return v, o
 }
 
+// newPromiseCapability implements NewPromiseCapability(C): construct a promise
+// via `new C(executor)` and capture the resolve/reject functions the executor
+// receives, so Promise.all/race/etc. produce a promise of the subclass C.
+func (rt *Runtime) newPromiseCapability(C Value) (promise, resolve, reject Value, err *ThrowError) {
+	resolve, reject = mkundef(), mkundef()
+	executor := rt.newNativeFunc("", 2, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+		resolve, reject = arg(a, 0), arg(a, 1)
+		return mkundef(), nil
+	})
+	p, e := rt.construct(C, []Value{executor})
+	if e != nil {
+		return mkundef(), mkundef(), mkundef(), e
+	}
+	if !rt.isCallable(resolve) || !rt.isCallable(reject) {
+		return mkundef(), mkundef(), mkundef(), rt.typeError("Promise resolve or reject function is not callable")
+	}
+	return p, resolve, reject, nil
+}
+
 // fulfillPromise settles o as fulfilled and schedules its reactions.
 func (rt *Runtime) fulfillPromise(o *object, value Value) {
 	st := o.promise
@@ -354,16 +373,16 @@ func (rt *Runtime) initPromiseBuiltin() {
 		return rt.rejectedPromise(arg(args, 0)), nil
 	})
 	rt.defMethod(cobj, "all", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.promiseAll(arg(args, 0), false)
+		return rt.promiseAll(this, arg(args, 0), false)
 	})
 	rt.defMethod(cobj, "allSettled", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.promiseAll(arg(args, 0), true)
+		return rt.promiseAll(this, arg(args, 0), true)
 	})
 	rt.defMethod(cobj, "race", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.promiseRace(arg(args, 0), false)
+		return rt.promiseRace(this, arg(args, 0), false)
 	})
 	rt.defMethod(cobj, "any", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.promiseRace(arg(args, 0), true)
+		return rt.promiseRace(this, arg(args, 0), true)
 	})
 	rt.defMethod(cobj, "try", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		// Promise.try(fn, ...args): run fn synchronously, resolve with its result
@@ -387,20 +406,26 @@ func (rt *Runtime) initPromiseBuiltin() {
 	rt.defGlobal("Promise", ctor)
 }
 
-// promiseAll implements Promise.all / Promise.allSettled.
-func (rt *Runtime) promiseAll(iterable Value, settled bool) (Value, *ThrowError) {
-	vals, e := rt.iterableValues(iterable)
+// promiseAll implements Promise.all / Promise.allSettled. The result promise is
+// built from the receiver C (NewPromiseCapability), so a Promise subclass gets a
+// subclass instance back.
+func (rt *Runtime) promiseAll(C, iterable Value, settled bool) (Value, *ThrowError) {
+	result, resolveFn, rejectFn, e := rt.newPromiseCapability(C)
 	if e != nil {
 		return mkundef(), e
 	}
-	result, ro := rt.makePromise()
+	vals, e := rt.iterableValues(iterable)
+	if e != nil {
+		rt.callValue(rejectFn, mkundef(), []Value{e.Value}) // IfAbruptRejectPromise
+		return result, nil
+	}
 	results := rt.newArray()
 	ra := rt.objPtr(results)
 	remaining := len(vals) + 1
 	tryFinish := func() {
 		remaining--
 		if remaining == 0 {
-			rt.resolvePromise(result, ro, results)
+			rt.callValue(resolveFn, mkundef(), []Value{results})
 		}
 	}
 	for i, v := range vals {
@@ -433,7 +458,7 @@ func (rt *Runtime) promiseAll(iterable Value, settled bool) (Value, *ThrowError)
 			})
 		} else {
 			onR = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				rt.rejectPromise(ro, arg(a, 0))
+				rt.callValue(rejectFn, mkundef(), []Value{arg(a, 0)})
 				return mkundef(), nil
 			})
 		}
@@ -443,13 +468,18 @@ func (rt *Runtime) promiseAll(iterable Value, settled bool) (Value, *ThrowError)
 	return result, nil
 }
 
-// promiseRace implements Promise.race / Promise.any.
-func (rt *Runtime) promiseRace(iterable Value, any bool) (Value, *ThrowError) {
-	vals, e := rt.iterableValues(iterable)
+// promiseRace implements Promise.race / Promise.any, building the result promise
+// from the receiver C (NewPromiseCapability) for subclass support.
+func (rt *Runtime) promiseRace(C, iterable Value, any bool) (Value, *ThrowError) {
+	result, resolveFn, rejectFn, e := rt.newPromiseCapability(C)
 	if e != nil {
 		return mkundef(), e
 	}
-	result, ro := rt.makePromise()
+	vals, e := rt.iterableValues(iterable)
+	if e != nil {
+		rt.callValue(rejectFn, mkundef(), []Value{e.Value}) // IfAbruptRejectPromise
+		return result, nil
+	}
 	remaining := len(vals)
 	errs := rt.newArray()
 	ea := rt.objPtr(errs)
@@ -459,7 +489,7 @@ func (rt *Runtime) promiseRace(iterable Value, any bool) (Value, *ThrowError) {
 		var onF, onR Value
 		if any {
 			onF = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				rt.resolvePromise(result, ro, arg(a, 0))
+				rt.callValue(resolveFn, mkundef(), []Value{arg(a, 0)})
 				return mkundef(), nil
 			})
 			onR = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
@@ -470,17 +500,17 @@ func (rt *Runtime) promiseRace(iterable Value, any bool) (Value, *ThrowError) {
 					if eo := rt.objPtr(agg); eo != nil {
 						eo.defineOwn("errors", errs, attrWritable|attrConfigurable)
 					}
-					rt.rejectPromise(ro, agg)
+					rt.callValue(rejectFn, mkundef(), []Value{agg})
 				}
 				return mkundef(), nil
 			})
 		} else {
 			onF = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				rt.resolvePromise(result, ro, arg(a, 0))
+				rt.callValue(resolveFn, mkundef(), []Value{arg(a, 0)})
 				return mkundef(), nil
 			})
 			onR = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				rt.rejectPromise(ro, arg(a, 0))
+				rt.callValue(rejectFn, mkundef(), []Value{arg(a, 0)})
 				return mkundef(), nil
 			})
 		}
@@ -488,7 +518,7 @@ func (rt *Runtime) promiseRace(iterable Value, any bool) (Value, *ThrowError) {
 	}
 	if any && len(vals) == 0 {
 		agg := rt.makeError(rt.errors.aggProto, "AggregateError", "All promises were rejected")
-		rt.rejectPromise(ro, agg)
+		rt.callValue(rejectFn, mkundef(), []Value{agg})
 	}
 	return result, nil
 }
