@@ -319,6 +319,7 @@ compat-table/es6/default-params.refer-previous.js
 compat-table/es6/default-params.separate-scope.js
 compat-table/es6/destructuring-assign.chained-iterable.js
 compat-table/es6/destructuring-assign.chained-object.js
+compat-table/es6/destructuring-assign.computed-properties.js
 compat-table/es6/destructuring-assign.defaults.js
 compat-table/es6/destructuring-assign.empty-patterns.js
 compat-table/es6/destructuring-assign.iterable-expression.js
@@ -328,6 +329,7 @@ compat-table/es6/destructuring-assign.object-expression.js
 compat-table/es6/destructuring-assign.object-primitives.js
 compat-table/es6/destructuring-assign.rest.js
 compat-table/es6/destructuring-assign.throws-null-undefined.js
+compat-table/es6/destructuring-decl.computed-properties.js
 compat-table/es6/destructuring-decl.defaults.js
 compat-table/es6/destructuring-decl.for-in.js
 compat-table/es6/destructuring-decl.for-of.js
@@ -337,6 +339,7 @@ compat-table/es6/destructuring-decl.rest.js
 compat-table/es6/destructuring-decl.throws-null-undefined.js
 compat-table/es6/destructuring-params.aliased-defaults-arrow.js
 compat-table/es6/destructuring-params.arguments.js
+compat-table/es6/destructuring-params.computed-properties.js
 compat-table/es6/destructuring-params.defaults.js
 compat-table/es6/destructuring-params.defaults-new-function.js
 compat-table/es6/destructuring-params.defaults-separate-scope.js

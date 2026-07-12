@@ -105,11 +105,7 @@ func (c *compiler) destructureObject(pattern *Node, src int, kind VarKind) {
 			continue
 		}
 		name, ok := propKeyName(prop.Left)
-		if !ok {
-			c.errorf("computed destructuring keys not yet supported (slice)")
-			return
-		}
-		priorKeys = append(priorKeys, name)
+		computed := prop.Flags&fnComputed != 0 || !ok
 		// Binding target and optional default from prop.Right.
 		target := prop.Right
 		var defExpr *Node
@@ -117,6 +113,16 @@ func (c *compiler) destructureObject(pattern *Node, src int, kind VarKind) {
 			defExpr = target.Right
 			target = target.Left
 		}
+		if computed {
+			// { [expr]: target }: read src[ToPropertyKey(expr)].
+			c.emitOpU16(OpGetLocal, uint16(src)) // [src]
+			c.compileExpr(prop.Left)             // [src, key]
+			c.emit(OpGetElem)                    // [val]
+			c.applyDefault(defExpr)
+			c.destructureTarget(target, kind)
+			continue
+		}
+		priorKeys = append(priorKeys, name)
 		c.emitOpU16(OpGetLocal, uint16(src))
 		c.emitFieldOp(OpGetField, name)
 		c.applyDefault(defExpr)
