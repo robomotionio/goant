@@ -65,6 +65,10 @@ func (c *compiler) compileFunc(n *Node) {
 
 // compileFunctionBody compiles a function's parameters and body into c.fn.
 func (c *compiler) compileFunctionBody(n *Node) {
+	// Class bodies (constructors, methods, accessors) are always strict.
+	if n.Flags&fnClassBody != 0 || n.Flags&fnClassCtor != 0 {
+		c.fn.isStrict = true
+	}
 	// A function with its own "use strict" directive is strict (as is any
 	// function nested in strict code, inherited via c.fn.isStrict).
 	if !c.fn.isStrict && n.Body != nil && n.Body.Kind == NBlock {
