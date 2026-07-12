@@ -1,6 +1,10 @@
 package engine
 
-import "goant/internal/regexpjs"
+import (
+	"sort"
+
+	"goant/internal/regexpjs"
+)
 
 // Port of ant include/object.h + the property protocol in src/ant.c. An object
 // stores its named properties in shape-assigned slots: the first inobjMaxSlots
@@ -348,10 +352,10 @@ func (o *object) ownKeys() []string {
 			keys = append(keys, p.key.str)
 		}
 	}
-	return keys
+	return orderOwnKeys(keys)
 }
 
-// ownKeysEnumerable returns own enumerable string keys in slot order.
+// ownKeysEnumerable returns own enumerable string keys in spec order.
 func (o *object) ownKeysEnumerable() []string {
 	keys := make([]string, 0, o.shape.count())
 	for i := 0; i < o.shape.count(); i++ {
@@ -360,7 +364,30 @@ func (o *object) ownKeysEnumerable() []string {
 			keys = append(keys, p.key.str)
 		}
 	}
-	return keys
+	return orderOwnKeys(keys)
+}
+
+// orderOwnKeys reorders own string keys into ES OwnPropertyKeys order: canonical
+// array-index keys first (ascending numeric), then the rest in insertion order.
+func orderOwnKeys(keys []string) []string {
+	var idxKeys []string
+	var strKeys []string
+	for _, k := range keys {
+		if _, ok := canonicalIndex(k); ok {
+			idxKeys = append(idxKeys, k)
+		} else {
+			strKeys = append(strKeys, k)
+		}
+	}
+	if len(idxKeys) == 0 {
+		return keys
+	}
+	sort.Slice(idxKeys, func(i, j int) bool {
+		a, _ := canonicalIndex(idxKeys[i])
+		b, _ := canonicalIndex(idxKeys[j])
+		return a < b
+	})
+	return append(idxKeys, strKeys...)
 }
 
 // maxProtoChainDepth guards prototype-chain walks (ant MAX_PROTO_CHAIN_DEPTH).

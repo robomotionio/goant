@@ -507,15 +507,12 @@ func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) Value {
 		}
 		rt.arraySet(ao, ao.arrLen, rt.internString("length"))
 	}
-	for i := 0; i < o.shape.count(); i++ {
-		p := &o.shape.props[i]
-		if p.key.sym {
-			continue
-		}
-		if enumerableOnly && p.attrs&attrEnumerable == 0 {
-			continue
-		}
-		rt.arraySet(ao, ao.arrLen, rt.internString(p.key.str))
+	keys := o.ownKeys()
+	if enumerableOnly {
+		keys = o.ownKeysEnumerable()
+	}
+	for _, k := range keys {
+		rt.arraySet(ao, ao.arrLen, rt.internString(k))
 	}
 	return arr
 }
