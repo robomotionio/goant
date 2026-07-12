@@ -92,6 +92,8 @@ type Runtime struct {
 	symSpecies            Value
 	symIsConcatSpreadable Value
 	symUnscopables        Value
+	symDispose            Value
+	symAsyncDispose       Value
 
 	// errors holds the NativeError constructors/prototypes for internal throws.
 	errors errorCtors

@@ -564,6 +564,36 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 				rt.setInferredNameFromKey(stack[len(stack)-1], stack[len(stack)-2])
 			}
 			ip++
+		case OpUsingPush, OpUsingPushAsync:
+			// [entries, resource] -> [resource]: register the resource's disposer.
+			resource := pop()
+			entries := pop()
+			r, e := rt.usingPush(entries, resource, op == OpUsingPushAsync)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(r)
+			ip++
+		case OpUsingDispose:
+			// [entries] -> [undefined]: dispose the block's resources on normal
+			// completion; a disposal error becomes a throw.
+			entries := pop()
+			completion := rt.disposeEntries(entries, mkundef())
+			if !completion.IsUndefined() {
+				thrown = &ThrowError{Value: completion, rt: rt}
+				goto unwind
+			}
+			push(mkundef())
+			ip++
+		case OpUsingDisposeSuppressed:
+			// [entries, completion] -> [completion']: dispose on abrupt completion,
+			// folding disposal errors into the pending one; the following OpThrow
+			// re-raises the aggregate.
+			completion := pop()
+			entries := pop()
+			push(rt.disposeEntries(entries, completion))
+			ip++
 		case OpToPropkey:
 			// Coerce to a property key (ToPrimitive with hint "string"). Used by
 			// template substitution so `${obj}` prefers toString over valueOf, and

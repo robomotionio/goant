@@ -15,8 +15,9 @@ type errorCtors struct {
 	uriErr      Value
 	typeProto   Value
 	rangeProto  Value
-	syntaxProto Value
-	aggProto    Value
+	syntaxProto     Value
+	aggProto        Value
+	suppressedProto Value
 }
 
 func (rt *Runtime) initErrorBuiltin() {
@@ -114,6 +115,37 @@ func (rt *Runtime) initErrorBuiltin() {
 	apo.defineOwn("constructor", aggCtor, attrWritable|attrConfigurable)
 	rt.errors.aggProto = aggProto
 	rt.defGlobal("AggregateError", aggCtor)
+
+	// SuppressedError(error, suppressed, message): carries the disposal error and
+	// the value it suppressed (Explicit Resource Management).
+	supProto := rt.newObject(errProto)
+	spo := rt.objPtr(supProto)
+	spo.defineOwn("name", rt.internString("SuppressedError"), attrWritable|attrConfigurable)
+	spo.defineOwn("message", rt.internString(""), attrWritable|attrConfigurable)
+	supCtor := rt.newNativeFunc("SuppressedError", 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		errObj := this
+		if !this.IsObjectType() {
+			errObj = rt.newObject(rt.newTargetProto(supProto))
+		} else if p := rt.newTargetProto(supProto); p != supProto {
+			rt.objPtr(errObj).proto = p
+		}
+		eo := rt.objPtr(errObj)
+		eo.setSlot(slotBrand, mknum(brandError)) // [[ErrorData]]
+		eo.defineOwn("error", arg(args, 0), attrWritable|attrConfigurable)
+		eo.defineOwn("suppressed", arg(args, 1), attrWritable|attrConfigurable)
+		if msg := arg(args, 2); !msg.IsUndefined() {
+			s, e := rt.toStringValue(msg)
+			if e != nil {
+				return mkundef(), e
+			}
+			eo.defineOwn("message", s, attrWritable|attrConfigurable)
+		}
+		return errObj, nil
+	})
+	rt.objPtr(supCtor).defineOwn("prototype", supProto, 0)
+	spo.defineOwn("constructor", supCtor, attrWritable|attrConfigurable)
+	rt.errors.suppressedProto = supProto
+	rt.defGlobal("SuppressedError", supCtor)
 
 	rt.defGlobal("Error", base)
 	rt.defGlobal("TypeError", rt.errors.typeErr)

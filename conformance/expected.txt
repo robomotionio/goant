@@ -819,9 +819,13 @@ compat-table/next/AsyncIterator.prototype.some.js
 compat-table/next/AsyncIterator.prototype.Symbol.toStringTag.js
 compat-table/next/AsyncIterator.prototype.take.js
 compat-table/next/AsyncIterator.prototype.toArray.js
+compat-table/next/await-using.js
 compat-table/next/Map.prototype.upsert.js
 compat-table/next/RegExp.1-9.js
+compat-table/next/SuppressedError.js
+compat-table/next/Symbol.dispose.bound.js
 compat-table/next/throw-expr.logical.js
+compat-table/next/using.js
 compat-table/next/WeakMap.prototype.upsert.js
 es1/annex-b.Date.prototype.getYear.js
 es1/annex-b.Date.prototype.setYear.js

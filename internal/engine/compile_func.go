@@ -33,8 +33,9 @@ func (c *compiler) bindDeclared(name string) {
 // emits CLOSURE, leaving the closure value on the stack.
 func (c *compiler) compileFunc(n *Node) {
 	child := &compiler{
-		rt:        c.rt,
-		enclosing: c,
+		rt:         c.rt,
+		enclosing:  c,
+		usingStack: -1,
 		fn: &svFunc{
 			name:        n.Str,
 			filename:    c.fn.filename,

@@ -102,6 +102,8 @@ func (rt *Runtime) initSymbolBuiltin() {
 	rt.symSearch = wk("search")
 	rt.symSplit = wk("split")
 	rt.symUnscopables = wk("unscopables")
+	rt.symDispose = wk("dispose")
+	rt.symAsyncDispose = wk("asyncDispose")
 
 	// Symbol.for / Symbol.keyFor (global registry).
 	rt.defMethod(cobj, "for", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

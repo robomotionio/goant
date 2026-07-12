@@ -55,6 +55,10 @@ type compiler struct {
 
 	// pendingLabel is a label awaiting the loop/statement it prefixes.
 	pendingLabel string
+
+	// usingStack is the local slot holding the current block's disposal-record
+	// array (for `using` declarations), or -1 when not inside a using block.
+	usingStack int
 }
 
 func (c *compiler) consumeLabel() string {
@@ -89,10 +93,11 @@ func (rt *Runtime) CompileEval(prog *Node, filename, source string) (*svFunc, er
 
 func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval bool) (*svFunc, error) {
 	c := &compiler{
-		rt:       rt,
-		isScript: true,
-		isEval:   isEval,
-		fn:       &svFunc{name: "", filename: filename, source: source, isStrict: prog.Flags&fnParseStrict != 0},
+		rt:         rt,
+		isScript:   true,
+		isEval:     isEval,
+		usingStack: -1,
+		fn:         &svFunc{name: "", filename: filename, source: source, isStrict: prog.Flags&fnParseStrict != 0},
 	}
 	// Reserve slot 0 for the completion value.
 	c.completionSlot = c.addLocal("*completion*", false)
@@ -260,6 +265,10 @@ func (c *compiler) compileStmt(n *Node) {
 	case NVar:
 		c.compileVarDecl(n)
 	case NBlock:
+		if blockHasUsing(n.Args) {
+			c.compileBlockWithUsing(n)
+			return
+		}
 		c.scopeDepth++
 		c.hoistFunctions(n.Args)
 		c.compileStmts(n.Args)
@@ -316,7 +325,90 @@ func (c *compiler) compileStmt(n *Node) {
 	}
 }
 
+// blockHasUsing reports whether a statement list declares a `using` or
+// `await using` resource directly (so the block needs a disposal scope).
+func blockHasUsing(stmts []*Node) bool {
+	for _, s := range stmts {
+		d := s
+		if s != nil && s.Kind == NExport && s.Left != nil {
+			d = s.Left
+		}
+		if d != nil && d.Kind == NVar && (d.VarKind == VarUsing || d.VarKind == VarAwaitUsing) {
+			return true
+		}
+	}
+	return false
+}
+
+// compileBlockWithUsing compiles a block whose direct statements include a
+// `using` declaration. Resources register on a disposal-record array; a
+// try-handler runs the disposal on both normal and abrupt completion (the latter
+// folding disposal errors into the thrown value via SuppressedError). Disposal
+// on `break`/`continue`/`return` out of the block is not yet handled — matching
+// goant's existing try/finally limitation.
+func (c *compiler) compileBlockWithUsing(n *Node) {
+	c.scopeDepth++
+	c.hoistFunctions(n.Args)
+
+	c.emit(OpArray)
+	c.emitU16(0)
+	stackLocal := c.addLocal("*using*", false)
+	c.emitOpU16(OpPutLocal, uint16(stackLocal))
+	errLocal := c.addLocal("*usingerr*", false)
+	savedUsing := c.usingStack
+	c.usingStack = stackLocal
+
+	catchHandler := c.emitJump(OpTryPush)
+	c.compileStmts(n.Args)
+	c.emit(OpTryPop)
+
+	// Normal completion: dispose all resources, discard the completion value.
+	c.emitOpU16(OpGetLocal, uint16(stackLocal))
+	c.emit(OpUsingDispose)
+	c.emit(OpPop)
+	endJump := c.emitJump(OpJmp)
+
+	// Abrupt completion (throw): capture the error, dispose-suppressed, re-throw.
+	c.patchJump(catchHandler)
+	c.emit(OpCatch)
+	c.emitU32(0)
+	c.emitOpU16(OpPutLocal, uint16(errLocal))
+	c.emitOpU16(OpGetLocal, uint16(stackLocal))
+	c.emitOpU16(OpGetLocal, uint16(errLocal))
+	c.emit(OpUsingDisposeSuppressed)
+	c.emit(OpThrow)
+
+	c.patchJump(endJump)
+	c.usingStack = savedUsing
+	c.scopeDepth--
+	c.popBlockScope()
+}
+
 func (c *compiler) compileVarDecl(n *Node) {
+	// `using` / `await using`: bind the resource and register its disposer on the
+	// enclosing block's disposal stack.
+	if (n.VarKind == VarUsing || n.VarKind == VarAwaitUsing) && c.usingStack >= 0 {
+		for _, decl := range n.Args {
+			if decl.Left == nil || decl.Left.Kind != NIdent {
+				c.errorf("unsupported using declaration target (slice)")
+				return
+			}
+			slot := c.declareLexical(decl.Left.Str, false)
+			c.emitOpU16(OpGetLocal, uint16(c.usingStack)) // entries
+			if decl.Right != nil {
+				c.compileExpr(decl.Right)
+			} else {
+				c.emit(OpUndef)
+			}
+			if n.VarKind == VarAwaitUsing {
+				c.emit(OpUsingPushAsync)
+			} else {
+				c.emit(OpUsingPush)
+			}
+			c.emitOpU16(OpPutLocal, uint16(slot))
+		}
+		return
+	}
 	// Top-level `var` binds globally; `let`/`const` (and any binding inside a
 	// function) are frame locals.
 	asGlobal := n.VarKind == VarVar && c.isScript && !c.isEval
