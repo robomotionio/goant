@@ -36,6 +36,9 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 	if obj.IsNullish() {
 		return false, rt.typeError("cannot delete property of " + rt.nullishName(obj))
 	}
+	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
+		return rt.proxyDelete(o.proxy, rt.toPropertyKeyValue(key))
+	}
 	if idx, ok := arrayIndex(key); ok && obj.Type() == TArr {
 		o := rt.objPtr(obj)
 		if int(idx) < len(o.arr) {
@@ -68,6 +71,20 @@ func (rt *Runtime) forInKeys(obj Value) Value {
 	for depth := 0; depth < maxProtoChainDepth; depth++ {
 		o := rt.objPtr(cur)
 		if o == nil {
+			break
+		}
+		if o.proxy != nil {
+			keys, _ := rt.proxyOwnKeys(o.proxy)
+			for _, kv := range keys {
+				if !kv.IsString() {
+					continue
+				}
+				k := string(rt.strBytes(kv))
+				if !seen[k] {
+					seen[k] = true
+					rt.arraySet(ao, ao.arrLen, kv)
+				}
+			}
 			break
 		}
 		if cur.Type() == TArr {

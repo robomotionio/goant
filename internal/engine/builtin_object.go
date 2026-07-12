@@ -436,6 +436,15 @@ func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) Value {
 		return arr
 	}
 	ao := rt.objPtr(arr)
+	if o.proxy != nil {
+		keys, _ := rt.proxyOwnKeys(o.proxy)
+		for _, kv := range keys {
+			if kv.IsString() {
+				rt.arraySet(ao, ao.arrLen, kv)
+			}
+		}
+		return arr
+	}
 	if v.Type() == TArr {
 		for i := uint32(0); i < o.arrLen; i++ {
 			if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {

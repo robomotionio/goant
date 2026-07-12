@@ -86,7 +86,12 @@ func (rt *Runtime) iterateProtocol(v Value) ([]Value, bool, *ThrowError) {
 		return nil, true, rt.typeError("iterator.next is not a function")
 	}
 	var out []Value
-	for {
+	// Eager materialization cap: the slice compiler lowers for-of/spread to an
+	// array, so an unbounded iterator that a `break` would have stopped cannot be
+	// consumed lazily yet. Cap to avoid wedging the process; lazy for-of (pull +
+	// break/close) is the real fix.
+	const maxEager = 1 << 20
+	for iters := 0; iters < maxEager; iters++ {
 		res, e := rt.callValue(next, iter, nil)
 		if e != nil {
 			return nil, true, e
@@ -104,6 +109,7 @@ func (rt *Runtime) iterateProtocol(v Value) ([]Value, bool, *ThrowError) {
 		}
 		out = append(out, val)
 	}
+	return out, true, rt.rangeError("iterator produced too many values (eager-iteration cap)")
 }
 
 // objectIterableValues handles built-in iterable objects (Map/Set); returns

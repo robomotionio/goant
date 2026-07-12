@@ -67,6 +67,9 @@ type object struct {
 	// gen is set for generator objects (their suspended coroutine).
 	gen *genState
 
+	// proxy is set for Proxy objects (their target + trap handler).
+	proxy *proxyState
+
 	typeTag Type
 	flags   objFlags
 }
@@ -342,6 +345,10 @@ func (rt *Runtime) getProp(obj Value, key string) (Value, bool) {
 
 // hasProp implements ordinary [[HasProperty]] (own + inherited).
 func (rt *Runtime) hasProp(obj Value, key string) bool {
+	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
+		has, _ := rt.proxyHas(o.proxy, rt.internString(key))
+		return has
+	}
 	_, _, found := rt.resolveProp(obj, key)
 	return found
 }

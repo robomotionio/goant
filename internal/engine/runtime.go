@@ -150,6 +150,7 @@ func New() *Runtime {
 	rt.initPromiseBuiltin()
 	rt.initGeneratorBuiltin()
 	rt.initReflectBuiltin()
+	rt.initProxyBuiltin()
 	return rt
 }
 

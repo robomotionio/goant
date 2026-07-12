@@ -11,6 +11,9 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 	if obj.IsNullish() {
 		return mkundef(), rt.typeError("cannot read properties of " + rt.nullishName(obj) + " (reading '" + name + "')")
 	}
+	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
+		return rt.proxyGet(o.proxy, rt.internString(name), obj)
+	}
 	switch obj.Type() {
 	case TArr:
 		if name == "length" {
@@ -92,6 +95,9 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 	if obj.IsNullish() {
 		return false, rt.typeError("cannot set properties of " + rt.nullishName(obj))
 	}
+	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
+		return true, rt.proxySet(o.proxy, rt.internString(name), v, obj)
+	}
 	if obj.Type() == TArr && name == "length" {
 		e := rt.setArrayLength(obj, v)
 		return e == nil, e
@@ -145,6 +151,9 @@ func canonicalIndex(s string) (uint32, bool) {
 func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 	if obj.IsNullish() {
 		return mkundef(), rt.typeError("cannot read properties of " + rt.nullishName(obj))
+	}
+	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
+		return rt.proxyGet(o.proxy, rt.toPropertyKeyValue(key), obj)
 	}
 	if key.IsSymbol() {
 		return rt.getFieldSymbol(obj, key.handle()), nil
@@ -219,6 +228,9 @@ func (rt *Runtime) hasFieldSymbol(obj Value, sym uint32) bool {
 func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 	if obj.IsNullish() {
 		return rt.typeError("cannot set properties of " + rt.nullishName(obj))
+	}
+	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
+		return rt.proxySet(o.proxy, rt.toPropertyKeyValue(key), v, obj)
 	}
 	if key.IsSymbol() {
 		if o := rt.objPtr(obj); o != nil {

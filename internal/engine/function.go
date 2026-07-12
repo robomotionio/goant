@@ -66,6 +66,9 @@ func (rt *Runtime) construct(fnVal Value, args []Value) (Value, *ThrowError) {
 	if o == nil || !o.flags.isCallable {
 		return mkundef(), rt.typeError("value is not a constructor")
 	}
+	if o.proxy != nil {
+		return rt.proxyConstruct(o.proxy, args)
+	}
 	if cl := rt.closures.get(o.closure); cl != nil && (cl.fn.isGenerator || cl.fn.isAsync || cl.fn.isArrow) {
 		nm := cl.fn.name
 		if nm == "" {
@@ -106,6 +109,9 @@ func (rt *Runtime) callValue(fnVal, thisVal Value, args []Value) (Value, *ThrowE
 	o := rt.objPtr(fnVal)
 	if o == nil || !o.flags.isCallable {
 		return mkundef(), rt.typeError("value is not a function")
+	}
+	if o.proxy != nil {
+		return rt.proxyApply(o.proxy, thisVal, args)
 	}
 	if o.native != nil {
 		rt.frameDepth++
