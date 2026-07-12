@@ -9,7 +9,9 @@ compat-table/es2016/misc.nested-rest-destructuring-params.js
 compat-table/es2016/misc.Proxy-Array-includes.js
 compat-table/es2016/misc.Proxy-enumerate-removed.js
 compat-table/es2017/annex-b.Object.prototype.__defineGetter__.js
+compat-table/es2017/annex-b.Object.prototype.__defineGetter__.symbols.js
 compat-table/es2017/annex-b.Object.prototype.__defineSetter__.js
+compat-table/es2017/annex-b.Object.prototype.__defineSetter__.symbols.js
 compat-table/es2017/annex-b.Object.prototype.__lookupGetter__.js
 compat-table/es2017/annex-b.Object.prototype.__lookupGetter__.prototype-chain.js
 compat-table/es2017/annex-b.Object.prototype.__lookupGetter__.shadow-accessors.js
@@ -191,6 +193,8 @@ compat-table/es5/String.property-access.js
 compat-table/es5/String.prototype.trim.js
 compat-table/es6/annex-b.function.hoisted-block-level.js
 compat-table/es6/annex-b.__proto__.literals.multiple-error.js
+compat-table/es6/annex-b.__proto__.literals.not-shorthand-method.js
+compat-table/es6/annex-b.__proto__.literals.not-shorthand-property.js
 compat-table/es6/annex-b.__proto__.Object.prototype.absent-from-null.js
 compat-table/es6/annex-b.__proto__.Object.prototype.descriptor.js
 compat-table/es6/annex-b.__proto__.Object.prototype.get.js

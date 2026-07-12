@@ -53,6 +53,15 @@ func (c *compiler) compileObject(n *Node) {
 			c.errorf("unsupported object literal key (slice)")
 			return
 		}
+		// `{__proto__: expr}` (colon form only) sets the [[Prototype]]; the
+		// computed/shorthand/method forms create an ordinary "__proto__" property.
+		if name == "__proto__" && prop.Flags&fnColon != 0 && prop.Flags&(fnGetter|fnSetter|fnMethod) == 0 {
+			c.emit(OpDup)
+			c.compileExpr(prop.Right)
+			c.emit(OpSetProto) // obj proto -> obj
+			c.emit(OpPop)
+			continue
+		}
 		nameAnonExpr(prop.Right, name)
 		c.compileExpr(prop.Right)
 		c.emitDefineField(name) // obj val -> obj

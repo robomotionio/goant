@@ -153,6 +153,13 @@ func (rt *Runtime) initObjectBuiltin() {
 		if o.proxy != nil {
 			return rt.proxyGetOwnPropertyDescriptor(o.proxy, arg(args, 1))
 		}
+		if key := arg(args, 1); key.IsSymbol() {
+			d := o.ownDescriptorSym(key.handle())
+			if !d.exists {
+				return mkundef(), nil
+			}
+			return rt.descriptorToObject(d), nil
+		}
 		name, e := rt.propKeyString(arg(args, 1))
 		if e != nil {
 			return mkundef(), e
