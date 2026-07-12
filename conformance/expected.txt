@@ -518,6 +518,7 @@ compat-table/es6/misc.Proxy.get.CreateListFromArrayLike.js
 compat-table/es6/misc.Proxy.get.Date.toJSON.js
 compat-table/es6/misc.Proxy.get.Error.toString.js
 compat-table/es6/misc.Proxy.get.Function.bind.js
+compat-table/es6/misc.Proxy.get.HasBinding.js
 compat-table/es6/misc.Proxy.get.instanceof.js
 compat-table/es6/misc.Proxy.get.IteratorComplete.js
 compat-table/es6/misc.Proxy.get.JSON.stringify.js

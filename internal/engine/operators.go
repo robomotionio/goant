@@ -38,7 +38,9 @@ func (rt *Runtime) isUnscopable(obj Value, name string) bool {
 	if rt.symUnscopables == 0 {
 		return false
 	}
-	unsc := rt.getFieldSymbol(obj, rt.symUnscopables.handle())
+	// Get(obj, @@unscopables) through [[Get]] so a Proxy's trap observes it
+	// (with-statement HasBinding consults @@unscopables before the name).
+	unsc, _ := rt.getElement(obj, rt.symUnscopables)
 	if !unsc.IsObjectType() {
 		return false
 	}
