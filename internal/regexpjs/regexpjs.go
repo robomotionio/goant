@@ -9,6 +9,7 @@ package regexpjs
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/dlclark/regexp2"
 )
@@ -76,6 +77,15 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	}
 	// An empty pattern matches the empty string; ECMAScript spells it (?:).
 	src := pattern
+	// Under the u/v flag, translate ES Unicode property escapes (\p{…}) into
+	// explicit code-point classes regexp2 can compile.
+	if r.Unicode && (strings.Contains(src, `\p`) || strings.Contains(src, `\P`)) {
+		t, terr := translateUnicodeProps(src)
+		if terr != nil {
+			return nil, fmt.Errorf("invalid regular expression: %v", terr)
+		}
+		src = t
+	}
 	if src == "" {
 		src = "(?:)"
 	}
