@@ -28,6 +28,11 @@ type parser struct {
 	noIn     bool
 	err      error
 	filename string
+	// inAsync is true inside an async function body (so `await` is the operator,
+	// not an identifier). pendingAsync is set by a caller right before parseFunc
+	// to mark the function it is about to parse as async.
+	inAsync      bool
+	pendingAsync bool
 }
 
 // Parse tokenizes and parses src into an AST (N_PROGRAM root node).
@@ -363,7 +368,15 @@ func (p *parser) parseMemberSuffix(left *Node, la Token) *Node {
 	return nil
 }
 
-func (p *parser) parseArrowBody() *Node {
+// parseArrowBody parses a concise-body arrow tail. An async arrow establishes
+// an await context for its body; a plain arrow inherits the surrounding one
+// (an arrow has no Await binding of its own — ArrowFunction[?Await]).
+func (p *parser) parseArrowBody(isAsync bool) *Node {
+	if isAsync {
+		saved := p.inAsync
+		p.inAsync = true
+		defer func() { p.inAsync = saved }()
+	}
 	if p.next() == TokLBrace {
 		return p.parseBlock(true)
 	}
@@ -387,7 +400,7 @@ func (p *parser) tryParseAsyncArrow() *Node {
 				p.consume()
 				fn := p.mk(NFunc)
 				fn.Flags = fnArrow | fnAsync
-				fn.Body = p.parseArrowBody()
+				fn.Body = p.parseArrowBody(true)
 				fn.SrcOff = asyncOff
 				fn.SrcEnd = nodeSrcEnd(p, fn.Body)
 				return fn
@@ -404,7 +417,7 @@ func (p *parser) tryParseAsyncArrow() *Node {
 			fn := p.mk(NFunc)
 			fn.Flags = fnArrow | fnAsync
 			pushArrowParamsFromExpr(fn, expr)
-			fn.Body = p.parseArrowBody()
+			fn.Body = p.parseArrowBody(true)
 			fn.SrcOff = asyncOff
 			fn.SrcEnd = nodeSrcEnd(p, fn.Body)
 			return fn
@@ -424,7 +437,7 @@ func (p *parser) tryParseAsyncArrow() *Node {
 			fn := p.mk(NFunc)
 			fn.Flags = fnArrow | fnAsync
 			fn.Args = append(fn.Args, id)
-			fn.Body = p.parseArrowBody()
+			fn.Body = p.parseArrowBody(true)
 			fn.SrcOff = asyncOff
 			fn.SrcEnd = nodeSrcEnd(p, fn.Body)
 			return fn
@@ -529,6 +542,12 @@ func (p *parser) parsePrimary() *Node {
 		}
 		return n
 	case TokAwait:
+		// Outside an async function, `await` is a plain identifier.
+		if !p.inAsync {
+			n := p.mkIdentFromTok()
+			p.consume()
+			return n
+		}
 		p.consume()
 		n := p.mk(NAwait)
 		n.Right = p.parseUnary()
@@ -581,6 +600,7 @@ func (p *parser) parseAsyncPrimary() *Node {
 	if !hasLineTerm && p.la() == TokFunc {
 		p.next()
 		p.consume()
+		p.pendingAsync = true
 		fn := p.parseFunc()
 		fn.Flags |= fnAsync
 		fn.SrcOff = asyncOff
@@ -912,6 +932,7 @@ func (p *parser) parseObject() *Node {
 					p.next()
 				}
 				p.parseObjectKey(prop)
+				p.pendingAsync = true
 				prop.Right = p.parseFunc()
 				prop.Right.Flags |= fnAsync | fnMethod
 				if prop.Flags&fnGenerator != 0 {
@@ -1187,7 +1208,7 @@ func (p *parser) parseAssign() *Node {
 			p.errorf("Malformed arrow function parameter list")
 			return p.mk(NEmpty)
 		}
-		fn.Body = p.parseArrowBody()
+		fn.Body = p.parseArrowBody(false)
 		fn.SrcEnd = nodeSrcEnd(p, fn.Body)
 		return fn
 	}
@@ -1247,6 +1268,14 @@ func (p *parser) parseParenExpr() *Node {
 
 func (p *parser) parseFunc() *Node {
 	fn := p.mk(NFunc)
+	// This function's async-ness (set by the caller via pendingAsync). Its body
+	// establishes the await context; its parameter list does not (await in an
+	// async function's params is a SyntaxError).
+	isAsync := p.pendingAsync
+	p.pendingAsync = false
+	savedAsync := p.inAsync
+	p.inAsync = false // parameters
+	defer func() { p.inAsync = savedAsync }()
 	if p.next() == TokMul {
 		p.consume()
 		fn.Flags |= fnGenerator
@@ -1301,6 +1330,7 @@ func (p *parser) parseFunc() *Node {
 			}
 		}
 	}
+	p.inAsync = isAsync // the body establishes the await context
 	fn.Body = p.parseBlock(true)
 	fn.SrcEnd = uint32(p.toff() + p.tlen())
 	if fn.Flags&fnArrow == 0 && referencesArguments(fn.Body) {
@@ -1407,6 +1437,7 @@ func (p *parser) parseClass() *Node {
 		if p.next() == TokLParen {
 			savedStrict := p.lx.strict
 			p.lx.strict = true
+			p.pendingAsync = flags&fnAsync != 0 // async method body gets an await context
 			method.Right = p.parseFunc()
 			p.lx.strict = savedStrict
 			if !p.validateAccessorParams(method.Right, method.Flags) {
@@ -1611,6 +1642,7 @@ func (p *parser) parseExportStmt() *Node {
 			p.consume()
 			p.next()
 			p.consume()
+			p.pendingAsync = true
 			decl.Left = p.parseFunc()
 			decl.Left.Flags |= fnAsync
 			decl.Left.SrcOff = asyncOff
@@ -1650,6 +1682,7 @@ func (p *parser) parseExportStmt() *Node {
 		p.consume()
 		p.next()
 		p.consume()
+		p.pendingAsync = true
 		decl.Left = p.parseFunc()
 		decl.Left.Flags |= fnAsync
 		decl.Left.SrcOff = asyncOff
@@ -1874,6 +1907,7 @@ func (p *parser) parseStmt() *Node {
 			p.consume()
 			p.next()
 			p.consume()
+			p.pendingAsync = true
 			fn := p.parseFunc()
 			fn.Flags |= fnAsync
 			fn.SrcOff = asyncOff

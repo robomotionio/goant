@@ -33,6 +33,7 @@ compat-table/es2017/async.await-rejection.js
 compat-table/es2017/async.methods-class.js
 compat-table/es2017/async.methods-object.js
 compat-table/es2017/async.must-await-value.js
+compat-table/es2017/async.no-await-in-params.js
 compat-table/es2017/async.no-prototype.js
 compat-table/es2017/async.prototype-chain.js
 compat-table/es2017/async.return.js
