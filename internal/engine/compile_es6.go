@@ -338,18 +338,30 @@ func (c *compiler) compileClass(n *Node) {
 		if m.Left != nil && m.Left.Kind == NIdent && m.Left.Str == "constructor" && m.Flags&fnStatic == 0 {
 			continue
 		}
+		target := protoSlot
+		if m.Flags&fnStatic != 0 {
+			target = ctorSlot
+		}
 		if m.Flags&fnComputed != 0 {
-			c.errorf("computed class member names not yet supported (slice)")
-			return
+			if m.Flags&(fnGetter|fnSetter) != 0 {
+				c.errorf("computed class accessor names not yet supported (slice)")
+				return
+			}
+			// Computed data method / field: target[key] = value.
+			c.emitOpU16(OpGetLocal, uint16(target)) // [target]
+			c.compileExpr(m.Left)                   // [target, key]
+			if m.Right != nil && m.Right.Kind == NFunc {
+				c.compileFunc(m.Right)
+			} else {
+				c.compileExpr(m.Right)
+			}
+			c.emit(OpPutElem)
+			continue
 		}
 		name, ok := propKeyName(m.Left)
 		if !ok {
 			c.errorf("unsupported class member key (slice)")
 			return
-		}
-		target := protoSlot
-		if m.Flags&fnStatic != 0 {
-			target = ctorSlot
 		}
 		// Class field with a value (not a method): m.Right is an expression.
 		if m.Right != nil && m.Right.Kind != NFunc {

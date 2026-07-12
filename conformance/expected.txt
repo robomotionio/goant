@@ -58,6 +58,8 @@ compat-table/es2021/logical-assignment.or.setter-not-invoked.js
 compat-table/es2021/logical-assignment.or.short-circuit.js
 compat-table/es2021/numeric-separators.js
 compat-table/es2021/String.prototype.replaceAll.js
+compat-table/es2022/class-fields.computed-instance.js
+compat-table/es2022/class-fields.computed-static.js
 compat-table/es2022/class-fields.instance.parent-scope.js
 compat-table/es2022/class-fields.private-instance.initializers.js
 compat-table/es2022/class-fields.private-instance.js
@@ -202,6 +204,8 @@ compat-table/es6/arrow.precedence.js
 compat-table/es6/arrow.this-call-apply.js
 compat-table/es6/class.accessor-properties.js
 compat-table/es6/class.anonymous.js
+compat-table/es6/class.computed-prototype-methods.js
+compat-table/es6/class.computed-static-methods.js
 compat-table/es6/class.constructor.js
 compat-table/es6/class.expression.js
 compat-table/es6/class.extends-expressions.js
@@ -274,6 +278,7 @@ compat-table/es6/generators.basic.js
 compat-table/es6/generators.no-new-this.js
 compat-table/es6/generators.return.js
 compat-table/es6/generators.sending.js
+compat-table/es6/generators.shorthand.computed.class.js
 compat-table/es6/generators.shorthand.computed.js
 compat-table/es6/generators.shorthand.js
 compat-table/es6/generators.shorthand.string-keyed.js
