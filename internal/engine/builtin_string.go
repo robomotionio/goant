@@ -403,7 +403,7 @@ func (rt *Runtime) initStringBuiltin() {
 			}
 			vals, _ := rt.iterableValues(s)
 			i := 0
-			return rt.newIteratorObject(func() (Value, bool) {
+			return rt.newIteratorObjectP(rt.stringIterProto, func() (Value, bool) {
 				if i >= len(vals) {
 					return mkundef(), true
 				}

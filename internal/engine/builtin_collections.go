@@ -137,21 +137,21 @@ func (rt *Runtime) initMapBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newCollectionIterator(m, iterKeys), nil
+		return rt.newCollectionIterator(m, iterKeys, rt.mapIterProto), nil
 	})
 	rt.defMethod(po, "values", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		m, e := rt.collOf(this, false)
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newCollectionIterator(m, iterValues), nil
+		return rt.newCollectionIterator(m, iterValues, rt.mapIterProto), nil
 	})
 	entriesFn := rt.newNativeFunc("entries", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		m, e := rt.collOf(this, false)
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newCollectionIterator(m, iterEntries), nil
+		return rt.newCollectionIterator(m, iterEntries, rt.mapIterProto), nil
 	})
 	po.defineOwn("entries", entriesFn, attrWritable|attrConfigurable)
 	if rt.symIterator != 0 {
@@ -286,14 +286,14 @@ func (rt *Runtime) initSetBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newCollectionIterator(s, iterEntries), nil
+		return rt.newCollectionIterator(s, iterEntries, rt.setIterProto), nil
 	})
 	valuesFn := rt.newNativeFunc("values", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		s, e := rt.collOf(this, true)
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newCollectionIterator(s, iterValues), nil
+		return rt.newCollectionIterator(s, iterValues, rt.setIterProto), nil
 	})
 	po.defineOwn("values", valuesFn, attrWritable|attrConfigurable)
 	po.defineOwn("keys", valuesFn, attrWritable|attrConfigurable) // Set.keys === Set.values

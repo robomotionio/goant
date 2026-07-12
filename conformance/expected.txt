@@ -257,6 +257,7 @@ compat-table/es6/Array.from.array-like.js
 compat-table/es6/Array.from.generator.js
 compat-table/es6/Array.from.map.array-like.js
 compat-table/es6/Array.from.map.generator.js
+compat-table/es6/Array.iterator-prototype-chain.js
 compat-table/es6/Array.of.js
 compat-table/es6/Array.prototype.copyWithin.js
 compat-table/es6/Array.prototype.entries.js
@@ -407,6 +408,7 @@ compat-table/es6/Map.constructor-accepts-null.js
 compat-table/es6/Map.constructor-arguments.js
 compat-table/es6/Map.constructor-invokes-set.js
 compat-table/es6/Map.constructor-requires-new.js
+compat-table/es6/Map.iterator-prototype-chain.js
 compat-table/es6/Map.prototype.clear.js
 compat-table/es6/Map.prototype.delete.js
 compat-table/es6/Map.prototype.entries.js
@@ -599,6 +601,7 @@ compat-table/es6/Set.constructor-accepts-null.js
 compat-table/es6/Set.constructor-arguments.js
 compat-table/es6/Set.constructor-invokes-add.js
 compat-table/es6/Set.constructor-requires-new.js
+compat-table/es6/Set.iterator-prototype-chain.js
 compat-table/es6/Set.prototype.add-returns-this.js
 compat-table/es6/Set.prototype.clear.js
 compat-table/es6/Set.prototype.delete.js

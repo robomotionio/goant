@@ -46,6 +46,10 @@ type Runtime struct {
 	promiseProto          Value
 	genProto              Value // %GeneratorPrototype%
 	iteratorProto         Value // %IteratorPrototype%
+	arrayIterProto        Value // %ArrayIteratorPrototype%
+	mapIterProto          Value // %MapIteratorPrototype%
+	setIterProto          Value // %SetIteratorPrototype%
+	stringIterProto       Value // %StringIteratorPrototype%
 	asyncFunctionProto    Value // %AsyncFunction.prototype%
 	generatorFuncProto    Value // %GeneratorFunction.prototype%
 	asyncGeneratorFnProto Value

@@ -16,6 +16,18 @@ func (rt *Runtime) initIteratorProto() {
 		})
 		rt.objPtr(proto).defineOwnSymbol(rt.symIterator.handle(), selfIter, attrWritable|attrConfigurable)
 	}
+	// Per-kind iterator prototypes (%ArrayIteratorPrototype% etc.) chain to
+	// %IteratorPrototype%, so an iterator instance's proto chain is
+	// instance -> <Kind>IteratorPrototype -> %IteratorPrototype%.
+	mk := func(tag string) Value {
+		p := rt.newObject(rt.iteratorProto)
+		rt.setStringTag(p, tag)
+		return p
+	}
+	rt.arrayIterProto = mk("Array Iterator")
+	rt.mapIterProto = mk("Map Iterator")
+	rt.setIterProto = mk("Set Iterator")
+	rt.stringIterProto = mk("String Iterator")
 }
 
 // sliceIterator returns an iterator object over a fixed slice of values.
@@ -255,7 +267,13 @@ func (rt *Runtime) initIteratorHelpers() {
 // newIteratorObject wraps a producer closure as a spec IteratorResult-yielding
 // iterator. next returns (value, done); once done it must keep returning done.
 func (rt *Runtime) newIteratorObject(next func() (Value, bool)) Value {
-	v := rt.newObject(rt.iteratorProto)
+	return rt.newIteratorObjectP(rt.iteratorProto, next)
+}
+
+// newIteratorObjectP is newIteratorObject with an explicit [[Prototype]] (one of
+// the per-kind %…IteratorPrototype% objects).
+func (rt *Runtime) newIteratorObjectP(proto Value, next func() (Value, bool)) Value {
+	v := rt.newObject(proto)
 	o := rt.objPtr(v)
 	rt.defMethod(o, "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		val, done := next()
@@ -276,7 +294,7 @@ const (
 // newIndexIterator builds an Array/TypedArray iterator over live length.
 func (rt *Runtime) newIndexIterator(src Value, kind iterKind) Value {
 	i := 0
-	return rt.newIteratorObject(func() (Value, bool) {
+	return rt.newIteratorObjectP(rt.arrayIterProto, func() (Value, bool) {
 		n, _ := rt.lengthOf(src)
 		if i >= n {
 			return mkundef(), true
@@ -301,9 +319,9 @@ func (rt *Runtime) newIndexIterator(src Value, kind iterKind) Value {
 }
 
 // newCollectionIterator builds a Map/Set iterator over a snapshot of entries.
-func (rt *Runtime) newCollectionIterator(c *collection, kind iterKind) Value {
+func (rt *Runtime) newCollectionIterator(c *collection, kind iterKind, proto Value) Value {
 	i := 0
-	return rt.newIteratorObject(func() (Value, bool) {
+	return rt.newIteratorObjectP(proto, func() (Value, bool) {
 		for i < len(c.keys) {
 			if c.keys[i].IsEmpty() {
 				i++
