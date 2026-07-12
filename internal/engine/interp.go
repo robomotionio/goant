@@ -274,6 +274,17 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		case OpObject:
 			push(rt.newPlainObject())
 			ip++
+		case OpCopyDataProps:
+			// Object spread: copy src's enumerable own props into target.
+			// Stack: [target, src] -> [target].
+			src := pop()
+			target := pop()
+			if e := rt.copyDataProps(target, src); e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(target)
+			ip += 2
 		case OpArray:
 			n := int(readU16(code, ip+1))
 			arrv := rt.newArray()

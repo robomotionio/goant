@@ -84,16 +84,32 @@ func (c *compiler) destructureArray(pattern *Node, src int, kind VarKind) {
 }
 
 func (c *compiler) destructureObject(pattern *Node, src int, kind VarKind) {
+	var priorKeys []string
 	for _, prop := range pattern.Args {
 		if prop.Kind == NSpread {
-			c.errorf("object rest destructuring not yet supported (slice)")
-			return
+			// {a, ...rest}: rest is a fresh object with src's enumerable own props
+			// minus the already-destructured keys.
+			c.emit(OpObject) // [restObj]
+			c.emit(OpDup)
+			c.emitOpU16(OpGetLocal, uint16(src))
+			c.emit(OpCopyDataProps) // [restObj, restObj]
+			c.emitByte(0)
+			c.emit(OpPop) // [restObj]
+			for _, k := range priorKeys {
+				c.emit(OpDup)
+				c.emitConst(c.rt.internString(k))
+				c.emit(OpDelete)
+				c.emit(OpPop)
+			}
+			c.destructureTarget(prop.Right, kind)
+			continue
 		}
 		name, ok := propKeyName(prop.Left)
 		if !ok {
 			c.errorf("computed destructuring keys not yet supported (slice)")
 			return
 		}
+		priorKeys = append(priorKeys, name)
 		// Binding target and optional default from prop.Right.
 		target := prop.Right
 		var defExpr *Node

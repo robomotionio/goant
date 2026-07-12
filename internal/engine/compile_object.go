@@ -9,8 +9,13 @@ func (c *compiler) compileObject(n *Node) {
 	c.emit(OpObject)
 	for _, prop := range n.Args {
 		if prop.Kind == NSpread {
-			c.errorf("object spread not yet supported (slice)")
-			return
+			// {...src}: copy src's enumerable own props into the target.
+			c.emit(OpDup)             // [target, target]
+			c.compileExpr(prop.Right) // [target, target, src]
+			c.emit(OpCopyDataProps)   // -> [target, target]
+			c.emitByte(0)
+			c.emit(OpPop) // discard the extra target left by COPY_DATA_PROPS
+			continue
 		}
 		if prop.Flags&(fnGetter|fnSetter) != 0 {
 			name, ok := propKeyName(prop.Left)

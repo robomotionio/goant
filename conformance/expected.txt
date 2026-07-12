@@ -25,6 +25,8 @@ compat-table/es2017/Object.getOwnPropertyDescriptors.js
 compat-table/es2017/Object.values.js
 compat-table/es2017/String.prototype.padEnd.js
 compat-table/es2017/String.prototype.padStart.js
+compat-table/es2018/object-rest.js
+compat-table/es2018/object-spread.js
 compat-table/es2019/annex-b.String.prototype.trimLeft.js
 compat-table/es2019/annex-b.String.prototype.trimRight.js
 compat-table/es2019/Array.prototype.flat.js

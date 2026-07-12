@@ -335,6 +335,51 @@ func (rt *Runtime) propKeyString(key Value) (string, *ThrowError) {
 	return string(rt.strBytes(s)), nil
 }
 
+// copyDataProps copies src's own enumerable properties (array indices, string
+// keys, and symbol keys) into target, invoking getters (object spread / rest).
+func (rt *Runtime) copyDataProps(target, src Value) *ThrowError {
+	if src.IsNullish() {
+		return nil
+	}
+	so := rt.objPtr(src)
+	if so == nil {
+		// Primitive (e.g. string): spread its indexed characters.
+		if src.IsString() {
+			n := utf16Len(rt.strBytes(src))
+			for i := 0; i < n; i++ {
+				v, _ := rt.getElement(src, mknum(float64(i)))
+				rt.setElement(target, mknum(float64(i)), v)
+			}
+		}
+		return nil
+	}
+	if src.Type() == TArr {
+		for i := uint32(0); i < so.arrLen; i++ {
+			if int(i) < len(so.arr) && !so.arr[i].IsEmpty() {
+				rt.setElement(target, mknum(float64(i)), so.arr[i])
+			}
+		}
+	}
+	for _, k := range so.ownKeysEnumerable() {
+		v, e := rt.getField(src, k)
+		if e != nil {
+			return e
+		}
+		if e := rt.setField(target, k, v); e != nil {
+			return e
+		}
+	}
+	for _, off := range so.ownSymbolKeys() {
+		if d := so.ownDescriptorSym(off); d.exists && d.enumerable {
+			v := rt.getFieldSymbol(src, off)
+			if o := rt.objPtr(target); o != nil {
+				o.defineOwnSymbol(off, v, attrDefault)
+			}
+		}
+	}
+	return nil
+}
+
 func (rt *Runtime) nullishName(v Value) string {
 	if v.IsNull() {
 		return "null"
