@@ -94,58 +94,97 @@ func (rt *Runtime) initRegExpBuiltin() {
 		po.defineOwnSymbol(sym.handle(), fn, attrWritable|attrConfigurable)
 	}
 	defSym(rt.symMatch, func(this Value, args []Value) (Value, *ThrowError) {
-		str := arg(args, 0)
-		re := rt.objPtr(this)
-		if re == nil || re.regex == nil {
-			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.match] called on incompatible receiver")
+		// Generic RegExp.prototype[@@match] (22.2.6.8): reads global/unicode and
+		// runs RegExpExec, all via [[Get]] so it composes with Proxy traps.
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("RegExp.prototype[Symbol.match] called on non-object")
 		}
-		s, e := rt.toStringValue(str)
+		s, e := rt.toStringValue(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		if !re.regex.Global {
-			return rt.regexpExec(this, s)
+		gv, e := rt.getField(this, "global")
+		if e != nil {
+			return mkundef(), e
 		}
-		input := []rune(string(rt.strBytes(s)))
+		if !rt.toBoolean(gv) {
+			return rt.regExpExecAbstract(this, s)
+		}
+		uv, e := rt.getField(this, "unicode")
+		if e != nil {
+			return mkundef(), e
+		}
+		fullUnicode := rt.toBoolean(uv)
+		if e := rt.setField(this, "lastIndex", mknum(0)); e != nil {
+			return mkundef(), e
+		}
 		res := rt.newArray()
 		ro := rt.objPtr(res)
-		pos, any := 0, false
+		n := 0
 		for {
-			m, err := re.regex.Exec(input, pos)
-			if err != nil || m == nil {
-				break
+			result, e := rt.regExpExecAbstract(this, s)
+			if e != nil {
+				return mkundef(), e
 			}
-			any = true
-			rt.arraySet(ro, ro.arrLen, rt.newString(m.Groups[0].Value))
-			adv := m.Index + m.Groups[0].Length
-			if adv <= pos {
-				adv = pos + 1
+			if result.IsNull() {
+				if n == 0 {
+					return mknull(), nil
+				}
+				return res, nil
 			}
-			pos = adv
+			m0, e := rt.getField(result, "0")
+			if e != nil {
+				return mkundef(), e
+			}
+			matchStr, e := rt.toStringValue(m0)
+			if e != nil {
+				return mkundef(), e
+			}
+			rt.arraySet(ro, ro.arrLen, matchStr)
+			n++
+			if len(rt.strBytes(matchStr)) == 0 {
+				li, _ := rt.getField(this, "lastIndex")
+				liN, _ := rt.toNumber(li)
+				rt.setField(this, "lastIndex", mknum(rt.advanceStringIndex(s, liN, fullUnicode)))
+			}
 		}
-		if !any {
-			return mknull(), nil
-		}
-		return res, nil
 	})
 	defSym(rt.symReplace, func(this Value, args []Value) (Value, *ThrowError) {
 		return rt.stringReplace(arg(args, 0), this, arg(args, 1))
 	})
 	defSym(rt.symSearch, func(this Value, args []Value) (Value, *ThrowError) {
-		str := arg(args, 0)
-		re := rt.objPtr(this)
-		if re == nil || re.regex == nil {
-			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.search] called on incompatible receiver")
+		// Generic RegExp.prototype[@@search] (22.2.6.11): saves/restores lastIndex
+		// around a single RegExpExec, all via [[Get]]/[[Set]].
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("RegExp.prototype[Symbol.search] called on non-object")
 		}
-		b, e := rt.thisStringBytes(str)
+		s, e := rt.toStringValue(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		m, err := re.regex.Exec([]rune(string(b)), 0)
-		if err != nil || m == nil {
+		prevLI, e := rt.getField(this, "lastIndex")
+		if e != nil {
+			return mkundef(), e
+		}
+		if n, _ := rt.toNumber(prevLI); n != 0 {
+			if e := rt.setField(this, "lastIndex", mknum(0)); e != nil {
+				return mkundef(), e
+			}
+		}
+		result, e := rt.regExpExecAbstract(this, s)
+		if e != nil {
+			return mkundef(), e
+		}
+		curLI, _ := rt.getField(this, "lastIndex")
+		if !rt.sameValue(curLI, prevLI) {
+			if e := rt.setField(this, "lastIndex", prevLI); e != nil {
+				return mkundef(), e
+			}
+		}
+		if result.IsNull() {
 			return mknum(-1), nil
 		}
-		return mknum(float64(m.Index)), nil
+		return rt.getField(result, "index")
 	})
 	defSym(rt.symSplit, func(this Value, args []Value) (Value, *ThrowError) {
 		str := arg(args, 0)
@@ -245,6 +284,25 @@ func (rt *Runtime) initRegExpAccessors() {
 		return rt.internString(string(b)), nil
 	})
 	po.defineAccessor("flags", flagsGetter, mkundef(), true, false, attrConfigurable)
+}
+
+// advanceStringIndex implements AdvanceStringIndex (22.2.7.3): +1, or +2 when
+// unicode and the code unit at index is a lead surrogate paired with a trail.
+func (rt *Runtime) advanceStringIndex(s Value, index float64, unicode bool) float64 {
+	if !unicode {
+		return index + 1
+	}
+	b := rt.strBytes(s)
+	i := int(index)
+	if i+1 >= utf16Len(b) {
+		return index + 1
+	}
+	hi := utf16CodeUnitAt(b, i)
+	lo := utf16CodeUnitAt(b, i+1)
+	if hi >= 0xD800 && hi <= 0xDBFF && lo >= 0xDC00 && lo <= 0xDFFF {
+		return index + 2
+	}
+	return index + 1
 }
 
 // canonicalFlags reorders regexp flag characters into the ES canonical order

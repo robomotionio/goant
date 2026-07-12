@@ -487,6 +487,8 @@ compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Object.hasOwnProperty.js
 compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Set.js
 compat-table/es6/misc.Proxy.get.Promise.resolve.js
 compat-table/es6/misc.Proxy.get.RegExp.flags.js
+compat-table/es6/misc.Proxy.get.RegExp.Symbol.match.js
+compat-table/es6/misc.Proxy.get.RegExp.Symbol.search.js
 compat-table/es6/misc.Proxy.get.RegExp.test.js
 compat-table/es6/misc.Proxy.get.RegExp.toString.js
 compat-table/es6/misc.Proxy.get.String.match.js
