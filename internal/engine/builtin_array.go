@@ -63,6 +63,26 @@ func (rt *Runtime) sortValues(vs []Value, cmp Value) *ThrowError {
 	return sortErr
 }
 
+// arraySpeciesCreate implements ArraySpeciesCreate: the result of an array
+// method uses this.constructor[Symbol.species] as its constructor when present,
+// otherwise a plain Array.
+func (rt *Runtime) arraySpeciesCreate(this Value, length int) (Value, *ThrowError) {
+	if this.Type() == TArr && rt.symSpecies != 0 {
+		ctor, e := rt.getField(this, "constructor")
+		if e != nil {
+			return mkundef(), e
+		}
+		if ctor.IsObjectType() {
+			sp := rt.getFieldSymbol(ctor, rt.symSpecies.handle())
+			if sp.IsObjectType() && rt.isCallable(sp) {
+				return rt.construct(sp, []Value{mknum(float64(length))})
+			}
+		}
+	}
+	res := rt.newArray()
+	return res, nil
+}
+
 func (rt *Runtime) initArrayBuiltin() {
 	proto := rt.objPtr(rt.arrayProto)
 
@@ -475,15 +495,17 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		res := rt.newArray()
-		ro := rt.objPtr(res)
+		res, e := rt.arraySpeciesCreate(this, n)
+		if e != nil {
+			return mkundef(), e
+		}
 		for i := 0; i < n; i++ {
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			mapped, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
 				return mkundef(), e
 			}
-			rt.arraySet(ro, ro.arrLen, mapped)
+			rt.setElement(res, mknum(float64(i)), mapped)
 		}
 		return res, nil
 	})
@@ -493,8 +515,11 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		res := rt.newArray()
-		ro := rt.objPtr(res)
+		res, e := rt.arraySpeciesCreate(this, 0)
+		if e != nil {
+			return mkundef(), e
+		}
+		outIdx := 0
 		for i := 0; i < n; i++ {
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			keep, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
@@ -502,7 +527,8 @@ func (rt *Runtime) initArrayBuiltin() {
 				return mkundef(), e
 			}
 			if rt.toBoolean(keep) {
-				rt.arraySet(ro, ro.arrLen, el)
+				rt.setElement(res, mknum(float64(outIdx)), el)
+				outIdx++
 			}
 		}
 		return res, nil

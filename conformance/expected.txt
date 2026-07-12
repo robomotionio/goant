@@ -541,6 +541,8 @@ compat-table/es6/well-known.iterator.js
 compat-table/es6/well-known.match.js
 compat-table/es6/well-known.replace.js
 compat-table/es6/well-known.search.js
+compat-table/es6/well-known.species.Array.filter.js
+compat-table/es6/well-known.species.Array.map.js
 compat-table/es6/well-known.species.js
 compat-table/es6/well-known.split.js
 compat-table/es6/well-known.toPrimitive.js

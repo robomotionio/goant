@@ -64,17 +64,19 @@ type Runtime struct {
 	microtasks []func()
 
 	// Well-known symbols and the Symbol.for registry.
-	symbolCounter    uint64
-	symbolRegistry   map[string]Value
-	symIterator      Value
-	symAsyncIterator Value
-	symHasInstance   Value
-	symToPrimitive   Value
-	symToStringTag   Value
-	symMatch         Value
-	symReplace       Value
-	symSearch        Value
-	symSplit         Value
+	symbolCounter         uint64
+	symbolRegistry        map[string]Value
+	symIterator           Value
+	symAsyncIterator      Value
+	symHasInstance        Value
+	symToPrimitive        Value
+	symToStringTag        Value
+	symMatch              Value
+	symReplace            Value
+	symSearch             Value
+	symSplit              Value
+	symSpecies            Value
+	symIsConcatSpreadable Value
 
 	// errors holds the NativeError constructors/prototypes for internal throws.
 	errors errorCtors
