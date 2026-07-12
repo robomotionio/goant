@@ -241,6 +241,15 @@ func (rt *Runtime) RunString(filename, src string) (Value, error) {
 	}
 	v, err := rt.execute(fn)
 	rt.drainMicrotasks()
+	// Async conformance protocol: a test sets globalThis.__asyncTestPending and
+	// clears it from asyncTestPassed(); if still pending after the microtask
+	// queue drains, the async assertion never succeeded.
+	if err == nil {
+		if p, e := rt.getField(rt.global, "__asyncTestPending"); e == nil && rt.toBoolean(p) {
+			code := 1
+			return mkundef(), &ExitError{Code: code}
+		}
+	}
 	if rt.exitCode != nil {
 		return mkundef(), &ExitError{Code: *rt.exitCode}
 	}

@@ -93,12 +93,9 @@ func main() {
 		return
 	}
 
-	// Emit sync tests for claimed targets.
+	// Emit tests for claimed targets (sync + async).
 	written := 0
 	for leaf, r := range claimedBy {
-		if r.IsAsync {
-			continue // async harness lands later
-		}
 		full := targets[leaf] // compat-table/<cat>/<leaf>.js
 		rel := strings.TrimPrefix(full, "compat-table/")
 		dst := filepath.Join(*outRoot, rel)
@@ -269,6 +266,17 @@ func genTest(r *record, pin string) string {
 	fmt.Fprintf(&b, "// pin: %s\n// feature: %s\n", pin, r.Feature)
 	if r.Subtest != "" {
 		fmt.Fprintf(&b, "// subtest: %s\n", r.Subtest)
+	}
+	if r.IsAsync {
+		// Async: the exec signals success via asyncTestPassed(); if the pending
+		// flag is still set after the microtask queue drains, it failed (handled
+		// by the host in RunString).
+		b.WriteString("globalThis.__asyncTestPending = true;\n")
+		b.WriteString("global.asyncTestPassed = function () { globalThis.__asyncTestPending = false; };\n")
+		b.WriteString("(function () {")
+		b.WriteString(r.Exec)
+		b.WriteString("\n})();\n")
+		return b.String()
 	}
 	b.WriteString("var __ok = (function () {")
 	b.WriteString(r.Exec)

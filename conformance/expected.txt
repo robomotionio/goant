@@ -24,10 +24,17 @@ compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.prototype-chain.js
 compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.shadow-accessors.js
 compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.symbols.js
 compat-table/es2017/annex-b.Object.prototype.__lookupSetter__.ToObject.js
+compat-table/es2017/async.arrow-in-class.js
+compat-table/es2017/async.arrow.js
+compat-table/es2017/async.await-non-promise.js
+compat-table/es2017/async.methods-class.js
+compat-table/es2017/async.methods-object.js
 compat-table/es2017/async.must-await-value.js
 compat-table/es2017/async.no-prototype.js
 compat-table/es2017/async.prototype-chain.js
+compat-table/es2017/async.return.js
 compat-table/es2017/async.Symbol.toStringTag.js
+compat-table/es2017/async.throw.js
 compat-table/es2017/Atomics.add.js
 compat-table/es2017/Atomics.and.js
 compat-table/es2017/Atomics.compareExchange.js
@@ -53,6 +60,8 @@ compat-table/es2017/String.prototype.padEnd.js
 compat-table/es2017/String.prototype.padStart.js
 compat-table/es2018/object-rest.js
 compat-table/es2018/object-spread.js
+compat-table/es2018/Promise.prototype.finally.js
+compat-table/es2018/Promise.prototype.finally.no-change-resolution.js
 compat-table/es2018/regex.named-capture-groups.js
 compat-table/es2019/annex-b.String.prototype.trimLeft.js
 compat-table/es2019/annex-b.String.prototype.trimRight.js
@@ -67,6 +76,7 @@ compat-table/es2019/misc.Function-toString.native-code.js
 compat-table/es2019/misc.JSON-stringify-well-formed.js
 compat-table/es2019/misc.JSON-superset.line-separator.js
 compat-table/es2019/misc.JSON-superset.paragraph-separator.js
+compat-table/es2019/misc.optional-catch-binding.await.js
 compat-table/es2019/misc.optional-catch-binding.js
 compat-table/es2019/misc.optional-catch-binding.yield.js
 compat-table/es2019/Object.fromEntries.js
@@ -80,6 +90,7 @@ compat-table/es2020/optional-chaining.bracket.js
 compat-table/es2020/optional-chaining.function-call.js
 compat-table/es2020/optional-chaining.method-call.js
 compat-table/es2020/optional-chaining.property.js
+compat-table/es2020/Promise.allSettled.js
 compat-table/es2020/String.prototype.matchAll.js
 compat-table/es2020/String.prototype.matchAll.throws-non-global.js
 compat-table/es2021/logical-assignment.and.js
@@ -92,6 +103,7 @@ compat-table/es2021/logical-assignment.or.js
 compat-table/es2021/logical-assignment.or.setter-not-invoked.js
 compat-table/es2021/logical-assignment.or.short-circuit.js
 compat-table/es2021/numeric-separators.js
+compat-table/es2021/Promise.any.fulfillment.js
 compat-table/es2021/String.prototype.replaceAll.js
 compat-table/es2022/class-fields.computed-instance.js
 compat-table/es2022/class-fields.computed-static.js
@@ -489,6 +501,7 @@ compat-table/es6/Proxy.revocable.js
 compat-table/es6/Reflect.apply.js
 compat-table/es6/Reflect.construct.js
 compat-table/es6/Reflect.construct.new-target.js
+compat-table/es6/Reflect.construct.Promise-subclassing.js
 compat-table/es6/Reflect.construct.third-argument.js
 compat-table/es6/Reflect.defineProperty.js
 compat-table/es6/Reflect.deleteProperty.js

@@ -1,3 +1,4 @@
+compat-table/es2018/Promise.prototype.finally.js
 compat-table/es2022/class-fields.static.define.js
 compat-table/es6/annex-b.html-comments.js
 compat-table/es6/misc.Proxy.get.RegExp.flags.js
@@ -6,8 +7,22 @@ compat-table/es6/tail-calls.mutual.js
 compat-table/es6/well-known.isConcatSpreadable.poisoned-getter.js
 compat-table/next/Array.isTemplateObject.js
 compat-table/next/AsyncIterator.extends.js
+compat-table/next/AsyncIterator.from.async-iterable.js
+compat-table/next/AsyncIterator.from.iterable.js
+compat-table/next/AsyncIterator.from.iterator.js
 compat-table/next/AsyncIterator.instanceof.js
+compat-table/next/AsyncIterator.prototype.drop.js
+compat-table/next/AsyncIterator.prototype.every.js
+compat-table/next/AsyncIterator.prototype.filter.js
+compat-table/next/AsyncIterator.prototype.find.js
+compat-table/next/AsyncIterator.prototype.flatMap.js
+compat-table/next/AsyncIterator.prototype.forEach.js
+compat-table/next/AsyncIterator.prototype.map.js
+compat-table/next/AsyncIterator.prototype.reduce.js
+compat-table/next/AsyncIterator.prototype.some.js
 compat-table/next/AsyncIterator.prototype.Symbol.toStringTag.js
+compat-table/next/AsyncIterator.prototype.take.js
+compat-table/next/AsyncIterator.prototype.toArray.js
 compat-table/next/Map.prototype.upsert.js
 compat-table/next/throw-expr.logical.js
 compat-table/next/WeakMap.prototype.upsert.js
