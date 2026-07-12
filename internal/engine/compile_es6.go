@@ -232,7 +232,14 @@ func (c *compiler) bindDeclName(name string, kind VarKind) {
 	}
 	var slot int
 	if kind == VarLet || kind == VarConst {
-		slot = c.declareLexical(name, kind == VarConst)
+		// Reuse the slot pre-declared by hoistLexicals (leaving the binding in TDZ
+		// until this store) so a hoisted nested function captures the same slot;
+		// else declare it now.
+		if s := c.lexicalAtCurrentDepth(name); s >= 0 {
+			slot = s
+		} else {
+			slot = c.declareLexical(name, kind == VarConst)
+		}
 	} else {
 		slot = c.declareVar(name, false)
 	}

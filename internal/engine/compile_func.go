@@ -97,12 +97,13 @@ func (c *compiler) compileIfBranch(n *Node) {
 	c.compileStmt(n)
 }
 
-// hoistLexicals pre-declares the simple let/const bindings of a statement list at
-// the current scope, initializing each to an EMPTY hole. Running before function
+// hoistLexicals pre-declares the let/const bindings of a statement list at the
+// current scope, initializing each to an EMPTY hole. Running before function
 // hoisting lets nested functions capture the binding, and a read before the
 // declaration's initializer runs hits the hole and throws (temporal dead zone).
-// Destructuring targets are left to inline declaration (no TDZ) to stay
-// conservative. Top-level script `var`-scoped code is unaffected.
+// Names bound inside a destructuring pattern are hoisted too (via
+// collectPatternNames), so `const {x}=o; function f(){return x}` captures x.
+// Top-level script `var`-scoped code is unaffected.
 func (c *compiler) hoistLexicals(list []*Node) {
 	for _, stmt := range list {
 		if stmt == nil || stmt.Kind != NVar {
@@ -112,15 +113,60 @@ func (c *compiler) hoistLexicals(list []*Node) {
 			continue
 		}
 		for _, decl := range stmt.Args {
-			if decl.Left == nil || decl.Left.Kind != NIdent {
+			var names []string
+			collectPatternNames(decl.Left, &names)
+			for _, name := range names {
+				if c.lexicalAtCurrentDepth(name) >= 0 {
+					continue // already hoisted (duplicate — inline decl will store)
+				}
+				slot := c.declareLexical(name, stmt.VarKind == VarConst)
+				c.emit(OpEmpty)
+				c.emitOpU16(OpPutLocal, uint16(slot))
+			}
+		}
+	}
+}
+
+// collectPatternNames appends the identifier names bound by a declaration target
+// — a plain NIdent, or a nested array/object binding pattern — to out. Defaults
+// (NAssignPat / `x = d`) and rest elements are unwrapped to their target;
+// member targets (which appear only in destructuring *assignment*, never a
+// let/const declaration) bind no name and are skipped.
+func collectPatternNames(pattern *Node, out *[]string) {
+	if pattern == nil {
+		return
+	}
+	switch pattern.Kind {
+	case NIdent:
+		*out = append(*out, pattern.Str)
+	case NArray:
+		for _, elem := range pattern.Args {
+			if elem == nil || elem.Kind == NEmpty {
 				continue
 			}
-			if c.lexicalAtCurrentDepth(decl.Left.Str) >= 0 {
-				continue // already hoisted (duplicate — inline decl will store)
+			switch {
+			case elem.Kind == NRest || elem.Kind == NSpread:
+				collectPatternNames(elem.Right, out)
+			case elem.Kind == NAssignPat || (elem.Kind == NAssign && elem.Op == TokAssign):
+				collectPatternNames(elem.Left, out)
+			default:
+				collectPatternNames(elem, out)
 			}
-			slot := c.declareLexical(decl.Left.Str, stmt.VarKind == VarConst)
-			c.emit(OpEmpty)
-			c.emitOpU16(OpPutLocal, uint16(slot))
+		}
+	case NObject:
+		for _, prop := range pattern.Args {
+			if prop == nil {
+				continue
+			}
+			if prop.Kind == NSpread {
+				collectPatternNames(prop.Right, out)
+				continue
+			}
+			target := prop.Right
+			if target != nil && target.Kind == NAssign && target.Op == TokAssign {
+				target = target.Left
+			}
+			collectPatternNames(target, out)
 		}
 	}
 }
