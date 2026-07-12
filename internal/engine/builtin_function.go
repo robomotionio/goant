@@ -1,5 +1,7 @@
 package engine
 
+import "strings"
+
 // Function constructor + Function.prototype (ant builtin_function): call, apply,
 // bind, toString. Function.prototype is itself callable (returns undefined).
 
@@ -97,10 +99,47 @@ func (rt *Runtime) initFunctionBuiltin() {
 		return rt.newString("function " + name + "() { }"), nil
 	})
 
-	// Function constructor (identity-ish; dynamic code compilation via the
-	// Function() constructor lands with eval support later).
+	// Function constructor: compile `function anonymous(params) { body }` in the
+	// global scope and return the resulting function (ant dynamic Function).
 	ctor := rt.newNativeFunc("Function", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return mkundef(), rt.typeError("Function constructor (dynamic) not yet supported")
+		var params []string
+		body := ""
+		if len(args) > 0 {
+			for i := 0; i < len(args)-1; i++ {
+				s, e := rt.toStringValue(args[i])
+				if e != nil {
+					return mkundef(), e
+				}
+				params = append(params, string(rt.strBytes(s)))
+			}
+			bs, e := rt.toStringValue(args[len(args)-1])
+			if e != nil {
+				return mkundef(), e
+			}
+			body = string(rt.strBytes(bs))
+		}
+		// Compile in the global scope and capture the function via a temporary
+		// global binding (the script completion value drops function-expression
+		// statements, so we read the binding back instead).
+		const tmp = "__goant_Function__"
+		src := "globalThis." + tmp + " = (function anonymous(" + strings.Join(params, ",") + "\n) {\n" + body + "\n});"
+		prog, perr := Parse("<anonymous>", src)
+		if perr != nil {
+			return mkundef(), &ThrowError{Value: rt.makeError(rt.errors.syntaxProto, "SyntaxError", perr.Error()), rt: rt}
+		}
+		fn, cerr := rt.Compile(prog, "<anonymous>", src)
+		if cerr != nil {
+			return mkundef(), &ThrowError{Value: rt.makeError(rt.errors.syntaxProto, "SyntaxError", cerr.Error()), rt: rt}
+		}
+		if _, xerr := rt.execute(fn); xerr != nil {
+			if te, ok := xerr.(*ThrowError); ok {
+				return mkundef(), te
+			}
+			return mkundef(), rt.typeError(xerr.Error())
+		}
+		v, _ := rt.getField(rt.global, tmp)
+		rt.objPtr(rt.global).deleteOwn(tmp)
+		return v, nil
 	})
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", rt.functionProto, 0)

@@ -261,6 +261,23 @@ func (rt *Runtime) initPromiseBuiltin() {
 	rt.defMethod(cobj, "resolve", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.resolvedPromise(arg(args, 0)), nil
 	})
+	rt.defMethod(cobj, "withResolvers", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		p, o := rt.makePromise()
+		resolve := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			rt.resolvePromise(p, o, arg(a, 0))
+			return mkundef(), nil
+		})
+		reject := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			rt.rejectPromise(o, arg(a, 0))
+			return mkundef(), nil
+		})
+		res := rt.newPlainObject()
+		ro := rt.objPtr(res)
+		ro.defineOwn("promise", p, attrDefault)
+		ro.defineOwn("resolve", resolve, attrDefault)
+		ro.defineOwn("reject", reject, attrDefault)
+		return res, nil
+	})
 	rt.defMethod(cobj, "reject", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.rejectedPromise(arg(args, 0)), nil
 	})

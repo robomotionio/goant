@@ -385,6 +385,42 @@ func (o *object) ownDescriptor(key string) ownDesc {
 	return d
 }
 
+// ownSymbolKeys returns the object's own symbol keys (as symbol handles) in
+// slot order.
+func (o *object) ownSymbolKeys() []uint32 {
+	var out []uint32
+	for i := 0; i < o.shape.count(); i++ {
+		p := &o.shape.props[i]
+		if p.key.sym {
+			out = append(out, p.key.off)
+		}
+	}
+	return out
+}
+
+// ownDescriptorSym is ownDescriptor for a symbol-keyed property.
+func (o *object) ownDescriptorSym(off uint32) ownDesc {
+	slot := o.shape.lookupSymbol(off)
+	if slot < 0 {
+		return ownDesc{}
+	}
+	attrs := o.shape.attrsAt(uint32(slot))
+	d := ownDesc{
+		exists:     true,
+		writable:   attrs&attrWritable != 0,
+		enumerable: attrs&attrEnumerable != 0,
+		configable: attrs&attrConfigurable != 0,
+	}
+	if o.isAccessorSlot(uint32(slot)) {
+		p := o.shape.propAt(uint32(slot))
+		d.isAccessor = true
+		d.getter, d.setter = p.getter, p.setter
+	} else {
+		d.value = o.slotGet(uint32(slot))
+	}
+	return d
+}
+
 // setAttrsOwn updates just the attribute bits of an existing own property.
 func (o *object) setAttrsOwn(key string, attrs uint8) {
 	o.ensureUniqueShape()

@@ -230,6 +230,17 @@ func (rt *Runtime) initDateBuiltin() {
 	})
 
 	rt.defMethod(proto, "toJSON", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// A non-finite time value serializes as null (ES Date.prototype.toJSON).
+		if vf, _ := rt.getField(this, "valueOf"); rt.isCallable(vf) {
+			pv, e := rt.callValue(vf, this, nil)
+			if e != nil {
+				return mkundef(), e
+			}
+			n, _ := rt.toNumber(pv)
+			if math.IsNaN(n) || math.IsInf(n, 0) {
+				return mknull(), nil
+			}
+		}
 		iso, _ := rt.getField(this, "toISOString")
 		if rt.isCallable(iso) {
 			return rt.callValue(iso, this, nil)

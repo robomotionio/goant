@@ -148,7 +148,8 @@ func (rt *Runtime) genResult(value Value, done bool) Value {
 }
 
 func (rt *Runtime) initGeneratorBuiltin() {
-	proto := rt.newObject(rt.objectProto)
+	// %GeneratorPrototype% inherits [Symbol.iterator] from %IteratorPrototype%.
+	proto := rt.newObject(rt.iteratorProto)
 	rt.genProto = proto
 	po := rt.objPtr(proto)
 

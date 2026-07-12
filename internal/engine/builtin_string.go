@@ -359,6 +359,52 @@ func (rt *Runtime) initStringBuiltin() {
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", rt.stringProto, 0)
 	proto.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	// String.prototype[Symbol.iterator] iterates by code point (astral-aware).
+	if rt.symIterator != 0 {
+		strIter := rt.newNativeFunc("[Symbol.iterator]", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			s, e := rt.toStringValue(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			vals, _ := rt.iterableValues(s)
+			i := 0
+			return rt.newIteratorObject(func() (Value, bool) {
+				if i >= len(vals) {
+					return mkundef(), true
+				}
+				v := vals[i]
+				i++
+				return v, false
+			}), nil
+		})
+		proto.defineOwnSymbol(rt.symIterator.handle(), strIter, attrWritable|attrConfigurable)
+	}
+	// String.raw`...` — assemble a template's raw strings with substitutions.
+	rt.defMethod(cobj, "raw", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		tmpl := arg(args, 0)
+		rawV, e := rt.getField(tmpl, "raw")
+		if e != nil {
+			return mkundef(), e
+		}
+		if rawV.IsNullish() {
+			return mkundef(), rt.typeError("String.raw requires a template object")
+		}
+		n, e := rt.lengthOf(rawV)
+		if e != nil {
+			return mkundef(), e
+		}
+		var b []byte
+		for i := 0; i < n; i++ {
+			seg, _ := rt.getElement(rawV, mknum(float64(i)))
+			ss, _ := rt.toStringValue(seg)
+			b = append(b, rt.strBytes(ss)...)
+			if i+1 < n && i+1 < len(args) {
+				sub, _ := rt.toStringValue(args[i+1])
+				b = append(b, rt.strBytes(sub)...)
+			}
+		}
+		return rt.newStringBytes(b), nil
+	})
 	rt.defMethod(cobj, "fromCharCode", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		units := make([]uint16, len(args))
 		for i, a := range args {

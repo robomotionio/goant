@@ -132,6 +132,32 @@ func (rt *Runtime) initMapBuiltin() {
 		return mknum(float64(m.size())), nil
 	}), mkundef(), true, false, attrConfigurable)
 
+	rt.defMethod(po, "keys", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		m, e := rt.collOf(this, false)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newCollectionIterator(m, iterKeys), nil
+	})
+	rt.defMethod(po, "values", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		m, e := rt.collOf(this, false)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newCollectionIterator(m, iterValues), nil
+	})
+	entriesFn := rt.newNativeFunc("entries", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		m, e := rt.collOf(this, false)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newCollectionIterator(m, iterEntries), nil
+	})
+	po.defineOwn("entries", entriesFn, attrWritable|attrConfigurable)
+	if rt.symIterator != 0 {
+		po.defineOwnSymbol(rt.symIterator.handle(), entriesFn, attrWritable|attrConfigurable)
+	}
+
 	ctor := rt.newNativeFunc("Map", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		if o == nil {
@@ -224,6 +250,26 @@ func (rt *Runtime) initSetBuiltin() {
 		}
 		return mknum(float64(s.size())), nil
 	}), mkundef(), true, false, attrConfigurable)
+
+	rt.defMethod(po, "entries", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.collOf(this, true)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newCollectionIterator(s, iterEntries), nil
+	})
+	valuesFn := rt.newNativeFunc("values", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.collOf(this, true)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newCollectionIterator(s, iterValues), nil
+	})
+	po.defineOwn("values", valuesFn, attrWritable|attrConfigurable)
+	po.defineOwn("keys", valuesFn, attrWritable|attrConfigurable) // Set.keys === Set.values
+	if rt.symIterator != 0 {
+		po.defineOwnSymbol(rt.symIterator.handle(), valuesFn, attrWritable|attrConfigurable)
+	}
 
 	ctor := rt.newNativeFunc("Set", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)

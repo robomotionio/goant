@@ -1,5 +1,7 @@
 package engine
 
+import "strconv"
+
 // Object constructor + Object.prototype (ant ant.c object sections /
 // builtin_object). The prototype root's methods (toString/valueOf/
 // hasOwnProperty/isPrototypeOf/propertyIsEnumerable) plus core Object statics.
@@ -156,6 +158,44 @@ func (rt *Runtime) initObjectBuiltin() {
 	})
 	rt.defMethod(cobj, "getOwnPropertyNames", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.ownPropertyNames(arg(args, 0), false), nil
+	})
+	rt.defMethod(cobj, "getOwnPropertySymbols", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		res := rt.newArray()
+		ra := rt.objPtr(res)
+		if o := rt.objPtr(arg(args, 0)); o != nil {
+			for _, off := range o.ownSymbolKeys() {
+				rt.arraySet(ra, ra.arrLen, mkval(TSymbol, uint64(off)))
+			}
+		}
+		return res, nil
+	})
+	rt.defMethod(cobj, "getOwnPropertyDescriptors", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(arg(args, 0))
+		if o == nil {
+			return mkundef(), rt.typeError("Object.getOwnPropertyDescriptors called on non-object")
+		}
+		res := rt.newPlainObject()
+		reso := rt.objPtr(res)
+		if arg(args, 0).Type() == TArr {
+			for i := uint32(0); i < o.arrLen; i++ {
+				if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
+					reso.defineOwn(strconv.Itoa(int(i)), rt.makeDataDescriptor(o.arr[i], true, true, true), attrDefault)
+				}
+			}
+		}
+		for _, k := range o.ownKeys() {
+			d := o.ownDescriptor(k)
+			if d.exists {
+				reso.defineOwn(k, rt.descriptorToObject(d), attrDefault)
+			}
+		}
+		for _, off := range o.ownSymbolKeys() {
+			d := o.ownDescriptorSym(off)
+			if d.exists {
+				reso.defineOwnSymbol(off, rt.descriptorToObject(d), attrDefault)
+			}
+		}
+		return res, nil
 	})
 	rt.defMethod(cobj, "preventExtensions", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if o := rt.objPtr(arg(args, 0)); o != nil {

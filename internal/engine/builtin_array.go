@@ -4,7 +4,33 @@ package engine
 // iteration methods; the ".generic" (array-like via .call) forms work because
 // element access goes through length + getElement.
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
+
+// relativeIndex resolves a relative-index argument against length n (ES
+// ToIntegerOrInfinity + clamp): negatives count from the end, results clamp to
+// [0, n]. A missing/undefined argument yields 0.
+func (rt *Runtime) relativeIndex(v Value, n int) int {
+	if v.IsUndefined() {
+		return 0
+	}
+	d, _ := rt.toNumber(v)
+	if math.IsNaN(d) {
+		return 0
+	}
+	k := int(d)
+	if k < 0 {
+		k += n
+		if k < 0 {
+			k = 0
+		}
+	} else if k > n {
+		k = n
+	}
+	return k
+}
 
 func (rt *Runtime) initArrayBuiltin() {
 	proto := rt.objPtr(rt.arrayProto)
@@ -140,7 +166,8 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		for i := 0; i < n; i++ {
+		start := rt.relativeIndex(arg(args, 1), n)
+		for i := start; i < n; i++ {
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			if rt.sameValueZero(el, target) {
 				return mktrue(), nil
@@ -148,6 +175,112 @@ func (rt *Runtime) initArrayBuiltin() {
 		}
 		return mkfalse(), nil
 	})
+	rt.defMethod(proto, "flatMap", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("flatMap callback is not a function")
+		}
+		n, e := rt.lengthOf(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		res := rt.newArray()
+		ro := rt.objPtr(res)
+		for i := 0; i < n; i++ {
+			el, _ := rt.getElement(this, mknum(float64(i)))
+			mv, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			if mv.Type() == TArr {
+				mo := rt.objPtr(mv)
+				for j := uint32(0); j < mo.arrLen; j++ {
+					if int(j) < len(mo.arr) && !mo.arr[j].IsEmpty() {
+						rt.arraySet(ro, ro.arrLen, mo.arr[j])
+					} else {
+						rt.arraySet(ro, ro.arrLen, mkundef())
+					}
+				}
+			} else {
+				rt.arraySet(ro, ro.arrLen, mv)
+			}
+		}
+		return res, nil
+	})
+	rt.defMethod(proto, "findLast", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		n, e := rt.lengthOf(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		for i := n - 1; i >= 0; i-- {
+			el, _ := rt.getElement(this, mknum(float64(i)))
+			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.toBoolean(r) {
+				return el, nil
+			}
+		}
+		return mkundef(), nil
+	})
+	rt.defMethod(proto, "findLastIndex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		n, e := rt.lengthOf(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		for i := n - 1; i >= 0; i-- {
+			el, _ := rt.getElement(this, mknum(float64(i)))
+			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.toBoolean(r) {
+				return mknum(float64(i)), nil
+			}
+		}
+		return mknum(-1), nil
+	})
+	rt.defMethod(proto, "copyWithin", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		n, e := rt.lengthOf(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		to := rt.relativeIndex(arg(args, 0), n)
+		from := rt.relativeIndex(arg(args, 1), n)
+		final := n
+		if len(args) > 2 && !arg(args, 2).IsUndefined() {
+			final = rt.relativeIndex(arg(args, 2), n)
+		}
+		count := final - from
+		if count > n-to {
+			count = n - to
+		}
+		buf := make([]Value, 0, count)
+		for i := 0; i < count; i++ {
+			el, _ := rt.getElement(this, mknum(float64(from+i)))
+			buf = append(buf, el)
+		}
+		for i := 0; i < count; i++ {
+			rt.setElement(this, mknum(float64(to+i)), buf[i])
+		}
+		return this, nil
+	})
+	rt.defMethod(proto, "entries", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.newIndexIterator(this, iterEntries), nil
+	})
+	rt.defMethod(proto, "keys", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.newIndexIterator(this, iterKeys), nil
+	})
+	valuesFn := rt.newNativeFunc("values", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.newIndexIterator(this, iterValues), nil
+	})
+	proto.defineOwn("values", valuesFn, attrWritable|attrConfigurable)
+	if rt.symIterator != 0 {
+		proto.defineOwnSymbol(rt.symIterator.handle(), valuesFn, attrWritable|attrConfigurable)
+	}
 
 	rt.defMethod(proto, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		n, e := rt.lengthOf(this)

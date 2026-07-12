@@ -45,6 +45,7 @@ type Runtime struct {
 	symbolProto   Value
 	promiseProto  Value
 	genProto      Value // %GeneratorPrototype%
+	iteratorProto Value // %IteratorPrototype%
 
 	// curGen is the coroutine currently executing on the JS "thread" (nil on the
 	// main frame). Generator/async suspension hands control between the driver
@@ -129,6 +130,10 @@ func New() *Runtime {
 	rt.initGlobal()
 	rt.initErrorBuiltin()
 	rt.initFunctionBuiltin()
+	// Symbol + %IteratorPrototype% must precede any builtin that installs a
+	// [Symbol.iterator] method (Array/String/Collections).
+	rt.initSymbolBuiltin()
+	rt.initIteratorProto()
 	rt.initBuiltins()
 	rt.initMath()
 	rt.initObjectBuiltin()
@@ -141,9 +146,9 @@ func New() *Runtime {
 	rt.initRegExpBuiltin()
 	rt.initJSONBuiltin()
 	rt.initCollections()
-	rt.initSymbolBuiltin()
 	rt.initPromiseBuiltin()
 	rt.initGeneratorBuiltin()
+	rt.initReflectBuiltin()
 	return rt
 }
 

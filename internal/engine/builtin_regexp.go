@@ -75,12 +75,27 @@ func (rt *Runtime) newRegExp(pattern, flags string) (Value, *ThrowError) {
 	o.regex = re
 	o.setSlot(slotBrand, mknum(brandRegExp))
 	o.defineOwn("source", rt.internString(nonEmptySource(pattern)), 0)
-	o.defineOwn("flags", rt.internString(flags), 0)
+	o.defineOwn("flags", rt.internString(canonicalFlags(flags)), 0)
 	o.defineOwn("global", mkbool(re.Global), 0)
 	o.defineOwn("ignoreCase", mkbool(re.IgnoreCase), 0)
 	o.defineOwn("multiline", mkbool(re.Multiline), 0)
 	o.defineOwn("lastIndex", mknum(0), attrWritable)
 	return v, nil
+}
+
+// canonicalFlags reorders regexp flag characters into the ES canonical order
+// (d, g, i, m, s, u, v, y), dropping duplicates.
+func canonicalFlags(flags string) string {
+	var b []byte
+	for _, c := range []byte("dgimsuvy") {
+		for i := 0; i < len(flags); i++ {
+			if flags[i] == c {
+				b = append(b, c)
+				break
+			}
+		}
+	}
+	return string(b)
 }
 
 const brandRegExp = 1001
@@ -199,6 +214,53 @@ func (rt *Runtime) initStringRegexpMethods() {
 
 	rt.defMethod(sp, "replace", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.stringReplace(this, arg(args, 0), arg(args, 1))
+	})
+
+	rt.defMethod(sp, "replaceAll", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		search := arg(args, 0)
+		if o := rt.objPtr(search); o != nil && o.regex != nil {
+			if !o.regex.Global {
+				return mkundef(), rt.typeError("replaceAll must be called with a global RegExp")
+			}
+			return rt.stringReplace(this, search, arg(args, 1))
+		}
+		s, e := rt.toStringValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		ss := string(rt.strBytes(s))
+		se, e := rt.toStringValue(search)
+		if e != nil {
+			return mkundef(), e
+		}
+		needle := string(rt.strBytes(se))
+		repl := arg(args, 1)
+		if rt.isCallable(repl) {
+			var b strings.Builder
+			pos := 0
+			for {
+				idx := strings.Index(ss[pos:], needle)
+				if idx < 0 || needle == "" {
+					break
+				}
+				at := pos + idx
+				b.WriteString(ss[pos:at])
+				rv, e := rt.callValue(repl, mkundef(), []Value{rt.newString(needle), mknum(float64(at)), s})
+				if e != nil {
+					return mkundef(), e
+				}
+				rs, _ := rt.toStringValue(rv)
+				b.Write(rt.strBytes(rs))
+				pos = at + len(needle)
+			}
+			b.WriteString(ss[pos:])
+			return rt.newString(b.String()), nil
+		}
+		rs, e := rt.toStringValue(repl)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newString(strings.ReplaceAll(ss, needle, string(rt.strBytes(rs)))), nil
 	})
 
 	rt.defMethod(sp, "split", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
