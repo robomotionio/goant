@@ -154,6 +154,16 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			ao.arrLen = uint32(len(vals))
 			push(arr)
 			ip++
+		case OpForAwaitOf:
+			// Pop the source, push its async iterator (GetAsyncIterator). The
+			// caller-emitted loop then drives it with await iter.next().
+			it, e := rt.getAsyncIterator(pop())
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(it)
+			ip++
 		case OpRegexp:
 			flags := string(rt.strBytes(pop()))
 			pattern := string(rt.strBytes(pop()))

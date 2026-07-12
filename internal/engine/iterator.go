@@ -5,6 +5,83 @@ package engine
 // Map/Set; the lazy Symbol.iterator + generator protocol is layered on when
 // Symbol and generators land.
 
+// getAsyncIterator implements GetIterator(obj, async): prefer @@asyncIterator,
+// otherwise wrap the sync @@iterator via CreateAsyncFromSyncIterator. The
+// returned object's next() yields a promise of an IteratorResult.
+func (rt *Runtime) getAsyncIterator(source Value) (Value, *ThrowError) {
+	if rt.symAsyncIterator != 0 {
+		m, e := rt.getElement(source, rt.symAsyncIterator)
+		if e != nil {
+			return mkundef(), e
+		}
+		if rt.isCallable(m) {
+			it, e := rt.callValue(m, source, nil)
+			if e != nil {
+				return mkundef(), e
+			}
+			if !it.IsObjectType() {
+				return mkundef(), rt.typeError("[Symbol.asyncIterator]() returned a non-object")
+			}
+			return it, nil
+		}
+	}
+	if rt.symIterator != 0 {
+		m, e := rt.getElement(source, rt.symIterator)
+		if e != nil {
+			return mkundef(), e
+		}
+		if rt.isCallable(m) {
+			syncIt, e := rt.callValue(m, source, nil)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.createAsyncFromSyncIterator(syncIt), nil
+		}
+	}
+	return mkundef(), rt.typeError("value is not async iterable")
+}
+
+// createAsyncFromSyncIterator wraps a sync iterator so its next()/return() yield
+// promises of IteratorResults (25.1.4.1). The wrapper's next awaits the sync
+// value and re-wraps it with the sync done flag.
+func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) Value {
+	wrap := rt.newObject(rt.objectProto)
+	o := rt.objPtr(wrap)
+	step := func(method string) nativeFunc {
+		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			fn, e := rt.getField(syncIt, method)
+			if e != nil {
+				return mkundef(), e
+			}
+			if !rt.isCallable(fn) {
+				if method == "next" {
+					return rt.resolvedPromise(rt.genResult(mkundef(), true)), nil
+				}
+				return rt.resolvedPromise(rt.genResult(arg(args, 0), true)), nil
+			}
+			res, e := rt.callValue(fn, syncIt, args)
+			if e != nil {
+				return rt.rejectedPromise(e.Value), nil
+			}
+			if !res.IsObjectType() {
+				return rt.rejectedPromise(rt.makeError(rt.errors.typeProto, "TypeError", "iterator result is not an object")), nil
+			}
+			doneV, _ := rt.getField(res, "done")
+			val, _ := rt.getField(res, "value")
+			return rt.resolvedPromise(rt.genResult(val, rt.toBoolean(doneV))), nil
+		}
+	}
+	rt.defMethod(o, "next", 1, step("next"))
+	rt.defMethod(o, "return", 1, step("return"))
+	if rt.symAsyncIterator != 0 {
+		self := rt.newNativeFunc("[Symbol.asyncIterator]", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			return this, nil
+		})
+		o.defineOwnSymbol(rt.symAsyncIterator.handle(), self, attrWritable|attrConfigurable)
+	}
+	return wrap
+}
+
 // iterableValues returns the values produced by iterating v (for for-of and
 // spread). Arrays yield their elements; strings yield their code points.
 func (rt *Runtime) iterableValues(v Value) ([]Value, *ThrowError) {

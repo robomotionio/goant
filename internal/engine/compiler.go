@@ -277,6 +277,8 @@ func (c *compiler) compileStmt(n *Node) {
 		c.compileForIn(n)
 	case NForOf:
 		c.compileForOf(n)
+	case NForAwaitOf:
+		c.compileForAwaitOf(n)
 	case NBreak:
 		c.compileBreak(n)
 	case NContinue:

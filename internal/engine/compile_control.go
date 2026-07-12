@@ -138,6 +138,58 @@ func (c *compiler) compileForIn(n *Node) { c.compileForArray(n, OpForIn) }
 // produced by FOR_OF.
 func (c *compiler) compileForOf(n *Node) { c.compileForArray(n, OpForOf) }
 
+// compileForAwaitOf lowers `for await (v of src)` to a lazy loop that awaits
+// each iter.next() result (GetAsyncIterator + repeated await). Only valid inside
+// an async function/generator (OpAwait suspends the coroutine).
+func (c *compiler) compileForAwaitOf(n *Node) {
+	c.scopeDepth++
+	store, lexSlot := c.forInStore(n.Left)
+	if store == nil {
+		c.errorf("unsupported for-await-of target (slice)")
+		c.scopeDepth--
+		return
+	}
+	// iter = GetAsyncIterator(source)
+	c.compileExpr(n.Right)
+	c.emit(OpForAwaitOf) // source -> asyncIter
+	iterSlot := c.addLocal("*fai*", false)
+	c.emitOpU16(OpPutLocal, uint16(iterSlot))
+	resSlot := c.addLocal("*far*", false)
+
+	l := c.pushLoop(c.consumeLabel(), false)
+	condStart := len(c.fn.code)
+	// result = await iter.next()
+	c.emitOpU16(OpGetLocal, uint16(iterSlot))
+	c.emitFieldOp(OpGetField2, "next") // [iter, next]
+	c.emit(OpCallMethod)
+	c.emitU16(0)    // [promise]
+	c.emit(OpAwait) // [result]
+	c.emitOpU16(OpPutLocal, uint16(resSlot))
+	// if result.done break
+	c.emitOpU16(OpGetLocal, uint16(resSlot))
+	c.emitFieldOp(OpGetField, "done")
+	exit := c.emitJump(OpJmpTrue)
+	l.breaks = append(l.breaks, exit)
+	// v = result.value
+	c.emitOpU16(OpGetLocal, uint16(resSlot))
+	c.emitFieldOp(OpGetField, "value")
+	store()
+
+	c.compileStmt(n.Body)
+
+	l.continueTarget = len(c.fn.code)
+	c.patchContinues(l)
+	if lexSlot >= 0 {
+		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
+	}
+	c.emit(OpJmp)
+	c.emitU32(uint32(condStart))
+
+	c.popLoop()
+	c.scopeDepth--
+	c.popBlockScope()
+}
+
 // compileForArray implements the shared for-in/for-of lowering: produceOp turns
 // the source into an array (keys or values), which is then iterated by index.
 func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
