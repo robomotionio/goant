@@ -172,6 +172,7 @@ compat-table/es5/Array.prototype.map.js
 compat-table/es5/Array.prototype.reduce.js
 compat-table/es5/Array.prototype.reduceRight.js
 compat-table/es5/Array.prototype.some.js
+compat-table/es5/Array.prototype.sort.compareFn-type.js
 compat-table/es5/Array.prototype.sort.compareFn-undefined.js
 compat-table/es5/Array.prototype.unshift.return-count.js
 compat-table/es5/Date.now.js

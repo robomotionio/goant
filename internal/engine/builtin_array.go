@@ -35,6 +35,9 @@ func (rt *Runtime) relativeIndex(v Value, n int) int {
 // sortValues sorts a slice in place with JS Array.prototype.sort semantics
 // (undefined last; comparator or default ToString ordering).
 func (rt *Runtime) sortValues(vs []Value, cmp Value) *ThrowError {
+	if !cmp.IsUndefined() && !rt.isCallable(cmp) {
+		return rt.typeError("The comparison function must be either a function or undefined")
+	}
 	var sortErr *ThrowError
 	sort.SliceStable(vs, func(i, j int) bool {
 		if sortErr != nil {
@@ -788,6 +791,9 @@ func (rt *Runtime) initArrayBuiltin() {
 			return this, nil
 		}
 		cmp := arg(args, 0)
+		if !cmp.IsUndefined() && !rt.isCallable(cmp) {
+			return mkundef(), rt.typeError("The comparison function must be either a function or undefined")
+		}
 		var sortErr *ThrowError
 		sort.SliceStable(o.arr[:o.arrLen], func(i, j int) bool {
 			if sortErr != nil {
