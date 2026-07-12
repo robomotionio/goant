@@ -999,6 +999,25 @@ func (rt *Runtime) initArrayBuiltin() {
 	rt.defMethod(cobj, "isArray", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return mkbool(rt.isArrayValue(arg(args, 0))), nil
 	})
+	// Array.isTemplateObject: a template-strings object is a frozen array with a
+	// frozen own `raw` array (as produced for a tagged template). A plain or
+	// user-frozen array without such a `raw` is not one.
+	rt.defMethod(cobj, "isTemplateObject", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		v := arg(args, 0)
+		if v.Type() != TArr {
+			return mkbool(false), nil
+		}
+		o := rt.objPtr(v)
+		if o == nil || o.flags.extensible {
+			return mkbool(false), nil
+		}
+		raw, ok := o.getOwn("raw")
+		if !ok || raw.Type() != TArr {
+			return mkbool(false), nil
+		}
+		ro := rt.objPtr(raw)
+		return mkbool(ro != nil && !ro.flags.extensible), nil
+	})
 	rt.defMethod(cobj, "of", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		res, e := rt.arrayFromCtor(this, len(args))
 		if e != nil {

@@ -798,6 +798,7 @@ compat-table/intl/Date.prototype.toLocaleTimeString.js
 compat-table/intl/Number.prototype.toLocaleString.js
 compat-table/intl/Object.prototype.toLocaleString.js
 compat-table/intl/String.prototype.localeCompare.js
+compat-table/next/Array.isTemplateObject.js
 compat-table/next/AsyncIterator.extends.js
 compat-table/next/AsyncIterator.from.async-iterable.js
 compat-table/next/AsyncIterator.from.iterable.js
