@@ -59,6 +59,11 @@ func (rt *Runtime) initNumberBuiltin() {
 		if !ok {
 			return mkundef(), rt.typeError("Number.prototype.toExponential requires a number")
 		}
+		// A non-finite value returns before the fractionDigits range check (so
+		// NaN.toExponential(Infinity) yields "NaN", not a RangeError).
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return rt.newString(toExponentialStr(n, 0, false)), nil
+		}
 		if arg(args, 0).IsUndefined() {
 			return rt.newString(toExponentialStr(n, 0, false)), nil
 		}

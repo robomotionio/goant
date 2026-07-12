@@ -216,6 +216,8 @@ compat-table/es5/misc.parseInt.ignores-leading-zeros.js
 compat-table/es5/misc.thrown-functions-this.js
 compat-table/es5/misc.unreserved-words.js
 compat-table/es5/misc.zero-width-identifiers.js
+compat-table/es5/Number.prototype.toExponential.no-throw-edge-cases.js
+compat-table/es5/Number.prototype.toExponential.rounds-properly.js
 compat-table/es5/Number.prototype.toExponential.throws-infinity.js
 compat-table/es5/Object.create.js
 compat-table/es5/Object.defineProperties.js

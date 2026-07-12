@@ -7,6 +7,7 @@ package engine
 
 import (
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -203,12 +204,63 @@ func toExponentialStr(x float64, fracDigits int, hasDigits bool) string {
 	if math.IsInf(x, -1) {
 		return "-Infinity"
 	}
-	prec := fracDigits
 	if !hasDigits {
-		prec = -1
+		return fixExponent(strconv.FormatFloat(x, 'e', -1, 64))
 	}
-	s := strconv.FormatFloat(x, 'e', prec, 64)
-	return fixExponent(s)
+	neg := math.Signbit(x)
+	ax := math.Abs(x)
+	if ax == 0 {
+		m := "0"
+		if fracDigits > 0 {
+			m = "0." + strings.Repeat("0", fracDigits)
+		}
+		out := m + "e+0"
+		if neg {
+			return "-" + out
+		}
+		return out
+	}
+	// Exact decimal exponent from the shortest round-trip representation (avoids
+	// math.Log10 boundary error), then exact round-half-away via big.Rat so ties
+	// resolve to the larger magnitude (ECMAScript 21.1.3.2).
+	_, expStr, _ := strings.Cut(strconv.FormatFloat(ax, 'e', -1, 64), "e")
+	e, _ := strconv.Atoi(expStr)
+	r := new(big.Rat).SetFloat64(ax)
+	scale := fracDigits - e
+	pow := new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(absInt(scale))), nil))
+	if scale >= 0 {
+		r.Mul(r, pow)
+	} else {
+		r.Quo(r, pow)
+	}
+	n := ratRoundHalfAway(r)
+	digits := n.String()
+	if len(digits) > fracDigits+1 { // rounded up an extra digit (e.g. 9.99 -> 10)
+		e += len(digits) - (fracDigits + 1)
+		digits = digits[:fracDigits+1]
+	}
+	m := digits[:1]
+	if fracDigits > 0 {
+		m += "." + digits[1:]
+	}
+	out := m + "e" + expSign(e) + strconv.Itoa(absInt(e))
+	if neg {
+		return "-" + out
+	}
+	return out
+}
+
+// ratRoundHalfAway rounds a non-negative rational to the nearest integer, ties
+// away from zero.
+func ratRoundHalfAway(r *big.Rat) *big.Int {
+	num := new(big.Int).Set(r.Num())
+	den := r.Denom()
+	q, rem := new(big.Int).QuoRem(num, den, new(big.Int))
+	twice := new(big.Int).Lsh(rem, 1) // 2*rem
+	if twice.Cmp(den) >= 0 {          // fractional part >= 1/2 -> round up
+		q.Add(q, big.NewInt(1))
+	}
+	return q
 }
 
 // toPrecisionStr implements Number.prototype.toPrecision.
