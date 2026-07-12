@@ -61,10 +61,13 @@ compat-table/es2021/String.prototype.replaceAll.js
 compat-table/es2022/class-fields.instance.parent-scope.js
 compat-table/es2022/class-fields.private-instance.initializers.js
 compat-table/es2022/class-fields.private-instance.js
+compat-table/es2022/class-fields.private-static.js
 compat-table/es2022/class-fields.public-instance.js
 compat-table/es2022/class-fields.public-static.js
 compat-table/es2022/class-methods.private-accessor.js
 compat-table/es2022/class-methods.private-instance.js
+compat-table/es2022/class-methods.private-static-accessor.js
+compat-table/es2022/class-methods.private-static.js
 compat-table/es2022/Error.cause.Error.js
 compat-table/es2022/Error.cause.Error-prototype-lacks.js
 compat-table/es2022/Error.cause.EvalError.js
@@ -156,6 +159,7 @@ compat-table/es5/Object.seal.js
 compat-table/es5/strict.arguments-callee-error.js
 compat-table/es5/strict.arguments-unmapped.js
 compat-table/es5/strict.function-caller-arguments-error.js
+compat-table/es5/strict.this-not-coerced-accessors.js
 compat-table/es5/strict.this-not-coerced-methods.js
 compat-table/es5/strict.this-undefined.js
 compat-table/es5/String.property-access.js
@@ -269,10 +273,13 @@ compat-table/es6/Function.name.statement.js
 compat-table/es6/generators.basic.js
 compat-table/es6/generators.no-new-this.js
 compat-table/es6/generators.return.js
+compat-table/es6/generators.sending.js
 compat-table/es6/generators.shorthand.computed.js
 compat-table/es6/generators.shorthand.js
 compat-table/es6/generators.shorthand.string-keyed.js
 compat-table/es6/generators.this.js
+compat-table/es6/generators.throw.js
+compat-table/es6/generators.yield-precedence.js
 compat-table/es6/generators.yield-star.array.js
 compat-table/es6/generators.yield-star.astral-string.js
 compat-table/es6/generators.yield-star.generator.js
@@ -449,6 +456,7 @@ compat-table/es6/Symbol.prototype.js
 compat-table/es6/Symbol.typeof.js
 compat-table/es6/template.basic.js
 compat-table/es6/template.line-break.js
+compat-table/es6/template.tagged.js
 compat-table/es6/typed-arrays.constructor-iterables.js
 compat-table/es6/typed-arrays.DataView.Float32.js
 compat-table/es6/typed-arrays.DataView.Float64.js

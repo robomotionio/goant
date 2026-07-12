@@ -184,6 +184,16 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	if n.Body == nil {
 		c.emit(OpReturnUndef)
 	} else if n.Body.Kind == NBlock {
+		// Pre-declare all function-scoped var/function/class names as locals so
+		// that hoisted function bodies capture them as upvalues (their cells)
+		// rather than resolving to globals.
+		names := map[string]bool{}
+		collectVarFuncNames(n.Body.Args, names)
+		for name := range names {
+			if c.resolveLocal(name) < 0 {
+				c.addLocal(name, false)
+			}
+		}
 		c.hoistFunctions(n.Body.Args)
 		c.compileStmts(n.Body.Args)
 		c.emit(OpReturnUndef)
