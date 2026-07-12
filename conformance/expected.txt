@@ -473,6 +473,7 @@ compat-table/es6/misc.Proxy.get.ClassDefinitionEvaluation.js
 compat-table/es6/misc.Proxy.get.CreateListFromArrayLike.js
 compat-table/es6/misc.Proxy.get.Date.toJSON.js
 compat-table/es6/misc.Proxy.get.Error.toString.js
+compat-table/es6/misc.Proxy.get.Function.bind.js
 compat-table/es6/misc.Proxy.get.instanceof.js
 compat-table/es6/misc.Proxy.get.JSON.stringify.js
 compat-table/es6/misc.Proxy.get.Object.assign.js
@@ -558,6 +559,7 @@ compat-table/es6/Proxy.handler.set.invariants.js
 compat-table/es6/Proxy.handler.set.js
 compat-table/es6/Proxy.handler.setPrototypeOf.invariants.js
 compat-table/es6/Proxy.handler.setPrototypeOf.js
+compat-table/es6/Proxy.JSON.stringify.js
 compat-table/es6/Proxy.no-prototype.js
 compat-table/es6/Proxy.revocable.js
 compat-table/es6/Reflect.apply.js

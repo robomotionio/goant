@@ -142,6 +142,10 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 		return "", false, nil
 	default:
 		if v.IsObjectType() {
+			// A Proxy wrapping an array serializes as an array (via its traps).
+			if o := rt.objPtr(v); o != nil && o.proxy != nil && rt.isArrayValue(v) {
+				return st.stringifyArray(v, indent)
+			}
 			return st.stringifyObject(v, indent)
 		}
 		return "", false, nil
@@ -150,9 +154,11 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 
 func (st *jsonStringifier) stringifyArray(v Value, indent string) (string, bool, *ThrowError) {
 	rt := st.rt
-	o := rt.objPtr(v)
 	newIndent := indent + st.gap
-	n := int(o.arrLen)
+	n, e := rt.lengthOf(v)
+	if e != nil {
+		return "", false, e
+	}
 	parts := make([]string, n)
 	for i := 0; i < n; i++ {
 		s, ok, e := st.str(numberToString(float64(i)), v, newIndent)

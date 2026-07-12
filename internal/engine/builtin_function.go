@@ -61,16 +61,12 @@ func (rt *Runtime) initFunctionBuiltin() {
 		if len(args) > 1 {
 			boundArgs = append(boundArgs, args[1:]...)
 		}
-		targetName := ""
-		if nv, e := rt.getField(target, "name"); e == nil && nv.IsString() {
-			targetName = string(rt.strBytes(nv))
-		}
-		bound := rt.newNativeFunc("bound "+targetName, 0, func(rt *Runtime, _ Value, callArgs []Value) (Value, *ThrowError) {
+		bound := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, callArgs []Value) (Value, *ThrowError) {
 			full := append(append([]Value{}, boundArgs...), callArgs...)
 			return rt.callValue(target, boundThis, full)
 		})
-		// bound.length = max(0, target.length - boundArgs). Spec reads length only
-		// when HasOwnProperty(target, "length") holds ([[GetOwnProperty]] trap).
+		// Spec order: SetFunctionLength first (HasOwnProperty then Get "length"),
+		// then SetFunctionName (Get "name"). Both Gets are observable via a trap.
 		tlen := 0
 		if has, e := rt.hasOwnPropertyOf(target, "length"); e != nil {
 			return mkundef(), e
@@ -84,6 +80,13 @@ func (rt *Runtime) initFunctionBuiltin() {
 			blen = 0
 		}
 		rt.objPtr(bound).defineOwn("length", mknum(float64(blen)), attrConfigurable)
+		targetName := ""
+		if nv, e := rt.getField(target, "name"); e != nil {
+			return mkundef(), e
+		} else if nv.IsString() {
+			targetName = string(rt.strBytes(nv))
+		}
+		rt.objPtr(bound).defineOwn("name", rt.internString("bound "+targetName), attrConfigurable)
 		return bound, nil
 	})
 
