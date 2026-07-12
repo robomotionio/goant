@@ -290,7 +290,43 @@ func (rt *Runtime) proxyGetOwnPropertyDescriptor(p *proxyState, key Value) (Valu
 		return mkundef(), e
 	}
 	if rt.isCallable(trap) {
-		return rt.callValue(trap, p.handler, []Value{p.target, rt.toPropertyKeyValue(key)})
+		res, e := rt.callValue(trap, p.handler, []Value{p.target, rt.toPropertyKeyValue(key)})
+		if e != nil {
+			return mkundef(), e
+		}
+		if !res.IsObjectType() && !res.IsUndefined() {
+			return mkundef(), rt.typeError("'getOwnPropertyDescriptor' on proxy: trap returned neither object nor undefined")
+		}
+		td, texists := rt.targetOwnDesc(p.target, key)
+		if res.IsUndefined() {
+			// Invariant: a non-configurable (or non-extensible-target) property
+			// can't be reported as absent.
+			if texists && !td.configable {
+				return mkundef(), rt.typeError("'getOwnPropertyDescriptor' on proxy: trap reported a non-configurable property as non-existent")
+			}
+			if texists && !rt.targetExtensible(p.target) {
+				return mkundef(), rt.typeError("'getOwnPropertyDescriptor' on proxy: trap reported an existing property as non-existent on a non-extensible target")
+			}
+			return mkundef(), nil
+		}
+		// Normalize (ToPropertyDescriptor + CompletePropertyDescriptor +
+		// FromPropertyDescriptor) so absent fields default per spec.
+		completed := rt.completeDescriptor(res)
+		// A brand-new property can't be reported on a non-extensible target.
+		if !texists && !rt.targetExtensible(p.target) {
+			return mkundef(), rt.typeError("'getOwnPropertyDescriptor' on proxy: trap reported a new property on a non-extensible target")
+		}
+		// A non-configurable report requires an existing non-configurable target
+		// property; a non-writable report additionally requires non-writable.
+		if cfg, _ := rt.getField(completed, "configurable"); !rt.toBoolean(cfg) {
+			if !texists || td.configable {
+				return mkundef(), rt.typeError("'getOwnPropertyDescriptor' on proxy: trap reported a property as non-configurable that is not non-configurable on the target")
+			}
+			if w, _ := rt.getField(completed, "writable"); !td.isAccessor && !rt.toBoolean(w) && td.writable {
+				return mkundef(), rt.typeError("'getOwnPropertyDescriptor' on proxy: trap reported a non-writable property that is writable on the target")
+			}
+		}
+		return completed, nil
 	}
 	// Forward to target.
 	to := rt.objPtr(p.target)

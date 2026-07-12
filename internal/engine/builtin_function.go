@@ -69,10 +69,15 @@ func (rt *Runtime) initFunctionBuiltin() {
 			full := append(append([]Value{}, boundArgs...), callArgs...)
 			return rt.callValue(target, boundThis, full)
 		})
-		// bound.length = max(0, target.length - boundArgs)
+		// bound.length = max(0, target.length - boundArgs). Spec reads length only
+		// when HasOwnProperty(target, "length") holds ([[GetOwnProperty]] trap).
 		tlen := 0
-		if lv, e := rt.getField(target, "length"); e == nil && lv.Type() == TNum {
-			tlen = int(lv.Number())
+		if has, e := rt.hasOwnPropertyOf(target, "length"); e != nil {
+			return mkundef(), e
+		} else if has {
+			if lv, e := rt.getField(target, "length"); e == nil && lv.Type() == TNum {
+				tlen = int(lv.Number())
+			}
 		}
 		blen := tlen - len(boundArgs)
 		if blen < 0 {

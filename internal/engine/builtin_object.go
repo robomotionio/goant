@@ -18,6 +18,14 @@ func (rt *Runtime) initObjectBuiltin() {
 		if o == nil {
 			return mkfalse(), nil
 		}
+		// HasOwnProperty -> [[GetOwnProperty]] routes through the proxy trap.
+		if o.proxy != nil {
+			d, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, rt.toPropertyKeyValue(arg(args, 0)))
+			if e != nil {
+				return mkundef(), e
+			}
+			return mkbool(!d.IsUndefined()), nil
+		}
 		if key := arg(args, 0); key.IsSymbol() {
 			return mkbool(o.shape.lookupSymbol(key.handle()) >= 0), nil
 		}
@@ -600,6 +608,39 @@ func (rt *Runtime) descriptorToObject(d ownDesc) Value {
 	o.defineOwn("enumerable", mkbool(d.enumerable), attrDefault)
 	o.defineOwn("configurable", mkbool(d.configable), attrDefault)
 	return obj
+}
+
+// completeDescriptor round-trips a user descriptor object through
+// ToPropertyDescriptor + CompletePropertyDescriptor + FromPropertyDescriptor,
+// yielding a fresh object with every field present (absent fields defaulted).
+func (rt *Runtime) completeDescriptor(desc Value) Value {
+	has := func(name string) bool { return rt.hasProp(desc, name) }
+	get := func(name string) Value { v, _ := rt.getField(desc, name); return v }
+	isAccessor := has("get") || has("set")
+	var d ownDesc
+	d.isAccessor = isAccessor
+	if isAccessor {
+		if has("get") {
+			d.getter = get("get")
+		} else {
+			d.getter = mkundef()
+		}
+		if has("set") {
+			d.setter = get("set")
+		} else {
+			d.setter = mkundef()
+		}
+	} else {
+		if has("value") {
+			d.value = get("value")
+		} else {
+			d.value = mkundef()
+		}
+		d.writable = has("writable") && rt.toBoolean(get("writable"))
+	}
+	d.enumerable = has("enumerable") && rt.toBoolean(get("enumerable"))
+	d.configable = has("configurable") && rt.toBoolean(get("configurable"))
+	return rt.descriptorToObject(d)
 }
 
 func (rt *Runtime) makeDataDescriptor(v Value, w, e, c bool) Value {

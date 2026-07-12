@@ -471,6 +471,26 @@ func (rt *Runtime) hasProp(obj Value, key string) bool {
 	return false
 }
 
+// hasOwnPropertyOf implements HasOwnProperty(O, key): [[GetOwnProperty]] on the
+// object only (no prototype walk), routing through a Proxy's trap.
+func (rt *Runtime) hasOwnPropertyOf(obj Value, key string) (bool, *ThrowError) {
+	o := rt.objPtr(obj)
+	if o == nil {
+		return false, nil
+	}
+	if o.proxy != nil {
+		d, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, rt.internString(key))
+		if e != nil {
+			return false, e
+		}
+		return !d.IsUndefined(), nil
+	}
+	if idx, ok := canonicalIndex(key); ok && rt.hasOwnIndex(obj, o, idx) {
+		return true, nil
+	}
+	return o.hasOwn(key), nil
+}
+
 // hasOwnIndex reports whether obj owns integer index idx in its element backing
 // store (array elements, typed-array slots, or string code units).
 func (rt *Runtime) hasOwnIndex(obj Value, o *object, idx uint32) bool {

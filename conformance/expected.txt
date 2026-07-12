@@ -473,7 +473,9 @@ compat-table/es6/misc.Proxy.get.CreateListFromArrayLike.js
 compat-table/es6/misc.Proxy.get.Error.toString.js
 compat-table/es6/misc.Proxy.get.JSON.stringify.js
 compat-table/es6/misc.Proxy.get.Object.assign.js
+compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Function.bind.js
 compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Object.assign.js
+compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Object.hasOwnProperty.js
 compat-table/es6/misc.Proxy.get.Promise.resolve.js
 compat-table/es6/misc.Proxy.get.RegExp.test.js
 compat-table/es6/misc.Proxy.get.RegExp.toString.js
@@ -528,6 +530,8 @@ compat-table/es6/Proxy.handler.deleteProperty.js
 compat-table/es6/Proxy.handler.get.instances.js
 compat-table/es6/Proxy.handler.get.invariants.js
 compat-table/es6/Proxy.handler.get.js
+compat-table/es6/Proxy.handler.getOwnPropertyDescriptor.invariants.js
+compat-table/es6/Proxy.handler.getOwnPropertyDescriptor.js
 compat-table/es6/Proxy.handler.getPrototypeOf.invariants.js
 compat-table/es6/Proxy.handler.getPrototypeOf.js
 compat-table/es6/Proxy.handler.has.instances.js
