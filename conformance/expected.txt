@@ -476,6 +476,7 @@ compat-table/es6/misc.Proxy.get.Error.toString.js
 compat-table/es6/misc.Proxy.get.instanceof.js
 compat-table/es6/misc.Proxy.get.JSON.stringify.js
 compat-table/es6/misc.Proxy.get.Object.assign.js
+compat-table/es6/misc.Proxy.get.Object.defineProperties.js
 compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Function.bind.js
 compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Object.assign.js
 compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Object.hasOwnProperty.js
@@ -489,6 +490,7 @@ compat-table/es6/misc.Proxy.get.String.replace.js
 compat-table/es6/misc.Proxy.get.String.search.js
 compat-table/es6/misc.Proxy.get.String.split.js
 compat-table/es6/misc.Proxy.get.ToPrimitive.js
+compat-table/es6/misc.Proxy.get.ToPropertyDescriptor.js
 compat-table/es6/misc.Proxy.ownKeys.SerializeJSONObject.js
 compat-table/es6/misc.Proxy.ownKeys.SetIntegrityLevel.js
 compat-table/es6/misc.Proxy.ownKeys.TestIntegrityLevel.js

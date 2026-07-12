@@ -522,12 +522,26 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 		}
 		return mkundef(), false
 	}
-	getV, hasGet := get("get")
-	setV, hasSet := get("set")
-	valV, hasVal := get("value")
-	wV, hasW := get("writable")
+	// Field reads follow the spec ToPropertyDescriptor order (enumerable,
+	// configurable, value, writable, get, set) — observable via a Proxy get trap.
 	eV, hasE := get("enumerable")
 	cV, hasC := get("configurable")
+	valV, hasVal := get("value")
+	wV, hasW := get("writable")
+	getV, hasGet := get("get")
+	setV, hasSet := get("set")
+
+	// A descriptor cannot mix accessor fields with data fields (ToPropertyDescriptor),
+	// and get/set, when present, must be callable or undefined.
+	if (hasGet || hasSet) && (hasVal || hasW) {
+		return rt.typeError("Invalid property descriptor. Cannot both specify accessors and a value or writable attribute")
+	}
+	if hasGet && !getV.IsUndefined() && !rt.isCallable(getV) {
+		return rt.typeError("Getter must be a function")
+	}
+	if hasSet && !setV.IsUndefined() && !rt.isCallable(setV) {
+		return rt.typeError("Setter must be a function")
+	}
 
 	// Start from existing attrs (or all-false for a new property).
 	writable, enumerable, configurable := existing.writable, existing.enumerable, existing.configable
@@ -585,8 +599,17 @@ func (rt *Runtime) objectDefineProperties(obj, props Value) *ThrowError {
 	if po == nil {
 		return rt.typeError("Property descriptors must be an object")
 	}
-	for _, k := range po.ownKeysEnumerable() {
-		desc, _ := rt.getField(props, k)
+	// Enumerate via [[OwnPropertyKeys]] + [[GetOwnProperty]] (proxy traps), then
+	// read each descriptor object via [[Get]].
+	keys, e := rt.enumerableOwnKeysE(props)
+	if e != nil {
+		return e
+	}
+	for _, k := range keys {
+		desc, e := rt.getField(props, k)
+		if e != nil {
+			return e
+		}
 		if e := rt.objectDefineProperty(obj, k, desc); e != nil {
 			return e
 		}
