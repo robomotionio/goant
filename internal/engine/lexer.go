@@ -614,6 +614,18 @@ func (l *lexer) scanString(off int, quote byte) {
 			return
 		}
 		escChar := buf[escPos+1]
+		// Legacy octal (\1–\7, or \0 followed by a digit) and non-octal decimal
+		// (\8, \9) escapes are SyntaxErrors in strict mode (Annex B.1.2).
+		if l.strict {
+			if escChar >= '1' && escChar <= '9' {
+				l.st.tok, l.st.tlen = TokErr, escPos+2
+				return
+			}
+			if escChar == '0' && escPos+2 < rem && buf[escPos+2] >= '0' && buf[escPos+2] <= '9' {
+				l.st.tok, l.st.tlen = TokErr, escPos+3
+				return
+			}
+		}
 		skip := 2
 		if escChar == 'x' {
 			skip = 4

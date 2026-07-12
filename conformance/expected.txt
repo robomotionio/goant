@@ -242,6 +242,7 @@ compat-table/es5/strict.arguments-unmapped.js
 compat-table/es5/strict.assignment-eval-arguments-error.js
 compat-table/es5/strict.eval-arguments-bindings-error.js
 compat-table/es5/strict.function-caller-arguments-error.js
+compat-table/es5/strict.legacy-octal-error.js
 compat-table/es5/strict.reserved-words.js
 compat-table/es5/strict.this-not-coerced-accessors.js
 compat-table/es5/strict.this-not-coerced-methods.js
