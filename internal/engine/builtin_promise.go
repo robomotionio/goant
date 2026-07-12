@@ -365,6 +365,23 @@ func (rt *Runtime) initPromiseBuiltin() {
 	rt.defMethod(cobj, "any", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.promiseRace(arg(args, 0), true)
 	})
+	rt.defMethod(cobj, "try", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// Promise.try(fn, ...args): run fn synchronously, resolve with its result
+		// or reject with a thrown error (ES2025).
+		cb := arg(args, 0)
+		var extra []Value
+		if len(args) > 1 {
+			extra = args[1:]
+		}
+		p, o := rt.makePromise()
+		res, e := rt.callValue(cb, mkundef(), extra)
+		if e != nil {
+			rt.rejectPromise(o, e.Value)
+		} else {
+			rt.resolvePromise(p, o, res)
+		}
+		return p, nil
+	})
 
 	rt.defSpeciesGetter(ctor)
 	rt.defGlobal("Promise", ctor)
@@ -449,7 +466,7 @@ func (rt *Runtime) promiseRace(iterable Value, any bool) (Value, *ThrowError) {
 				rt.arraySet(ea, uint32(i), arg(a, 0))
 				remaining--
 				if remaining == 0 {
-					agg := rt.makeError(rt.errors.typeProto, "AggregateError", "All promises were rejected")
+					agg := rt.makeError(rt.errors.aggProto, "AggregateError", "All promises were rejected")
 					if eo := rt.objPtr(agg); eo != nil {
 						eo.defineOwn("errors", errs, attrWritable|attrConfigurable)
 					}
@@ -470,7 +487,7 @@ func (rt *Runtime) promiseRace(iterable Value, any bool) (Value, *ThrowError) {
 		rt.promiseThen(onF, onR, po)
 	}
 	if any && len(vals) == 0 {
-		agg := rt.makeError(rt.errors.typeProto, "AggregateError", "All promises were rejected")
+		agg := rt.makeError(rt.errors.aggProto, "AggregateError", "All promises were rejected")
 		rt.rejectPromise(ro, agg)
 	}
 	return result, nil

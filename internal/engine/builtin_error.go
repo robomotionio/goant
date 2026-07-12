@@ -16,6 +16,7 @@ type errorCtors struct {
 	typeProto   Value
 	rangeProto  Value
 	syntaxProto Value
+	aggProto    Value
 }
 
 func (rt *Runtime) initErrorBuiltin() {
@@ -110,6 +111,7 @@ func (rt *Runtime) initErrorBuiltin() {
 	})
 	rt.objPtr(aggCtor).defineOwn("prototype", aggProto, 0)
 	apo.defineOwn("constructor", aggCtor, attrWritable|attrConfigurable)
+	rt.errors.aggProto = aggProto
 	rt.defGlobal("AggregateError", aggCtor)
 
 	rt.defGlobal("Error", base)

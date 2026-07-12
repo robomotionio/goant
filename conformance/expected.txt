@@ -105,6 +105,7 @@ compat-table/es2021/logical-assignment.or.js
 compat-table/es2021/logical-assignment.or.setter-not-invoked.js
 compat-table/es2021/logical-assignment.or.short-circuit.js
 compat-table/es2021/numeric-separators.js
+compat-table/es2021/Promise.any.AggregateError.js
 compat-table/es2021/Promise.any.fulfillment.js
 compat-table/es2021/String.prototype.replaceAll.js
 compat-table/es2022/class-fields.computed-instance.js
@@ -171,6 +172,7 @@ compat-table/es2025/Iterator.prototype.some.js
 compat-table/es2025/Iterator.prototype.Symbol.toStringTag.js
 compat-table/es2025/Iterator.prototype.take.js
 compat-table/es2025/Iterator.prototype.toArray.js
+compat-table/es2025/Promise.try.js
 compat-table/es2025/regex.duplicate-named-groups.js
 compat-table/es2025/regex.pattern-modifiers.i.js
 compat-table/es2025/regex.pattern-modifiers.m.js
