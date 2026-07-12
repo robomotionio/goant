@@ -144,7 +144,89 @@ func (rt *Runtime) proxySet(p *proxyState, key, val, receiver Value) *ThrowError
 		}
 		return nil
 	}
-	return rt.setElement(p.target, key, val)
+	// No set trap: perform the ordinary [[Set]] on the target, but with the proxy
+	// as the receiver so a data-property assignment routes back through the
+	// proxy's [[DefineOwnProperty]] / [[GetOwnProperty]] traps (10.5.9).
+	_, e = rt.ordinarySet(p.target, key, val, receiver)
+	return e
+}
+
+// ordinarySet implements OrdinarySet(O, P, V, Receiver): walk O's chain for the
+// property; an accessor calls its setter with this=Receiver, a Proxy dispatches
+// its [[Set]], and a data property (or none) writes to Receiver.
+func (rt *Runtime) ordinarySet(o, key, val, receiver Value) (bool, *ThrowError) {
+	cur := o
+	for depth := 0; depth < maxProtoChainDepth; depth++ {
+		oo := rt.objPtr(cur)
+		if oo == nil {
+			break
+		}
+		if oo.proxy != nil {
+			return true, rt.proxySet(oo.proxy, key, val, receiver)
+		}
+		if d, exists := rt.targetOwnDesc(cur, key); exists {
+			if d.isAccessor {
+				if rt.isCallable(d.setter) {
+					_, e := rt.callValue(d.setter, receiver, []Value{val})
+					return true, e
+				}
+				return false, nil
+			}
+			if !d.writable {
+				return false, nil
+			}
+			return rt.setOnReceiver(receiver, key, val)
+		}
+		cur = oo.proto
+	}
+	return rt.setOnReceiver(receiver, key, val)
+}
+
+// setOnReceiver performs the final write of OrdinarySetWithOwnDescriptor: it
+// creates or updates an own data property on Receiver (via the defineProperty /
+// getOwnPropertyDescriptor traps when Receiver is itself a proxy).
+func (rt *Runtime) setOnReceiver(receiver, key, val Value) (bool, *ThrowError) {
+	ro := rt.objPtr(receiver)
+	if ro == nil {
+		return false, nil // primitive receiver
+	}
+	if ro.proxy != nil {
+		existing, e := rt.proxyGetOwnPropertyDescriptor(ro.proxy, key)
+		if e != nil {
+			return false, e
+		}
+		desc := rt.newPlainObject()
+		do := rt.objPtr(desc)
+		if existing.IsUndefined() {
+			do.defineOwn("value", val, attrDefault)
+			do.defineOwn("writable", mktrue(), attrDefault)
+			do.defineOwn("enumerable", mktrue(), attrDefault)
+			do.defineOwn("configurable", mktrue(), attrDefault)
+		} else {
+			if g, _ := rt.getField(existing, "get"); rt.isCallable(g) {
+				return false, nil
+			}
+			if s, _ := rt.getField(existing, "set"); rt.isCallable(s) {
+				return false, nil
+			}
+			if w, _ := rt.getField(existing, "writable"); !rt.toBoolean(w) {
+				return false, nil
+			}
+			do.defineOwn("value", val, attrDefault)
+		}
+		if e := rt.proxyDefineProperty(ro.proxy, key, desc); e != nil {
+			return false, e
+		}
+		return true, nil
+	}
+	if key.IsSymbol() {
+		if d := ro.ownDescriptorSym(key.handle()); d.exists && (d.isAccessor || !d.writable) {
+			return false, nil
+		}
+		return rt.setElement(receiver, key, val) == nil, nil
+	}
+	name, _ := rt.propKeyString(key)
+	return rt.setProp(receiver, name, val), nil
 }
 
 func (rt *Runtime) proxyHas(p *proxyState, key Value) (bool, *ThrowError) {

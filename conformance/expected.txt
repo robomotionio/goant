@@ -457,6 +457,7 @@ compat-table/es6/misc.property-order.Object.keys.js
 compat-table/es6/misc.property-order.Reflect.ownKeys.string.js
 compat-table/es6/misc.property-order.Reflect.ownKeys.symbol.js
 compat-table/es6/misc.Proxy.defineProperty.SetIntegrityLevel.js
+compat-table/es6/misc.Proxy.defineProperty.Set.js
 compat-table/es6/misc.Proxy.deleteProperty.Array.copyWithin.js
 compat-table/es6/misc.Proxy.deleteProperty.Array.pop.js
 compat-table/es6/misc.Proxy.deleteProperty.Array.reverse.js
@@ -476,6 +477,7 @@ compat-table/es6/misc.Proxy.get.Object.assign.js
 compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Function.bind.js
 compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Object.assign.js
 compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Object.hasOwnProperty.js
+compat-table/es6/misc.Proxy.getOwnPropertyDescriptor.Set.js
 compat-table/es6/misc.Proxy.get.Promise.resolve.js
 compat-table/es6/misc.Proxy.get.RegExp.test.js
 compat-table/es6/misc.Proxy.get.RegExp.toString.js
@@ -542,6 +544,7 @@ compat-table/es6/Proxy.handler.isExtensible.js
 compat-table/es6/Proxy.handler.ownKeys.js
 compat-table/es6/Proxy.handler.preventExtensions.invariants.js
 compat-table/es6/Proxy.handler.preventExtensions.js
+compat-table/es6/Proxy.handler.set.instances.js
 compat-table/es6/Proxy.handler.set.invariants.js
 compat-table/es6/Proxy.handler.set.js
 compat-table/es6/Proxy.handler.setPrototypeOf.js

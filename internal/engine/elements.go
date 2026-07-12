@@ -116,13 +116,31 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 		return e == nil, e
 	}
 	if obj.IsObjectType() || obj.Type() == TTypedArray {
-		if holder, slot, found := rt.resolveProp(obj, name); found && holder.isAccessorSlot(slot) {
-			p := holder.shape.propAt(slot)
-			if p.hasSetter {
-				_, e := rt.callValue(p.setter, obj, []Value{v})
-				return true, e
+		// Ordinary [[Set]]: walk the chain for an accessor (call its setter with
+		// this=obj) or a Proxy (dispatch its [[Set]] trap with receiver=obj). A
+		// data property or the chain end falls through to setProp, which
+		// creates/updates the own property on the receiver.
+		cur := obj
+		for depth := 0; depth < maxProtoChainDepth; depth++ {
+			o := rt.objPtr(cur)
+			if o == nil {
+				break
 			}
-			return false, nil // setter-less accessor: rejected
+			if o.proxy != nil {
+				return true, rt.proxySet(o.proxy, rt.internString(name), v, obj)
+			}
+			if slot := o.shape.lookupInterned(name); slot >= 0 {
+				if o.isAccessorSlot(uint32(slot)) {
+					p := o.shape.propAt(uint32(slot))
+					if p.hasSetter {
+						_, e := rt.callValue(p.setter, obj, []Value{v})
+						return true, e
+					}
+					return false, nil // setter-less accessor: rejected
+				}
+				break // data property: fall through to setProp
+			}
+			cur = o.proto
 		}
 		return rt.setProp(obj, name, v), nil
 	}
