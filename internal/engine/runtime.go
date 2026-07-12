@@ -44,6 +44,7 @@ type Runtime struct {
 	setProto              Value
 	symbolProto           Value
 	promiseProto          Value
+	promiseCtor           Value // the %Promise% constructor (species fast-path check)
 	genProto              Value // %GeneratorPrototype%
 	iteratorProto         Value // %IteratorPrototype%
 	asyncIteratorProto    Value // %AsyncIteratorPrototype%

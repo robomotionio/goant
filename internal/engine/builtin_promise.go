@@ -210,31 +210,54 @@ func (rt *Runtime) runThenableJob(p Value, o *object, thenable, then Value) {
 // runReaction executes one settled reaction: apply the matching handler (or pass
 // the value/reason straight through) and settle the derived promise.
 func (rt *Runtime) runReaction(r promiseReaction, state int, value Value) {
-	dp := rt.objPtr(r.result)
+	// Settle the derived promise: through the species capability functions when
+	// present, otherwise directly on the ordinary native promise.
+	settleFulfil := func(v Value) {
+		if rt.isCallable(r.capResolve) {
+			rt.callValue(r.capResolve, mkundef(), []Value{v})
+		} else {
+			rt.resolvePromise(r.result, rt.objPtr(r.result), v)
+		}
+	}
+	settleReject := func(v Value) {
+		if rt.isCallable(r.capReject) {
+			rt.callValue(r.capReject, mkundef(), []Value{v})
+		} else {
+			rt.rejectPromise(rt.objPtr(r.result), v)
+		}
+	}
 	handler := r.onFulfilled
 	if state == 2 {
 		handler = r.onRejected
 	}
 	if !rt.isCallable(handler) {
 		if state == 1 {
-			rt.resolvePromise(r.result, dp, value)
+			settleFulfil(value)
 		} else {
-			rt.rejectPromise(dp, value)
+			settleReject(value)
 		}
 		return
 	}
 	out, e := rt.callValue(handler, mkundef(), []Value{value})
 	if e != nil {
-		rt.rejectPromise(dp, e.Value)
+		settleReject(e.Value)
 		return
 	}
-	rt.resolvePromise(r.result, dp, out)
+	settleFulfil(out)
 }
 
-// promiseThen registers a reaction on o and returns the derived promise.
+// promiseThen registers a reaction on o and returns a fresh native derived
+// promise.
 func (rt *Runtime) promiseThen(onF, onR Value, o *object) Value {
 	dp, _ := rt.makePromise()
-	r := promiseReaction{onFulfilled: onF, onRejected: onR, result: dp}
+	return rt.promiseThenCap(onF, onR, o, dp, mkundef(), mkundef())
+}
+
+// promiseThenCap registers a reaction whose derived promise `result` is settled
+// via capResolve/capReject when they are callable (a species capability), or
+// directly otherwise.
+func (rt *Runtime) promiseThenCap(onF, onR Value, o *object, result, capResolve, capReject Value) Value {
+	r := promiseReaction{onFulfilled: onF, onRejected: onR, result: result, capResolve: capResolve, capReject: capReject}
 	st := o.promise
 	switch st.state {
 	case 0:
@@ -244,7 +267,54 @@ func (rt *Runtime) promiseThen(onF, onR Value, o *object) Value {
 		state, value := st.state, st.value
 		rt.enqueueMicrotask(func() { rt.runReaction(r, state, value) })
 	}
-	return dp
+	return result
+}
+
+// promiseThenSpecies implements Promise.prototype.then's derived-promise
+// creation: the ordinary native promise fast-path unless a @@species constructor
+// is in play, in which case NewPromiseCapability(species) supplies the result.
+func (rt *Runtime) promiseThenSpecies(this Value, o *object, onF, onR Value) (Value, *ThrowError) {
+	C, e := rt.speciesConstructor(this, rt.promiseCtor)
+	if e != nil {
+		return mkundef(), e
+	}
+	if rt.promiseCtor == 0 || C == rt.promiseCtor {
+		return rt.promiseThen(onF, onR, o), nil
+	}
+	cap, resolveFn, rejectFn, e := rt.newPromiseCapability(C)
+	if e != nil {
+		return mkundef(), e
+	}
+	return rt.promiseThenCap(onF, onR, o, cap, resolveFn, rejectFn), nil
+}
+
+// speciesConstructor implements SpeciesConstructor(O, defaultConstructor): the
+// constructor to use for a derived object, honouring O.constructor[@@species].
+func (rt *Runtime) speciesConstructor(obj, defaultCtor Value) (Value, *ThrowError) {
+	c, e := rt.getField(obj, "constructor")
+	if e != nil {
+		return mkundef(), e
+	}
+	if c.IsUndefined() {
+		return defaultCtor, nil
+	}
+	if !c.IsObjectType() {
+		return mkundef(), rt.typeError("constructor is not an object")
+	}
+	if rt.symSpecies == 0 {
+		return c, nil
+	}
+	s, e := rt.getElement(c, rt.symSpecies)
+	if e != nil {
+		return mkundef(), e
+	}
+	if s.IsNullish() {
+		return defaultCtor, nil
+	}
+	if !rt.isCallable(s) {
+		return mkundef(), rt.typeError("@@species is not a constructor")
+	}
+	return s, nil
 }
 
 // resolvedPromise returns a promise already resolved with value (adopting a
@@ -274,7 +344,7 @@ func (rt *Runtime) initPromiseBuiltin() {
 		if o == nil || o.promise == nil {
 			return mkundef(), rt.typeError("Promise.prototype.then called on incompatible receiver")
 		}
-		return rt.promiseThen(arg(args, 0), arg(args, 1), o), nil
+		return rt.promiseThenSpecies(this, o, arg(args, 0), arg(args, 1))
 	})
 	rt.defMethod(po, "catch", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
@@ -343,6 +413,7 @@ func (rt *Runtime) initPromiseBuiltin() {
 		return this, nil
 	})
 	cobj := rt.objPtr(ctor)
+	rt.promiseCtor = ctor
 	cobj.defineOwn("prototype", proto, 0)
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 	if rt.symToStringTag != 0 {

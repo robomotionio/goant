@@ -97,6 +97,11 @@ type promiseReaction struct {
 	onFulfilled Value
 	onRejected  Value
 	result      Value // the derived promise to settle
+	// capResolve/capReject settle the derived promise via a species constructor's
+	// capability functions (set only when the derived promise is not an ordinary
+	// native promise); otherwise result is settled directly.
+	capResolve Value
+	capReject  Value
 }
 
 // collection backs Map and Set (insertion-ordered entries + canonical-key
