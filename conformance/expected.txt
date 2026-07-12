@@ -482,6 +482,7 @@ compat-table/es6/Reflect.apply.js
 compat-table/es6/Reflect.construct.js
 compat-table/es6/Reflect.construct.new-target.js
 compat-table/es6/Reflect.construct.third-argument.js
+compat-table/es6/Reflect.defineProperty.js
 compat-table/es6/Reflect.deleteProperty.js
 compat-table/es6/Reflect.get.js
 compat-table/es6/Reflect.getOwnPropertyDescriptor.js

@@ -444,6 +444,16 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 		}
 		existing = o.ownDescriptor(name)
 	}
+	// A new property cannot be defined on a non-extensible object; a
+	// non-configurable existing property cannot be redefined.
+	if !existing.exists && !o.flags.extensible {
+		return rt.typeError("Cannot define property, object is not extensible")
+	}
+	// A non-configurable, non-writable data property (e.g. frozen) cannot be
+	// redefined; a writable one may still have its value updated.
+	if existing.exists && !existing.configable && !existing.isAccessor && !existing.writable {
+		return rt.typeError("Cannot redefine property")
+	}
 	get := func(k string) (Value, bool) {
 		if rt.hasProp(descVal, k) {
 			v, _ := rt.getField(descVal, k)
