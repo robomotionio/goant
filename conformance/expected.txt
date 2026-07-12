@@ -255,6 +255,7 @@ compat-table/es5/Object.seal.js
 compat-table/es5/strict.arguments-callee-error.js
 compat-table/es5/strict.arguments-unmapped.js
 compat-table/es5/strict.assignment-eval-arguments-error.js
+compat-table/es5/strict.assignment-non-writable-error.js
 compat-table/es5/strict.eval-arguments-bindings-error.js
 compat-table/es5/strict.eval-no-bindings.js
 compat-table/es5/strict.function-caller-arguments-error.js

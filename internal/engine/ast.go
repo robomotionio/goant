@@ -115,6 +115,7 @@ const (
 	fnDerivedCtor     = 1 << 17
 	fnInferredName    = 1 << 18 // name came from NamedEvaluation (no self-binding)
 	fnClassCtor       = 1 << 19 // a class constructor (must be invoked with new)
+	fnFuncExpr        = 1 << 20 // a function expression (immutable self-name binding)
 )
 
 // Export flags (ant ast.h EX_*).

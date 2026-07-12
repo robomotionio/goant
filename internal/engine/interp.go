@@ -759,6 +759,22 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			thrown = &ThrowError{Value: pop(), rt: rt}
 			goto unwind
 
+		case OpThrowError:
+			// Throw a native error of the given kind (0=TypeError, 1=ReferenceError,
+			// 2=SyntaxError, 3=RangeError) with a constant message.
+			msg := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			switch code[ip+5] {
+			case 1:
+				thrown = rt.referenceError(msg)
+			case 2:
+				thrown = rt.syntaxError(msg)
+			case 3:
+				thrown = rt.rangeError(msg)
+			default:
+				thrown = rt.typeError(msg)
+			}
+			goto unwind
+
 		case OpYield, OpAwait:
 			// Suspend this coroutine, handing the operand to its driver and
 			// blocking until resumed. A throw/return injection unwinds instead of

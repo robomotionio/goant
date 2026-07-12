@@ -167,6 +167,12 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	// name assigned by NamedEvaluation does NOT create this binding.
 	if n.Str != "" && n.Flags&fnArrow == 0 && n.Flags&fnInferredName == 0 {
 		slot := c.declareVar(n.Str, false)
+		// A named function EXPRESSION's self-reference is immutable (assigning to it
+		// is a strict-mode TypeError, a sloppy no-op); a declaration's name is the
+		// mutable outer binding.
+		if n.Flags&fnFuncExpr != 0 {
+			c.locals[slot].selfName = true
+		}
 		c.emit(OpSpecialObj)
 		c.emitByte(1) // current function value
 		c.emitOpU16(OpPutLocal, uint16(slot))

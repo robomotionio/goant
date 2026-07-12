@@ -22,6 +22,7 @@ type localVar struct {
 	captured    bool
 	blockScoped bool // let/const: hidden once its block is exited
 	dead        bool // scope exited; no longer resolvable
+	selfName    bool // a named function expression's immutable self-reference
 }
 
 type compiler struct {
@@ -898,6 +899,18 @@ func (c *compiler) compileAssign(n *Node) {
 		}
 	}
 	storeVar := func() {
+		// A named function expression's self-reference is immutable: assigning to it
+		// throws a TypeError in strict mode and is a silent no-op otherwise (the
+		// evaluated value stays on the stack either way).
+		if slot >= 0 && c.locals[slot].selfName {
+			if c.fn.isStrict {
+				idx := c.constant(c.rt.internString("Assignment to constant variable."))
+				c.emit(OpThrowError)
+				c.emitU32(uint32(idx))
+				c.emitByte(0) // TypeError
+			}
+			return
+		}
 		switch {
 		case slot >= 0:
 			c.emitOpU16(OpSetLocal, uint16(slot))
@@ -949,6 +962,18 @@ func (c *compiler) compileAssign(n *Node) {
 		c.emit(op)
 	}
 
+	// A named function expression's self-reference is immutable: assigning to it
+	// throws a TypeError in strict mode and is a silent no-op otherwise (the value
+	// stays on the stack, since assignment is an expression).
+	if slot >= 0 && c.locals[slot].selfName {
+		if c.fn.isStrict {
+			idx := c.constant(c.rt.internString("Assignment to constant variable."))
+			c.emit(OpThrowError)
+			c.emitU32(uint32(idx))
+			c.emitByte(0) // TypeError
+		}
+		return
+	}
 	// SET_* keeps the value on the stack (assignment is an expression).
 	switch {
 	case slot >= 0:

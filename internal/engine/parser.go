@@ -497,7 +497,9 @@ func (p *parser) parsePrimary() *Node {
 		return p.parseObject()
 	case TokFunc:
 		p.consume()
-		return p.parseFunc()
+		fn := p.parseFunc()
+		fn.Flags |= fnFuncExpr
+		return fn
 	case TokClass:
 		classOff := uint32(p.toff())
 		p.consume()
@@ -602,7 +604,7 @@ func (p *parser) parseAsyncPrimary() *Node {
 		p.consume()
 		p.pendingAsync = true
 		fn := p.parseFunc()
-		fn.Flags |= fnAsync
+		fn.Flags |= fnAsync | fnFuncExpr
 		fn.SrcOff = asyncOff
 		return fn
 	}
