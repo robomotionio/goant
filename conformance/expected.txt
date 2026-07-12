@@ -5,6 +5,7 @@ compat-table/es2016/Array.prototype.includes.typed-array.js
 compat-table/es2016/exponentiation.assignment.js
 compat-table/es2016/exponentiation.basic.js
 compat-table/es2016/exponentiation.unary-negation-error.js
+compat-table/es2016/misc.generator-throw-inner.js
 compat-table/es2016/misc.nested-rest-destructuring-decl.js
 compat-table/es2016/misc.nested-rest-destructuring-params.js
 compat-table/es2016/misc.Proxy-Array-includes.js
@@ -425,6 +426,7 @@ compat-table/es6/generators.yield-precedence.js
 compat-table/es6/generators.yield-star.array.js
 compat-table/es6/generators.yield-star.astral-string.js
 compat-table/es6/generators.yield-star.generator.js
+compat-table/es6/generators.yield-star.iterator-closing-throw.js
 compat-table/es6/generators.yield-star.non-iterable-error.js
 compat-table/es6/generators.yield-star.sparse-array.js
 compat-table/es6/generators.yield-star.string.js

@@ -775,6 +775,66 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			}
 			goto unwind
 
+		case OpYieldStarInit:
+			// Lazy `yield* iterable`: drive the inner iterator, forwarding how the
+			// outer generator is resumed (next/throw/return) to inner.next / throw /
+			// return, and re-yielding each produced value. Leaves the delegate's
+			// final value on the stack.
+			inner, e := rt.getSyncIterator(pop())
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			sent := mkundef()
+			kind := genNext
+			for {
+				var result Value
+				var re *ThrowError
+				switch kind {
+				case genThrow:
+					throwFn, _ := rt.getField(inner, "throw")
+					if !rt.isCallable(throwFn) {
+						rt.iteratorClose(inner)
+						thrown = rt.typeError("The iterator does not provide a 'throw' method")
+						goto unwind
+					}
+					result, re = rt.callValue(throwFn, inner, []Value{sent})
+				case genReturn:
+					returnFn, _ := rt.getField(inner, "return")
+					if !rt.isCallable(returnFn) {
+						closeAll()
+						return sent, nil // no return method: propagate the return
+					}
+					result, re = rt.callValue(returnFn, inner, []Value{sent})
+				default:
+					nextFn, _ := rt.getField(inner, "next")
+					result, re = rt.callValue(nextFn, inner, []Value{sent})
+				}
+				if re != nil {
+					thrown = re
+					goto unwind
+				}
+				if !result.IsObjectType() {
+					thrown = rt.typeError("iterator result is not an object")
+					goto unwind
+				}
+				doneV, _ := rt.getField(result, "done")
+				value, _ := rt.getField(result, "value")
+				if rt.toBoolean(doneV) {
+					if kind == genReturn {
+						closeAll()
+						return value, nil // inner honored return: propagate it
+					}
+					push(value)
+					break
+				}
+				resumed, inject := rt.suspend(value)
+				sent, kind = resumed, genNext
+				if inject != nil {
+					sent, kind = inject.val, inject.kind
+				}
+			}
+			ip += 3
 		case OpYield, OpAwait:
 			// Suspend this coroutine, handing the operand to its driver and
 			// blocking until resumed. A throw/return injection unwinds instead of

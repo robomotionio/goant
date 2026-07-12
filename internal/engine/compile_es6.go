@@ -750,38 +750,9 @@ func (c *compiler) compileYield(n *Node) {
 // yielding each. Values are materialized eagerly (like for-of); the delegated
 // iterator's return value is not propagated (yield* evaluates to undefined).
 func (c *compiler) compileYieldStar(n *Node) {
-	c.scopeDepth++
+	// Lazy delegation: OP_YIELD_STAR_INIT drives the inner iterator and forwards
+	// next/throw/return, leaving the delegate's final value on the stack.
 	c.compileExpr(n.Right)
-	c.emit(OpForOf) // iterable -> values array
-	arrSlot := c.addLocal("*yss*", false)
-	c.emitOpU16(OpPutLocal, uint16(arrSlot))
-	iSlot := c.addLocal("*ysi*", false)
-	c.emit(OpConstI8)
-	c.emitByte(0)
-	c.emitOpU16(OpPutLocal, uint16(iSlot))
-
-	condStart := len(c.fn.code)
-	c.emitOpU16(OpGetLocal, uint16(iSlot))
-	c.emitOpU16(OpGetLocal, uint16(arrSlot))
-	c.emit(OpGetLength)
-	c.emit(OpLt)
-	exit := c.emitJump(OpJmpFalse)
-
-	// yield arr[i]; discard the resume value (not forwarded to inner in eager mode)
-	c.emitOpU16(OpGetLocal, uint16(arrSlot))
-	c.emitOpU16(OpGetLocal, uint16(iSlot))
-	c.emit(OpGetElem)
-	c.emit(OpYield)
-	c.emit(OpPop)
-
-	// i++
-	c.emitOpU16(OpGetLocal, uint16(iSlot))
-	c.emit(OpInc)
-	c.emitOpU16(OpPutLocal, uint16(iSlot))
-	c.emit(OpJmp)
-	c.emitU32(uint32(condStart))
-
-	c.patchJump(exit)
-	c.scopeDepth--
-	c.emit(OpUndef) // completion value of yield*
+	c.emit(OpYieldStarInit)
+	c.emitU16(0) // unused inline operand
 }
