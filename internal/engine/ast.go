@@ -247,8 +247,10 @@ func referencesArguments(n *Node) bool {
 		return false
 	}
 	if referencesArguments(n.Left) || referencesArguments(n.Right) ||
-		referencesArguments(n.Body) || referencesArguments(n.CatchBody) ||
-		referencesArguments(n.FinallyBody) {
+		referencesArguments(n.Cond) || referencesArguments(n.Body) ||
+		referencesArguments(n.CatchBody) || referencesArguments(n.FinallyBody) ||
+		referencesArguments(n.CatchParam) || referencesArguments(n.Init) ||
+		referencesArguments(n.Update) {
 		return true
 	}
 	for _, a := range n.Args {
