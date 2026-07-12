@@ -178,7 +178,13 @@ func (st *jsonStringifier) stringifyObject(v Value, indent string) (string, bool
 	o := rt.objPtr(v)
 	newIndent := indent + st.gap
 	var parts []string
-	for _, k := range o.ownKeysEnumerable() {
+	// EnumerableOwnPropertyNames: for a proxy this routes through its ownKeys +
+	// getOwnPropertyDescriptor traps.
+	keys := o.ownKeysEnumerable()
+	if o.proxy != nil {
+		keys = rt.enumerableOwnKeys(v)
+	}
+	for _, k := range keys {
 		if st.allow != nil && !st.allow[k] {
 			continue
 		}

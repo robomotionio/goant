@@ -70,6 +70,15 @@ func (rt *Runtime) targetOwnDesc(target, key Value) (ownDesc, bool) {
 	return d, d.exists
 }
 
+// propKeyId returns a collision-free identity string for a string/symbol key,
+// used to detect duplicate ownKeys entries.
+func (rt *Runtime) propKeyId(k Value) string {
+	if k.IsSymbol() {
+		return "y:" + itoaSmall(int(k.handle()))
+	}
+	return "s:" + string(rt.strBytes(k))
+}
+
 // targetExtensible reports the target's [[IsExtensible]] (proxies recurse).
 func (rt *Runtime) targetExtensible(v Value) bool {
 	o := rt.objPtr(v)
@@ -209,7 +218,23 @@ func (rt *Runtime) proxyOwnKeys(p *proxyState) ([]Value, *ThrowError) {
 		if e != nil {
 			return nil, e
 		}
-		return rt.iterableValues(r)
+		keys, e := rt.iterableValues(r)
+		if e != nil {
+			return nil, e
+		}
+		// Invariant: the trap must report only property keys, with no duplicates.
+		seen := make(map[string]bool, len(keys))
+		for _, k := range keys {
+			if !k.IsString() && !k.IsSymbol() {
+				return nil, rt.typeError("'ownKeys' on proxy: trap result must be an array of property keys")
+			}
+			id := rt.propKeyId(k)
+			if seen[id] {
+				return nil, rt.typeError("'ownKeys' on proxy: trap result contains duplicate entries")
+			}
+			seen[id] = true
+		}
+		return keys, nil
 	}
 	// Forward to target's own keys.
 	var out []Value

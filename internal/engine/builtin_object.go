@@ -94,7 +94,20 @@ func (rt *Runtime) initObjectBuiltin() {
 	proto.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 
 	rt.defMethod(cobj, "keys", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.objectKeys(arg(args, 0)), nil
+		v := arg(args, 0)
+		if o := rt.objPtr(v); o != nil && o.proxy != nil {
+			keys, e := rt.enumerableOwnKeysE(v)
+			if e != nil {
+				return mkundef(), e
+			}
+			arr := rt.newArray()
+			ao := rt.objPtr(arr)
+			for _, k := range keys {
+				rt.arraySet(ao, ao.arrLen, rt.internString(k))
+			}
+			return arr, nil
+		}
+		return rt.objectKeys(v), nil
 	})
 	rt.defMethod(cobj, "getPrototypeOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		obj, e := rt.toObjectValue(arg(args, 0))
@@ -293,18 +306,24 @@ func (rt *Runtime) initObjectBuiltin() {
 		return mkbool(o != nil && o.flags.extensible), nil
 	})
 	rt.defMethod(cobj, "seal", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		rt.sealObject(arg(args, 0), false)
+		if e := rt.sealObject(arg(args, 0), false); e != nil {
+			return mkundef(), e
+		}
 		return arg(args, 0), nil
 	})
 	rt.defMethod(cobj, "freeze", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		rt.sealObject(arg(args, 0), true)
+		if e := rt.sealObject(arg(args, 0), true); e != nil {
+			return mkundef(), e
+		}
 		return arg(args, 0), nil
 	})
 	rt.defMethod(cobj, "isSealed", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return mkbool(rt.isSealedOrFrozen(arg(args, 0), false)), nil
+		s, e := rt.isSealedOrFrozenE(arg(args, 0), false)
+		return mkbool(s), e
 	})
 	rt.defMethod(cobj, "isFrozen", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return mkbool(rt.isSealedOrFrozen(arg(args, 0), true)), nil
+		s, e := rt.isSealedOrFrozenE(arg(args, 0), true)
+		return mkbool(s), e
 	})
 
 	rt.defMethod(cobj, "assign", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -396,20 +415,34 @@ func (rt *Runtime) initObjectBuiltin() {
 // enumerableOwnKeys returns own enumerable string keys (array indices first),
 // used by Object.assign/values/entries and JSON.
 func (rt *Runtime) enumerableOwnKeys(v Value) []string {
+	keys, _ := rt.enumerableOwnKeysE(v)
+	return keys
+}
+
+// enumerableOwnKeysE is enumerableOwnKeys with error propagation: a proxy's
+// ownKeys / getOwnPropertyDescriptor traps can throw (e.g. the duplicate-key
+// invariant), and callers that return a completion must surface it.
+func (rt *Runtime) enumerableOwnKeysE(v Value) ([]string, *ThrowError) {
 	o := rt.objPtr(v)
 	if o == nil {
-		return nil
+		return nil, nil
 	}
 	if o.proxy != nil {
 		// EnumerableOwnPropertyNames: [[OwnPropertyKeys]] then filter the string
 		// keys by the enumerability reported by [[GetOwnProperty]] (both traps).
-		ks, _ := rt.proxyOwnKeys(o.proxy)
+		ks, e := rt.proxyOwnKeys(o.proxy)
+		if e != nil {
+			return nil, e
+		}
 		var out []string
 		for _, kv := range ks {
 			if !kv.IsString() {
 				continue
 			}
-			desc, _ := rt.proxyGetOwnPropertyDescriptor(o.proxy, kv)
+			desc, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, kv)
+			if e != nil {
+				return nil, e
+			}
 			if desc.IsUndefined() {
 				continue
 			}
@@ -417,7 +450,7 @@ func (rt *Runtime) enumerableOwnKeys(v Value) []string {
 				out = append(out, string(rt.strBytes(kv)))
 			}
 		}
-		return out
+		return out, nil
 	}
 	var keys []string
 	if v.Type() == TArr {
@@ -428,7 +461,7 @@ func (rt *Runtime) enumerableOwnKeys(v Value) []string {
 		}
 	}
 	keys = append(keys, o.ownKeysEnumerable()...)
-	return keys
+	return keys, nil
 }
 
 // objectDefineProperty applies an ES5 property descriptor to obj[name].
@@ -627,10 +660,44 @@ func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) Value {
 }
 
 // sealObject implements Object.seal / Object.freeze.
-func (rt *Runtime) sealObject(v Value, freeze bool) {
+func (rt *Runtime) sealObject(v Value, freeze bool) *ThrowError {
 	o := rt.objPtr(v)
 	if o == nil {
-		return
+		return nil
+	}
+	if o.proxy != nil {
+		// SetIntegrityLevel via the proxy's preventExtensions + ownKeys +
+		// getOwnPropertyDescriptor + defineProperty traps.
+		if e := rt.proxyPreventExtensions(o.proxy); e != nil {
+			return e
+		}
+		keys, e := rt.proxyOwnKeys(o.proxy)
+		if e != nil {
+			return e
+		}
+		for _, k := range keys {
+			desc := rt.newPlainObject()
+			do := rt.objPtr(desc)
+			do.defineOwn("configurable", mkfalse(), attrDefault)
+			if freeze {
+				cur, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, k)
+				if e != nil {
+					return e
+				}
+				if cur.IsUndefined() {
+					continue
+				}
+				g, _ := rt.getField(cur, "get")
+				s, _ := rt.getField(cur, "set")
+				if !rt.isCallable(g) && !rt.isCallable(s) {
+					do.defineOwn("writable", mkfalse(), attrDefault)
+				}
+			}
+			if e := rt.proxyDefineProperty(o.proxy, k, desc); e != nil {
+				return e
+			}
+		}
+		return nil
 	}
 	o.flags.extensible = false
 	o.ensureUniqueShape()
@@ -646,27 +713,69 @@ func (rt *Runtime) sealObject(v Value, freeze bool) {
 		o.flags.frozen = true
 	}
 	o.flags.sealed = true
+	return nil
 }
 
 // isSealedOrFrozen checks Object.isSealed / isFrozen.
 func (rt *Runtime) isSealedOrFrozen(v Value, frozen bool) bool {
+	sealed, _ := rt.isSealedOrFrozenE(v, frozen)
+	return sealed
+}
+
+func (rt *Runtime) isSealedOrFrozenE(v Value, frozen bool) (bool, *ThrowError) {
 	o := rt.objPtr(v)
 	if o == nil {
-		return true // primitives are trivially sealed/frozen
+		return true, nil // primitives are trivially sealed/frozen
+	}
+	if o.proxy != nil {
+		// TestIntegrityLevel via isExtensible + ownKeys + getOwnPropertyDescriptor.
+		ext, e := rt.proxyIsExtensible(o.proxy)
+		if e != nil {
+			return false, e
+		}
+		if ext {
+			return false, nil
+		}
+		keys, e := rt.proxyOwnKeys(o.proxy)
+		if e != nil {
+			return false, e
+		}
+		for _, k := range keys {
+			cur, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, k)
+			if e != nil {
+				return false, e
+			}
+			if cur.IsUndefined() {
+				continue
+			}
+			if cfg, _ := rt.getField(cur, "configurable"); rt.toBoolean(cfg) {
+				return false, nil
+			}
+			if frozen {
+				g, _ := rt.getField(cur, "get")
+				s, _ := rt.getField(cur, "set")
+				if !rt.isCallable(g) && !rt.isCallable(s) {
+					if w, _ := rt.getField(cur, "writable"); rt.toBoolean(w) {
+						return false, nil
+					}
+				}
+			}
+		}
+		return true, nil
 	}
 	if o.flags.extensible {
-		return false
+		return false, nil
 	}
 	for i := 0; i < o.shape.count(); i++ {
 		p := &o.shape.props[i]
 		if p.attrs&attrConfigurable != 0 {
-			return false
+			return false, nil
 		}
 		if frozen && !(p.hasGetter || p.hasSetter) && p.attrs&attrWritable != 0 {
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 // objectToStringTag returns Object.prototype.toString's "[object Tag]" result.
