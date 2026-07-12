@@ -145,6 +145,10 @@ func New() *Runtime {
 		closures: newPool[closure](),
 		interned: make(map[string]Handle),
 	}
+	// Value(0) decodes as the number 0, not undefined; new.target slots must start
+	// as a real undefined so "not constructing" is detectable.
+	rt.pendingNewTarget = mkundef()
+	rt.activeNewTarget = mkundef()
 	rt.initPrototypes()
 	rt.initGlobal()
 	rt.initErrorBuiltin()

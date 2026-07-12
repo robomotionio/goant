@@ -260,6 +260,7 @@ compat-table/es6/class.anonymous.js
 compat-table/es6/class.computed-prototype-methods.js
 compat-table/es6/class.computed-static-methods.js
 compat-table/es6/class.constructor.js
+compat-table/es6/class.constructor-requires-new.js
 compat-table/es6/class.expression.js
 compat-table/es6/class.extends-expressions.js
 compat-table/es6/class.extends.js
