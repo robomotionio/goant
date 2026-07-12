@@ -66,6 +66,7 @@ compat-table/es2017/Object.entries.js
 compat-table/es2017/Object.getOwnPropertyDescriptors.js
 compat-table/es2017/Object.getOwnPropertyDescriptors.no-undefined.js
 compat-table/es2017/Object.values.js
+compat-table/es2017/regex.flags.u.case-folding.js
 compat-table/es2017/SharedArrayBuffer.js
 compat-table/es2017/SharedArrayBuffer.prototype.byteLength.js
 compat-table/es2017/SharedArrayBuffer.prototype.slice.js
@@ -795,6 +796,7 @@ compat-table/es6/Reflect.ownKeys.symbol.js
 compat-table/es6/Reflect.preventExtensions.js
 compat-table/es6/Reflect.set.js
 compat-table/es6/Reflect.setPrototypeOf.js
+compat-table/es6/regex.flags.u.case-folding.js
 compat-table/es6/regex.flags.u.codepoint.js
 compat-table/es6/regex.flags.u.js
 compat-table/es6/regex.flags.u.non-bmp.js
