@@ -513,6 +513,7 @@ compat-table/es6/Promise.prototype-not-instance.js
 compat-table/es6/Promise.race.js
 compat-table/es6/Promise.Symbol.species.js
 compat-table/es6/Proxy.Array.isArray.js
+compat-table/es6/Proxy.constructor-requires-new.js
 compat-table/es6/Proxy.handler.apply.invariants.js
 compat-table/es6/Proxy.handler.apply.js
 compat-table/es6/Proxy.handler.construct.js
@@ -524,6 +525,7 @@ compat-table/es6/Proxy.handler.get.invariants.js
 compat-table/es6/Proxy.handler.get.js
 compat-table/es6/Proxy.handler.getPrototypeOf.invariants.js
 compat-table/es6/Proxy.handler.getPrototypeOf.js
+compat-table/es6/Proxy.handler.has.instances.js
 compat-table/es6/Proxy.handler.has.invariants.js
 compat-table/es6/Proxy.handler.has.js
 compat-table/es6/Proxy.handler.isExtensible.invariants.js

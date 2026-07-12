@@ -412,6 +412,10 @@ func itoaSmall(n int) string {
 
 func (rt *Runtime) initProxyBuiltin() {
 	ctor := rt.newNativeFunc("Proxy", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// Proxy is a constructor: a plain call (no `this` object) is a TypeError.
+		if rt.objPtr(this) == nil {
+			return mkundef(), rt.typeError("Constructor Proxy requires 'new'")
+		}
 		return rt.newProxy(arg(args, 0), arg(args, 1))
 	})
 	cobj := rt.objPtr(ctor)

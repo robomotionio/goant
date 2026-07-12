@@ -444,32 +444,31 @@ func (rt *Runtime) getProp(obj Value, key string) (Value, bool) {
 	return holder.slotGet(slot), true
 }
 
-// hasProp implements ordinary [[HasProperty]] (own + inherited).
+// hasProp implements ordinary [[HasProperty]] (own + inherited). It walks the
+// prototype chain itself so a Proxy anywhere in the chain dispatches its `has`
+// trap, and so integer-indexed elements (which live in the backing store, not
+// the shape) are found.
 func (rt *Runtime) hasProp(obj Value, key string) bool {
-	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
-		has, _ := rt.proxyHas(o.proxy, rt.internString(key))
-		return has
-	}
-	// Integer-indexed elements live in the array/typed-array/string backing
-	// store, not the shape, so resolveProp alone would miss them.
-	if idx, ok := canonicalIndex(key); ok {
-		for cur := obj; ; {
-			o := rt.objPtr(cur)
-			if o == nil {
-				break
-			}
-			if rt.hasOwnIndex(cur, o, idx) {
-				return true
-			}
-			if s := o.shape.lookupInterned(key); s >= 0 {
-				return true
-			}
-			cur = o.proto
+	idx, isIdx := canonicalIndex(key)
+	cur := obj
+	for depth := 0; depth < maxProtoChainDepth; depth++ {
+		o := rt.objPtr(cur)
+		if o == nil {
+			break
 		}
-		return false
+		if o.proxy != nil {
+			has, _ := rt.proxyHas(o.proxy, rt.internString(key))
+			return has
+		}
+		if isIdx && rt.hasOwnIndex(cur, o, idx) {
+			return true
+		}
+		if s := o.shape.lookupInterned(key); s >= 0 {
+			return true
+		}
+		cur = o.proto
 	}
-	_, _, found := rt.resolveProp(obj, key)
-	return found
+	return false
 }
 
 // hasOwnIndex reports whether obj owns integer index idx in its element backing
