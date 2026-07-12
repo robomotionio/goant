@@ -26,11 +26,21 @@ func (rt *Runtime) initRegExpBuiltin() {
 		return mkbool(!res.IsNull()), nil
 	})
 	rt.defMethod(po, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(this)
-		if o == nil || o.regex == nil {
-			return rt.internString("/(?:)/"), nil
+		// Generic: `/${this.source}/${this.flags}` (works on any object).
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("RegExp.prototype.toString called on non-object")
 		}
-		return rt.newString("/" + o.regex.Source + "/" + o.regex.Flags), nil
+		sv, e := rt.getField(this, "source")
+		if e != nil {
+			return mkundef(), e
+		}
+		src, _ := rt.toStringValue(sv)
+		fv, e := rt.getField(this, "flags")
+		if e != nil {
+			return mkundef(), e
+		}
+		flags, _ := rt.toStringValue(fv)
+		return rt.newString("/" + string(rt.strBytes(src)) + "/" + string(rt.strBytes(flags))), nil
 	})
 
 	ctor := rt.newNativeFunc("RegExp", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
