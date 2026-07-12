@@ -516,6 +516,15 @@ func (c *compiler) emitWithVar(op Opcode, name string) {
 }
 
 func (c *compiler) compileBinary(n *Node) {
+	// Private brand check `#x in obj`: the LHS is a private name, keyed as its
+	// string form rather than loaded as a variable.
+	if n.Op == TokIn && n.Left != nil && n.Left.Kind == NIdent &&
+		len(n.Left.Str) > 0 && n.Left.Str[0] == '#' {
+		c.emitConst(c.rt.internString(n.Left.Str))
+		c.compileExpr(n.Right)
+		c.emit(OpIn)
+		return
+	}
 	// Logical operators short-circuit.
 	switch n.Op {
 	case TokLand:

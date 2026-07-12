@@ -104,6 +104,8 @@ compat-table/es2022/class-methods.private-accessor.js
 compat-table/es2022/class-methods.private-instance.js
 compat-table/es2022/class-methods.private-static-accessor.js
 compat-table/es2022/class-methods.private-static.js
+compat-table/es2022/class-static-init-blocks.js
+compat-table/es2022/ergonomic-brand-checks.js
 compat-table/es2022/Error.cause.AggregateError.js
 compat-table/es2022/Error.cause.AggregateError-prototype-lacks.js
 compat-table/es2022/Error.cause.Error.js

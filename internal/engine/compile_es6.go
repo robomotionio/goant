@@ -354,6 +354,17 @@ func (c *compiler) compileClass(n *Node) {
 
 	// Define methods (skip the constructor; it's already the ctor function).
 	for _, m := range n.Args {
+		if m.Kind == NStaticBlock {
+			// Static initialization block: run its body with this = the class.
+			body := &Node{Kind: NBlock, Args: m.Args}
+			blockFn := &Node{Kind: NFunc, Body: body, Flags: fnClassBody}
+			c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // this
+			c.compileFunc(blockFn)                    // func
+			c.emit(OpCallMethod)                      // [this, func] -> result
+			c.emitU16(0)
+			c.emit(OpPop)
+			continue
+		}
 		if m.Kind != NMethod {
 			continue
 		}
