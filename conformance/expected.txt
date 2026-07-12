@@ -193,8 +193,12 @@ compat-table/es6/class.statement.js
 compat-table/es6/class.static-accessor-properties.js
 compat-table/es6/class.static-methods.js
 compat-table/es6/const.basic.js
+compat-table/es6/const.block-scoped.js
+compat-table/es6/const.for-loop.js
 compat-table/es6/const.shadow.js
 compat-table/es6/const.strict.basic.js
+compat-table/es6/const.strict.block-scoped.js
+compat-table/es6/const.strict.for-loop.js
 compat-table/es6/const.strict.shadow.js
 compat-table/es6/default-params.new-function.js
 compat-table/es6/default-params.refer-previous.js
@@ -260,10 +264,14 @@ compat-table/es6/generators.yield-star.non-iterable-error.js
 compat-table/es6/generators.yield-star.sparse-array.js
 compat-table/es6/generators.yield-star.string.js
 compat-table/es6/let.basic.js
+compat-table/es6/let.block-scoped.js
 compat-table/es6/let.for-in-shadow.js
+compat-table/es6/let.for-loop.js
 compat-table/es6/let.shadow.js
 compat-table/es6/let.strict.basic.js
+compat-table/es6/let.strict.block-scoped.js
 compat-table/es6/let.strict.for-in-shadow.js
+compat-table/es6/let.strict.for-loop.js
 compat-table/es6/let.strict.shadow.js
 compat-table/es6/literals.binary.js
 compat-table/es6/literals.binary.Number.js

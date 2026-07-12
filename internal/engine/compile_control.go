@@ -115,6 +115,7 @@ func (c *compiler) compileFor(n *Node) {
 	c.popLoop()
 	_ = hasExit
 	c.scopeDepth--
+	c.popBlockScope()
 }
 
 // compileForIn lowers `for (v in obj)` to iteration over the enumerable-keys
@@ -174,6 +175,7 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 
 	c.popLoop()
 	c.scopeDepth--
+	c.popBlockScope()
 }
 
 // forInStore returns a closure that stores the top-of-stack value into the
@@ -193,7 +195,12 @@ func (c *compiler) forInStore(left *Node) func() {
 		}
 		name = binding.Str
 		if !(left.VarKind == VarVar && c.isScript) {
-			slot := c.declareVar(name, left.VarKind == VarConst)
+			var slot int
+			if left.VarKind == VarLet || left.VarKind == VarConst {
+				slot = c.declareLexical(name, left.VarKind == VarConst)
+			} else {
+				slot = c.declareVar(name, false)
+			}
 			return func() { c.emitOpU16(OpPutLocal, uint16(slot)) }
 		}
 	case left.Kind == NIdent:

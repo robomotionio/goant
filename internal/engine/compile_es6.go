@@ -132,7 +132,12 @@ func (c *compiler) bindDeclName(name string, kind VarKind) {
 		c.emitGlobalPut(name)
 		return
 	}
-	slot := c.declareVar(name, kind == VarConst)
+	var slot int
+	if kind == VarLet || kind == VarConst {
+		slot = c.declareLexical(name, kind == VarConst)
+	} else {
+		slot = c.declareVar(name, false)
+	}
 	c.emitOpU16(OpPutLocal, uint16(slot))
 }
 

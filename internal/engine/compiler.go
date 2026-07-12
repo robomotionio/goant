@@ -16,10 +16,12 @@ type CompileError struct{ Msg string }
 func (e *CompileError) Error() string { return "CompileError: " + e.Msg }
 
 type localVar struct {
-	name     string
-	depth    int
-	isConst  bool
-	captured bool
+	name        string
+	depth       int
+	isConst     bool
+	captured    bool
+	blockScoped bool // let/const: hidden once its block is exited
+	dead        bool // scope exited; no longer resolvable
 }
 
 type compiler struct {
@@ -146,14 +148,34 @@ func (c *compiler) addLocal(name string, isConst bool) int {
 	return len(c.locals) - 1
 }
 
-// resolveLocal returns the slot for name, searching innermost-first.
+// resolveLocal returns the slot for name, searching innermost-first. Bindings
+// whose block has been exited (dead) are skipped.
 func (c *compiler) resolveLocal(name string) int {
 	for i := len(c.locals) - 1; i >= 0; i-- {
+		if c.locals[i].dead {
+			continue
+		}
 		if c.locals[i].name == name {
 			return i
 		}
 	}
 	return -1
+}
+
+// declareLexical creates a fresh block-scoped (let/const) binding that shadows
+// any outer binding and is hidden when its block exits.
+func (c *compiler) declareLexical(name string, isConst bool) int {
+	c.locals = append(c.locals, localVar{name: name, depth: c.scopeDepth, isConst: isConst, blockScoped: true})
+	return len(c.locals) - 1
+}
+
+// popBlockScope hides the block-scoped bindings declared at the just-exited depth.
+func (c *compiler) popBlockScope() {
+	for i := len(c.locals) - 1; i >= 0; i-- {
+		if c.locals[i].depth > c.scopeDepth && c.locals[i].blockScoped {
+			c.locals[i].dead = true
+		}
+	}
 }
 
 // resolveUpvalue resolves name as a capture from an enclosing function,
@@ -225,6 +247,7 @@ func (c *compiler) compileStmt(n *Node) {
 		c.hoistFunctions(n.Args)
 		c.compileStmts(n.Args)
 		c.scopeDepth--
+		c.popBlockScope()
 	case NIf:
 		c.compileIf(n)
 	case NWhile:
@@ -297,7 +320,12 @@ func (c *compiler) compileVarDecl(n *Node) {
 			// A bare `var x;` at top level leaves any existing global intact.
 			continue
 		}
-		slot := c.declareVar(name, n.VarKind == VarConst)
+		var slot int
+		if n.VarKind == VarLet || n.VarKind == VarConst {
+			slot = c.declareLexical(name, n.VarKind == VarConst)
+		} else {
+			slot = c.declareVar(name, false)
+		}
 		if decl.Right != nil {
 			c.compileExpr(decl.Right)
 		} else {
