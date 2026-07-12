@@ -135,6 +135,12 @@ func (rt *Runtime) newGenerator(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 	proto := rt.genProto
 	if fn.isAsync && rt.asyncGenProto != 0 {
 		proto = rt.asyncGenProto // async generator: %AsyncGeneratorPrototype%
+	} else if fnVal.IsObjectType() {
+		// A sync generator instance inherits from the generator function's own
+		// .prototype (which itself chains to %GeneratorPrototype%).
+		if p, e := rt.getField(fnVal, "prototype"); e == nil && p.IsObjectType() {
+			proto = p
+		}
 	}
 	v := rt.newObject(proto)
 	o := rt.objPtr(v)
@@ -188,15 +194,10 @@ func (rt *Runtime) initGeneratorBuiltin() {
 	})
 	rt.defMethod(po, "throw", 1, drive(genThrow))
 
-	// %GeneratorPrototype%[Symbol.iterator]() returns this.
-	if rt.symIterator != 0 {
-		selfIter := rt.newNativeFunc("[Symbol.iterator]", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			return this, nil
-		})
-		po.defineOwnSymbol(rt.symIterator.handle(), selfIter, attrConfigurable)
-		if rt.symToStringTag != 0 {
-			po.defineOwnSymbol(rt.symToStringTag.handle(), rt.newString("Generator"), attrConfigurable)
-		}
+	// %GeneratorPrototype% inherits [Symbol.iterator] from %IteratorPrototype%
+	// (it must NOT define its own); it carries only @@toStringTag "Generator".
+	if rt.symToStringTag != 0 {
+		po.defineOwnSymbol(rt.symToStringTag.handle(), rt.newString("Generator"), attrConfigurable)
 	}
 }
 

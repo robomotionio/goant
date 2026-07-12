@@ -319,6 +319,7 @@ compat-table/es6/const.strict.for-in.js
 compat-table/es6/const.strict.for-loop.js
 compat-table/es6/const.strict.for-of.js
 compat-table/es6/const.strict.shadow.js
+compat-table/es6/Date.prototype.Symbol.toPrimitive.js
 compat-table/es6/default-params.new-function.js
 compat-table/es6/default-params.refer-previous.js
 compat-table/es6/default-params.separate-scope.js
@@ -377,6 +378,7 @@ compat-table/es6/Function.name.shorthand.no-lexical.js
 compat-table/es6/Function.name.statement.js
 compat-table/es6/generators.basic.js
 compat-table/es6/generators.no-new-this.js
+compat-table/es6/generators.prototype-chain.js
 compat-table/es6/generators.return.js
 compat-table/es6/generators.sending.js
 compat-table/es6/generators.shorthand.computed.class.js

@@ -12,6 +12,10 @@ func (rt *Runtime) initNumberBuiltin() {
 		if this.Type() == TNum {
 			return this.Number(), true
 		}
+		// Unwrap a boxed Number object (new Number(x) / Object(x)).
+		if o := rt.objPtr(this); o != nil && o.boxed.Type() == TNum {
+			return o.boxed.Number(), true
+		}
 		return 0, false
 	}
 
