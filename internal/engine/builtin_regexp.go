@@ -62,6 +62,80 @@ func (rt *Runtime) initRegExpBuiltin() {
 	rt.defGlobal("RegExp", ctor)
 
 	rt.initStringRegexpMethods()
+
+	// RegExp.prototype[Symbol.match/replace/search/split] delegate to the String
+	// operations with `this` as the pattern (so str.match(regex) works via them).
+	defSym := func(sym Value, run func(this Value, args []Value) (Value, *ThrowError)) {
+		if sym == 0 {
+			return
+		}
+		fn := rt.newNativeFunc("", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			return run(this, args)
+		})
+		po.defineOwnSymbol(sym.handle(), fn, attrWritable|attrConfigurable)
+	}
+	defSym(rt.symMatch, func(this Value, args []Value) (Value, *ThrowError) {
+		str := arg(args, 0)
+		re := rt.objPtr(this)
+		if re == nil || re.regex == nil {
+			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.match] called on incompatible receiver")
+		}
+		s, e := rt.toStringValue(str)
+		if e != nil {
+			return mkundef(), e
+		}
+		if !re.regex.Global {
+			return rt.regexpExec(this, s)
+		}
+		input := []rune(string(rt.strBytes(s)))
+		res := rt.newArray()
+		ro := rt.objPtr(res)
+		pos, any := 0, false
+		for {
+			m, err := re.regex.Exec(input, pos)
+			if err != nil || m == nil {
+				break
+			}
+			any = true
+			rt.arraySet(ro, ro.arrLen, rt.newString(m.Groups[0].Value))
+			adv := m.Index + m.Groups[0].Length
+			if adv <= pos {
+				adv = pos + 1
+			}
+			pos = adv
+		}
+		if !any {
+			return mknull(), nil
+		}
+		return res, nil
+	})
+	defSym(rt.symReplace, func(this Value, args []Value) (Value, *ThrowError) {
+		return rt.stringReplace(arg(args, 0), this, arg(args, 1))
+	})
+	defSym(rt.symSearch, func(this Value, args []Value) (Value, *ThrowError) {
+		str := arg(args, 0)
+		re := rt.objPtr(this)
+		if re == nil || re.regex == nil {
+			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.search] called on incompatible receiver")
+		}
+		b, e := rt.thisStringBytes(str)
+		if e != nil {
+			return mkundef(), e
+		}
+		m, err := re.regex.Exec([]rune(string(b)), 0)
+		if err != nil || m == nil {
+			return mknum(-1), nil
+		}
+		return mknum(float64(m.Index)), nil
+	})
+	defSym(rt.symSplit, func(this Value, args []Value) (Value, *ThrowError) {
+		str := arg(args, 0)
+		re := rt.objPtr(this)
+		if re == nil || re.regex == nil {
+			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.split] called on incompatible receiver")
+		}
+		return rt.stringSplitRegexp(str, re.regex, arg(args, 1))
+	})
 }
 
 // newRegExp compiles a pattern/flags pair into a RegExp object.

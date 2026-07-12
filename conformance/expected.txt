@@ -118,6 +118,9 @@ compat-table/es2023/Array.prototype.toSorted.js
 compat-table/es2023/Array.prototype.toSpliced.js
 compat-table/es2023/Array.prototype.with.js
 compat-table/es2023/hashbang.js
+compat-table/es2023/TypedArray.prototype.toReversed.js
+compat-table/es2023/TypedArray.prototype.toSorted.js
+compat-table/es2023/TypedArray.prototype.with.js
 compat-table/es2024/Map.groupBy.js
 compat-table/es2024/Object.groupBy.js
 compat-table/es2024/Promise.withResolvers.js
@@ -459,6 +462,10 @@ compat-table/es6/Reflect.setPrototypeOf.js
 compat-table/es6/regex.flags.u.non-bmp.js
 compat-table/es6/regex.flags.y.lastIndex.js
 compat-table/es6/RegExp.prototype.flags.js
+compat-table/es6/RegExp.prototype.Symbol.match.js
+compat-table/es6/RegExp.prototype.Symbol.replace.js
+compat-table/es6/RegExp.prototype.Symbol.search.js
+compat-table/es6/RegExp.prototype.Symbol.split.js
 compat-table/es6/rest-params.basic.js
 compat-table/es6/rest-params.new-function.js
 compat-table/es6/Set.constructor-accepts-null.js

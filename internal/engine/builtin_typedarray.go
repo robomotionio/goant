@@ -754,6 +754,68 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		}
 		return this, nil
 	})
+	m("toReversed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		l := length(this)
+		out, _ := rt.newTypedArray(o.ta.kind, []Value{mknum(float64(l))})
+		oo := rt.objPtr(out)
+		for i := 0; i < l; i++ {
+			el, _ := rt.taGet(o, l-1-i)
+			rt.taSet(oo, i, el.Number())
+		}
+		return out, nil
+	})
+	m("toSorted", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		l := length(this)
+		vals := make([]float64, l)
+		for i := 0; i < l; i++ {
+			el, _ := rt.taGet(o, i)
+			vals[i] = el.Number()
+		}
+		cmp := arg(args, 0)
+		var sortErr *ThrowError
+		sort.SliceStable(vals, func(i, j int) bool {
+			if rt.isCallable(cmp) {
+				r, e := rt.callValue(cmp, mkundef(), []Value{mknum(vals[i]), mknum(vals[j])})
+				if e != nil {
+					sortErr = e
+					return false
+				}
+				n, _ := rt.toNumber(r)
+				return n < 0
+			}
+			return vals[i] < vals[j]
+		})
+		if sortErr != nil {
+			return mkundef(), sortErr
+		}
+		out, _ := rt.newTypedArray(o.ta.kind, []Value{mknum(float64(l))})
+		oo := rt.objPtr(out)
+		for i, v := range vals {
+			rt.taSet(oo, i, v)
+		}
+		return out, nil
+	})
+	m("with", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		l := length(this)
+		idx := int(argNum(rt, args, 0))
+		if idx < 0 {
+			idx += l
+		}
+		if idx < 0 || idx >= l {
+			return mkundef(), rt.rangeError("Invalid typed array index")
+		}
+		out, _ := rt.newTypedArray(o.ta.kind, []Value{mknum(float64(l))})
+		oo := rt.objPtr(out)
+		for i := 0; i < l; i++ {
+			el, _ := rt.taGet(o, i)
+			rt.taSet(oo, i, el.Number())
+		}
+		rt.taSet(oo, idx, argNum(rt, args, 1))
+		return out, nil
+	})
 	m("keys", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.newIndexIterator(this, iterKeys), nil
 	})
