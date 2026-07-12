@@ -73,6 +73,9 @@ func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
 	if rt, ok := unicode.Properties[name]; ok {
 		return rt, true
 	}
+	if rt, ok := emojiProperties[name]; ok {
+		return rt, true
+	}
 	if rt, ok := unicode.Scripts[name]; ok {
 		return rt, true
 	}

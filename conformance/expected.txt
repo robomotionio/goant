@@ -78,7 +78,12 @@ compat-table/es2018/Promise.prototype.finally.js
 compat-table/es2018/Promise.prototype.finally.no-change-resolution.js
 compat-table/es2018/regex.named-capture-groups.js
 compat-table/es2018/regex.unicode-property-escapes.js
+compat-table/es2018/regex.unicode-property-escapes.unicode-11.js
 compat-table/es2018/regex.unicode-property-escapes.unicode-12.1.js
+compat-table/es2018/regex.unicode-property-escapes.unicode-12.js
+compat-table/es2018/regex.unicode-property-escapes.unicode-13.js
+compat-table/es2018/regex.unicode-property-escapes.unicode-14.js
+compat-table/es2018/regex.unicode-property-escapes.unicode-15.js
 compat-table/es2019/annex-b.String.prototype.trimLeft.js
 compat-table/es2019/annex-b.String.prototype.trimRight.js
 compat-table/es2019/Array.prototype.flat-flatMap.unscopables.js
