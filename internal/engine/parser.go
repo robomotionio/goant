@@ -294,7 +294,9 @@ func (p *parser) parseBlock(directiveCtx bool) *Node {
 func (p *parser) parseBindingPattern() *Node {
 	p.next()
 	if p.tok() == TokLBracket {
-		return p.parseArray()
+		arr := p.parseArray()
+		p.validateArrayPattern(arr)
+		return arr
 	}
 	if p.tok() == TokLBrace {
 		return p.parseObject()
@@ -836,6 +838,11 @@ func (p *parser) parseArray() *Node {
 			spread := p.mk(NSpread)
 			spread.Right = p.parseAssign()
 			n.Args = append(n.Args, spread)
+			if p.next() == TokComma {
+				// A rest element followed by a comma is valid spread in an array
+				// literal but invalid in a binding/assignment pattern.
+				n.Flags |= nodeRestComma
+			}
 		} else {
 			n.Args = append(n.Args, p.parseAssign())
 		}
@@ -847,6 +854,37 @@ func (p *parser) parseArray() *Node {
 	}
 	p.expect(TokRBracket)
 	return n
+}
+
+// validateArrayPattern raises a SyntaxError when an array pattern misuses its
+// rest element: a rest must be the last element and may not be followed by a
+// comma (BindingRestElement / AssignmentRestElement). It recurses into nested
+// array/object patterns.
+func (p *parser) validateArrayPattern(n *Node) {
+	if n == nil || n.Kind != NArray {
+		return
+	}
+	if n.Flags&nodeRestComma != 0 {
+		p.errorf("Rest element must be last element")
+		return
+	}
+	for i, e := range n.Args {
+		if e == nil {
+			continue
+		}
+		if (e.Kind == NSpread || e.Kind == NRest) && i != len(n.Args)-1 {
+			p.errorf("Rest element must be last element")
+			return
+		}
+		switch e.Kind {
+		case NArray:
+			p.validateArrayPattern(e)
+		case NSpread, NRest:
+			p.validateArrayPattern(e.Right)
+		case NAssign, NAssignPat:
+			p.validateArrayPattern(e.Left)
+		}
+	}
 }
 
 func (p *parser) validateAccessorParams(fn *Node, flags uint32) bool {
@@ -1256,6 +1294,10 @@ func (p *parser) parseAssign() *Node {
 			p.errorf("cannot modify eval or arguments in strict mode")
 			return p.mk(NEmpty)
 		}
+		if op == TokAssign && left.Kind == NArray {
+			// Destructuring assignment: the array pattern's rest must be last.
+			p.validateArrayPattern(left)
+		}
 		p.consume()
 		n := p.mk(NAssign)
 		n.Op = op
@@ -1520,6 +1562,7 @@ func (p *parser) parseVarDecl(kind VarKind, allowUninitConst bool) *Node {
 		switch p.tok() {
 		case TokLBracket:
 			decl.Left = p.parseArray()
+			p.validateArrayPattern(decl.Left)
 		case TokLBrace:
 			decl.Left = p.parseObject()
 		case TokErr:
