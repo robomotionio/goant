@@ -1281,7 +1281,11 @@ func (rt *Runtime) regexpSymbolSplitGeneric(splitter, strVal, limitV Value, unic
 	ro := rt.objPtr(res)
 	lim := int64(1)<<32 - 1
 	if !limitV.IsUndefined() {
-		lim = int64(toUint32(float64(rt.intArg([]Value{limitV}, 0))))
+		ln, e := rt.toNumber(limitV) // ToUint32, propagating a throwing valueOf
+		if e != nil {
+			return mkundef(), e
+		}
+		lim = int64(toUint32(ln))
 	}
 	if lim == 0 {
 		return res, nil
@@ -1311,8 +1315,14 @@ func (rt *Runtime) regexpSymbolSplitGeneric(splitter, strVal, limitV Value, unic
 			q = int(rt.advanceStringIndex(sV, float64(q), unicode))
 			continue
 		}
-		liV, _ := rt.getField(splitter, "lastIndex")
-		liN, _ := rt.toNumber(liV)
+		liV, e := rt.getField(splitter, "lastIndex")
+		if e != nil {
+			return mkundef(), e
+		}
+		liN, e := rt.toIntegerOrInfinity(liV) // ToLength
+		if e != nil {
+			return mkundef(), e
+		}
 		end := min(int(liN), len(S))
 		if end == p {
 			q = int(rt.advanceStringIndex(sV, float64(q), unicode))
@@ -1322,9 +1332,23 @@ func (rt *Runtime) regexpSymbolSplitGeneric(splitter, strVal, limitV Value, unic
 		if int64(ro.arrLen) == lim {
 			return res, nil
 		}
-		lenV, _ := rt.getField(z, "length")
-		ln, _ := rt.toNumber(lenV)
-		for i := 1; i <= max(int(ln)-1, 0); i++ {
+		lenV, e := rt.getField(z, "length")
+		if e != nil {
+			return mkundef(), e
+		}
+		lnF, e := rt.toIntegerOrInfinity(lenV) // ToLength
+		if e != nil {
+			return mkundef(), e
+		}
+		nCaps := 0
+		if lnF > 1 {
+			if lnF > 1<<31 {
+				nCaps = 1<<31 - 1
+			} else {
+				nCaps = int(lnF) - 1
+			}
+		}
+		for i := 1; i <= nCaps; i++ {
 			cv, e := rt.getElement(z, mknum(float64(i)))
 			if e != nil {
 				return mkundef(), e
