@@ -94,6 +94,8 @@ func (rt *Runtime) primitiveProto(v Value) Value {
 		return rt.booleanProto
 	case TSymbol:
 		return rt.symbolProto
+	case TBigInt:
+		return rt.bigintProto
 	default:
 		return mkundef()
 	}
