@@ -268,11 +268,9 @@ func (rt *Runtime) initRegExpBuiltin() {
 		}
 	})
 	defSym(rt.symReplace, func(this Value, args []Value) (Value, *ThrowError) {
-		// A native RegExp uses the fast substring path; any other object (a
-		// RegExp-like or a Proxy) runs the generic exec-driven algorithm.
-		if o := rt.objPtr(this); o != nil && o.regex != nil {
-			return rt.stringReplace(arg(args, 0), this, arg(args, 1))
-		}
+		// Always run the generic exec-driven algorithm: it reads the exec result's
+		// length/0/index/N/groups observably (through a subclass's overridden exec
+		// and each property's coercion), which a fast native-substring path skips.
 		return rt.regexpSymbolReplace(this, arg(args, 0), arg(args, 1))
 	})
 	defSym(rt.symSearch, func(this Value, args []Value) (Value, *ThrowError) {
