@@ -755,32 +755,72 @@ func (rt *Runtime) initStringRegexpMethods() {
 		}
 		needle := string(rt.strBytes(se))
 		repl := arg(args, 1)
-		if rt.isCallable(repl) {
-			var b strings.Builder
-			pos := 0
-			for {
+		callable := rt.isCallable(repl)
+		var replStr string
+		if !callable {
+			rs, e := rt.toStringValue(repl)
+			if e != nil {
+				return mkundef(), e
+			}
+			replStr = string(rt.strBytes(rs))
+		}
+		inputRunes := []rune(ss)
+		// Enumerate every (non-overlapping) match position of needle in ss; an empty
+		// needle matches at every code-unit boundary (including the end).
+		var b strings.Builder
+		pos := 0
+		advance := len(needle)
+		if advance == 0 {
+			advance = 1
+		}
+		for pos <= len(ss) {
+			var at int
+			if needle == "" {
+				at = pos
+			} else {
 				idx := strings.Index(ss[pos:], needle)
-				if idx < 0 || needle == "" {
+				if idx < 0 {
 					break
 				}
-				at := pos + idx
-				b.WriteString(ss[pos:at])
-				rv, e := rt.callValue(repl, mkundef(), []Value{rt.newString(needle), mknum(float64(at)), s})
+				at = pos + idx
+			}
+			b.WriteString(ss[pos:at])
+			utf16pos := byteOffsetToUtf16([]byte(ss), at)
+			var rep string
+			if callable {
+				rv, e := rt.callValue(repl, mkundef(), []Value{rt.newString(needle), mknum(float64(utf16pos)), s})
 				if e != nil {
 					return mkundef(), e
 				}
-				rs, _ := rt.toStringValue(rv)
-				b.Write(rt.strBytes(rs))
-				pos = at + len(needle)
+				rvs, e := rt.toStringValue(rv)
+				if e != nil {
+					return mkundef(), e
+				}
+				rep = string(rt.strBytes(rvs))
+			} else {
+				rep = expandReplacement(replStr, needle, utf16pos, inputRunes, []regexpjs.Group{{Index: utf16pos, Value: needle}}, nil)
 			}
+			b.WriteString(rep)
+			// Emit the skipped code unit for an empty-needle step, then advance.
+			if needle == "" {
+				if at < len(ss) {
+					j := at + 1 // advance one UTF-8 rune (skip continuation bytes)
+					for j < len(ss) && ss[j]&0xC0 == 0x80 {
+						j++
+					}
+					b.WriteString(ss[at:j])
+					pos = j
+				} else {
+					pos = at + 1
+				}
+			} else {
+				pos = at + advance
+			}
+		}
+		if pos <= len(ss) {
 			b.WriteString(ss[pos:])
-			return rt.newString(b.String()), nil
 		}
-		rs, e := rt.toStringValue(repl)
-		if e != nil {
-			return mkundef(), e
-		}
-		return rt.newString(strings.ReplaceAll(ss, needle, string(rt.strBytes(rs)))), nil
+		return rt.newString(b.String()), nil
 	})
 
 	rt.defMethod(sp, "split", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
