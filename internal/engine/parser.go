@@ -40,6 +40,9 @@ type parser struct {
 	// pendingGenerator marks the function parseFunc is about to parse as a
 	// generator when the caller (an object/class method) already consumed the `*`.
 	pendingGenerator bool
+	// funcDepth > 0 inside any function/arrow body, so a `return` outside every
+	// function (top-level script or eval code) is a SyntaxError.
+	funcDepth int
 }
 
 // Parse tokenizes and parses src into an AST (N_PROGRAM root node).
@@ -384,6 +387,8 @@ func (p *parser) parseArrowBody(isAsync bool) *Node {
 		p.inAsync = true
 		defer func() { p.inAsync = saved }()
 	}
+	p.funcDepth++ // return is legal inside an arrow body
+	defer func() { p.funcDepth-- }()
 	if p.next() == TokLBrace {
 		return p.parseBlock(true)
 	}
@@ -1363,7 +1368,9 @@ func (p *parser) parseFunc() *Node {
 	}
 	p.inAsync = isAsync         // the body establishes the await context
 	p.inGenerator = isGenerator // and the yield context
+	p.funcDepth++               // return is legal inside the body
 	fn.Body = p.parseBlock(true)
+	p.funcDepth--
 	fn.SrcEnd = uint32(p.toff() + p.tlen())
 	// A function with a non-simple parameter list (rest / default / destructuring)
 	// may not carry an explicit "use strict" directive (ES2016 §14.1.2).
@@ -2127,6 +2134,9 @@ func (p *parser) parseFor() *Node {
 }
 
 func (p *parser) parseReturn() *Node {
+	if p.funcDepth == 0 {
+		p.errorf("Illegal return statement") // return outside a function
+	}
 	p.consume()
 	n := p.mk(NReturn)
 	if p.next() != TokSemicolon && p.tok() != TokRBrace && p.tok() != TokEOF && !p.hadNewline() {
