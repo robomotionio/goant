@@ -52,6 +52,11 @@ func (rt *Runtime) thisStringBytes(this Value) ([]byte, *ThrowError) {
 	if this.IsString() {
 		return rt.strBytes(this), nil
 	}
+	// RequireObjectCoercible: a String.prototype method rejects a null/undefined
+	// receiver before ToString (which would otherwise stringify it to "null").
+	if this.IsNullish() {
+		return nil, rt.typeError("String.prototype method called on null or undefined")
+	}
 	s, e := rt.toStringValue(this)
 	if e != nil {
 		return nil, e
@@ -83,7 +88,10 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		idx := rt.intArg(args, 0)
+		idx, e := rt.posArgE(args, 0)
+		if e != nil {
+			return mkundef(), e
+		}
 		if idx < 0 || idx >= utf16Len(b) {
 			return rt.internString(""), nil
 		}
@@ -94,7 +102,10 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		idx := rt.intArg(args, 0)
+		idx, e := rt.posArgE(args, 0)
+		if e != nil {
+			return mkundef(), e
+		}
 		if idx < 0 || idx >= utf16Len(b) {
 			return mknum(math.NaN()), nil
 		}
@@ -105,7 +116,10 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		idx := rt.intArg(args, 0)
+		idx, e := rt.posArgE(args, 0)
+		if e != nil {
+			return mkundef(), e
+		}
 		if idx < 0 || idx >= utf16Len(b) {
 			return mkundef(), nil
 		}
@@ -452,14 +466,24 @@ func (rt *Runtime) initStringBuiltin() {
 			return mkundef(), e
 		}
 		n := utf16Len(b)
-		idx := rt.intArg(args, 0)
-		if idx < 0 {
-			idx += n
+		rel, e := rt.toIntegerOrInfinity(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
 		}
-		if idx < 0 || idx >= n {
+		k := int(rel)
+		if rel < 0 {
+			if kf := float64(n) + rel; kf < 0 {
+				return mkundef(), nil
+			} else {
+				k = int(kf)
+			}
+		} else if rel >= float64(n) {
 			return mkundef(), nil
 		}
-		return rt.charAt(b, idx), nil
+		if k < 0 || k >= n {
+			return mkundef(), nil
+		}
+		return rt.charAt(b, k), nil
 	})
 	rt.defMethod(proto, "trimStart", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
@@ -623,6 +647,24 @@ func (rt *Runtime) intArg(args []Value, i int) int {
 		return 0
 	}
 	return int(n)
+}
+
+// posArgE coerces a char-accessor position via ToIntegerOrInfinity, propagating
+// an abrupt coercion. A negative position returns -1 and an infinite/huge one
+// saturates, so both fall outside any string's range (the caller returns the
+// out-of-range result).
+func (rt *Runtime) posArgE(args []Value, i int) (int, *ThrowError) {
+	f, e := rt.toIntegerOrInfinity(arg(args, i))
+	if e != nil {
+		return 0, e
+	}
+	if f < 0 {
+		return -1, nil
+	}
+	if f > 0x7FFFFFFF {
+		return 0x7FFFFFFF, nil
+	}
+	return int(f), nil
 }
 
 // strClampPos coerces a String-method position argument via ToIntegerOrInfinity
