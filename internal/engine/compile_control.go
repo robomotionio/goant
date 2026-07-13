@@ -39,6 +39,18 @@ func (c *compiler) patchJumpTo(operandPos, target int) {
 // label (so `continue label` works); for other statements it pushes a break-only
 // target so `break label` can exit.
 func (c *compiler) compileLabel(n *Node) {
+	// A label may not be nested inside another statement carrying the same label
+	// (sibling labels reusing a name are fine — they aren't in scope together).
+	if c.pendingLabel == n.Str {
+		c.syntaxErrorf("Label '%s' has already been declared", n.Str)
+		return
+	}
+	for _, l := range c.loops {
+		if l.label == n.Str {
+			c.syntaxErrorf("Label '%s' has already been declared", n.Str)
+			return
+		}
+	}
 	if isLoopNode(n.Body) {
 		c.pendingLabel = n.Str
 		c.compileStmt(n.Body)
