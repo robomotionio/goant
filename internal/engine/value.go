@@ -173,6 +173,11 @@ func (v Value) IsEmpty() bool     { return v == tEmpty }
 // (obj/arr/func/promise/generator).
 func (v Value) IsObjectType() bool { return (tagFlagBit(v.Type()) & tObjectMask) != 0 }
 
+// IsObjectLike reports whether v is a heap object that participates in the
+// ordinary property protocol: an object-family value (IsObjectType) or a
+// TypedArray, which is an exotic object carried under its own value tag.
+func (v Value) IsObjectLike() bool { return v.IsObjectType() || v.Type() == TTypedArray }
+
 // IsSpecialObject reports whether v is a plain object or array.
 func (v Value) IsSpecialObject() bool { return (tagFlagBit(v.Type()) & tSpecialObjectMask) != 0 }
 

@@ -149,7 +149,7 @@ func (rt *Runtime) initObjectBuiltin() {
 	})
 	rt.defMethod(cobj, "defineProperty", 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		obj := arg(args, 0)
-		if !obj.IsObjectType() {
+		if !obj.IsObjectLike() {
 			return mkundef(), rt.typeError("Object.defineProperty called on non-object")
 		}
 		if e := rt.objectDefinePropertyKey(obj, arg(args, 1), arg(args, 2)); e != nil {
@@ -159,7 +159,7 @@ func (rt *Runtime) initObjectBuiltin() {
 	})
 	rt.defMethod(cobj, "defineProperties", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		obj := arg(args, 0)
-		if !obj.IsObjectType() {
+		if !obj.IsObjectLike() {
 			return mkundef(), rt.typeError("Object.defineProperties called on non-object")
 		}
 		if e := rt.objectDefineProperties(obj, arg(args, 1)); e != nil {
@@ -188,6 +188,17 @@ func (rt *Runtime) initObjectBuiltin() {
 		}
 		d := o.ownDescriptor(name)
 		if !d.exists {
+			if arg(args, 0).Type() == TTypedArray {
+				// Integer-indexed exotic [[GetOwnProperty]]: a live element is a
+				// writable/enumerable/configurable data property; a canonical index
+				// that is out of range (or detached) has no descriptor.
+				if idx, ok := canonicalIndex(name); ok {
+					if v, live := rt.taGet(o, int(idx)); live {
+						return rt.makeDataDescriptor(v, true, true, true), nil
+					}
+					return mkundef(), nil
+				}
+			}
 			if arg(args, 0).Type() == TArr {
 				// The array "length" data property (value = length, writable,
 				// non-enumerable, non-configurable) is virtual — synthesize it.
@@ -479,6 +490,11 @@ func (rt *Runtime) enumerableOwnKeysE(v Value) ([]string, *ThrowError) {
 			}
 		}
 	}
+	if v.Type() == TTypedArray {
+		for i, l := 0, rt.taLength(o); i < l; i++ {
+			keys = append(keys, strconv.Itoa(i))
+		}
+	}
 	keys = append(keys, o.ownKeysEnumerable()...)
 	return keys, nil
 }
@@ -500,6 +516,13 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	}
 	if o.proxy != nil {
 		return rt.proxyDefineProperty(o.proxy, key, descVal)
+	}
+	// Integer-indexed exotic [[DefineOwnProperty]]: an element index is defined
+	// through the buffer, never as an ordinary named slot.
+	if obj.Type() == TTypedArray && !key.IsSymbol() {
+		if idx, isIdx := rt.arrayIndexOf(key); isIdx {
+			return rt.taDefineIndex(o, int(idx), descVal)
+		}
 	}
 	sym := key.IsSymbol()
 	name := ""
@@ -797,6 +820,13 @@ func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) Value {
 		}
 		rt.arraySet(ao, ao.arrLen, rt.internString("length"))
 	}
+	if v.Type() == TTypedArray {
+		// Integer indices [0, length) are the typed array's own enumerable data
+		// properties (length lives on the prototype).
+		for i, l := 0, rt.taLength(o); i < l; i++ {
+			rt.arraySet(ao, ao.arrLen, rt.newString(strconv.Itoa(i)))
+		}
+	}
 	keys := o.ownKeys()
 	if enumerableOnly {
 		keys = o.ownKeysEnumerable()
@@ -1011,6 +1041,11 @@ func (rt *Runtime) objectKeys(v Value) Value {
 			if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
 				rt.arraySet(ao, ao.arrLen, rt.newString(numberToString(float64(i))))
 			}
+		}
+	}
+	if v.Type() == TTypedArray {
+		for i, l := 0, rt.taLength(o); i < l; i++ {
+			rt.arraySet(ao, ao.arrLen, rt.newString(strconv.Itoa(i)))
 		}
 	}
 	for _, k := range o.ownKeysEnumerable() {

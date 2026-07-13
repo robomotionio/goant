@@ -12,7 +12,7 @@ func (rt *Runtime) initReflectBuiltin() {
 	ro := rt.objPtr(reflect)
 
 	needObj := func(v Value, m string) *ThrowError {
-		if !v.IsObjectType() {
+		if !v.IsObjectLike() {
 			return rt.typeError("Reflect." + m + " called on non-object")
 		}
 		return nil
@@ -48,15 +48,17 @@ func (rt *Runtime) initReflectBuiltin() {
 		return mkbool(rt.hasProp(arg(args, 0), name)), nil
 	})
 	rt.defMethod(ro, "deleteProperty", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(arg(args, 0))
-		if o == nil {
+		target := arg(args, 0)
+		if !target.IsObjectLike() {
 			return mkundef(), rt.typeError("Reflect.deleteProperty called on non-object")
 		}
-		name, e := rt.propKeyString(arg(args, 1))
+		// Route through [[Delete]] so integer-indexed exotic objects (typed
+		// arrays) and proxies observe their own delete semantics.
+		ok, e := rt.deleteElement(target, arg(args, 1))
 		if e != nil {
 			return mkundef(), e
 		}
-		return mkbool(o.deleteOwn(name)), nil
+		return mkbool(ok), nil
 	})
 	rt.defMethod(ro, "getPrototypeOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(arg(args, 0))
@@ -95,6 +97,14 @@ func (rt *Runtime) initReflectBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if arg(args, 0).Type() == TTypedArray {
+			if idx, ok := canonicalIndex(name); ok {
+				if v, live := rt.taGet(o, int(idx)); live {
+					return rt.makeDataDescriptor(v, true, true, true), nil
+				}
+				return mkundef(), nil
+			}
+		}
 		d := o.ownDescriptor(name)
 		if !d.exists {
 			return mkundef(), nil
@@ -130,6 +140,11 @@ func (rt *Runtime) initReflectBuiltin() {
 				}
 			}
 			rt.arraySet(ra, ra.arrLen, rt.newString("length"))
+		}
+		if arg(args, 0).Type() == TTypedArray {
+			for i, l := 0, rt.taLength(o); i < l; i++ {
+				rt.arraySet(ra, ra.arrLen, rt.newString(strconv.Itoa(i)))
+			}
 		}
 		for _, k := range o.ownKeys() {
 			rt.arraySet(ra, ra.arrLen, rt.newString(k))

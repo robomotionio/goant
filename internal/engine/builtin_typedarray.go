@@ -126,10 +126,92 @@ func clampUint8(v float64) byte {
 	return byte(r)
 }
 
-// taGet/taSet are the element accessors used by getElement/setElement.
+// taDetached reports whether o is a TypedArray whose backing ArrayBuffer has
+// been detached (its bytes transferred away). Element access, length, and
+// most prototype methods observe a detached array as empty / throwing.
+func (rt *Runtime) taDetached(o *object) bool {
+	if o == nil || o.ta == nil {
+		return false
+	}
+	b := rt.objPtr(o.ta.buf)
+	return b == nil || b.abuf == nil
+}
+
+// validateTypedArray implements ValidateTypedArray(O): O must be a TypedArray
+// whose buffer is not detached, else a TypeError. Used to guard the
+// non-generic %TypedArray%.prototype methods.
+func (rt *Runtime) validateTypedArray(this Value) *ThrowError {
+	o := rt.objPtr(this)
+	if o == nil || o.ta == nil {
+		return rt.typeError("TypedArray.prototype method called on incompatible receiver")
+	}
+	if rt.taDetached(o) {
+		return rt.typeError("Cannot perform TypedArray operation on a detached ArrayBuffer")
+	}
+	return nil
+}
+
+// taValidIndex implements IsValidIntegerIndex(O, i): i addresses a live element
+// of typed array o (in bounds, buffer attached).
+func (rt *Runtime) taValidIndex(o *object, i int) bool {
+	return o != nil && o.ta != nil && !rt.taDetached(o) && i >= 0 && i < o.ta.length
+}
+
+// taDefineIndex implements the integer-indexed exotic [[DefineOwnProperty]] for
+// element index idx: elements are writable/enumerable/configurable data
+// properties, so any descriptor demanding an accessor, non-writable,
+// non-enumerable, or non-configurable element — or targeting an invalid index —
+// is rejected (a non-nil error, which Object.defineProperty throws and
+// Reflect.defineProperty reports as false).
+func (rt *Runtime) taDefineIndex(o *object, idx int, descVal Value) *ThrowError {
+	if !rt.taValidIndex(o, idx) {
+		return rt.typeError("Cannot define property: invalid typed array index")
+	}
+	field := func(k string) (Value, bool) {
+		if rt.hasProp(descVal, k) {
+			v, _ := rt.getField(descVal, k)
+			return v, true
+		}
+		return mkundef(), false
+	}
+	if v, ok := field("configurable"); ok && !rt.toBoolean(v) {
+		return rt.typeError("Cannot redefine typed array element as non-configurable")
+	}
+	if v, ok := field("enumerable"); ok && !rt.toBoolean(v) {
+		return rt.typeError("Cannot redefine typed array element as non-enumerable")
+	}
+	if _, ok := field("get"); ok {
+		return rt.typeError("Cannot redefine typed array element as an accessor")
+	}
+	if _, ok := field("set"); ok {
+		return rt.typeError("Cannot redefine typed array element as an accessor")
+	}
+	if v, ok := field("writable"); ok && !rt.toBoolean(v) {
+		return rt.typeError("Cannot redefine typed array element as non-writable")
+	}
+	if v, ok := field("value"); ok {
+		if isBigIntKind(o.ta.kind) {
+			bi, e := rt.toBigInt(v)
+			if e != nil {
+				return e
+			}
+			rt.taSetBig(o, idx, bi)
+		} else {
+			n, e := rt.toNumber(v)
+			if e != nil {
+				return e
+			}
+			rt.taSet(o, idx, n)
+		}
+	}
+	return nil
+}
+
+// taGet/taSet are the element accessors used by getElement/setElement. A valid
+// integer index requires an attached buffer (IsValidIntegerIndex).
 func (rt *Runtime) taGet(o *object, i int) (Value, bool) {
 	t := o.ta
-	if t == nil || i < 0 || i >= t.length {
+	if t == nil || rt.taDetached(o) || i < 0 || i >= t.length {
 		return mkundef(), false
 	}
 	off := t.byteOffset + i*t.size()
@@ -145,7 +227,7 @@ func (rt *Runtime) taGet(o *object, i int) (Value, bool) {
 
 func (rt *Runtime) taSet(o *object, i int, v float64) bool {
 	t := o.ta
-	if t == nil || i < 0 || i >= t.length {
+	if t == nil || rt.taDetached(o) || i < 0 || i >= t.length {
 		return false
 	}
 	encodeElem(t.bytes, t.byteOffset+i*t.size(), t.kind, v)
@@ -156,7 +238,7 @@ func (rt *Runtime) taSet(o *object, i int, v float64) bool {
 // low-64-bit two's-complement pattern.
 func (rt *Runtime) taSetBig(o *object, i int, v *big.Int) bool {
 	t := o.ta
-	if t == nil || i < 0 || i >= t.length {
+	if t == nil || rt.taDetached(o) || i < 0 || i >= t.length {
 		return false
 	}
 	binary.LittleEndian.PutUint64(t.bytes[t.byteOffset+i*t.size():], bigIntAsUintN(64, v).Uint64())
@@ -619,7 +701,7 @@ func argNum(rt *Runtime, args []Value, i int) float64 {
 
 // taLength returns a TypedArray's element length (for lengthOf / methods).
 func (rt *Runtime) taLength(o *object) int {
-	if o.ta != nil {
+	if o.ta != nil && !rt.taDetached(o) {
 		return o.ta.length
 	}
 	return 0
@@ -659,7 +741,17 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 
 	get := func(this Value, i int) Value { v, _ := rt.getElement(this, mknum(float64(i))); return v }
 
-	m := func(name string, n int, fn nativeFunc) { rt.defMethod(tp, name, n, fn) }
+	// Every %TypedArray%.prototype method is non-generic and begins with
+	// ValidateTypedArray(this): it throws a TypeError when called on a
+	// non-TypedArray receiver or one whose buffer has been detached.
+	m := func(name string, n int, fn nativeFunc) {
+		rt.defMethod(tp, name, n, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			if e := rt.validateTypedArray(this); e != nil {
+				return mkundef(), e
+			}
+			return fn(rt, this, args)
+		})
+	}
 
 	m("forEach", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		cb := arg(args, 0)
@@ -1077,6 +1169,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		return rt.newIndexIterator(this, iterEntries), nil
 	})
 	valuesFn := rt.newNativeFunc("values", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if e := rt.validateTypedArray(this); e != nil {
+			return mkundef(), e
+		}
 		return rt.newIndexIterator(this, iterValues), nil
 	})
 	tp.defineOwn("values", valuesFn, attrWritable|attrConfigurable)

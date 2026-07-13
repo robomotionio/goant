@@ -32,6 +32,15 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 				return o.arr[idx], nil
 			}
 		}
+	case TTypedArray:
+		// A canonical numeric index reads the element directly (undefined when
+		// out of range or the buffer is detached) and never consults the
+		// prototype chain. Non-index names ("length", "byteLength", …) fall
+		// through to the ordinary [[Get]] below.
+		if idx, ok := canonicalIndex(name); ok {
+			v, _ := rt.taGet(rt.objPtr(obj), int(idx))
+			return v, nil
+		}
 	case TStr:
 		if name == "length" {
 			return mknum(float64(utf16Len(rt.strBytes(obj)))), nil

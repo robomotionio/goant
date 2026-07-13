@@ -68,6 +68,12 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 		}
 		return true, nil
 	}
+	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TTypedArray {
+		// Integer-indexed exotic [[Delete]]: a live element is non-configurable
+		// (delete fails); an out-of-range / detached index has nothing to delete
+		// (delete succeeds).
+		return !rt.taValidIndex(rt.objPtr(obj), int(idx)), nil
+	}
 	o := rt.objPtr(obj)
 	if o == nil {
 		return true, nil
@@ -187,7 +193,7 @@ func (rt *Runtime) jsInstanceof(l, r Value) (bool, *ThrowError) {
 	if !protoV.IsObjectType() {
 		return false, rt.typeError("prototype is not an object")
 	}
-	if !l.IsObjectType() {
+	if !l.IsObjectLike() {
 		return false, nil
 	}
 	target := rt.objPtr(protoV)
