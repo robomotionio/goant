@@ -105,6 +105,10 @@ func (c *compiler) compileIfBranch(n *Node) {
 // collectPatternNames), so `const {x}=o; function f(){return x}` captures x.
 // Top-level script `var`-scoped code is unaffected.
 func (c *compiler) hoistLexicals(list []*Node) {
+	// A name may be lexically declared at most once per scope; `seen` tracks the
+	// let/const names declared by THIS statement list (a genuine duplicate) so a
+	// pre-existing binding from an outer/enclosing construct isn't misread as one.
+	seen := map[string]bool{}
 	for _, stmt := range list {
 		if stmt == nil || stmt.Kind != NVar {
 			continue
@@ -116,8 +120,18 @@ func (c *compiler) hoistLexicals(list []*Node) {
 			var names []string
 			collectPatternNames(decl.Left, &names)
 			for _, name := range names {
+				if name == "let" {
+					// `let`/`const` may not bind the name "let" (LexicalDeclaration).
+					c.syntaxErrorf("let is disallowed as a lexically bound name")
+					return
+				}
+				if seen[name] {
+					c.syntaxErrorf("Identifier '%s' has already been declared", name)
+					return
+				}
+				seen[name] = true
 				if c.lexicalAtCurrentDepth(name) >= 0 {
-					continue // already hoisted (duplicate — inline decl will store)
+					continue // already hoisted (e.g. class-name binding); inline decl will store
 				}
 				slot := c.declareLexical(name, stmt.VarKind == VarConst)
 				c.emit(OpEmpty)
