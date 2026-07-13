@@ -331,6 +331,14 @@ func (o *object) defineOwn(key string, v Value, attrs uint8) bool {
 	if !ok {
 		return false
 	}
+	// Converting an accessor slot to a data property: clear the getter/setter
+	// markers (privatizing the shape first, since they are stamped per-object).
+	if p := o.shape.propAt(slot); p.hasGetter || p.hasSetter {
+		o.ensureUniqueShape()
+		p = o.shape.propAt(slot)
+		p.hasGetter, p.hasSetter = false, false
+		p.getter, p.setter = mkundef(), mkundef()
+	}
 	o.slotSet(slot, v)
 	return true
 }
