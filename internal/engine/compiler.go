@@ -54,6 +54,15 @@ type compiler struct {
 	// globals must resolve dynamically against the with-object chain.
 	withDepth int
 
+	// classFields holds a class constructor's instance-field member nodes so the
+	// ctor initializes them per-instance (base class: at body entry; derived:
+	// right after super()). pendingClassFields/pendingClassDerived hand them from
+	// compileClass to the child compiler compileFunc builds for the constructor.
+	classFields         []*Node
+	classDerived        bool
+	pendingClassFields  []*Node
+	pendingClassDerived bool
+
 	// pendingLabel is a label awaiting the loop/statement it prefixes.
 	pendingLabel string
 

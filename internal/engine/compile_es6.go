@@ -355,6 +355,11 @@ func (c *compiler) compileSuperCall(n *Node) {
 	} else if uv := c.resolveUpvalue("*this*"); uv >= 0 {
 		c.emitOpU16(OpSetUpval, uint16(uv))
 	}
+	// A derived class initializes its instance fields immediately after super()
+	// binds `this` (InitializeInstanceElements). classFields is set only on the
+	// constructor's own compiler, so a super() call nested in an arrow is a no-op
+	// here (a rare case left for later).
+	c.emitInstanceFieldInit()
 }
 
 // compileSuperMethodCall compiles `super.method(...)`: it invokes the parent
@@ -386,6 +391,73 @@ func (c *compiler) compileSuperMethodCall(n *Node) {
 // compileClass compiles a class declaration/expression into a constructor
 // function with prototype methods and static members, wiring the extends
 // prototype chain. super() / super.method are a later refinement.
+// isInstanceFieldMember reports whether a class element is an instance field
+// (as opposed to a method, accessor, constructor, static member, or static
+// block). Methods/accessors/constructor carry fnMethod on their function node;
+// a field's value is a plain expression (or NUndef for `x;`), possibly even a
+// non-method function (`x = function(){}`).
+func isInstanceFieldMember(m *Node) bool {
+	if m == nil || m.Kind != NMethod {
+		return false
+	}
+	if m.Flags&(fnStatic|fnGetter|fnSetter) != 0 {
+		return false
+	}
+	if m.Flags&fnComputed == 0 && m.Left != nil && m.Left.Kind == NIdent && m.Left.Str == "constructor" {
+		return false
+	}
+	if m.Right != nil && m.Right.Kind == NFunc && m.Right.Flags&fnMethod != 0 {
+		return false
+	}
+	return true
+}
+
+// emitInstanceFieldInit initializes a class's instance fields on `this`, in
+// source order: each field's initializer is evaluated with `this` bound to the
+// new instance and the result defined as an own enumerable data property
+// (DefineField — not [[Set]], so inherited setters are ignored). Called at
+// base-ctor entry and right after super() in a derived ctor.
+func (c *compiler) emitInstanceFieldInit() {
+	loadThis := func() {
+		if slot := c.resolveLocal("*this*"); slot >= 0 {
+			c.emitOpU16(OpGetLocal, uint16(slot))
+		} else if uv := c.resolveUpvalue("*this*"); uv >= 0 {
+			c.emitOpU16(OpGetUpval, uint16(uv))
+		} else {
+			c.emit(OpUndef)
+		}
+	}
+	for _, m := range c.classFields {
+		if m.Flags&fnComputed != 0 {
+			// [this] [key] [value] — computed key (evaluated per-instance; a v1
+			// simplification of the once-at-definition rule).
+			loadThis()
+			c.compileExpr(m.Left)
+			if m.Right == nil {
+				c.emit(OpUndef)
+			} else {
+				c.compileExpr(m.Right)
+			}
+			c.emit(OpPutElem)
+			continue
+		}
+		name, ok := propKeyName(m.Left)
+		if !ok {
+			c.errorf("unsupported class field key (slice)")
+			return
+		}
+		loadThis()
+		if m.Right == nil {
+			c.emit(OpUndef)
+		} else {
+			nameAnonExpr(m.Right, name) // NamedEvaluation for `field = () => {}`
+			c.compileExpr(m.Right)
+		}
+		c.emitDefineField(name)
+		c.emit(OpPop)
+	}
+}
+
 func (c *compiler) compileClass(n *Node) {
 	ctorSlot := c.tempLocal()
 	protoSlot := c.tempLocal()
@@ -457,6 +529,18 @@ func (c *compiler) compileClass(n *Node) {
 		c.emitOpU16(OpPutLocal, uint16(superProtoSlot))
 	}
 
+	// Collect instance fields and hand them to the constructor so it initializes
+	// them per-instance (base: at entry; derived: after super()). They are NOT
+	// defined on the prototype.
+	var instanceFields []*Node
+	for _, m := range n.Args {
+		if isInstanceFieldMember(m) {
+			instanceFields = append(instanceFields, m)
+		}
+	}
+	c.pendingClassFields = instanceFields
+	c.pendingClassDerived = n.Left != nil
+
 	c.compileFunc(ctorFn) // [ctor]
 	c.emitOpU16(OpPutLocal, uint16(ctorSlot))
 
@@ -500,6 +584,11 @@ func (c *compiler) compileClass(n *Node) {
 			continue
 		}
 		if m.Kind != NMethod {
+			continue
+		}
+		// Instance fields are initialized per-instance by the constructor, not
+		// defined here on the prototype.
+		if isInstanceFieldMember(m) {
 			continue
 		}
 		if m.Left != nil && m.Left.Kind == NIdent && m.Left.Str == "constructor" && m.Flags&fnStatic == 0 {

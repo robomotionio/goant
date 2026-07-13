@@ -229,6 +229,13 @@ func (c *compiler) compileFunc(n *Node) {
 			srcEnd:      int(n.SrcEnd),
 		},
 	}
+	// Hand a class constructor its instance-field initializers (set by
+	// compileClass immediately before this call; cleared so no other function
+	// inherits them).
+	child.classFields = c.pendingClassFields
+	child.classDerived = c.pendingClassDerived
+	c.pendingClassFields = nil
+	c.pendingClassDerived = false
 	child.compileFunctionBody(n)
 	if child.err != nil {
 		if c.err == nil {
@@ -434,6 +441,12 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		}
 		c.hoistLexicals(n.Body.Args)
 		c.hoistFunctions(n.Body.Args, false)
+		// A base class constructor initializes its instance fields on `this`
+		// before the body runs. (A derived ctor does it after super() instead —
+		// see compileSuperCall.)
+		if c.fn.isClassCtor && !c.classDerived {
+			c.emitInstanceFieldInit()
+		}
 		c.compileStmts(n.Body.Args)
 		// A class constructor's implicit completion returns its (possibly
 		// super-rebound) `this`, so subclassing an exotic native yields the object
