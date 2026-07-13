@@ -120,7 +120,11 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return mknum(float64(utf16IndexOf(b, sub, 0))), nil
+		start, e := rt.strClampPos(arg(args, 1), utf16Len(b))
+		if e != nil {
+			return mkundef(), e
+		}
+		return mknum(float64(utf16IndexOf(b, sub, start))), nil
 	})
 	rt.defMethod(proto, "lastIndexOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
@@ -145,7 +149,11 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return mkbool(utf16IndexOf(b, sub, 0) >= 0), nil
+		start, e := rt.strClampPos(arg(args, 1), utf16Len(b))
+		if e != nil {
+			return mkundef(), e
+		}
+		return mkbool(utf16IndexOf(b, sub, start) >= 0), nil
 	})
 	rt.defMethod(proto, "startsWith", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
@@ -159,7 +167,13 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return mkbool(strings.HasPrefix(string(b), string(sub))), nil
+		n := utf16Len(b)
+		start, e := rt.strClampPos(arg(args, 1), n)
+		if e != nil {
+			return mkundef(), e
+		}
+		bs, _ := utf16RangeToByteRange(b, start, n)
+		return mkbool(strings.HasPrefix(string(b[bs:]), string(sub))), nil
 	})
 	rt.defMethod(proto, "endsWith", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
@@ -173,7 +187,15 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return mkbool(strings.HasSuffix(string(b), string(sub))), nil
+		n := utf16Len(b)
+		end := n
+		if !arg(args, 1).IsUndefined() {
+			if end, e = rt.strClampPos(arg(args, 1), n); e != nil {
+				return mkundef(), e
+			}
+		}
+		_, be := utf16RangeToByteRange(b, 0, end)
+		return mkbool(strings.HasSuffix(string(b[:be]), string(sub))), nil
 	})
 
 	rt.defMethod(proto, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -182,8 +204,16 @@ func (rt *Runtime) initStringBuiltin() {
 			return mkundef(), e
 		}
 		n := utf16Len(b)
-		start := relIndex(rt, arg(args, 0), n, 0)
-		end := relIndex(rt, arg(args, 1), n, n)
+		start, e := rt.relativeIndexE(arg(args, 0), n)
+		if e != nil {
+			return mkundef(), e
+		}
+		end := n
+		if !arg(args, 1).IsUndefined() {
+			if end, e = rt.relativeIndexE(arg(args, 1), n); e != nil {
+				return mkundef(), e
+			}
+		}
 		if start >= end {
 			return rt.internString(""), nil
 		}
@@ -196,10 +226,15 @@ func (rt *Runtime) initStringBuiltin() {
 			return mkundef(), e
 		}
 		n := utf16Len(b)
-		start := clampIndex(rt.intArg(args, 0), n)
+		start, e := rt.strClampPos(arg(args, 0), n)
+		if e != nil {
+			return mkundef(), e
+		}
 		end := n
 		if !arg(args, 1).IsUndefined() {
-			end = clampIndex(rt.intArg(args, 1), n)
+			if end, e = rt.strClampPos(arg(args, 1), n); e != nil {
+				return mkundef(), e
+			}
 		}
 		if start > end {
 			start, end = end, start
@@ -588,6 +623,22 @@ func (rt *Runtime) intArg(args []Value, i int) int {
 		return 0
 	}
 	return int(n)
+}
+
+// strClampPos coerces a String-method position argument via ToIntegerOrInfinity
+// and clamps it to [0, n] (a UTF-16 index), propagating an abrupt coercion.
+func (rt *Runtime) strClampPos(v Value, n int) (int, *ThrowError) {
+	f, e := rt.toIntegerOrInfinity(v)
+	if e != nil {
+		return 0, e
+	}
+	if f <= 0 {
+		return 0, nil
+	}
+	if f >= float64(n) {
+		return n, nil
+	}
+	return int(f), nil
 }
 
 func (rt *Runtime) stringArg(args []Value, i int) ([]byte, *ThrowError) {
