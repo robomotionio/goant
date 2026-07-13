@@ -204,6 +204,9 @@ func toExponentialStr(x float64, fracDigits int, hasDigits bool) string {
 	if math.IsInf(x, -1) {
 		return "-Infinity"
 	}
+	if x == 0 {
+		x = 0 // -0 formats without a sign in toExponential (sign is x < 0)
+	}
 	if !hasDigits {
 		return fixExponent(strconv.FormatFloat(x, 'e', -1, 64))
 	}
@@ -346,8 +349,13 @@ func absInt(n int) int {
 	return n
 }
 
-// strconvFixed implements Number.prototype.toFixed formatting.
+// strconvFixed implements Number.prototype.toFixed formatting. toFixed's sign is
+// applied only when x < 0, which is false for -0, so an exact -0 formats without
+// a sign (unlike a small negative that rounds to -0, e.g. (-0.4).toFixed(0)).
 func strconvFixed(n float64, digits int) string {
+	if n == 0 {
+		n = 0 // normalize -0 to +0
+	}
 	if math.Abs(n) >= 1e21 {
 		return numberToString(n)
 	}
