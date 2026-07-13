@@ -74,8 +74,15 @@ type object struct {
 	// proxy is set for Proxy objects (their target + trap handler).
 	proxy *proxyState
 
-	// abuf is the backing byte store for an ArrayBuffer object.
+	// abuf is the backing byte store for an ArrayBuffer object; nil once the
+	// buffer is detached. For a resizable buffer, len(abuf) is the current byte
+	// length and cap(abuf) is abMax, so resize() only re-slices (the storage
+	// never moves and existing views stay valid).
 	abuf []byte
+	// abMax is the maximum byte length; abResizable marks a resizable buffer.
+	// For a non-resizable buffer abMax equals its fixed byte length.
+	abMax       int
+	abResizable bool
 	// ta is set for TypedArray views (element kind + window into an ArrayBuffer);
 	// dv marks a DataView over a buffer.
 	ta *typedArray
