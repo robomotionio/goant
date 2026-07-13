@@ -450,7 +450,26 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 		// array may be shadowed by a named index property defined with attributes
 		// (non-writable data rejects the write; an accessor invokes its setter) —
 		// honor it; absent one, keep the array fast.
-		if (int(idx) < len(o.arr) && !o.arr[idx].IsEmpty()) || idx >= o.arrLen {
+		if int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
+			rt.arraySet(o, idx, v)
+			return nil
+		}
+		// A far index whose gap past the dense store would balloon the backing
+		// slice spills to a named property (sparse array): length still tracks the
+		// index, but we never allocate the intervening holes (e.g. a[2**32-2]=x).
+		if idx > uint32(len(o.arr)) && idx-uint32(len(o.arr)) > maxDenseGap {
+			name := strconv.Itoa(int(idx))
+			if o.shape.lookupInterned(name) >= 0 {
+				_, e := rt.setFieldR(obj, name, v)
+				return e
+			}
+			o.defineOwn(name, v, attrDefault)
+			if idx+1 > o.arrLen {
+				o.arrLen = idx + 1
+			}
+			return nil
+		}
+		if idx >= o.arrLen {
 			rt.arraySet(o, idx, v)
 			return nil
 		}
@@ -505,6 +524,11 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 // ---- array helpers ----
 
 // arraySet stores v at index idx, growing the backing store and length.
+// maxDenseGap bounds how far past the materialized dense store an index write may
+// extend the fast backing slice. A larger jump is stored as a named property so a
+// sparse write near the 2^32 index ceiling can't balloon the slice (and OOM).
+const maxDenseGap = 1 << 20
+
 func (rt *Runtime) arraySet(o *object, idx uint32, v Value) {
 	for uint32(len(o.arr)) <= idx {
 		o.arr = append(o.arr, tEmpty)
