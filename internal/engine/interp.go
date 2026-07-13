@@ -230,12 +230,28 @@ restart:
 			push(it)
 			ip += 2 // Size 2 (unused inline operand byte)
 		case OpIterClose:
-			// Pop the iterator and call its return() (IteratorClose, normal
-			// completion — errors from return() are swallowed).
+			// IteratorClose (7.4.8) for a normal completion: call iter.return();
+			// a throw from GetMethod/return() propagates, and a non-Object return()
+			// result is a TypeError. (For a well-behaved return() this is identical
+			// to the old swallow behavior, so the abrupt-completion callers that
+			// emit this op after a caught throw are unaffected in the common case.)
 			iter := pop()
 			if iter.IsObjectType() {
-				if rf, e := rt.getField(iter, "return"); e == nil && rt.isCallable(rf) {
-					rt.callValue(rf, iter, nil)
+				rf, e := rt.getField(iter, "return")
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				if rt.isCallable(rf) {
+					res, e := rt.callValue(rf, iter, nil)
+					if e != nil {
+						thrown = e
+						goto unwind
+					}
+					if !res.IsObjectType() {
+						thrown = rt.typeError("iterator close: return() did not return an object")
+						goto unwind
+					}
 				}
 			}
 			ip++
