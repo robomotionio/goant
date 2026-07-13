@@ -281,6 +281,7 @@ func (rt *Runtime) markNativeConstructors() {
 // root (null proto); the others chain to it.
 func (rt *Runtime) initPrototypes() {
 	rt.objectProto = rt.newObject(mknull())
+	rt.objPtr(rt.objectProto).flags.immutableProto = true // %Object.prototype% [[Prototype]] is immutable
 	rt.functionProto = rt.newObject(rt.objectProto)
 	// Array.prototype is itself an Array exotic object (a length-0 array), so
 	// Array.isArray(Array.prototype) is true and it carries array [[DefineOwn]].

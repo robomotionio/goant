@@ -31,6 +31,9 @@ type objFlags struct {
 	// (Object.defineProperty(a,'length',{writable:false}) or Object.freeze). The
 	// length may not change and the array may not grow past it.
 	arrLenNonWritable bool
+	// immutableProto marks an object whose [[Prototype]] cannot be changed
+	// (%Object.prototype%). A SetPrototypeOf to a different value is rejected.
+	immutableProto bool
 }
 
 // extraSlot is one internal slot entry (ant ant_extra_slot_t).
@@ -299,6 +302,35 @@ func (rt *Runtime) hasInProtoChain(v, proto Value) bool {
 	}
 	return false
 }
+
+// ordinarySetProto implements OrdinarySetPrototypeOf(O, V) for a non-proxy
+// object, returning false (a rejected change) when O is non-extensible or has an
+// immutable [[Prototype]], or when V would introduce a prototype cycle. A no-op
+// (V equals the current prototype) always succeeds.
+func (rt *Runtime) ordinarySetProto(o *object, v Value) bool {
+	if rt.sameValue(o.proto, v) {
+		return true
+	}
+	if o.immutableProtoOf() || !o.flags.extensible {
+		return false
+	}
+	// Cycle check: walk V's chain; a non-ordinary [[GetPrototypeOf]] (Proxy) stops
+	// the walk (its identity can't be reasoned about statically).
+	for p := v; !p.IsNull(); {
+		po := rt.objPtr(p)
+		if po == nil || po.proxy != nil {
+			break
+		}
+		if po == o {
+			return false
+		}
+		p = po.proto
+	}
+	o.proto = v
+	return true
+}
+
+func (o *object) immutableProtoOf() bool { return o.flags.immutableProto }
 
 // defineOwnSymbol installs a symbol-keyed own property.
 func (o *object) defineOwnSymbol(sym uint32, v Value, attrs uint8) bool {

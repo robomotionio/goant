@@ -418,8 +418,14 @@ func (rt *Runtime) initObjectBuiltin() {
 					return mkundef(), e
 				}
 			} else if p.IsObjectType() || p.IsNull() {
-				o.proto = p
+				if !rt.ordinarySetProto(o, p) {
+					return mkundef(), rt.typeError("Object.setPrototypeOf: cannot set prototype (non-extensible, immutable, or cyclic)")
+				}
+			} else {
+				return mkundef(), rt.typeError("Object.setPrototypeOf: prototype must be an object or null")
 			}
+		} else if obj.IsNullish() {
+			return mkundef(), rt.typeError("Object.setPrototypeOf called on null or undefined")
 		}
 		return obj, nil
 	})

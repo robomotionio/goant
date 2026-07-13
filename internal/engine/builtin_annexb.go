@@ -127,8 +127,13 @@ func (rt *Runtime) initAnnexBObject() {
 			return mkundef(), rt.typeError("Object.prototype.__proto__ called on null or undefined")
 		}
 		p := arg(args, 0)
-		if o := rt.objPtr(this); o != nil && (p.IsObjectType() || p.IsNull()) {
-			o.proto = p
+		if !p.IsObjectType() && !p.IsNull() {
+			return mkundef(), nil // a primitive value is a silent no-op
+		}
+		if o := rt.objPtr(this); o != nil {
+			if !rt.ordinarySetProto(o, p) {
+				return mkundef(), rt.typeError("Cannot set the prototype (non-extensible, immutable, or cyclic)")
+			}
 		}
 		return mkundef(), nil
 	})
