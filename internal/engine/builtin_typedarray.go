@@ -800,21 +800,75 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	})
 	rt.defMethod(po, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || o.abuf == nil {
+		if o == nil || o.ta != nil || o.dv != nil {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.slice on incompatible receiver")
 		}
+		if o.abuf == nil {
+			return mkundef(), rt.typeError("Cannot slice a detached ArrayBuffer")
+		}
 		n := len(o.abuf)
-		start := rt.relativeIndex(arg(args, 0), n)
-		end := n
-		if !arg(args, 1).IsUndefined() {
-			end = rt.relativeIndex(arg(args, 1), n)
+		// ToIntegerOrInfinity + clamp to [0, n]; undefined end defaults to n.
+		clamp := func(v Value, def int) (int, *ThrowError) {
+			if v.IsUndefined() {
+				return def, nil
+			}
+			d, e := rt.toIntegerOrInfinity(v)
+			if e != nil {
+				return 0, e
+			}
+			switch {
+			case math.IsInf(d, -1):
+				return 0, nil
+			case math.IsInf(d, 1):
+				return n, nil
+			}
+			k := int(d)
+			if k < 0 {
+				if k += n; k < 0 {
+					k = 0
+				}
+			} else if k > n {
+				k = n
+			}
+			return k, nil
 		}
-		if end < start {
-			end = start
+		first, e := clamp(arg(args, 0), 0)
+		if e != nil {
+			return mkundef(), e
 		}
-		nb := rt.newArrayBuffer(end - start)
-		copy(rt.objPtr(nb).abuf, o.abuf[start:end])
-		return nb, nil
+		final, e := clamp(arg(args, 1), n)
+		if e != nil {
+			return mkundef(), e
+		}
+		newLen := final - first
+		if newLen < 0 {
+			newLen = 0
+		}
+		// SpeciesConstructor(O, %ArrayBuffer%) builds the result.
+		def, _ := rt.getField(rt.global, "ArrayBuffer")
+		ctor, e := rt.speciesConstructor(this, def)
+		if e != nil {
+			return mkundef(), e
+		}
+		nbV, e := rt.construct(ctor, []Value{mknum(float64(newLen))})
+		if e != nil {
+			return mkundef(), e
+		}
+		nb := rt.objPtr(nbV)
+		if !rt.isArrayBufferValue(nbV) { // covers non-ArrayBuffer and detached results
+			return mkundef(), rt.typeError("ArrayBuffer species constructor did not return an ArrayBuffer")
+		}
+		if nbV == this {
+			return mkundef(), rt.typeError("ArrayBuffer species constructor returned the same ArrayBuffer")
+		}
+		if len(nb.abuf) < newLen {
+			return mkundef(), rt.typeError("ArrayBuffer species constructor returned too small a buffer")
+		}
+		if o.abuf == nil { // the species constructor may have detached the source
+			return mkundef(), rt.typeError("The source ArrayBuffer was detached during slice")
+		}
+		copy(nb.abuf, o.abuf[first:final])
+		return nbV, nil
 	})
 	po.defineAccessor("maxByteLength", rt.newNativeFunc("get maxByteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
