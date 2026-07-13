@@ -510,11 +510,6 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	if !existing.exists && !o.flags.extensible {
 		return rt.typeError("Cannot define property, object is not extensible")
 	}
-	// A non-configurable, non-writable data property (e.g. frozen) cannot be
-	// redefined; a writable one may still have its value updated.
-	if existing.exists && !existing.configable && !existing.isAccessor && !existing.writable {
-		return rt.typeError("Cannot redefine property")
-	}
 	get := func(k string) (Value, bool) {
 		if rt.hasProp(descVal, k) {
 			v, _ := rt.getField(descVal, k)
@@ -541,6 +536,37 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	}
 	if hasSet && !setV.IsUndefined() && !rt.isCallable(setV) {
 		return rt.typeError("Setter must be a function")
+	}
+
+	// ValidateAndApplyPropertyDescriptor (10.1.6.3): a non-configurable existing
+	// property tightly constrains what a redefinition may change. Only the exact
+	// forbidden transitions reject — an identical (no-op) redefine is allowed.
+	if existing.exists && !existing.configable {
+		descIsAccessor := hasGet || hasSet
+		descIsData := hasVal || hasW
+		switch {
+		case hasC && rt.toBoolean(cV):
+			return rt.typeError("Cannot redefine property")
+		case hasE && rt.toBoolean(eV) != existing.enumerable:
+			return rt.typeError("Cannot redefine property")
+		case descIsAccessor && !existing.isAccessor, descIsData && existing.isAccessor:
+			return rt.typeError("Cannot redefine property") // no data<->accessor conversion
+		case existing.isAccessor:
+			if hasGet && !rt.sameValue(getV, existing.getter) {
+				return rt.typeError("Cannot redefine property")
+			}
+			if hasSet && !rt.sameValue(setV, existing.setter) {
+				return rt.typeError("Cannot redefine property")
+			}
+		case !existing.writable:
+			// Non-writable data: writable may not go true, value may not change.
+			if hasW && rt.toBoolean(wV) {
+				return rt.typeError("Cannot redefine property")
+			}
+			if hasVal && !rt.sameValue(valV, existing.value) {
+				return rt.typeError("Cannot redefine property")
+			}
+		}
 	}
 
 	// Start from existing attrs (or all-false for a new property).
