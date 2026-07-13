@@ -322,9 +322,18 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		start := rt.relativeIndex(arg(args, 1), n)
+		if n == 0 {
+			return mkfalse(), nil
+		}
+		start, e := rt.relativeIndexE(arg(args, 1), n)
+		if e != nil {
+			return mkundef(), e
+		}
 		for i := start; i < n; i++ {
-			el, _ := rt.getElement(this, mknum(float64(i)))
+			el, ee := rt.getElement(this, mknum(float64(i)))
+			if ee != nil {
+				return mkundef(), ee
+			}
 			if rt.sameValueZero(el, target) {
 				return mktrue(), nil
 			}

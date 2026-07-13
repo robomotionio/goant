@@ -6,6 +6,7 @@ package engine
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 )
@@ -161,8 +162,17 @@ func (rt *Runtime) lengthOf(v Value) (int, *ThrowError) {
 	if e != nil {
 		return 0, e
 	}
-	if n < 0 || n != n {
+	// ToLength: ToIntegerOrInfinity, clamp to [0, 2^53-1].
+	if n != n { // NaN
 		return 0, nil
+	}
+	n = math.Trunc(n)
+	if n <= 0 {
+		return 0, nil
+	}
+	const maxLen = 1<<53 - 1
+	if n >= maxLen {
+		return maxLen, nil
 	}
 	return int(n), nil
 }
