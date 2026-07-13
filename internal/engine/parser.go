@@ -1154,6 +1154,10 @@ func (p *parser) parsePostfix() *Node {
 		return p.mk(NEmpty)
 	}
 	if (la == TokPostInc || la == TokPostDec) && !p.hadNewline() {
+		if !isValidAssignTarget(n, true) { // ++/-- need a simple assignment target
+			p.errorf("Invalid left-hand side expression in postfix operation")
+			return p.mk(NEmpty)
+		}
 		if p.isStrictRestrictedAssignTarget(n) {
 			p.errorf("cannot modify eval or arguments in strict mode")
 			return p.mk(NEmpty)
@@ -1191,6 +1195,10 @@ func (p *parser) parseUnary() *Node {
 	if la == TokPostInc || la == TokPostDec {
 		p.consume()
 		target := p.parseUnary()
+		if !isValidAssignTarget(target, true) { // ++/-- need a simple assignment target
+			p.errorf("Invalid left-hand side expression in prefix operation")
+			return p.mk(NEmpty)
+		}
 		if p.isStrictRestrictedAssignTarget(target) {
 			p.errorf("cannot modify eval or arguments in strict mode")
 			return p.mk(NEmpty)
