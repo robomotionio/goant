@@ -942,21 +942,21 @@ func (rt *Runtime) initStringRegexpMethods() {
 	})
 
 	rt.defMethod(sp, "split", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		// GetMethod(separator, @@split) via [[Get]] so a Proxy trap sees it.
-		if pat := arg(args, 0); !pat.IsNullish() {
-			m, e := rt.getElement(pat, rt.symSplit)
+		if this.IsNullish() { // RequireObjectCoercible
+			return mkundef(), rt.typeError("String.prototype.split called on null or undefined")
+		}
+		// GetMethod(separator, @@split) for an Object separator; delegate with the
+		// raw receiver O (NOT ToString(this) — ToString happens inside @@split).
+		sep := arg(args, 0)
+		if sep.IsObjectType() {
+			m, e := rt.getElement(sep, rt.symSplit)
 			if e != nil {
 				return mkundef(), e
 			}
 			if rt.isCallable(m) {
-				s, e := rt.toStringValue(this)
-				if e != nil {
-					return mkundef(), e
-				}
-				return rt.callValue(m, pat, []Value{s, arg(args, 1)})
+				return rt.callValue(m, sep, []Value{this, arg(args, 1)})
 			}
 		}
-		sep := arg(args, 0)
 		if o := rt.objPtr(sep); o != nil && o.regex != nil {
 			return rt.stringSplitRegexp(this, o.regex, arg(args, 1))
 		}
@@ -1508,17 +1508,26 @@ func (rt *Runtime) stringSplitRegexp(this Value, re *regexpjs.Regexp, limitV Val
 
 // stringSplitString is the plain-string split path (moved from builtin_string).
 func (rt *Runtime) stringSplitString(this Value, args []Value) (Value, *ThrowError) {
+	// Spec §22.1.3.23 order: S = ToString(this); lim = ToUint32(limit); R =
+	// ToString(separator); THEN the lim==0 and separator-undefined shortcuts (so a
+	// throwing limit/separator coercion is observed even when the result is trivial).
 	b, e := rt.thisStringBytes(this)
 	if e != nil {
 		return mkundef(), e
 	}
 	res := rt.newArray()
 	ro := rt.objPtr(res)
-	// lim === 0 yields an empty array — this precedes the undefined-separator
-	// shortcut (spec §22.1.3.23 steps 6–8).
-	limit := -1
+	var limit int64 = 1<<32 - 1
 	if !arg(args, 1).IsUndefined() {
-		limit = int(toUint32(float64(rt.intArg(args, 1))))
+		ln, e := rt.toNumber(arg(args, 1))
+		if e != nil {
+			return mkundef(), e
+		}
+		limit = int64(toUint32(ln))
+	}
+	sepB, e := rt.stringArg(args, 0) // R = ToString(separator) (even if undefined)
+	if e != nil {
+		return mkundef(), e
 	}
 	if limit == 0 {
 		return res, nil
@@ -1527,21 +1536,18 @@ func (rt *Runtime) stringSplitString(this Value, args []Value) (Value, *ThrowErr
 		rt.arraySet(ro, 0, rt.newStringBytes(append([]byte{}, b...)))
 		return res, nil
 	}
-	sep, e := rt.stringArg(args, 0)
-	if e != nil {
-		return mkundef(), e
-	}
+	sep := string(sepB)
 	if len(sep) == 0 {
 		for i := 0; i < utf16Len(b); i++ {
-			if limit >= 0 && int(ro.arrLen) >= limit {
+			if int64(ro.arrLen) >= limit {
 				break
 			}
 			rt.arraySet(ro, ro.arrLen, rt.charAt(b, i))
 		}
 		return res, nil
 	}
-	for p := range strings.SplitSeq(string(b), string(sep)) {
-		if limit >= 0 && int(ro.arrLen) >= limit {
+	for p := range strings.SplitSeq(string(b), sep) {
+		if int64(ro.arrLen) >= limit {
 			break
 		}
 		rt.arraySet(ro, ro.arrLen, rt.newString(p))
