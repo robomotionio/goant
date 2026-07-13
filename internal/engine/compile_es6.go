@@ -260,11 +260,22 @@ func (c *compiler) bindDeclName(name string, kind VarKind) {
 }
 
 // compileIdentStore stores the top-of-stack value into an existing identifier
-// binding (local/upvalue/with/global), consuming it.
+// binding (local/upvalue/with/global), consuming it. Used for destructuring
+// assignment leaves.
 func (c *compiler) compileIdentStore(name string) {
+	if slot := c.resolveLocal(name); slot >= 0 {
+		// Assignment to a const binding throws a TypeError (strict & sloppy),
+		// mirroring compileAssign's storeVar. Consume the value first so the
+		// destructuring stack stays balanced, then throw.
+		if c.locals[slot].isConst {
+			c.emit(OpPop)
+			c.emitConstAssignError()
+			return
+		}
+		c.emitOpU16(OpPutLocal, uint16(slot))
+		return
+	}
 	switch {
-	case c.resolveLocal(name) >= 0:
-		c.emitOpU16(OpPutLocal, uint16(c.resolveLocal(name)))
 	case c.resolveUpvalue(name) >= 0:
 		c.emitOpU16(OpPutUpval, uint16(c.resolveUpvalue(name)))
 	case c.withDepth > 0:
