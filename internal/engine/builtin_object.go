@@ -104,7 +104,7 @@ func (rt *Runtime) initObjectBuiltin() {
 		return rt.toStringValue(this)
 	})
 	rt.defMethod(proto, "valueOf", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return this, nil
+		return rt.toObjectValue(this) // ToObject(this): a primitive returns its wrapper
 	})
 
 	// Object constructor.
