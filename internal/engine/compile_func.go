@@ -288,6 +288,32 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		}
 	}
 
+	// Duplicate parameter names are forbidden for an arrow, a method/accessor, any
+	// strict-mode function, or one with a non-simple (rest/default/destructuring)
+	// parameter list — only a sloppy simple-parameter regular function may repeat
+	// a name.
+	if n.Flags&(fnArrow|fnMethod|fnGetter|fnSetter) != 0 || c.fn.isStrict || hasNonSimpleParams(n) {
+		seen := map[string]bool{}
+		for _, param := range n.Args {
+			var names []string
+			switch param.Kind {
+			case NAssignPat:
+				collectPatternNames(param.Left, &names)
+			case NRest:
+				collectPatternNames(param.Right, &names)
+			default:
+				collectPatternNames(param, &names)
+			}
+			for _, nm := range names {
+				if seen[nm] {
+					c.syntaxErrorf("Duplicate parameter name not allowed in this context")
+					return
+				}
+				seen[nm] = true
+			}
+		}
+	}
+
 	// Parameters become the first local slots. Simple/default params get one
 	// slot each (and are arg-copied); a rest param collects the remaining args.
 	type deferredDefault struct {
