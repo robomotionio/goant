@@ -608,6 +608,19 @@ func (rt *Runtime) regExpExecAbstract(r, s Value) (Value, *ThrowError) {
 	return rt.regexpExec(r, s)
 }
 
+// setLastIndexOrThrow performs Set(R, "lastIndex", n, true): a TypeError when
+// lastIndex is not writable (a sticky/global exec must Set it with throw=true).
+func (rt *Runtime) setLastIndexOrThrow(this Value, n float64) *ThrowError {
+	ok, e := rt.setFieldR(this, "lastIndex", mknum(n))
+	if e != nil {
+		return e
+	}
+	if !ok {
+		return rt.typeError("Cannot assign to read only property 'lastIndex'")
+	}
+	return nil
+}
+
 func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	o := rt.objPtr(this)
 	if o == nil || o.regex == nil {
@@ -620,11 +633,36 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	input := []rune(string(rt.strBytes(s)))
 	re := o.regex
 
+	// lastIndex = ToLength(Get(R, "lastIndex")) — always read (observable via a
+	// getter), used as the search start only for a global/sticky regexp.
+	liv, e := rt.getField(this, "lastIndex")
+	if e != nil {
+		return mkundef(), e
+	}
+	lif, e := rt.toIntegerOrInfinity(liv)
+	if e != nil {
+		return mkundef(), e
+	}
+	lastIndex := 0
+	switch {
+	case lif <= 0:
+		lastIndex = 0
+	case lif > float64(len(input)):
+		lastIndex = len(input) + 1 // out of range -> no match
+	default:
+		lastIndex = int(lif)
+	}
 	start := 0
 	if re.Global || re.Sticky {
-		liv, _ := rt.getField(this, "lastIndex")
-		n, _ := rt.toNumberPrimitive(liv)
-		start = int(n)
+		start = lastIndex
+	}
+	if start > len(input) {
+		if re.Global || re.Sticky {
+			if e := rt.setLastIndexOrThrow(this, 0); e != nil {
+				return mkundef(), e
+			}
+		}
+		return mknull(), nil
 	}
 	m, err := re.Exec(input, start)
 	if err != nil {
@@ -632,12 +670,16 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	}
 	if m == nil {
 		if re.Global || re.Sticky {
-			rt.setField(this, "lastIndex", mknum(0))
+			if e := rt.setLastIndexOrThrow(this, 0); e != nil {
+				return mkundef(), e
+			}
 		}
 		return mknull(), nil
 	}
 	if re.Global || re.Sticky {
-		rt.setField(this, "lastIndex", mknum(float64(m.Index+m.Groups[0].Length)))
+		if e := rt.setLastIndexOrThrow(this, float64(m.Index+m.Groups[0].Length)); e != nil {
+			return mkundef(), e
+		}
 	}
 	if len(m.Groups) > 0 {
 		rt.regexpLastMatch = m.Groups[0].Value // RegExp.lastMatch (Annex B)
