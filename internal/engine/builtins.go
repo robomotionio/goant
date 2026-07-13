@@ -184,6 +184,16 @@ func (rt *Runtime) hasElem(obj Value, i int) bool {
 	return rt.hasProp(obj, numberToString(float64(i)))
 }
 
+// hasElemE is HasProperty(O, i) that propagates an abrupt completion from a
+// Proxy [[HasProperty]] trap (hasElem swallows it), for algorithms that must
+// ReturnIfAbrupt on the HasProperty step (e.g. copyWithin).
+func (rt *Runtime) hasElemE(obj Value, i int) (bool, *ThrowError) {
+	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
+		return rt.proxyHas(o.proxy, rt.internString(numberToString(float64(i))))
+	}
+	return rt.hasProp(obj, numberToString(float64(i))), nil
+}
+
 // inspect renders a value for console output. quoted controls whether strings
 // nested inside containers are quoted (top-level strings print bare).
 func (rt *Runtime) inspect(v Value, quoted bool) string {

@@ -451,22 +451,35 @@ func (rt *Runtime) initArrayBuiltin() {
 		return mknum(-1), nil
 	})
 	rt.defMethod(proto, "copyWithin", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		to := rt.relativeIndex(arg(args, 0), n)
-		from := rt.relativeIndex(arg(args, 1), n)
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		to, e := rt.relativeIndexE(arg(args, 0), n)
+		if e != nil {
+			return mkundef(), e
+		}
+		from, e := rt.relativeIndexE(arg(args, 1), n)
+		if e != nil {
+			return mkundef(), e
+		}
 		final := n
 		if len(args) > 2 && !arg(args, 2).IsUndefined() {
-			final = rt.relativeIndex(arg(args, 2), n)
+			if final, e = rt.relativeIndexE(arg(args, 2), n); e != nil {
+				return mkundef(), e
+			}
 		}
 		count := final - from
 		if count > n-to {
 			count = n - to
 		}
 		// 23.1.3.4: copy in place with a direction chosen to avoid clobbering the
-		// source when the ranges overlap; a hole in the source Deletes the target.
+		// source when the ranges overlap; a hole in the source Deletes the target
+		// (DeletePropertyOrThrow), and HasProperty/Get abrupts propagate.
 		dir := 1
 		if from < to && to < from+count {
 			dir = -1
@@ -476,20 +489,31 @@ func (rt *Runtime) initArrayBuiltin() {
 		for ; count > 0; count-- {
 			fromP := mknum(float64(from))
 			toP := mknum(float64(to))
-			if rt.hasElem(this, from) {
-				v, _ := rt.getElement(this, fromP)
-				if e := rt.setElement(this, toP, v); e != nil {
+			present, e := rt.hasElemE(obj, from)
+			if e != nil {
+				return mkundef(), e
+			}
+			if present {
+				v, e := rt.getElement(obj, fromP)
+				if e != nil {
+					return mkundef(), e
+				}
+				if e := rt.setElement(obj, toP, v); e != nil {
 					return mkundef(), e
 				}
 			} else {
-				if _, e := rt.deleteElement(this, toP); e != nil {
+				ok, e := rt.deleteElement(obj, toP)
+				if e != nil {
 					return mkundef(), e
+				}
+				if !ok {
+					return mkundef(), rt.typeError("Cannot delete property '" + numberToString(float64(to)) + "'")
 				}
 			}
 			from += dir
 			to += dir
 		}
-		return this, nil
+		return obj, nil
 	})
 	rt.defMethod(proto, "entries", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.newIndexIterator(this, iterEntries), nil
@@ -959,21 +983,34 @@ func (rt *Runtime) initArrayBuiltin() {
 		return mknum(-1), nil
 	})
 	rt.defMethod(proto, "fill", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		// Generic (23.1.3.6): reads length, then Set for each index in range —
-		// works on array-likes and routes element writes through Proxy traps.
-		n, e := rt.lengthOf(this)
+		// Generic (23.1.3.6): ToObject, read length, then Set for each index in
+		// range — works on array-likes and routes writes through Proxy traps. An
+		// abrupt ToIntegerOrInfinity of start/end (Symbol, throwing valueOf) propagates.
+		obj, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		n, e := rt.lengthOf(obj)
 		if e != nil {
 			return mkundef(), e
 		}
 		val := arg(args, 0)
-		start := relIndex(rt, arg(args, 1), n, 0)
-		end := relIndex(rt, arg(args, 2), n, n)
-		for i := start; i < end; i++ {
-			if e := rt.setElement(this, mknum(float64(i)), val); e != nil {
+		start, e := rt.relativeIndexE(arg(args, 1), n)
+		if e != nil {
+			return mkundef(), e
+		}
+		end := n
+		if len(args) > 2 && !arg(args, 2).IsUndefined() {
+			if end, e = rt.relativeIndexE(arg(args, 2), n); e != nil {
 				return mkundef(), e
 			}
 		}
-		return this, nil
+		for i := start; i < end; i++ {
+			if e := rt.setElement(obj, mknum(float64(i)), val); e != nil {
+				return mkundef(), e
+			}
+		}
+		return obj, nil
 	})
 	rt.defMethod(proto, "flat", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		depth := 1
