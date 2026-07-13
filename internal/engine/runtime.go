@@ -245,7 +245,17 @@ func New() *Runtime {
 func (rt *Runtime) initPrototypes() {
 	rt.objectProto = rt.newObject(mknull())
 	rt.functionProto = rt.newObject(rt.objectProto)
-	rt.arrayProto = rt.newObject(rt.objectProto)
+	// Array.prototype is itself an Array exotic object (a length-0 array), so
+	// Array.isArray(Array.prototype) is true and it carries array [[DefineOwn]].
+	{
+		h, obj := rt.objects.alloc()
+		obj.proto = rt.objectProto
+		obj.shape = newShape()
+		obj.typeTag = TArr
+		obj.flags.extensible = true
+		obj.flags.fastArray = true
+		rt.arrayProto = mkval(TArr, uint64(h))
+	}
 	rt.stringProto = rt.newObject(rt.objectProto)
 	rt.numberProto = rt.newObject(rt.objectProto)
 	rt.booleanProto = rt.newObject(rt.objectProto)
