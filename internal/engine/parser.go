@@ -1253,6 +1253,28 @@ func (p *parser) parseTernary() *Node {
 	return cond
 }
 
+// isValidAssignTarget reports whether n may be the target of an assignment: an
+// identifier or member reference, or — for a plain `=` (compound == false) — an
+// array/object destructuring pattern. Everything else (a literal, call,
+// `this`, binary/update expression, …) is an invalid AssignmentTarget.
+func isValidAssignTarget(n *Node, compound bool) bool {
+	if n == nil {
+		return false
+	}
+	switch n.Kind {
+	case NIdent, NMember:
+		return true
+	case NUndef, NGlobalThis:
+		// `undefined` / `globalThis` are IdentifierReferences (goant models them as
+		// their own node kinds); assigning is a sloppy no-op / strict TypeError, not
+		// a SyntaxError — unlike the literals null/true/false or `this`.
+		return true
+	case NArray, NObject, NArrayPat, NObjectPat:
+		return !compound
+	}
+	return false
+}
+
 func (p *parser) parseAssign() *Node {
 	left := p.parseTernary()
 	op := p.next()
@@ -1292,6 +1314,14 @@ func (p *parser) parseAssign() *Node {
 		}
 		if p.isStrictRestrictedAssignTarget(left) {
 			p.errorf("cannot modify eval or arguments in strict mode")
+			return p.mk(NEmpty)
+		}
+		// The target must be a valid AssignmentTarget: an identifier or member
+		// reference, or (for plain `=`) an array/object destructuring pattern.
+		// Anything else (a literal, call, `this`, binary/update expression, …) is
+		// an early SyntaxError.
+		if !isValidAssignTarget(left, op != TokAssign) {
+			p.errorf("Invalid left-hand side in assignment")
 			return p.mk(NEmpty)
 		}
 		if op == TokAssign && left.Kind == NArray {
