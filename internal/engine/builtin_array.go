@@ -408,8 +408,14 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.findLast predicate is not a function")
+		}
 		for i := n - 1; i >= 0; i-- {
-			el, _ := rt.getElement(this, mknum(float64(i)))
+			el, e := rt.getElement(this, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
 				return mkundef(), e
@@ -426,8 +432,14 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.findLastIndex predicate is not a function")
+		}
 		for i := n - 1; i >= 0; i-- {
-			el, _ := rt.getElement(this, mknum(float64(i)))
+			el, e := rt.getElement(this, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
 				return mkundef(), e
@@ -902,11 +914,16 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.find predicate is not a function")
+		}
+		// find visits every index via Get (no hole skipping); a hole reads through
+		// the prototype and the predicate still runs.
 		for i := 0; i < n; i++ {
-			if !rt.hasElem(this, i) { // some/every skip holes
-				continue
+			el, e := rt.getElement(this, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
 			}
-			el, _ := rt.getElement(this, mknum(float64(i)))
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
 				return mkundef(), e
@@ -923,11 +940,14 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.findIndex predicate is not a function")
+		}
 		for i := 0; i < n; i++ {
-			if !rt.hasElem(this, i) { // some/every skip holes
-				continue
+			el, e := rt.getElement(this, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
 			}
-			el, _ := rt.getElement(this, mknum(float64(i)))
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
 				return mkundef(), e
