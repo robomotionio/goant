@@ -399,6 +399,7 @@ func (rt *Runtime) newArrayBuffer(byteLen int) Value {
 	}
 	o.abuf = make([]byte, byteLen)
 	o.abMax = byteLen
+	o.abObj = true
 	return v
 }
 
@@ -412,6 +413,7 @@ func (rt *Runtime) newResizableArrayBuffer(byteLen, maxLen int) Value {
 	o.abuf = make([]byte, byteLen)
 	o.abMax = maxLen
 	o.abResizable = true
+	o.abObj = true
 	return v
 }
 
@@ -729,15 +731,19 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	rt.arrayBufferProto = proto
 	po := rt.objPtr(proto)
 	po.defineAccessor("byteLength", rt.newNativeFunc("get byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if o := rt.objPtr(this); o != nil {
-			return mknum(float64(len(o.abuf))), nil
+		o := rt.objPtr(this)
+		if o == nil || !o.abObj {
+			return mkundef(), rt.typeError("ArrayBuffer.prototype.byteLength getter called on a non-ArrayBuffer")
 		}
-		return mknum(0), nil
+		return mknum(float64(len(o.abuf))), nil // 0 when detached
 	}), mkundef(), true, false, attrConfigurable)
 	// detached: an ArrayBuffer whose bytes have been transferred away (abuf nil).
 	po.defineAccessor("detached", rt.newNativeFunc("get detached", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		return mkbool(o != nil && o.abuf == nil), nil
+		if o == nil || !o.abObj {
+			return mkundef(), rt.typeError("ArrayBuffer.prototype.detached getter called on a non-ArrayBuffer")
+		}
+		return mkbool(o.abuf == nil), nil
 	}), mkundef(), true, false, attrConfigurable)
 	// ArrayBufferCopyAndDetach: copy into a new buffer and detach the source.
 	// transfer preserves resizability (same maxByteLength); transferToFixedLength

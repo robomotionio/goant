@@ -83,6 +83,10 @@ type object struct {
 	// For a non-resizable buffer abMax equals its fixed byte length.
 	abMax       int
 	abResizable bool
+	// abObj brands an object as an ArrayBuffer (the [[ArrayBufferData]] slot),
+	// staying true after detach so the prototype getters can require the slot on
+	// their receiver while still distinguishing a detached buffer from a non-buffer.
+	abObj bool
 	// ta is set for TypedArray views (element kind + window into an ArrayBuffer);
 	// dv marks a DataView over a buffer.
 	ta *typedArray
