@@ -1036,7 +1036,11 @@ func (p *parser) parseObject() *Node {
 		if p.next() == TokColon {
 			p.consume()
 			prop.Flags |= fnColon
-			if prop.Left != nil && prop.Left.Kind == NIdent && prop.Left.Str == "__proto__" {
+			// A plain data property named __proto__ (via identifier or string key,
+			// but NOT a computed key) is the prototype setter; two of them error.
+			if prop.Flags&fnComputed == 0 && prop.Left != nil &&
+				(prop.Left.Kind == NIdent || prop.Left.Kind == NString) &&
+				prop.Left.Str == "__proto__" {
 				if protoSet {
 					p.errorf("Duplicate __proto__ fields are not allowed in object literals")
 					return n
