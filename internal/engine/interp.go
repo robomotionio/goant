@@ -323,11 +323,15 @@ restart:
 			kind := code[ip+1]
 			switch kind {
 			case 0: // arguments
-				a := rt.newArray()
+				// The arguments object is an ordinary exotic object (NOT an Array), so
+				// its own "length" data property is fixed at the argument count and does
+				// not shift when an index past it is assigned.
+				a := rt.newObject(rt.objectProto)
 				ao := rt.objPtr(a)
 				for i, v := range args {
-					rt.arraySet(ao, uint32(i), v)
+					ao.defineOwn(numberToString(float64(i)), v, attrDefault)
 				}
+				ao.defineOwn("length", mknum(float64(len(args))), attrWritable|attrConfigurable)
 				if fn.isStrict {
 					// Strict arguments: `callee` is a poison-pill accessor.
 					ao.defineAccessor("callee", rt.poison, rt.poison, true, true, 0)
