@@ -75,6 +75,51 @@ func (rt *Runtime) relativeIndexE(v Value, n int) (int, *ThrowError) {
 	return k, nil
 }
 
+// sortCompare implements SortCompare: undefined sorts to the end; otherwise a
+// comparator's result is ToNumber'd (NaN -> 0), or the default ToString ordering
+// is used. Returns <0, 0, or >0 and propagates an abrupt comparator/ToString.
+func (rt *Runtime) sortCompare(x, y, cmp Value) (int, *ThrowError) {
+	xu, yu := x.IsUndefined(), y.IsUndefined()
+	if xu && yu {
+		return 0, nil
+	}
+	if xu {
+		return 1, nil
+	}
+	if yu {
+		return -1, nil
+	}
+	if !cmp.IsUndefined() {
+		r, e := rt.callValue(cmp, mkundef(), []Value{x, y})
+		if e != nil {
+			return 0, e
+		}
+		nv, e := rt.toNumber(r)
+		if e != nil {
+			return 0, e
+		}
+		if math.IsNaN(nv) {
+			return 0, nil
+		}
+		if nv < 0 {
+			return -1, nil
+		}
+		if nv > 0 {
+			return 1, nil
+		}
+		return 0, nil
+	}
+	sx, e := rt.toStringValue(x)
+	if e != nil {
+		return 0, e
+	}
+	sy, e := rt.toStringValue(y)
+	if e != nil {
+		return 0, e
+	}
+	return compareStrings(rt.strBytes(sx), rt.strBytes(sy)), nil
+}
+
 // sortValues sorts a slice in place with JS Array.prototype.sort semantics
 // (undefined last; comparator or default ToString ordering).
 func (rt *Runtime) sortValues(vs []Value, cmp Value) *ThrowError {
@@ -1226,43 +1271,67 @@ func (rt *Runtime) initArrayBuiltin() {
 	})
 
 	rt.defMethod(proto, "sort", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(this)
-		if o == nil {
-			return this, nil
-		}
 		cmp := arg(args, 0)
 		if !cmp.IsUndefined() && !rt.isCallable(cmp) {
 			return mkundef(), rt.typeError("The comparison function must be either a function or undefined")
 		}
+		obj, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		// SortIndexedProperties (skip-holes): collect the present elements via Get,
+		// sort, write them back with Set, then Delete the trailing holes. This runs
+		// entirely through the ordinary property protocol (getters/setters, the
+		// prototype chain, Proxy traps) unlike an in-place dense sort.
+		items := make([]Value, 0, n)
+		for k := 0; k < n; k++ {
+			present, e := rt.hasElemE(obj, k)
+			if e != nil {
+				return mkundef(), e
+			}
+			if present {
+				el, e := rt.getElement(obj, mknum(float64(k)))
+				if e != nil {
+					return mkundef(), e
+				}
+				items = append(items, el)
+			}
+		}
+		itemCount := len(items)
 		var sortErr *ThrowError
-		sort.SliceStable(o.arr[:o.arrLen], func(i, j int) bool {
+		sort.SliceStable(items, func(i, j int) bool {
 			if sortErr != nil {
 				return false
 			}
-			a, b := o.arr[i], o.arr[j]
-			if a.IsUndefined() {
+			c, e := rt.sortCompare(items[i], items[j], cmp)
+			if e != nil {
+				sortErr = e
 				return false
 			}
-			if b.IsUndefined() {
-				return true
-			}
-			if rt.isCallable(cmp) {
-				r, e := rt.callValue(cmp, mkundef(), []Value{a, b})
-				if e != nil {
-					sortErr = e
-					return false
-				}
-				nv, _ := rt.toNumberPrimitive(r)
-				return nv < 0
-			}
-			sa, _ := rt.toStringValue(a)
-			sb, _ := rt.toStringValue(b)
-			return compareStrings(rt.strBytes(sa), rt.strBytes(sb)) < 0
+			return c < 0
 		})
 		if sortErr != nil {
 			return mkundef(), sortErr
 		}
-		return this, nil
+		for j := 0; j < itemCount; j++ {
+			if e := rt.setElement(obj, mknum(float64(j)), items[j]); e != nil {
+				return mkundef(), e
+			}
+		}
+		for j := itemCount; j < n; j++ {
+			ok, e := rt.deleteElement(obj, mknum(float64(j)))
+			if e != nil {
+				return mkundef(), e
+			}
+			if !ok {
+				return mkundef(), rt.typeError("Cannot delete array index during sort")
+			}
+		}
+		return obj, nil
 	})
 
 	// Array constructor.
