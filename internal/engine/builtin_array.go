@@ -890,18 +890,32 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		start := relIndex(rt, arg(args, 0), n, 0)
-		delCount := n - start
-		if len(args) >= 2 {
-			dc := rt.intArg(args, 1)
-			if dc < 0 {
-				dc = 0
+		start, e := rt.relativeIndexE(arg(args, 0), n)
+		if e != nil {
+			return mkundef(), e
+		}
+		delCount := 0
+		if len(args) == 1 {
+			delCount = n - start
+		} else if len(args) >= 2 {
+			// actualDeleteCount = clamp(ToIntegerOrInfinity(deleteCount), 0, len-start).
+			dcF, e := rt.toIntegerOrInfinity(arg(args, 1))
+			if e != nil {
+				return mkundef(), e
 			}
-			if dc < delCount {
-				delCount = dc
+			if dcF >= float64(n-start) {
+				delCount = n - start
+			} else if dcF > 0 {
+				delCount = int(dcF)
 			}
-		} else if len(args) == 0 {
-			delCount = 0
+		}
+		itemCount := 0
+		if len(args) > 2 {
+			itemCount = len(args) - 2
+		}
+		// The resulting length must not exceed 2^53-1 (integer-index limit).
+		if float64(n)+float64(itemCount)-float64(delCount) > 9007199254740991 {
+			return mkundef(), rt.typeError("Invalid array length")
 		}
 		// 23.1.3.28: collect removed elements (holes stay holes), shift the tail to
 		// make room (Delete for holes), splice in the new items. HasProperty and
@@ -927,7 +941,6 @@ func (rt *Runtime) initArrayBuiltin() {
 		if len(args) > 2 {
 			items = args[2:]
 		}
-		itemCount := len(items)
 		switch {
 		case itemCount < delCount:
 			for i := start; i < n-delCount; i++ {
