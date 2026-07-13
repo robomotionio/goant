@@ -1477,6 +1477,7 @@ func (p *parser) parseClass() *Node {
 		cls.Left = p.parseAssign()
 	}
 	p.expect(TokLBrace)
+	sawCtor := false
 	for p.next() != TokRBrace && p.tok() != TokEOF {
 		if p.tok() == TokSemicolon {
 			p.consume()
@@ -1556,6 +1557,24 @@ func (p *parser) parseClass() *Node {
 			method.Left.Kind == NIdent && method.Left.Str == "constructor" {
 			p.errorf("Class constructor may not be a generator")
 			return cls
+		}
+		// A non-static, non-computed member named "constructor" may not be an
+		// accessor or async method (a constructor can't be a special method — the
+		// generator case is rejected above), and a class may declare at most one.
+		if flags&(fnStatic|fnComputed) == 0 &&
+			method.Left != nil && method.Left.Kind == NIdent &&
+			method.Left.Str == "constructor" {
+			if flags&(fnGetter|fnSetter|fnAsync) != 0 {
+				p.errorf("Class constructor may not be an accessor or async method")
+				return cls
+			}
+			if p.next() == TokLParen {
+				if sawCtor {
+					p.errorf("A class may only have one constructor")
+					return cls
+				}
+				sawCtor = true
+			}
 		}
 
 		if p.next() == TokLParen {
@@ -2272,12 +2291,18 @@ func (p *parser) parseSwitch() *Node {
 	n.Cond = p.parseExpr()
 	p.expect(TokRParen)
 	p.expect(TokLBrace)
+	sawDefault := false
 	for p.next() != TokRBrace && p.tok() != TokEOF {
 		c := p.mk(NCase)
 		if p.tok() == TokCase {
 			p.consume()
 			c.Left = p.parseExpr()
 		} else if p.tok() == TokDefault {
+			if sawDefault {
+				p.errorf("More than one default clause in switch statement")
+				return p.mk(NEmpty)
+			}
+			sawDefault = true
 			p.consume()
 		}
 		p.expect(TokColon)
