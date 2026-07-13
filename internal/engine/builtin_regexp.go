@@ -1004,7 +1004,21 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 			}
 			replacement = string(rt.strBytes(rs))
 		} else {
-			replacement = expandReplacement(replStr, matched, groups)
+			// Named captures for $<name> come from the match result's `groups`
+			// object (undefined when the pattern has no named groups).
+			var named map[string]string
+			if gv, _ := rt.getField(result, "groups"); gv.IsObjectType() {
+				named = map[string]string{}
+				for _, k := range rt.objPtr(gv).ownKeysEnumerable() {
+					v, _ := rt.getField(gv, k)
+					if v.IsUndefined() {
+						named[k] = ""
+					} else if sv, e := rt.toStringValue(v); e == nil {
+						named[k] = string(rt.strBytes(sv))
+					}
+				}
+			}
+			replacement = expandReplacement(replStr, matched, position, Srunes, groups, named)
 		}
 		if position >= nextPos {
 			out.WriteString(string(Srunes[nextPos:position]))
@@ -1123,7 +1137,20 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 		if terr != nil {
 			return "", terr
 		}
-		return expandReplacement(string(rt.strBytes(rs)), match, groups), nil
+		var named map[string]string
+		for _, g := range groups {
+			if g.Name != "" && !allDigits(g.Name) {
+				if named == nil {
+					named = map[string]string{}
+				}
+				if g.Index >= 0 {
+					named[g.Name] = g.Value
+				} else {
+					named[g.Name] = ""
+				}
+			}
+		}
+		return expandReplacement(string(rt.strBytes(rs)), match, index, []rune(string(rt.strBytes(s))), groups, named), nil
 	}
 
 	o := rt.objPtr(pattern)
@@ -1184,8 +1211,13 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 	return rt.newString(subject[:idx] + rep + subject[idx+len(pat):]), nil
 }
 
-// expandReplacement handles $&, $1..$9, $`, $', $$ in a string replacement.
-func expandReplacement(tmpl, match string, groups []regexpjs.Group) string {
+// expandReplacement handles the $ substitutions of GetSubstitution (22.1.3.19.1)
+// in a string replacement: $$, $&, $` (portion before the match), $' (portion
+// after), $1..$99 numbered captures, and $<name> named captures. position is the
+// match's rune offset into input; named is nil when the pattern has no named
+// groups (so "$<" stays literal).
+func expandReplacement(tmpl, match string, position int, input []rune, groups []regexpjs.Group, named map[string]string) string {
+	matchLen := len([]rune(match))
 	var out strings.Builder
 	for i := 0; i < len(tmpl); i++ {
 		if tmpl[i] != '$' || i+1 >= len(tmpl) {
@@ -1200,6 +1232,25 @@ func expandReplacement(tmpl, match string, groups []regexpjs.Group) string {
 		case c == '&':
 			out.WriteString(match)
 			i++
+		case c == '`':
+			if position >= 0 && position <= len(input) {
+				out.WriteString(string(input[:position]))
+			}
+			i++
+		case c == '\'':
+			if end := position + matchLen; end >= 0 && end <= len(input) {
+				out.WriteString(string(input[end:]))
+			}
+			i++
+		case c == '<' && len(named) > 0:
+			// Only a pattern that actually has named groups makes "$<" special;
+			// otherwise it is literal. An absent/unmatched name yields "".
+			if gt := strings.IndexByte(tmpl[i+2:], '>'); gt >= 0 {
+				out.WriteString(named[tmpl[i+2:i+2+gt]])
+				i += 2 + gt
+			} else {
+				out.WriteByte('$')
+			}
 		case c >= '1' && c <= '9':
 			n := int(c - '0')
 			// Two-digit group reference when valid.
