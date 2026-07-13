@@ -189,6 +189,17 @@ func (rt *Runtime) initObjectBuiltin() {
 		d := o.ownDescriptor(name)
 		if !d.exists {
 			if arg(args, 0).Type() == TArr {
+				// The array "length" data property (value = length, writable,
+				// non-enumerable, non-configurable) is virtual — synthesize it.
+				if name == "length" {
+					do := rt.newPlainObject()
+					dp := rt.objPtr(do)
+					dp.defineOwn("value", mknum(float64(o.arrLen)), attrDefault)
+					dp.defineOwn("writable", mktrue(), attrDefault)
+					dp.defineOwn("enumerable", mkfalse(), attrDefault)
+					dp.defineOwn("configurable", mkfalse(), attrDefault)
+					return do, nil
+				}
 				if idx, ok := arrayIndex(arg(args, 1)); ok && idx < o.arrLen {
 					v, _ := rt.getElement(arg(args, 0), arg(args, 1))
 					return rt.makeDataDescriptor(v, true, true, true), nil
