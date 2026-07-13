@@ -1745,18 +1745,24 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		v, _ := rt.taGet(o, k)
 		return v, nil
 	})
-	m("subarray", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	// subarray only requires the [[TypedArrayName]] slot (NOT ValidateTypedArray):
+	// it works on an out-of-bounds view (srcLength treated as 0) and its begin/end
+	// coercions stay observable even on a detached buffer — so it bypasses `m`.
+	rt.defMethod(tp, "subarray", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		l := length(this)
+		if o == nil || o.ta == nil {
+			return mkundef(), rt.typeError("TypedArray.prototype.subarray called on incompatible receiver")
+		}
+		l := length(this) // 0 when out of bounds
 		start, e := rt.relativeIndexE(arg(args, 0), l)
 		if e != nil {
 			return mkundef(), e
 		}
-		// subarray shares the buffer: SpeciesConstructor is invoked with
-		// (buffer, absoluteByteOffset, newLength). A length-tracking source with
-		// no end argument yields another length-tracking view (undefined length).
 		byteOffset := o.ta.byteOffset + start*o.ta.size()
-		lenArg := mkundef()
+		// SpeciesConstructor is invoked with (buffer, absoluteByteOffset[, newLength]).
+		// A length-tracking source with no end argument passes only 2 arguments so
+		// the result is itself length-tracking.
+		ctorArgs := []Value{o.ta.buf, mknum(float64(byteOffset))}
 		if !(o.ta.track && arg(args, 1).IsUndefined()) {
 			end := l
 			if !arg(args, 1).IsUndefined() {
@@ -1767,11 +1773,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 			if end < start {
 				end = start
 			}
-			lenArg = mknum(float64(end - start))
+			ctorArgs = append(ctorArgs, mknum(float64(end-start)))
 		}
-		return rt.typedArraySpeciesCreate(this, []Value{
-			o.ta.buf, mknum(float64(byteOffset)), lenArg,
-		})
+		return rt.typedArraySpeciesCreate(this, ctorArgs)
 	})
 	m("copyWithin", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
@@ -1835,6 +1839,11 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		}
 		if offN < 0 {
 			return mkundef(), rt.rangeError("Start offset is negative")
+		}
+		// ToNumber(offset) may have detached/shrunk the target buffer: re-validate
+		// before the range check (a detached target is a TypeError, not RangeError).
+		if rt.taOutOfBounds(o) {
+			return mkundef(), rt.typeError("Cannot set into a detached or out-of-bounds TypedArray")
 		}
 		targetLen := rt.taCurrentLen(o)
 		bigTarget := isBigIntKind(o.ta.kind)
