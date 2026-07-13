@@ -29,6 +29,9 @@ func (rt *Runtime) canonicalKey(v Value) string {
 			return "b:1"
 		}
 		return "b:0"
+	case TBigInt:
+		// BigInt keys compare by value, not by the handle in the Value bits.
+		return "i:" + rt.bigIntVal(v).String()
 	case TUndef:
 		return "u"
 	case TNull:

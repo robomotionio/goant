@@ -194,6 +194,11 @@ func (rt *Runtime) sameValueNonNumber(a, b Value) bool {
 	if a.Type() == TStr {
 		return string(rt.strBytes(a)) == string(rt.strBytes(b))
 	}
+	if a.Type() == TBigInt {
+		// BigInts compare by value, not by the handle stored in the Value bits.
+		x, y := rt.bigIntVal(a), rt.bigIntVal(b)
+		return x != nil && y != nil && x.Cmp(y) == 0
+	}
 	// undefined, null, boolean, symbol, object: identity by raw Value bits.
 	return a == b
 }

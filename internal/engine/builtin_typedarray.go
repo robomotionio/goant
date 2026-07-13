@@ -1226,6 +1226,17 @@ func (rt *Runtime) typedArrayCreate(C Value, length int) (Value, *ThrowError) {
 	return res, nil
 }
 
+// taStrictEq reports whether a TypedArray element el strictly equals a search
+// value (the comparison used by indexOf/lastIndexOf). The search value is not
+// coerced, so a Number search never matches a BigInt array element and vice
+// versa; NaN never equals NaN and +0 equals -0 (IEEE ==).
+func taStrictEq(rt *Runtime, el, search Value, bigKind bool) bool {
+	if bigKind {
+		return el.Type() == TBigInt && search.Type() == TBigInt && rt.bigIntVal(el).Cmp(rt.bigIntVal(search)) == 0
+	}
+	return search.IsNumber() && el.Number() == search.Number()
+}
+
 // taLength returns a TypedArray's effective element length (for lengthOf /
 // methods): 0 when detached or out of bounds, and recomputed from the buffer
 // for length-tracking views.
@@ -1450,29 +1461,97 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		tp.defineOwn("toString", ts, attrWritable|attrConfigurable)
 	}
 	m("indexOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		target, _ := rt.toNumber(arg(args, 0))
-		for i, l := 0, length(this); i < l; i++ {
-			if get(this, i).Number() == target {
+		// searchElement is NOT coerced; compare each element by strict equality.
+		// len is captured before ToIntegerOrInfinity(fromIndex), whose valueOf may
+		// resize/detach; out-of-bounds indices then read as "not present".
+		o := rt.objPtr(this)
+		search := arg(args, 0)
+		l := length(this)
+		if l == 0 {
+			return mknum(-1), nil
+		}
+		n, e := rt.toIntegerOrInfinity(arg(args, 1))
+		if e != nil {
+			return mkundef(), e
+		}
+		if math.IsInf(n, 1) {
+			return mknum(-1), nil
+		}
+		k := 0
+		if !math.IsInf(n, -1) {
+			if k = int(n); k < 0 {
+				if k += l; k < 0 {
+					k = 0
+				}
+			}
+		}
+		bigKind := isBigIntKind(o.ta.kind)
+		for i := k; i < l; i++ {
+			if el, ok := rt.taGet(o, i); ok && taStrictEq(rt, el, search, bigKind) {
 				return mknum(float64(i)), nil
 			}
 		}
 		return mknum(-1), nil
 	})
 	m("lastIndexOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		target, _ := rt.toNumber(arg(args, 0))
-		for i := length(this) - 1; i >= 0; i-- {
-			if get(this, i).Number() == target {
+		o := rt.objPtr(this)
+		search := arg(args, 0)
+		l := length(this)
+		if l == 0 {
+			return mknum(-1), nil
+		}
+		k := l - 1
+		if len(args) > 1 {
+			n, e := rt.toIntegerOrInfinity(arg(args, 1))
+			if e != nil {
+				return mkundef(), e
+			}
+			if math.IsInf(n, -1) {
+				return mknum(-1), nil
+			}
+			if math.IsInf(n, 1) || int(n) >= l {
+				k = l - 1
+			} else if k = int(n); k < 0 {
+				k += l
+			}
+		}
+		bigKind := isBigIntKind(o.ta.kind)
+		for i := k; i >= 0; i-- {
+			if el, ok := rt.taGet(o, i); ok && taStrictEq(rt, el, search, bigKind) {
 				return mknum(float64(i)), nil
 			}
 		}
 		return mknum(-1), nil
 	})
 	m("includes", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		target, _ := rt.toNumber(arg(args, 0))
+		// includes uses SameValueZero and reads out-of-bounds indices as undefined
+		// (so includes(undefined) can be true after a mid-coercion detach).
+		search := arg(args, 0)
 		l := length(this)
-		start := rt.relativeIndex(arg(args, 1), l)
-		for i := start; i < l; i++ {
-			if rt.sameValueZero(get(this, i), mknum(target)) {
+		if l == 0 {
+			return mkfalse(), nil
+		}
+		n, e := rt.toIntegerOrInfinity(arg(args, 1))
+		if e != nil {
+			return mkundef(), e
+		}
+		if math.IsInf(n, 1) {
+			return mkfalse(), nil
+		}
+		k := 0
+		if !math.IsInf(n, -1) {
+			if k = int(n); k < 0 {
+				if k += l; k < 0 {
+					k = 0
+				}
+			}
+		}
+		bigKind := isBigIntKind(rt.objPtr(this).ta.kind)
+		for i := k; i < l; i++ {
+			el := get(this, i)
+			// BigInt equality goes through taStrictEq (SameValueZero on BigInts is
+			// plain equality); Numbers use SameValueZero so NaN matches NaN.
+			if (bigKind && taStrictEq(rt, el, search, true)) || (!bigKind && rt.sameValueZero(el, search)) {
 				return mktrue(), nil
 			}
 		}
