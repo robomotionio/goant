@@ -65,6 +65,11 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 		// arrayIndexOf accepts a string index too ("1"), so `delete a["1"]` clears
 		// the element (arrayIndex only matched a numeric key, leaving it in place).
 		o := rt.objPtr(obj)
+		// An index defined with non-default attributes lives as a named shape
+		// property; delete it via deleteOwn (which honors [[Configurable]]).
+		if name := numberToString(float64(idx)); o.shape.lookupInterned(name) >= 0 {
+			return o.deleteOwn(name), nil
+		}
 		if int(idx) < len(o.arr) {
 			o.arr[idx] = tEmpty
 		}
