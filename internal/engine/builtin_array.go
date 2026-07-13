@@ -862,7 +862,11 @@ func (rt *Runtime) initArrayBuiltin() {
 	rt.defMethod(proto, "reverse", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		// Generic (23.1.3.26): honors holes via HasProperty so a hole reverses to
 		// a hole (Delete), routing every step through Proxy traps.
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		n, e := rt.lengthOf(obj)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -870,41 +874,51 @@ func (rt *Runtime) initArrayBuiltin() {
 			upper := n - 1 - lower
 			lowerP := mknum(float64(lower))
 			upperP := mknum(float64(upper))
-			lowerExists := rt.hasElem(this, lower)
+			lowerExists, e := rt.hasElemE(obj, lower)
+			if e != nil {
+				return mkundef(), e
+			}
 			var lowerVal Value
 			if lowerExists {
-				lowerVal, _ = rt.getElement(this, lowerP)
+				if lowerVal, e = rt.getElement(obj, lowerP); e != nil {
+					return mkundef(), e
+				}
 			}
-			upperExists := rt.hasElem(this, upper)
+			upperExists, e := rt.hasElemE(obj, upper)
+			if e != nil {
+				return mkundef(), e
+			}
 			var upperVal Value
 			if upperExists {
-				upperVal, _ = rt.getElement(this, upperP)
+				if upperVal, e = rt.getElement(obj, upperP); e != nil {
+					return mkundef(), e
+				}
 			}
 			switch {
 			case lowerExists && upperExists:
-				if e := rt.setElement(this, lowerP, upperVal); e != nil {
+				if e := rt.setElement(obj, lowerP, upperVal); e != nil {
 					return mkundef(), e
 				}
-				if e := rt.setElement(this, upperP, lowerVal); e != nil {
+				if e := rt.setElement(obj, upperP, lowerVal); e != nil {
 					return mkundef(), e
 				}
 			case upperExists:
-				if e := rt.setElement(this, lowerP, upperVal); e != nil {
+				if e := rt.setElement(obj, lowerP, upperVal); e != nil {
 					return mkundef(), e
 				}
-				if _, e := rt.deleteElement(this, upperP); e != nil {
+				if _, e := rt.deleteElement(obj, upperP); e != nil {
 					return mkundef(), e
 				}
 			case lowerExists:
-				if _, e := rt.deleteElement(this, lowerP); e != nil {
+				if _, e := rt.deleteElement(obj, lowerP); e != nil {
 					return mkundef(), e
 				}
-				if e := rt.setElement(this, upperP, lowerVal); e != nil {
+				if e := rt.setElement(obj, upperP, lowerVal); e != nil {
 					return mkundef(), e
 				}
 			}
 		}
-		return this, nil
+		return obj, nil
 	})
 
 	// Iteration methods taking a callback(value, index, array).
