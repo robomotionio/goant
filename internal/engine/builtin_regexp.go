@@ -752,18 +752,15 @@ func (rt *Runtime) initStringRegexpMethods() {
 		if this.IsNullish() { // RequireObjectCoercible before delegating to @@replace
 			return mkundef(), rt.typeError("String.prototype.replace called on null or undefined")
 		}
-		// GetMethod(searchValue, @@replace) via [[Get]] so a Proxy trap sees it.
-		if pat := arg(args, 0); !pat.IsNullish() {
+		// GetMethod(searchValue, @@replace) for an Object searchValue; delegate with
+		// the raw receiver O (ToString happens inside @@replace).
+		if pat := arg(args, 0); pat.IsObjectType() {
 			m, e := rt.getElement(pat, rt.symReplace)
 			if e != nil {
 				return mkundef(), e
 			}
 			if rt.isCallable(m) {
-				s, e := rt.toStringValue(this)
-				if e != nil {
-					return mkundef(), e
-				}
-				return rt.callValue(m, pat, []Value{s, arg(args, 1)})
+				return rt.callValue(m, pat, []Value{this, arg(args, 1)})
 			}
 		}
 		return rt.stringReplace(this, arg(args, 0), arg(args, 1))
@@ -978,11 +975,12 @@ func symOrZero(v Value) uint32 {
 // and returns (result, true). Real RegExp objects don't define these, so they
 // fall through to the built-in path.
 func (rt *Runtime) delegateSymbolMethod(sym, pattern, str Value) (Value, bool, *ThrowError) {
-	if sym == 0 || pattern.IsNullish() {
+	// Only an Object pattern is inspected (a primitive skips the @@method lookup);
+	// the well-known symbol is read via [[Get]] so a Proxy trap observes it, and
+	// the method receives the raw receiver O (ToString happens inside @@method).
+	if sym == 0 || !pattern.IsObjectType() {
 		return mkundef(), false, nil
 	}
-	// GetMethod routes through [[Get]] so a Proxy's trap observes the well-known
-	// symbol lookup (String.prototype.match/replace/search/split spec step 2a).
 	m, e := rt.getElement(pattern, sym)
 	if e != nil {
 		return mkundef(), true, e
@@ -990,11 +988,7 @@ func (rt *Runtime) delegateSymbolMethod(sym, pattern, str Value) (Value, bool, *
 	if !rt.isCallable(m) {
 		return mkundef(), false, nil
 	}
-	s, e := rt.toStringValue(str)
-	if e != nil {
-		return mkundef(), true, e
-	}
-	r, e := rt.callValue(m, pattern, []Value{s})
+	r, e := rt.callValue(m, pattern, []Value{str})
 	return r, true, e
 }
 
