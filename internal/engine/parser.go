@@ -33,6 +33,13 @@ type parser struct {
 	// to mark the function it is about to parse as async.
 	inAsync      bool
 	pendingAsync bool
+	// inGenerator is true inside a generator function body (so `yield` is the
+	// operator, not an identifier). Like inAsync it is cleared for the parameter
+	// list and any nested non-generator function.
+	inGenerator bool
+	// pendingGenerator marks the function parseFunc is about to parse as a
+	// generator when the caller (an object/class method) already consumed the `*`.
+	pendingGenerator bool
 }
 
 // Parse tokenizes and parses src into an AST (N_PROGRAM root node).
@@ -532,6 +539,19 @@ func (p *parser) parsePrimary() *Node {
 		}
 		return n
 	case TokYield:
+		// `yield` is the yield operator only inside a generator body. Outside one
+		// it is a plain IdentifierReference in sloppy mode; in strict mode it is a
+		// reserved word (mirrors `await` outside async).
+		if !p.inGenerator {
+			if p.lx.strict {
+				p.errorf("'yield' is not allowed as an identifier in strict mode")
+				p.consume()
+				return p.mk(NEmpty)
+			}
+			n := p.mkIdentFromTok()
+			p.consume()
+			return n
+		}
 		p.consume()
 		n := p.mk(NYield)
 		if p.next() == TokMul {
@@ -888,6 +908,7 @@ func (p *parser) parseObject() *Node {
 			p.consume()
 			p.next()
 			p.parseObjectKey(prop)
+			p.pendingGenerator = true // body gets a yield context
 			prop.Right = p.parseFunc()
 			prop.Right.Flags |= fnGenerator | fnMethod
 			prop.Right.SrcOff = prop.SrcOff
@@ -935,6 +956,7 @@ func (p *parser) parseObject() *Node {
 				}
 				p.parseObjectKey(prop)
 				p.pendingAsync = true
+				p.pendingGenerator = prop.Flags&fnGenerator != 0
 				prop.Right = p.parseFunc()
 				prop.Right.Flags |= fnAsync | fnMethod
 				if prop.Flags&fnGenerator != 0 {
@@ -1275,11 +1297,18 @@ func (p *parser) parseFunc() *Node {
 	// async function's params is a SyntaxError).
 	isAsync := p.pendingAsync
 	p.pendingAsync = false
+	isGenerator := p.pendingGenerator // a method whose `*` the caller already ate
+	p.pendingGenerator = false
 	savedAsync := p.inAsync
-	p.inAsync = false // parameters
-	defer func() { p.inAsync = savedAsync }()
+	savedGen := p.inGenerator
+	p.inAsync = false     // parameters
+	p.inGenerator = false // parameters
+	defer func() { p.inAsync = savedAsync; p.inGenerator = savedGen }()
 	if p.next() == TokMul {
 		p.consume()
+		isGenerator = true
+	}
+	if isGenerator {
 		fn.Flags |= fnGenerator
 	}
 	if isIdentLikeTok(p.next()) {
@@ -1332,7 +1361,8 @@ func (p *parser) parseFunc() *Node {
 			}
 		}
 	}
-	p.inAsync = isAsync // the body establishes the await context
+	p.inAsync = isAsync         // the body establishes the await context
+	p.inGenerator = isGenerator // and the yield context
 	fn.Body = p.parseBlock(true)
 	fn.SrcEnd = uint32(p.toff() + p.tlen())
 	// A function with a non-simple parameter list (rest / default / destructuring)
@@ -1444,7 +1474,8 @@ func (p *parser) parseClass() *Node {
 		if p.next() == TokLParen {
 			savedStrict := p.lx.strict
 			p.lx.strict = true
-			p.pendingAsync = flags&fnAsync != 0 // async method body gets an await context
+			p.pendingAsync = flags&fnAsync != 0         // async method body gets an await context
+			p.pendingGenerator = flags&fnGenerator != 0 // generator method body gets a yield context
 			method.Right = p.parseFunc()
 			p.lx.strict = savedStrict
 			if !p.validateAccessorParams(method.Right, method.Flags) {
