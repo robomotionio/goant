@@ -61,7 +61,9 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 		}
 		return true, nil
 	}
-	if idx, ok := arrayIndex(key); ok && obj.Type() == TArr {
+	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TArr {
+		// arrayIndexOf accepts a string index too ("1"), so `delete a["1"]` clears
+		// the element (arrayIndex only matched a numeric key, leaving it in place).
 		o := rt.objPtr(obj)
 		if int(idx) < len(o.arr) {
 			o.arr[idx] = tEmpty

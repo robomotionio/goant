@@ -65,16 +65,36 @@ func (rt *Runtime) initObjectBuiltin() {
 	})
 
 	rt.defMethod(proto, "propertyIsEnumerable", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(this)
-		if o == nil {
-			return mkfalse(), nil
+		key := arg(args, 0)
+		isSym := key.IsSymbol()
+		var name string
+		if !isSym {
+			var e *ThrowError
+			if name, e = rt.propKeyString(key); e != nil {
+				return mkundef(), e
+			}
 		}
-		name, e := rt.propKeyString(arg(args, 0))
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		slot := o.shape.lookupInterned(name)
-		return mkbool(slot >= 0 && o.shape.attrsAt(uint32(slot))&attrEnumerable != 0), nil
+		o := rt.objPtr(obj)
+		if o == nil {
+			return mkfalse(), nil
+		}
+		if isSym {
+			d := o.ownDescriptorSym(key.handle())
+			return mkbool(d.exists && d.enumerable), nil
+		}
+		if d := o.ownDescriptor(name); d.exists {
+			return mkbool(d.enumerable), nil
+		}
+		// An indexed element in element backing store (array/typed-array/string
+		// wrapper) is an own enumerable data property not tracked in the shape.
+		if idx, ok := canonicalIndex(name); ok && rt.hasOwnIndex(obj, o, idx) {
+			return mktrue(), nil
+		}
+		return mkfalse(), nil
 	})
 
 	rt.defMethod(proto, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

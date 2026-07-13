@@ -677,7 +677,11 @@ func (rt *Runtime) initArrayBuiltin() {
 		return res, nil
 	})
 	rt.defMethod(proto, "concat", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		res, e := rt.arraySpeciesCreate(this, 0)
+		obj, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		res, e := rt.arraySpeciesCreate(obj, 0)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -720,7 +724,7 @@ func (rt *Runtime) initArrayBuiltin() {
 			}
 			return nil
 		}
-		if e := appendVal(this); e != nil {
+		if e := appendVal(obj); e != nil {
 			return mkundef(), e
 		}
 		for _, a := range args {
