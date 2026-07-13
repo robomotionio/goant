@@ -789,6 +789,38 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		}
 		return mknum(-1), nil
 	})
+	m("findLast", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		for i := length(this) - 1; i >= 0; i-- {
+			el := get(this, i)
+			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.toBoolean(r) {
+				return el, nil
+			}
+		}
+		return mkundef(), nil
+	})
+	m("findLastIndex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cb := arg(args, 0)
+		for i := length(this) - 1; i >= 0; i-- {
+			r, e := rt.callValue(cb, arg(args, 1), []Value{get(this, i), mknum(float64(i)), this})
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.toBoolean(r) {
+				return mknum(float64(i)), nil
+			}
+		}
+		return mknum(-1), nil
+	})
+	// %TypedArray%.prototype.toString IS the same function object as
+	// Array.prototype.toString (which calls this.join()).
+	if ts, ok := rt.objPtr(rt.arrayProto).getOwn("toString"); ok {
+		tp.defineOwn("toString", ts, attrWritable|attrConfigurable)
+	}
 	m("indexOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		target, _ := rt.toNumber(arg(args, 0))
 		for i, l := 0, length(this); i < l; i++ {
