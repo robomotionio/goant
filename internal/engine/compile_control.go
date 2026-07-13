@@ -567,7 +567,47 @@ func (c *compiler) compileSwitch(n *Node) {
 
 // compileCatchBody binds the catch parameter (if any) and compiles the catch
 // body. On entry the thrown value is on the stack (pushed by OP_CATCH).
+// checkCatchParamConflict enforces the catch-clause early errors: a catch
+// parameter name may not also be lexically (let/const) declared in the catch
+// body, nor var-declared there unless the parameter is a single identifier
+// (Annex B.3.4 allows `catch(e){ var e }` but not `catch({e}){ var e }`).
+func (c *compiler) checkCatchParamConflict(n *Node) {
+	if n.CatchParam == nil || n.CatchBody == nil || n.CatchBody.Kind != NBlock {
+		return
+	}
+	var paramNames []string
+	collectPatternNames(n.CatchParam, &paramNames)
+	if len(paramNames) == 0 {
+		return
+	}
+	pset := map[string]bool{}
+	for _, nm := range paramNames {
+		pset[nm] = true
+	}
+	isPattern := n.CatchParam.Kind == NArray || n.CatchParam.Kind == NObject
+	for _, stmt := range n.CatchBody.Args {
+		if stmt == nil || stmt.Kind != NVar {
+			continue
+		}
+		lexical := stmt.VarKind == VarLet || stmt.VarKind == VarConst
+		if !lexical && !(stmt.VarKind == VarVar && isPattern) {
+			continue
+		}
+		for _, decl := range stmt.Args {
+			var names []string
+			collectPatternNames(decl.Left, &names)
+			for _, nm := range names {
+				if pset[nm] {
+					c.syntaxErrorf("Identifier '%s' has already been declared", nm)
+					return
+				}
+			}
+		}
+	}
+}
+
 func (c *compiler) compileCatchBody(n *Node) {
+	c.checkCatchParamConflict(n)
 	if n.CatchParam != nil && n.CatchParam.Kind == NIdent {
 		c.scopeDepth++
 		slot := c.declareVar(n.CatchParam.Str, false)
