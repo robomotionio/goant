@@ -25,6 +25,7 @@ const (
 	taUint16
 	taInt32
 	taUint32
+	taFloat16
 	taFloat32
 	taFloat64
 	taBigInt64
@@ -43,6 +44,7 @@ var taKinds = []taInfo{
 	{"Int8Array", 1}, {"Uint8Array", 1}, {"Uint8ClampedArray", 1},
 	{"Int16Array", 2}, {"Uint16Array", 2},
 	{"Int32Array", 4}, {"Uint32Array", 4},
+	{"Float16Array", 2},
 	{"Float32Array", 4}, {"Float64Array", 8},
 	{"BigInt64Array", 8}, {"BigUint64Array", 8},
 }
@@ -79,6 +81,8 @@ func decodeElem(b []byte, off int, kind taKind) float64 {
 		return float64(int32(binary.LittleEndian.Uint32(b[off:])))
 	case taUint32:
 		return float64(binary.LittleEndian.Uint32(b[off:]))
+	case taFloat16:
+		return float16ToFloat64(binary.LittleEndian.Uint16(b[off:]))
 	case taFloat32:
 		return float64(math.Float32frombits(binary.LittleEndian.Uint32(b[off:])))
 	case taFloat64:
@@ -99,6 +103,8 @@ func encodeElem(b []byte, off int, kind taKind, v float64) {
 		binary.LittleEndian.PutUint16(b[off:], uint16(int64(toIntWrap(v))))
 	case taInt32, taUint32:
 		binary.LittleEndian.PutUint32(b[off:], uint32(int64(toIntWrap(v))))
+	case taFloat16:
+		binary.LittleEndian.PutUint16(b[off:], float16FromFloat64(v))
 	case taFloat32:
 		binary.LittleEndian.PutUint32(b[off:], math.Float32bits(float32(v)))
 	case taFloat64:
@@ -124,6 +130,94 @@ func clampUint8(v float64) byte {
 	// round half to even
 	r := math.RoundToEven(v)
 	return byte(r)
+}
+
+// float16FromFloat64 converts f to an IEEE-754 binary16 (half-precision) bit
+// pattern, rounding to nearest with ties to even (the rounding mode the spec's
+// SetValueInBuffer/ToFloat16 requires). The conversion is done directly from
+// the binary64 representation to avoid the double-rounding a float32 detour
+// would introduce.
+func float16FromFloat64(f float64) uint16 {
+	b := math.Float64bits(f)
+	sign := uint16((b >> 48) & 0x8000)
+	e := int((b >> 52) & 0x7FF)
+	m := b & 0xFFFFFFFFFFFFF // 52-bit trailing significand
+
+	if e == 0x7FF { // Inf / NaN
+		if m == 0 {
+			return sign | 0x7C00
+		}
+		h := uint16(m >> 42) // keep the leading NaN payload bits
+		if h == 0 {
+			h = 1
+		}
+		return sign | 0x7C00 | h
+	}
+	if e == 0 { // binary64 zero or subnormal → underflows to half zero
+		return sign
+	}
+
+	exp := e - 1023  // unbiased binary64 exponent
+	he := exp + 15   // biased half exponent for the normal case
+	if he >= 31 {    // overflow → infinity
+		return sign | 0x7C00
+	}
+
+	sig := m | (1 << 52) // 53-bit significand with the implicit leading 1
+
+	if he <= 0 {
+		// Subnormal half or underflow. value = sig * 2^(exp-52); express in
+		// units of the subnormal quantum 2^-24 by shifting right (28-exp).
+		shift := 28 - exp
+		if shift > 63 {
+			return sign
+		}
+		q := sig >> shift
+		rem := sig & ((uint64(1) << shift) - 1)
+		half := uint64(1) << (shift - 1)
+		if rem > half || (rem == half && q&1 == 1) {
+			q++ // ties to even; a carry into bit 10 yields the smallest normal
+		}
+		return sign | uint16(q)
+	}
+
+	// Normal case: keep 10 mantissa bits, round away the low 42.
+	q := sig >> 42
+	rem := sig & ((uint64(1) << 42) - 1)
+	half := uint64(1) << 41
+	if rem > half || (rem == half && q&1 == 1) {
+		q++
+	}
+	mant := q - 0x400 // strip the implicit leading 1 (q ∈ [0x400, 0x800])
+	if mant >= 0x400 {
+		he++ // mantissa carried out → exponent increment, mantissa 0
+		mant = 0
+	}
+	if he >= 31 {
+		return sign | 0x7C00
+	}
+	return sign | uint16(he)<<10 | uint16(mant)
+}
+
+// float16ToFloat64 decodes an IEEE-754 binary16 bit pattern to float64.
+func float16ToFloat64(h uint16) float64 {
+	sign := 1.0
+	if h&0x8000 != 0 {
+		sign = -1.0
+	}
+	exp := int((h >> 10) & 0x1F)
+	mant := int(h & 0x3FF)
+	switch exp {
+	case 0:
+		return sign * math.Ldexp(float64(mant), -24)
+	case 0x1F:
+		if mant == 0 {
+			return sign * math.Inf(1)
+		}
+		return math.NaN()
+	default:
+		return sign * math.Ldexp(float64(1024+mant), exp-25)
+	}
 }
 
 // taDetached reports whether o is a TypedArray whose backing ArrayBuffer has
@@ -601,6 +695,7 @@ func (rt *Runtime) initDataViewBuiltin() {
 		{"Uint16", 2, func(b []byte, o int, v float64, le bool) { order(le).PutUint16(b[o:], uint16(int64(toIntWrap(v)))) }, func(b []byte, o int, le bool) float64 { return float64(order(le).Uint16(b[o:])) }},
 		{"Int32", 4, func(b []byte, o int, v float64, le bool) { order(le).PutUint32(b[o:], uint32(int64(toIntWrap(v)))) }, func(b []byte, o int, le bool) float64 { return float64(int32(order(le).Uint32(b[o:]))) }},
 		{"Uint32", 4, func(b []byte, o int, v float64, le bool) { order(le).PutUint32(b[o:], uint32(int64(toIntWrap(v)))) }, func(b []byte, o int, le bool) float64 { return float64(order(le).Uint32(b[o:])) }},
+		{"Float16", 2, func(b []byte, o int, v float64, le bool) { order(le).PutUint16(b[o:], float16FromFloat64(v)) }, func(b []byte, o int, le bool) float64 { return float16ToFloat64(order(le).Uint16(b[o:])) }},
 		{"Float32", 4, func(b []byte, o int, v float64, le bool) { order(le).PutUint32(b[o:], math.Float32bits(float32(v))) }, func(b []byte, o int, le bool) float64 { return float64(math.Float32frombits(order(le).Uint32(b[o:]))) }},
 		{"Float64", 8, func(b []byte, o int, v float64, le bool) { order(le).PutUint64(b[o:], math.Float64bits(v)) }, func(b []byte, o int, le bool) float64 { return math.Float64frombits(order(le).Uint64(b[o:])) }},
 	}
@@ -1213,13 +1308,81 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	})
 	m("set", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
+		// targetOffset = ToIntegerOrInfinity(offset); a negative offset throws.
+		offN, e := rt.toNumber(arg(args, 1))
+		if e != nil {
+			return mkundef(), e
+		}
+		if math.IsNaN(offN) {
+			offN = 0
+		} else {
+			offN = math.Trunc(offN)
+		}
+		if offN < 0 {
+			return mkundef(), rt.rangeError("Start offset is negative")
+		}
+		targetLen := o.ta.length
+		bigTarget := isBigIntKind(o.ta.kind)
 		src := arg(args, 0)
-		off := int(argNum(rt, args, 1))
-		n, _ := rt.lengthOf(src)
+		// SetTypedArrayFromTypedArray: read the whole source first so overlapping
+		// buffers copy correctly.
+		if so := rt.objPtr(src); so != nil && so.ta != nil {
+			srcLen := so.ta.length
+			if math.IsInf(offN, 1) || float64(srcLen)+offN > float64(targetLen) {
+				return mkundef(), rt.rangeError("Source array is too large")
+			}
+			if bigTarget != isBigIntKind(so.ta.kind) {
+				return mkundef(), rt.typeError("Cannot mix BigInt and non-BigInt typed arrays")
+			}
+			off := int(offN)
+			if bigTarget {
+				tmp := make([]*big.Int, srcLen)
+				for i := 0; i < srcLen; i++ {
+					v, _ := rt.taGet(so, i)
+					tmp[i], _ = rt.toBigInt(v)
+				}
+				for i := 0; i < srcLen; i++ {
+					rt.taSetBig(o, off+i, tmp[i])
+				}
+			} else {
+				tmp := make([]float64, srcLen)
+				for i := 0; i < srcLen; i++ {
+					v, _ := rt.taGet(so, i)
+					tmp[i] = v.Number()
+				}
+				for i := 0; i < srcLen; i++ {
+					rt.taSet(o, off+i, tmp[i])
+				}
+			}
+			return mkundef(), nil
+		}
+		// SetTypedArrayFromArrayLike.
+		n, e := rt.lengthOf(src)
+		if e != nil {
+			return mkundef(), e
+		}
+		if math.IsInf(offN, 1) || float64(n)+offN > float64(targetLen) {
+			return mkundef(), rt.rangeError("Source array is too large")
+		}
+		off := int(offN)
 		for i := 0; i < n; i++ {
-			el, _ := rt.getElement(src, mknum(float64(i)))
-			nv, _ := rt.toNumber(el)
-			rt.taSet(o, off+i, nv)
+			el, e := rt.getElement(src, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
+			if bigTarget {
+				bi, e := rt.toBigInt(el)
+				if e != nil {
+					return mkundef(), e
+				}
+				rt.taSetBig(o, off+i, bi)
+			} else {
+				nv, e := rt.toNumber(el)
+				if e != nil {
+					return mkundef(), e
+				}
+				rt.taSet(o, off+i, nv)
+			}
 		}
 		return mkundef(), nil
 	})

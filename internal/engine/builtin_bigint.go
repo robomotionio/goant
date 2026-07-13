@@ -90,12 +90,10 @@ func (rt *Runtime) toBigInt(v Value) (*big.Int, *ThrowError) {
 		}
 		return bi, nil
 	case TNum:
-		f := p.Number()
-		if f != math.Trunc(f) || math.IsInf(f, 0) || f != f {
-			return nil, rt.rangeError("The number " + numberToString(f) + " cannot be converted to a BigInt because it is not an integer")
-		}
-		bi, _ := big.NewFloat(f).Int(nil)
-		return bi, nil
+		// ToBigInt of a Number always throws (7.1.13); the integer-preserving
+		// Number→BigInt path (NumberToBigInt) is reachable only via the BigInt()
+		// constructor, which handles Number arguments before calling here.
+		return nil, rt.typeError("Cannot convert " + numberToString(p.Number()) + " to a BigInt")
 	default:
 		return nil, rt.typeError("Cannot convert " + rt.typeofString(v) + " to a BigInt")
 	}
