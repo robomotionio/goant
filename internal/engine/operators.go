@@ -168,7 +168,29 @@ func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
 		// A hole (or out-of-range index) is not own, but HasProperty still walks
 		// the prototype chain (e.g. an index inherited from Array.prototype).
 	}
-	name, e := rt.propKeyString(key)
+	// A symbol key walks the prototype chain checking each shape's symbol table
+	// (propKeyString below would throw on a symbol).
+	pk, ke := rt.toPropertyKey(key)
+	if ke != nil {
+		return false, ke
+	}
+	if pk.IsSymbol() {
+		sym := pk.handle()
+		for cur := obj; ; {
+			o := rt.objPtr(cur)
+			if o == nil {
+				return false, nil
+			}
+			if o.proxy != nil {
+				return rt.proxyHas(o.proxy, pk)
+			}
+			if o.shape.lookupSymbol(sym) >= 0 {
+				return true, nil
+			}
+			cur = o.proto
+		}
+	}
+	name, e := rt.propKeyString(pk)
 	if e != nil {
 		return false, e
 	}
