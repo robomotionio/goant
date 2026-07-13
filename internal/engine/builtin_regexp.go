@@ -1112,19 +1112,21 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 		}
 		replStr = string(rt.strBytes(rs))
 	}
-	gv, e := rt.getField(rx, "global")
+	// flags = ToString(Get(rx, "flags")); global/fullUnicode derive from it (the
+	// native flags getter itself reads the individual flag getters).
+	flagsV, e := rt.getField(rx, "flags")
 	if e != nil {
 		return mkundef(), e
 	}
-	global := rt.toBoolean(gv)
-	fullUnicode := false
+	flagsS, e := rt.toStringValue(flagsV)
+	if e != nil {
+		return mkundef(), e
+	}
+	flags := string(rt.strBytes(flagsS))
+	global := strings.ContainsRune(flags, 'g')
+	fullUnicode := strings.ContainsRune(flags, 'u')
 	if global {
-		uv, e := rt.getField(rx, "unicode")
-		if e != nil {
-			return mkundef(), e
-		}
-		fullUnicode = rt.toBoolean(uv)
-		if e := rt.setField(rx, "lastIndex", mknum(0)); e != nil {
+		if e := rt.setLastIndexOrThrow(rx, 0); e != nil {
 			return mkundef(), e
 		}
 	}
@@ -1160,9 +1162,22 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 	var out strings.Builder
 	nextPos := 0
 	for _, result := range results {
-		lenV, _ := rt.getField(result, "length")
-		ln, _ := rt.toNumber(lenV)
-		nCaptures := max(int(ln)-1, 0)
+		lenV, e := rt.getField(result, "length")
+		if e != nil {
+			return mkundef(), e
+		}
+		lnF, e := rt.toIntegerOrInfinity(lenV) // ToLength
+		if e != nil {
+			return mkundef(), e
+		}
+		nCaptures := 0
+		if lnF > 1 {
+			if lnF > 1<<31 {
+				nCaptures = 1<<31 - 1
+			} else {
+				nCaptures = int(lnF) - 1
+			}
+		}
 		m0, e := rt.getElement(result, mknum(0))
 		if e != nil {
 			return mkundef(), e
@@ -1172,8 +1187,14 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 			return mkundef(), e
 		}
 		matched := string(rt.strBytes(matchedV))
-		idxV, _ := rt.getField(result, "index")
-		pos, _ := rt.toNumber(idxV)
+		idxV, e := rt.getField(result, "index")
+		if e != nil {
+			return mkundef(), e
+		}
+		pos, e := rt.toIntegerOrInfinity(idxV)
+		if e != nil {
+			return mkundef(), e
+		}
 		position := min(max(int(pos), 0), len(Srunes))
 		caps := make([]Value, nCaptures)
 		groups := make([]regexpjs.Group, nCaptures+1)
