@@ -474,6 +474,22 @@ func hasNumericSep(s string) bool {
 	return false
 }
 
+// hasBadSeparator reports whether a numeric literal misuses `_` separators: each
+// `_` must sit directly between two digits of the number's radix (so it may not
+// lead, trail, double up, or abut a `.`, exponent `e`, sign, or radix prefix —
+// isDigit is false for all of those). s is the digit portion for the radix.
+func hasBadSeparator(s string, isDigit func(byte) bool) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '_' {
+			continue
+		}
+		if i == 0 || i+1 >= len(s) || !isDigit(s[i-1]) || !isDigit(s[i+1]) {
+			return true
+		}
+	}
+	return false
+}
+
 func stripSep(s string) string {
 	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
@@ -568,21 +584,33 @@ func (l *lexer) parseNumber(off int) {
 	var value float64
 	numlen := 0
 
+	sepBad := false
 	if buf[0] == '0' && len(buf) > 1 {
 		c1 := buf[1] | 0x20
+		isBin := func(c byte) bool { return c == '0' || c == '1' }
 		switch {
 		case c1 == 'b':
-			numlen, value = parseRadix(buf, 2, 2, func(c byte) bool { return c == '0' || c == '1' })
+			numlen, value = parseRadix(buf, 2, 2, isBin)
+			sepBad = hasBadSeparator(buf[2:numlen], isBin)
 		case c1 == 'o':
 			numlen, value = parseRadix(buf, 8, 2, isOctalByte)
+			sepBad = hasBadSeparator(buf[2:numlen], isOctalByte)
 		case c1 == 'x':
 			numlen, value = parseRadix(buf, 16, 2, isXDigitByte)
+			sepBad = hasBadSeparator(buf[2:numlen], isXDigitByte)
 		case isOctalByte(buf[1]):
 			if l.strict {
 				l.st.tok, l.st.tlen = TokErr, 1
 				return
 			}
 			numlen, value = parseRadix(buf, 8, 1, isOctalByte)
+			// A legacy octal literal may not contain separators at all.
+			for k := 0; k < numlen; k++ {
+				if buf[k] == '_' {
+					sepBad = true
+					break
+				}
+			}
 		case isDigitByte(buf[1]) && l.strict:
 			l.st.tok, l.st.tlen = TokErr, 1
 			return
@@ -593,6 +621,7 @@ func (l *lexer) parseNumber(off int) {
 				l.st.tok, l.st.tlen = TokErr, numlen
 				return
 			}
+			sepBad = hasBadSeparator(buf[:numlen], isDigitByte)
 		}
 	} else {
 		var ok bool
@@ -601,6 +630,11 @@ func (l *lexer) parseNumber(off int) {
 			l.st.tok, l.st.tlen = TokErr, numlen
 			return
 		}
+		sepBad = hasBadSeparator(buf[:numlen], isDigitByte)
+	}
+	if sepBad {
+		l.st.tok, l.st.tlen = TokErr, numlen
+		return
 	}
 
 	l.st.tval = tov(value)
