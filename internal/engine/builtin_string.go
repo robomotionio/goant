@@ -338,11 +338,14 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		n := rt.intArg(args, 0)
-		if n < 0 {
+		nf, e := rt.toIntegerOrInfinity(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		if nf < 0 || math.IsInf(nf, 1) {
 			return mkundef(), rt.rangeError("Invalid count value")
 		}
-		return rt.newStringBytes([]byte(strings.Repeat(string(b), n))), nil
+		return rt.newStringBytes([]byte(strings.Repeat(string(b), int(nf)))), nil
 	})
 	rt.defMethod(proto, "split", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
@@ -428,7 +431,16 @@ func (rt *Runtime) initStringBuiltin() {
 			if e != nil {
 				return mkundef(), e
 			}
-			targetLen := rt.intArg(args, 0)
+			mlF, e := rt.toIntegerOrInfinity(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			targetLen := 0
+			if mlF > 0x7FFFFFFF {
+				targetLen = 0x7FFFFFFF
+			} else if mlF > 0 {
+				targetLen = int(mlF)
+			}
 			cur := utf16Len(b)
 			if cur >= targetLen {
 				return rt.newStringBytes(append([]byte{}, b...)), nil
