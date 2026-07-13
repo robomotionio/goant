@@ -510,6 +510,16 @@ func (c *compiler) compileSwitch(n *Node) {
 	discSlot := c.addLocal("*switch*", false)
 	c.emitOpU16(OpPutLocal, uint16(discSlot))
 
+	// The clauses of a switch share a single lexical (CaseBlock) scope, so their
+	// let/const/class bindings are hoisted together — a name declared in two
+	// clauses is a duplicate (early SyntaxError), and TDZ spans the whole block.
+	c.scopeDepth++
+	var caseStmts []*Node
+	for _, cas := range n.Args {
+		caseStmts = append(caseStmts, cas.Args...)
+	}
+	c.hoistLexicals(caseStmts)
+
 	l := c.pushLoop("", true)
 
 	var caseJumps []int
@@ -550,6 +560,8 @@ func (c *compiler) compileSwitch(n *Node) {
 	}
 
 	c.popLoop() // patches breaks to `end`
+	c.scopeDepth--
+	c.popBlockScope()
 	_ = l
 }
 
