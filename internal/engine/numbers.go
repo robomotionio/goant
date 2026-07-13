@@ -451,6 +451,14 @@ func jsParseInt(s string, radix int) float64 {
 	if consumed == 0 {
 		return math.NaN()
 	}
+	// Decimal digits: parse the whole run at once so the result is the
+	// correctly-rounded double of the exact integer (accumulating in float64
+	// digit-by-digit drifts by an ULP for large values, e.g. 21-digit inputs).
+	if radix == 10 {
+		if v, err := strconv.ParseFloat(s[:consumed], 64); err == nil || math.IsInf(v, 0) {
+			return sign * v
+		}
+	}
 	return sign * val
 }
 
