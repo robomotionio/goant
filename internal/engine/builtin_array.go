@@ -1009,15 +1009,45 @@ func (rt *Runtime) initArrayBuiltin() {
 	})
 	rt.defMethod(proto, "lastIndexOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		target := arg(args, 0)
-		n, e := rt.lengthOf(this)
+		length, e := rt.lengthOf(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		for i := n - 1; i >= 0; i-- {
+		if length == 0 {
+			return mknum(-1), nil
+		}
+		// Default start is the last index; an explicit fromIndex (present, even if
+		// undefined) is ToIntegerOrInfinity'd. -Inf (or a negative that lands before
+		// index 0) yields -1; +Inf / a too-large start clamps to len-1.
+		start := length - 1
+		if len(args) > 1 {
+			fromF, e := rt.toIntegerOrInfinity(args[1])
+			if e != nil {
+				return mkundef(), e
+			}
+			if math.IsInf(fromF, -1) {
+				return mknum(-1), nil
+			}
+			if fromF >= 0 {
+				if fromF < float64(length-1) {
+					start = int(fromF)
+				}
+			} else {
+				nf := float64(length) + fromF
+				if nf < 0 {
+					return mknum(-1), nil
+				}
+				start = int(nf)
+			}
+		}
+		for i := start; i >= 0; i-- {
 			if !rt.hasElem(this, i) { // lastIndexOf skips holes
 				continue
 			}
-			el, _ := rt.getElement(this, mknum(float64(i)))
+			el, ee := rt.getElement(this, mknum(float64(i)))
+			if ee != nil {
+				return mkundef(), ee
+			}
 			if rt.strictEquals(el, target) {
 				return mknum(float64(i)), nil
 			}
