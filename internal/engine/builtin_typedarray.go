@@ -1342,25 +1342,32 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	})
 	m("map", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("TypedArray.prototype.map callback is not a function")
+		}
 		l := length(this)
 		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(l))})
 		if e != nil {
 			return mkundef(), e
 		}
-		oo := rt.objPtr(out)
 		for i := 0; i < l; i++ {
 			r, e := rt.callValue(cb, arg(args, 1), []Value{get(this, i), mknum(float64(i)), this})
 			if e != nil {
 				return mkundef(), e
 			}
-			nv, _ := rt.toNumber(r)
-			rt.taSet(oo, i, nv)
+			// setElement coerces to the destination kind (ToNumber / ToBigInt).
+			if e := rt.setElement(out, mknum(float64(i)), r); e != nil {
+				return mkundef(), e
+			}
 		}
 		return out, nil
 	})
 	m("filter", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		cb := arg(args, 0)
-		var keep []float64
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("TypedArray.prototype.filter callback is not a function")
+		}
+		var keep []Value
 		for i, l := 0, length(this); i < l; i++ {
 			el := get(this, i)
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
@@ -1368,16 +1375,17 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 				return mkundef(), e
 			}
 			if rt.toBoolean(r) {
-				keep = append(keep, el.Number())
+				keep = append(keep, el)
 			}
 		}
 		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(len(keep)))})
 		if e != nil {
 			return mkundef(), e
 		}
-		oo := rt.objPtr(out)
 		for i, v := range keep {
-			rt.taSet(oo, i, v)
+			if e := rt.setElement(out, mknum(float64(i)), v); e != nil {
+				return mkundef(), e
+			}
 		}
 		return out, nil
 	})
@@ -1595,17 +1603,30 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		return mkfalse(), nil
 	})
 	m("join", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		l := length(this) // captured before ToString(separator) may resize
 		sep := ","
 		if s := arg(args, 0); !s.IsUndefined() {
-			sv, _ := rt.toStringValue(s)
+			sv, e := rt.toStringValue(s)
+			if e != nil {
+				return mkundef(), e
+			}
 			sep = string(rt.strBytes(sv))
 		}
 		out := ""
-		for i, l := 0, length(this); i < l; i++ {
+		for i := 0; i < l; i++ {
 			if i > 0 {
 				out += sep
 			}
-			out += numberToString(get(this, i).Number())
+			// An out-of-bounds index (buffer shrank during coercion) reads as
+			// undefined → the empty string.
+			if el, ok := rt.taGet(o, i); ok {
+				s, e := rt.toStringValue(el)
+				if e != nil {
+					return mkundef(), e
+				}
+				out += string(rt.strBytes(s))
+			}
 		}
 		return rt.newString(out), nil
 	})
@@ -2017,20 +2038,51 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	m("with", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		l := length(this)
-		idx := int(argNum(rt, args, 0))
-		if idx < 0 {
-			idx += l
+		bigKind := isBigIntKind(o.ta.kind)
+		// Spec order: ToIntegerOrInfinity(index), then coerce the value.
+		rel, e := rt.toIntegerOrInfinity(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
 		}
-		if idx < 0 || idx >= l {
+		actual := rel
+		if rel < 0 {
+			actual = float64(l) + rel
+		}
+		var fv float64
+		var bv *big.Int
+		if bigKind {
+			bv, e = rt.toBigInt(arg(args, 1))
+		} else {
+			fv, e = rt.toNumber(arg(args, 1))
+		}
+		if e != nil {
+			return mkundef(), e
+		}
+		// IsValidIntegerIndex against the current length (value coercion may resize).
+		cur := rt.taCurrentLen(o)
+		if actual < 0 || actual >= float64(cur) {
 			return mkundef(), rt.rangeError("Invalid typed array index")
 		}
+		actualIndex := int(actual)
 		out, _ := rt.newTypedArray(o.ta.kind, []Value{mknum(float64(l))})
 		oo := rt.objPtr(out)
 		for i := 0; i < l; i++ {
-			el, _ := rt.taGet(o, i)
-			rt.taSet(oo, i, el.Number())
+			if i == actualIndex {
+				if bigKind {
+					rt.taSetBig(oo, i, bv)
+				} else {
+					rt.taSet(oo, i, fv)
+				}
+				continue
+			}
+			el, ok := rt.taGet(o, i)
+			if !ok {
+				el = mkundef()
+			}
+			if e := rt.setElement(out, mknum(float64(i)), el); e != nil {
+				return mkundef(), e
+			}
 		}
-		rt.taSet(oo, idx, argNum(rt, args, 1))
 		return out, nil
 	})
 	m("keys", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
