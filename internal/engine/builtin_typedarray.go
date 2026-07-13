@@ -732,20 +732,46 @@ func (rt *Runtime) initDataViewBuiltin() {
 		if !rt.constructing() {
 			return mkundef(), rt.typeError("Constructor DataView requires 'new'")
 		}
-		bo := rt.objPtr(arg(args, 0))
+		bufV := arg(args, 0)
+		bo := rt.objPtr(bufV)
+		// RequireInternalSlot([[ArrayBufferData]]): reject non-ArrayBuffers (and
+		// buffers already detached, which have no usable storage).
 		if bo == nil || bo.abuf == nil {
 			return mkundef(), rt.typeError("First argument to DataView constructor must be an ArrayBuffer")
 		}
-		off := 0
-		if b := arg(args, 1); b.IsNumber() {
-			off = int(b.Number())
+		// ToIndex(byteOffset) may run user code (valueOf) that detaches the buffer.
+		offset, e := rt.toIndex(arg(args, 1))
+		if e != nil {
+			return mkundef(), e
 		}
-		length := len(bo.abuf) - off
-		if l := arg(args, 2); l.IsNumber() {
-			length = int(l.Number())
+		if bo.abuf == nil {
+			return mkundef(), rt.typeError("Cannot construct DataView on a detached ArrayBuffer")
 		}
-		v := rt.newObject(proto)
-		rt.objPtr(v).dv = &dataView{buf: arg(args, 0), bytes: bo.abuf, byteOffset: off, byteLength: length}
+		bufLen := len(bo.abuf)
+		if offset > bufLen {
+			return mkundef(), rt.rangeError("Start offset is outside the bounds of the buffer")
+		}
+		viewLen := bufLen - offset
+		if lv := arg(args, 2); !lv.IsUndefined() {
+			viewLen, e = rt.toIndex(lv)
+			if e != nil {
+				return mkundef(), e
+			}
+			if bo.abuf == nil {
+				return mkundef(), rt.typeError("Cannot construct DataView on a detached ArrayBuffer")
+			}
+			if offset+viewLen > bufLen {
+				return mkundef(), rt.rangeError("Invalid DataView length")
+			}
+		}
+		// OrdinaryCreateFromConstructor honors a subclass new.target; resolving its
+		// prototype can run a user getter that detaches the buffer, re-checked next.
+		viewProto := rt.newTargetProto(proto)
+		if bo.abuf == nil {
+			return mkundef(), rt.typeError("Cannot construct DataView on a detached ArrayBuffer")
+		}
+		v := rt.newObject(viewProto)
+		rt.objPtr(v).dv = &dataView{buf: bufV, bytes: bo.abuf, byteOffset: offset, byteLength: viewLen}
 		return v, nil
 	})
 	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
