@@ -1237,6 +1237,36 @@ func taStrictEq(rt *Runtime, el, search Value, bigKind bool) bool {
 	return search.IsNumber() && el.Number() == search.Number()
 }
 
+// taDefaultCompare is the default TypedArray SortCompare: numbers order with
+// NaN last and -0 before +0; BigInts by value.
+func taDefaultCompare(rt *Runtime, a, b Value, bigKind bool) int {
+	if bigKind {
+		return rt.bigIntVal(a).Cmp(rt.bigIntVal(b))
+	}
+	x, y := a.Number(), b.Number()
+	xn, yn := math.IsNaN(x), math.IsNaN(y)
+	switch {
+	case xn && yn:
+		return 0
+	case xn:
+		return 1
+	case yn:
+		return -1
+	case x < y:
+		return -1
+	case x > y:
+		return 1
+	case x == 0 && y == 0:
+		switch {
+		case math.Signbit(x) && !math.Signbit(y):
+			return -1
+		case !math.Signbit(x) && math.Signbit(y):
+			return 1
+		}
+	}
+	return 0
+}
+
 // taLength returns a TypedArray's effective element length (for lengthOf /
 // methods): 0 when detached or out of bounds, and recomputed from the buffer
 // for length-tracking views.
@@ -1844,67 +1874,123 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		return mkundef(), nil
 	})
 	m("sort", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cmp := arg(args, 0)
+		if !cmp.IsUndefined() && !rt.isCallable(cmp) {
+			return mkundef(), rt.typeError("The comparison function must be either a function or undefined")
+		}
 		o := rt.objPtr(this)
 		l := length(this)
-		vals := make([]float64, l)
+		bigKind := isBigIntKind(o.ta.kind)
+		vals := make([]Value, l) // snapshot before sorting (comparator may resize)
 		for i := 0; i < l; i++ {
-			el, _ := rt.taGet(o, i)
-			vals[i] = el.Number()
+			vals[i], _ = rt.taGet(o, i)
 		}
-		cmp := arg(args, 0)
 		var sortErr *ThrowError
 		sort.SliceStable(vals, func(i, j int) bool {
+			if sortErr != nil {
+				return false
+			}
 			if rt.isCallable(cmp) {
-				r, e := rt.callValue(cmp, mkundef(), []Value{mknum(vals[i]), mknum(vals[j])})
+				r, e := rt.callValue(cmp, mkundef(), []Value{vals[i], vals[j]})
 				if e != nil {
 					sortErr = e
 					return false
 				}
-				n, _ := rt.toNumber(r)
-				return n < 0
+				n, e := rt.toNumber(r)
+				if e != nil {
+					sortErr = e
+					return false
+				}
+				return n < 0 // NaN → not-less (n<0 false), matching +0 tie
 			}
-			return vals[i] < vals[j]
+			return taDefaultCompare(rt, vals[i], vals[j], bigKind) < 0
 		})
 		if sortErr != nil {
 			return mkundef(), sortErr
 		}
-		for i := 0; i < l; i++ {
-			rt.taSet(o, i, vals[i])
+		for i := 0; i < l && i < rt.taCurrentLen(o); i++ {
+			if bigKind {
+				bi, _ := rt.toBigInt(vals[i])
+				rt.taSetBig(o, i, bi)
+			} else {
+				rt.taSet(o, i, vals[i].Number())
+			}
 		}
 		return this, nil
+	})
+	m("toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		l := length(this)
+		out := ""
+		for i := 0; i < l; i++ {
+			if i > 0 {
+				out += ","
+			}
+			el := get(this, i)
+			// Call the element's own toLocaleString, then ToString the result.
+			m, e := rt.getField(el, "toLocaleString")
+			if e != nil {
+				return mkundef(), e
+			}
+			r, e := rt.callValue(m, el, nil)
+			if e != nil {
+				return mkundef(), e
+			}
+			s, e := rt.toStringValue(r)
+			if e != nil {
+				return mkundef(), e
+			}
+			out += string(rt.strBytes(s))
+		}
+		return rt.newString(out), nil
 	})
 	m("toReversed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		l := length(this)
 		out, _ := rt.newTypedArray(o.ta.kind, []Value{mknum(float64(l))})
 		oo := rt.objPtr(out)
+		bigKind := isBigIntKind(o.ta.kind)
 		for i := 0; i < l; i++ {
 			el, _ := rt.taGet(o, l-1-i)
-			rt.taSet(oo, i, el.Number())
+			if bigKind {
+				bi, _ := rt.toBigInt(el)
+				rt.taSetBig(oo, i, bi)
+			} else {
+				rt.taSet(oo, i, el.Number())
+			}
 		}
 		return out, nil
 	})
 	m("toSorted", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		cmp := arg(args, 0)
+		if !cmp.IsUndefined() && !rt.isCallable(cmp) {
+			return mkundef(), rt.typeError("The comparison function must be either a function or undefined")
+		}
 		o := rt.objPtr(this)
 		l := length(this)
-		vals := make([]float64, l)
+		bigKind := isBigIntKind(o.ta.kind)
+		vals := make([]Value, l)
 		for i := 0; i < l; i++ {
-			el, _ := rt.taGet(o, i)
-			vals[i] = el.Number()
+			vals[i], _ = rt.taGet(o, i)
 		}
-		cmp := arg(args, 0)
 		var sortErr *ThrowError
 		sort.SliceStable(vals, func(i, j int) bool {
+			if sortErr != nil {
+				return false
+			}
 			if rt.isCallable(cmp) {
-				r, e := rt.callValue(cmp, mkundef(), []Value{mknum(vals[i]), mknum(vals[j])})
+				r, e := rt.callValue(cmp, mkundef(), []Value{vals[i], vals[j]})
 				if e != nil {
 					sortErr = e
 					return false
 				}
-				n, _ := rt.toNumber(r)
+				n, e := rt.toNumber(r)
+				if e != nil {
+					sortErr = e
+					return false
+				}
 				return n < 0
 			}
-			return vals[i] < vals[j]
+			return taDefaultCompare(rt, vals[i], vals[j], bigKind) < 0
 		})
 		if sortErr != nil {
 			return mkundef(), sortErr
@@ -1912,7 +1998,12 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		out, _ := rt.newTypedArray(o.ta.kind, []Value{mknum(float64(l))})
 		oo := rt.objPtr(out)
 		for i, v := range vals {
-			rt.taSet(oo, i, v)
+			if bigKind {
+				bi, _ := rt.toBigInt(v)
+				rt.taSetBig(oo, i, bi)
+			} else {
+				rt.taSet(oo, i, v.Number())
+			}
 		}
 		return out, nil
 	})
