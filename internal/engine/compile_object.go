@@ -121,7 +121,7 @@ func (c *compiler) compileSuperMember(n *Node) {
 		c.emit(OpUndef)
 	}
 	if !c.resolveClassBinding("*superproto*") { // base
-		c.errorf("'super' keyword unexpected here")
+		c.syntaxErrorf("'super' keyword unexpected here")
 		return
 	}
 	if n.Flags&1 != 0 { // computed

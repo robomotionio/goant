@@ -177,6 +177,17 @@ func (c *compiler) errorf(format string, args ...any) {
 	}
 }
 
+// syntaxErrorf records an early (syntactic) error as a SyntaxError rather than a
+// CompileError — for constructs the grammar forbids that goant happens to detect
+// while compiling (an unresolved break/continue label, `super` outside a method).
+// Unlike an unsupported-feature CompileError, these are genuine ECMAScript early
+// errors, so tests expect a SyntaxError.
+func (c *compiler) syntaxErrorf(format string, args ...any) {
+	if c.err == nil {
+		c.err = &SyntaxError{Msg: fmt.Sprintf(format, args...)}
+	}
+}
+
 // ---- locals ----
 
 func (c *compiler) addLocal(name string, isConst bool) int {

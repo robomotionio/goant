@@ -343,7 +343,7 @@ func (c *compiler) compileSuperCall(n *Node) {
 	// binds the resulting object as `this` (so subclassing an exotic native like
 	// Function/Array/Error yields the native object rather than an ordinary one).
 	if !c.resolveClassBinding("*superctor*") { // [superctor]
-		c.errorf("'super' keyword unexpected here")
+		c.syntaxErrorf("'super' keyword unexpected here")
 		return
 	}
 	c.buildSpreadArray(n.Args) // [superctor, argsArray]
@@ -372,7 +372,7 @@ func (c *compiler) compileSuperMethodCall(n *Node) {
 	}
 	// method = *superproto*.name
 	if !c.resolveClassBinding("*superproto*") {
-		c.errorf("'super' keyword unexpected here")
+		c.syntaxErrorf("'super' keyword unexpected here")
 		return
 	}
 	if member.Flags&1 != 0 {

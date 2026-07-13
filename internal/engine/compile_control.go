@@ -412,7 +412,7 @@ func (c *compiler) forInStore(left *Node) (func(), int) {
 func (c *compiler) compileBreak(n *Node) {
 	l := c.targetLoop(n.Str)
 	if l == nil {
-		c.errorf("illegal break statement")
+		c.syntaxErrorf("Illegal break statement")
 		return
 	}
 	off := c.emitLoopExitJump(l)
@@ -422,7 +422,7 @@ func (c *compiler) compileBreak(n *Node) {
 func (c *compiler) compileContinue(n *Node) {
 	l := c.targetLoopForContinue(n.Str)
 	if l == nil {
-		c.errorf("illegal continue statement")
+		c.syntaxErrorf("Illegal continue statement")
 		return
 	}
 	off := c.emitLoopExitJump(l)
