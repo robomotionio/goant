@@ -2301,7 +2301,11 @@ func (p *parser) parseSwitch() *Node {
 	p.expect(TokLParen)
 	n.Cond = p.parseExpr()
 	p.expect(TokRParen)
-	p.expect(TokLBrace)
+	if p.next() != TokLBrace { // the switch body must be a CaseBlock
+		p.errorf("Missing '{' before switch body")
+		return p.mk(NEmpty)
+	}
+	p.consume()
 	sawDefault := false
 	for p.next() != TokRBrace && p.tok() != TokEOF {
 		c := p.mk(NCase)
@@ -2315,6 +2319,10 @@ func (p *parser) parseSwitch() *Node {
 			}
 			sawDefault = true
 			p.consume()
+		} else {
+			// Every statement in a switch must belong to a case/default clause.
+			p.errorf("Unexpected token in switch: a clause must begin with 'case' or 'default'")
+			return p.mk(NEmpty)
 		}
 		p.expect(TokColon)
 		for p.next() != TokCase && p.tok() != TokDefault && p.tok() != TokRBrace && p.tok() != TokEOF {
