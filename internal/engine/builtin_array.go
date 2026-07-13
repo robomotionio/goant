@@ -384,34 +384,25 @@ func (rt *Runtime) initArrayBuiltin() {
 		return rt.getElement(this, mknum(float64(k)))
 	})
 	rt.defMethod(proto, "flatMap", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		cb := arg(args, 0)
-		if !rt.isCallable(cb) {
-			return mkundef(), rt.typeError("flatMap callback is not a function")
-		}
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		res := rt.newArray()
-		ro := rt.objPtr(res)
-		for i := 0; i < n; i++ {
-			el, _ := rt.getElement(this, mknum(float64(i)))
-			mv, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
-			if e != nil {
-				return mkundef(), e
-			}
-			if mv.Type() == TArr {
-				mo := rt.objPtr(mv)
-				for j := uint32(0); j < mo.arrLen; j++ {
-					if int(j) < len(mo.arr) && !mo.arr[j].IsEmpty() {
-						rt.arraySet(ro, ro.arrLen, mo.arr[j])
-					} else {
-						rt.arraySet(ro, ro.arrLen, mkundef())
-					}
-				}
-			} else {
-				rt.arraySet(ro, ro.arrLen, mv)
-			}
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("flatMap mapper is not a function")
+		}
+		res, e := rt.arraySpeciesCreate(obj, 0)
+		if e != nil {
+			return mkundef(), e
+		}
+		// FlattenIntoArray with depth 1 and the mapper applied per source element.
+		if _, e := rt.flattenIntoArray(res, obj, n, 0, 1, cb, arg(args, 1)); e != nil {
+			return mkundef(), e
 		}
 		return res, nil
 	})
@@ -1075,12 +1066,36 @@ func (rt *Runtime) initArrayBuiltin() {
 		return obj, nil
 	})
 	rt.defMethod(proto, "flat", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		obj, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
 		depth := 1
 		if !arg(args, 0).IsUndefined() {
-			depth = rt.intArg(args, 0)
+			d, e := rt.toIntegerOrInfinity(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			switch {
+			case d > 0x7FFFFFFF:
+				depth = 0x7FFFFFFF
+			case d < 0:
+				depth = 0
+			default:
+				depth = int(d)
+			}
 		}
-		res := rt.newArray()
-		rt.flattenInto(rt.objPtr(res), this, depth)
+		res, e := rt.arraySpeciesCreate(obj, 0)
+		if e != nil {
+			return mkundef(), e
+		}
+		if _, e := rt.flattenIntoArray(res, obj, n, 0, depth, mkundef(), mkundef()); e != nil {
+			return mkundef(), e
+		}
 		return res, nil
 	})
 
@@ -1417,22 +1432,53 @@ func (rt *Runtime) isArrayValue(v Value) bool {
 
 // flattenInto appends the elements of arr into dst, recursing into nested
 // arrays up to depth levels (Array.prototype.flat).
-func (rt *Runtime) flattenInto(dst *object, arr Value, depth int) {
-	o := rt.objPtr(arr)
-	if o == nil {
-		return
-	}
-	for i := uint32(0); i < o.arrLen; i++ {
-		if int(i) >= len(o.arr) || o.arr[i].IsEmpty() {
+// flattenIntoArray implements FlattenIntoArray(target, source, sourceLen, start,
+// depth[, mapper, thisArg]) and returns the next target index. It is generic
+// (HasProperty/Get on array-likes, CreateDataPropertyOrThrow into target) and a
+// large depth (flat(Infinity)) is passed as a saturating int (real arrays can't
+// nest 2^31 deep). depth <= 0 stops flattening.
+func (rt *Runtime) flattenIntoArray(target, source Value, sourceLen, start, depth int, mapper, thisArg Value) (int, *ThrowError) {
+	targetIndex := start
+	for i := 0; i < sourceLen; i++ {
+		present, e := rt.hasElemE(source, i)
+		if e != nil {
+			return 0, e
+		}
+		if !present {
 			continue
 		}
-		el := o.arr[i]
-		if depth > 0 && el.Type() == TArr {
-			rt.flattenInto(dst, el, depth-1)
+		el, e := rt.getElement(source, mknum(float64(i)))
+		if e != nil {
+			return 0, e
+		}
+		if !mapper.IsUndefined() {
+			if el, e = rt.callValue(mapper, thisArg, []Value{el, mknum(float64(i)), source}); e != nil {
+				return 0, e
+			}
+		}
+		if depth > 0 && rt.isArrayValue(el) {
+			elLen, e := rt.lengthOf(el)
+			if e != nil {
+				return 0, e
+			}
+			newDepth := depth - 1
+			if depth >= 0x7FFFFFFF { // saturating +Infinity
+				newDepth = depth
+			}
+			if targetIndex, e = rt.flattenIntoArray(target, el, elLen, targetIndex, newDepth, mkundef(), mkundef()); e != nil {
+				return 0, e
+			}
 		} else {
-			rt.arraySet(dst, dst.arrLen, el)
+			if float64(targetIndex) >= 9007199254740991 {
+				return 0, rt.typeError("Array flatten result exceeds the maximum array length")
+			}
+			if e := rt.createDataProperty(target, mknum(float64(targetIndex)), el); e != nil {
+				return 0, e
+			}
+			targetIndex++
 		}
 	}
+	return targetIndex, nil
 }
 
 // relIndex resolves a slice/splice relative index (negative counts from end).
