@@ -202,16 +202,22 @@ func (rt *Runtime) initRegExpBuiltin() {
 
 	// RegExp.prototype[Symbol.match/replace/search/split] delegate to the String
 	// operations with `this` as the pattern (so str.match(regex) works via them).
-	defSym := func(sym Value, run func(this Value, args []Value) (Value, *ThrowError)) {
+	defSym := func(sym Value, length int, run func(this Value, args []Value) (Value, *ThrowError)) {
 		if sym == 0 {
 			return
 		}
-		fn := rt.newNativeFunc("", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// A well-known-symbol method's name is "[Symbol.<desc>]" (its description is
+		// e.g. "Symbol.replace").
+		name := ""
+		if d := rt.symbolDesc(sym); d.IsString() {
+			name = "[" + string(rt.strBytes(d)) + "]"
+		}
+		fn := rt.newNativeFunc(name, length, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			return run(this, args)
 		})
 		po.defineOwnSymbol(sym.handle(), fn, attrWritable|attrConfigurable)
 	}
-	defSym(rt.symMatch, func(this Value, args []Value) (Value, *ThrowError) {
+	defSym(rt.symMatch, 1, func(this Value, args []Value) (Value, *ThrowError) {
 		// Generic RegExp.prototype[@@match] (22.2.6.8): reads global/unicode and
 		// runs RegExpExec, all via [[Get]] so it composes with Proxy traps.
 		if !this.IsObjectType() {
@@ -275,13 +281,13 @@ func (rt *Runtime) initRegExpBuiltin() {
 			}
 		}
 	})
-	defSym(rt.symReplace, func(this Value, args []Value) (Value, *ThrowError) {
+	defSym(rt.symReplace, 2, func(this Value, args []Value) (Value, *ThrowError) {
 		// Always run the generic exec-driven algorithm: it reads the exec result's
 		// length/0/index/N/groups observably (through a subclass's overridden exec
 		// and each property's coercion), which a fast native-substring path skips.
 		return rt.regexpSymbolReplace(this, arg(args, 0), arg(args, 1))
 	})
-	defSym(rt.symSearch, func(this Value, args []Value) (Value, *ThrowError) {
+	defSym(rt.symSearch, 1, func(this Value, args []Value) (Value, *ThrowError) {
 		// Generic RegExp.prototype[@@search] (22.2.6.11): saves/restores lastIndex
 		// around a single RegExpExec, all via [[Get]]/[[Set]].
 		if !this.IsObjectType() {
@@ -315,7 +321,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 		}
 		return rt.getField(result, "index")
 	})
-	defSym(rt.symSplit, func(this Value, args []Value) (Value, *ThrowError) {
+	defSym(rt.symSplit, 2, func(this Value, args []Value) (Value, *ThrowError) {
 		if this.IsNullish() || !this.IsObjectType() {
 			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.split] called on incompatible receiver")
 		}
@@ -353,7 +359,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 		// A non-RegExp splitter: run the fully generic exec-driven algorithm.
 		return rt.regexpSymbolSplitGeneric(splitter, arg(args, 0), arg(args, 1), unicode)
 	})
-	defSym(rt.symMatchAll, func(this Value, args []Value) (Value, *ThrowError) {
+	defSym(rt.symMatchAll, 1, func(this Value, args []Value) (Value, *ThrowError) {
 		if !this.IsObjectType() {
 			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.matchAll] called on incompatible receiver")
 		}
