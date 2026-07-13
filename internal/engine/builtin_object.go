@@ -686,6 +686,18 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 		}
 		return nil
 	}
+	// A generic descriptor (no value/writable and no get/set) over an existing
+	// accessor keeps it an accessor — only the attributes change (do NOT fall
+	// through to the data path, which would convert it to a data property).
+	if !hasVal && !hasW && existing.exists && existing.isAccessor {
+		hg, hs := !existing.getter.IsUndefined(), !existing.setter.IsUndefined()
+		if sym {
+			o.defineAccessorSymbol(symOff, existing.getter, existing.setter, hg, hs, attrs)
+		} else {
+			o.defineAccessor(name, existing.getter, existing.setter, hg, hs, attrs)
+		}
+		return nil
+	}
 	// A newly created data property (or one converted from an accessor) whose
 	// descriptor omits `value` defaults to undefined — NOT the zero Value, which
 	// NaN-decodes to the number 0. Only an existing data property keeps its value.
