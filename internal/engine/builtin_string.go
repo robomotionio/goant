@@ -221,6 +221,47 @@ func (rt *Runtime) initStringBuiltin() {
 		}
 		return rt.newString(jsToLowerCase(b)), nil
 	})
+	// isWellFormed / toWellFormed (ES2024): a string is well-formed iff it has no
+	// lone surrogates. goant stores strings as WTF-8, so a well-formed string is
+	// exactly a valid-UTF-8 one; toWellFormed replaces each lone surrogate with
+	// U+FFFD.
+	rt.defMethod(proto, "isWellFormed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		b, e := rt.thisStringBytes(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		return mkbool(utf8.Valid(b)), nil
+	})
+	rt.defMethod(proto, "toWellFormed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		b, e := rt.thisStringBytes(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		if utf8.Valid(b) {
+			return rt.newStringBytes(append([]byte{}, b...)), nil
+		}
+		n := utf16Len(b)
+		units := make([]uint16, 0, n)
+		for i := 0; i < n; i++ {
+			cu := utf16CodeUnitAt(b, i)
+			switch {
+			case cu >= 0xD800 && cu <= 0xDBFF: // high surrogate
+				if i+1 < n {
+					if next := utf16CodeUnitAt(b, i+1); next >= 0xDC00 && next <= 0xDFFF {
+						units = append(units, uint16(cu), uint16(next))
+						i++
+						continue
+					}
+				}
+				units = append(units, 0xFFFD)
+			case cu >= 0xDC00 && cu <= 0xDFFF: // lone low surrogate
+				units = append(units, 0xFFFD)
+			default:
+				units = append(units, uint16(cu))
+			}
+		}
+		return rt.newStringBytes(utf16ToWTF8(units)), nil
+	})
 	rt.defMethod(proto, "trim", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
 		if e != nil {
