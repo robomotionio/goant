@@ -1,6 +1,9 @@
 package engine
 
-import "strconv"
+import (
+	"math"
+	"strconv"
+)
 
 // Property and element access used by the interpreter's GET_FIELD/PUT_FIELD/
 // GET_ELEM/PUT_ELEM opcodes (ant ops/property.h + ant.c). Layers accessor
@@ -207,6 +210,34 @@ func canonicalIndex(s string) (uint32, bool) {
 		return 0, false
 	}
 	return uint32(n), true
+}
+
+// canonicalNumericIndex implements CanonicalNumericIndexString(s): the numeric
+// value of s when s is the exact canonical string form of a Number ("-0",
+// "1.1", "-1", "NaN", "Infinity" all qualify; "1e2", " 1", "" do not). Typed
+// arrays treat every such key as an element key (never an ordinary property),
+// even when it does not address a live element.
+func canonicalNumericIndex(s string) (float64, bool) {
+	if s == "-0" {
+		return math.Copysign(0, -1), true
+	}
+	n := stringToNumber(s)
+	if numberToString(n) == s {
+		return n, true
+	}
+	return 0, false
+}
+
+// integerIndex reports whether f is a valid integer index value (a non-negative
+// integer that is not -0), returning it as an int.
+func integerIndex(f float64) (int, bool) {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) || f < 0 {
+		return 0, false
+	}
+	if f == 0 && math.Signbit(f) {
+		return 0, false
+	}
+	return int(f), true
 }
 
 // getElement reads obj[key] with array/string fast paths.
@@ -424,22 +455,38 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 		rt.arraySet(o, idx, v)
 		return nil
 	}
-	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TTypedArray {
-		o := rt.objPtr(obj)
-		if o.ta != nil && isBigIntKind(o.ta.kind) {
-			bi, e := rt.toBigInt(v)
-			if e != nil {
-				return e
+	if obj.Type() == TTypedArray {
+		fidx, isNum := key.Number(), key.IsNumber()
+		if !isNum && key.IsString() {
+			fidx, isNum = canonicalNumericIndex(string(rt.strBytes(key)))
+		}
+		if isNum {
+			// Integer-indexed exotic [[Set]]: coerce the value first (this can
+			// throw), then write only when the key addresses a live in-bounds
+			// integer index. A canonical numeric key that is not a valid index
+			// (fractional, negative, -0, NaN, out of range, or detached) is a
+			// silent no-op — it never becomes an ordinary named property.
+			o := rt.objPtr(obj)
+			idx, integral := integerIndex(fidx)
+			if o.ta != nil && isBigIntKind(o.ta.kind) {
+				bi, e := rt.toBigInt(v)
+				if e != nil {
+					return e
+				}
+				if integral {
+					rt.taSetBig(o, idx, bi)
+				}
+			} else {
+				n, e := rt.toNumber(v)
+				if e != nil {
+					return e
+				}
+				if integral {
+					rt.taSet(o, idx, n)
+				}
 			}
-			rt.taSetBig(o, int(idx), bi)
 			return nil
 		}
-		n, e := rt.toNumber(v)
-		if e != nil {
-			return e
-		}
-		rt.taSet(o, int(idx), n)
-		return nil
 	}
 	name, e := rt.propKeyString(key)
 	if e != nil {

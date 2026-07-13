@@ -517,11 +517,19 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	if o.proxy != nil {
 		return rt.proxyDefineProperty(o.proxy, key, descVal)
 	}
-	// Integer-indexed exotic [[DefineOwnProperty]]: an element index is defined
-	// through the buffer, never as an ordinary named slot.
+	// Integer-indexed exotic [[DefineOwnProperty]]: any canonical numeric key is
+	// an element key, defined through the buffer and never as an ordinary named
+	// slot. A canonical numeric key that is not a live integer index is rejected.
 	if obj.Type() == TTypedArray && !key.IsSymbol() {
-		if idx, isIdx := rt.arrayIndexOf(key); isIdx {
-			return rt.taDefineIndex(o, int(idx), descVal)
+		kname, e := rt.propKeyString(key)
+		if e != nil {
+			return e
+		}
+		if fidx, isNum := canonicalNumericIndex(kname); isNum {
+			if idx, integral := integerIndex(fidx); integral {
+				return rt.taDefineIndex(o, idx, descVal)
+			}
+			return rt.typeError("Cannot define property: invalid typed array index")
 		}
 	}
 	sym := key.IsSymbol()
