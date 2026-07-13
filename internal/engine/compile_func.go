@@ -105,6 +105,22 @@ func (c *compiler) compileIfBranch(n *Node) {
 // collectPatternNames), so `const {x}=o; function f(){return x}` captures x.
 // Top-level script `var`-scoped code is unaffected.
 func (c *compiler) hoistLexicals(list []*Node) {
+	// A lexical name may not also be var-declared in the same scope. Collect the
+	// var names declared directly in this statement list (the common same-level
+	// `let x; var x;` conflict; var hoisting through nested blocks is not modeled
+	// here, so this only ever reports a true conflict — never a false one).
+	varNames := map[string]bool{}
+	for _, stmt := range list {
+		if stmt != nil && stmt.Kind == NVar && stmt.VarKind == VarVar {
+			for _, decl := range stmt.Args {
+				var names []string
+				collectPatternNames(decl.Left, &names)
+				for _, nm := range names {
+					varNames[nm] = true
+				}
+			}
+		}
+	}
 	// A name may be lexically declared at most once per scope; `seen` tracks the
 	// let/const names declared by THIS statement list (a genuine duplicate) so a
 	// pre-existing binding from an outer/enclosing construct isn't misread as one.
@@ -125,7 +141,7 @@ func (c *compiler) hoistLexicals(list []*Node) {
 					c.syntaxErrorf("let is disallowed as a lexically bound name")
 					return
 				}
-				if seen[name] {
+				if seen[name] || varNames[name] {
 					c.syntaxErrorf("Identifier '%s' has already been declared", name)
 					return
 				}
