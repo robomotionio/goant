@@ -609,31 +609,40 @@ func (rt *Runtime) initDataViewBuiltin() {
 			if o == nil || o.dv == nil {
 				return mkundef(), rt.typeError("DataView.prototype.get" + t.name + " on incompatible receiver")
 			}
-			off := o.dv.byteOffset + int(argNum(rt, args, 0))
+			idx, e := rt.toIndex(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
 			le := rt.toBoolean(arg(args, 1))
 			if rt.dvDetached(o) {
 				return mkundef(), rt.typeError("Cannot get value from a detached ArrayBuffer")
 			}
-			if off < 0 || off+t.size > len(o.dv.bytes) {
+			if idx+t.size > o.dv.byteLength {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
-			return mknum(t.dec(o.dv.bytes, off, le)), nil
+			return mknum(t.dec(o.dv.bytes, o.dv.byteOffset+idx, le)), nil
 		})
 		rt.defMethod(po, "set"+t.name, 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			o := rt.objPtr(this)
 			if o == nil || o.dv == nil {
 				return mkundef(), rt.typeError("DataView.prototype.set" + t.name + " on incompatible receiver")
 			}
-			off := o.dv.byteOffset + int(argNum(rt, args, 0))
-			val := argNum(rt, args, 1)
+			idx, e := rt.toIndex(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			val, e := rt.toNumber(arg(args, 1))
+			if e != nil {
+				return mkundef(), e
+			}
 			le := rt.toBoolean(arg(args, 2))
 			if rt.dvDetached(o) {
 				return mkundef(), rt.typeError("Cannot set value on a detached ArrayBuffer")
 			}
-			if off < 0 || off+t.size > len(o.dv.bytes) {
+			if idx+t.size > o.dv.byteLength {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
-			t.enc(o.dv.bytes, off, val, le)
+			t.enc(o.dv.bytes, o.dv.byteOffset+idx, val, le)
 			return mkundef(), nil
 		})
 	}
@@ -648,14 +657,18 @@ func (rt *Runtime) initDataViewBuiltin() {
 			if o == nil || o.dv == nil {
 				return mkundef(), rt.typeError("DataView.prototype.get" + bt.name + " on incompatible receiver")
 			}
-			off := o.dv.byteOffset + int(argNum(rt, args, 0))
+			idx, e := rt.toIndex(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
 			le := rt.toBoolean(arg(args, 1))
 			if rt.dvDetached(o) {
 				return mkundef(), rt.typeError("Cannot get value from a detached ArrayBuffer")
 			}
-			if off < 0 || off+8 > len(o.dv.bytes) {
+			if idx+8 > o.dv.byteLength {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
+			off := o.dv.byteOffset + idx
 			u := order(le).Uint64(o.dv.bytes[off:])
 			if bt.signed {
 				return rt.newBigInt(big.NewInt(int64(u))), nil
@@ -667,7 +680,10 @@ func (rt *Runtime) initDataViewBuiltin() {
 			if o == nil || o.dv == nil {
 				return mkundef(), rt.typeError("DataView.prototype.set" + bt.name + " on incompatible receiver")
 			}
-			off := o.dv.byteOffset + int(argNum(rt, args, 0))
+			idx, e := rt.toIndex(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
 			bi, e := rt.toBigInt(arg(args, 1))
 			if e != nil {
 				return mkundef(), e
@@ -676,10 +692,10 @@ func (rt *Runtime) initDataViewBuiltin() {
 			if rt.dvDetached(o) {
 				return mkundef(), rt.typeError("Cannot set value on a detached ArrayBuffer")
 			}
-			if off < 0 || off+8 > len(o.dv.bytes) {
+			if idx+8 > o.dv.byteLength {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
-			order(le).PutUint64(o.dv.bytes[off:], bigIntAsUintN(64, bi).Uint64())
+			order(le).PutUint64(o.dv.bytes[o.dv.byteOffset+idx:], bigIntAsUintN(64, bi).Uint64())
 			return mkundef(), nil
 		})
 	}
@@ -740,6 +756,27 @@ func (rt *Runtime) initDataViewBuiltin() {
 func argNum(rt *Runtime, args []Value, i int) float64 {
 	n, _ := rt.toNumber(arg(args, i))
 	return n
+}
+
+// toIndex implements ToIndex(value): ToIntegerOrInfinity, then a RangeError if
+// the result is negative or exceeds 2^53-1. undefined maps to 0.
+func (rt *Runtime) toIndex(v Value) (int, *ThrowError) {
+	if v.IsUndefined() {
+		return 0, nil
+	}
+	n, e := rt.toNumber(v)
+	if e != nil {
+		return 0, e
+	}
+	if math.IsNaN(n) {
+		n = 0
+	} else {
+		n = math.Trunc(n)
+	}
+	if n < 0 || n > 9007199254740991 {
+		return 0, rt.rangeError("Invalid typed array or DataView index")
+	}
+	return int(n), nil
 }
 
 // taLength returns a TypedArray's element length (for lengthOf / methods).
