@@ -81,6 +81,27 @@ func (rt *Runtime) construct(fnVal Value, args []Value) (Value, *ThrowError) {
 	return rt.constructWithTarget(fnVal, args, fnVal)
 }
 
+// isConstructorValue reports whether v has a [[Construct]] internal method
+// (IsConstructor). Ordinary function constructors, flagged native constructors,
+// and proxies wrapping a constructor qualify; methods, arrows, generators,
+// async functions, getters, and call-only natives do not.
+func (rt *Runtime) isConstructorValue(v Value) bool {
+	o := rt.objPtr(v)
+	if o == nil || !o.flags.isCallable {
+		return false
+	}
+	if o.proxy != nil {
+		return rt.isConstructorValue(o.proxy.target)
+	}
+	if o.native != nil {
+		return o.flags.isConstructor
+	}
+	if cl := rt.closures.get(o.closure); cl != nil {
+		return !(cl.fn.isGenerator || cl.fn.isAsync || cl.fn.isArrow || cl.fn.isMethod)
+	}
+	return o.flags.isConstructor
+}
+
 // newTargetProto returns the [[Prototype]] to use for an object created by the
 // current native constructor: new.target.prototype when constructing (so
 // Reflect.construct(C, args, newTarget) / subclasses inherit correctly),
@@ -131,8 +152,23 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 		}
 		return mkundef(), rt.typeError(nm + " is not a constructor")
 	}
+	// A native function has [[Construct]] only if flagged a constructor; built-in
+	// methods, getters, Symbol/BigInt, %TypedArray%, etc. are call-only.
+	if o.native != nil && !o.flags.isConstructor {
+		nm := "value"
+		if nv, ok := o.getOwn("name"); ok && nv.IsString() {
+			if s := string(rt.strBytes(nv)); s != "" {
+				nm = s
+			}
+		}
+		return mkundef(), rt.typeError(nm + " is not a constructor")
+	}
 	if newTarget == 0 {
 		newTarget = fnVal
+	}
+	// new.target (Reflect.construct's third argument) must itself be a constructor.
+	if !rt.isConstructorValue(newTarget) {
+		return mkundef(), rt.typeError("new.target is not a constructor")
 	}
 	proto := mknull()
 	if p, e := rt.getField(newTarget, "prototype"); e == nil && p.IsObjectType() {

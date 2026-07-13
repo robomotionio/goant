@@ -238,7 +238,42 @@ func New() *Runtime {
 	rt.initAtomics()
 	rt.initIntl()
 	rt.initAnnexB()
+	rt.markNativeConstructors()
 	return rt
+}
+
+// markNativeConstructors flags the built-in functions that have a [[Construct]]
+// internal method. A native carrying its own "prototype" data property is a
+// constructor; prototype/static methods and accessor getters have none, so they
+// stay call-only and `new`/Reflect.construct on them throws a TypeError.
+// (Symbol and BigInt also own a "prototype" and DO have [[Construct]] per
+// IsConstructor — it simply throws when actually invoked — so they are flagged.)
+func (rt *Runtime) markNativeConstructors() {
+	mark := func(v Value, name string) {
+		o := rt.objPtr(v)
+		if o == nil || o.native == nil || !o.flags.isCallable {
+			return
+		}
+		// Proxy is the one standard constructor with no own "prototype" property.
+		if _, ok := o.getOwn("prototype"); ok || name == "Proxy" {
+			o.flags.isConstructor = true
+		}
+	}
+	markMembers := func(container Value) {
+		co := rt.objPtr(container)
+		if co == nil {
+			return
+		}
+		for _, k := range co.ownKeys() {
+			if v, ok := co.getOwn(k); ok {
+				mark(v, k)
+			}
+		}
+	}
+	markMembers(rt.global)
+	if intlV, ok := rt.objPtr(rt.global).getOwn("Intl"); ok {
+		markMembers(intlV)
+	}
 }
 
 // initPrototypes creates the core prototype objects. Object.prototype is the

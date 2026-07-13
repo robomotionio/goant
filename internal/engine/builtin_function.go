@@ -65,10 +65,12 @@ func (rt *Runtime) initFunctionBuiltin() {
 			full := append(append([]Value{}, boundArgs...), callArgs...)
 			return rt.callValue(target, boundThis, full)
 		})
-		// A bound function's [[Prototype]] is the target's [[Prototype]] (19.2.3.2).
+		// A bound function's [[Prototype]] is the target's [[Prototype]] (19.2.3.2),
+		// and it has [[Construct]] iff the target does.
 		if to := rt.objPtr(target); to != nil {
 			rt.objPtr(bound).proto = to.proto
 		}
+		rt.objPtr(bound).flags.isConstructor = rt.isConstructorValue(target)
 		// Spec order: SetFunctionLength first (HasOwnProperty then Get "length"),
 		// then SetFunctionName (Get "name"). Both Gets are observable via a trap.
 		tlen := 0
@@ -136,6 +138,7 @@ func (rt *Runtime) initFunctionFamily() {
 		fc := rt.newNativeFunc(name, 1, rt.dynamicFunctionCtor(keyword, famProto))
 		fo := rt.objPtr(fc)
 		fo.proto = ctorV // %GeneratorFunction% extends Function
+		fo.flags.isConstructor = true
 		fo.defineOwn("prototype", famProto, 0)
 		fo.defineOwn("name", rt.newString(name), attrConfigurable)
 		rt.objPtr(famProto).defineOwn("constructor", fc, attrConfigurable)
