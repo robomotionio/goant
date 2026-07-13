@@ -6,9 +6,31 @@ package engine
 import (
 	"math"
 	"strings"
+	"unicode/utf8"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
 )
+
+// jsToUpperCase / jsToLowerCase apply the Unicode default (language-independent)
+// case conversion ECMAScript toUpperCase/toLowerCase require — including the
+// 1→many and contextual mappings Go's strings.ToUpper/ToLower miss (ß→SS,
+// İ→i̇, ﬀ→FF, final sigma). A string carrying lone surrogates isn't valid
+// UTF-8, so it falls back to simple casing (which leaves those bytes intact).
+func jsToUpperCase(b []byte) string {
+	if utf8.Valid(b) {
+		return cases.Upper(language.Und).String(string(b))
+	}
+	return strings.ToUpper(string(b))
+}
+
+func jsToLowerCase(b []byte) string {
+	if utf8.Valid(b) {
+		return cases.Lower(language.Und).String(string(b))
+	}
+	return strings.ToLower(string(b))
+}
 
 // isRegExpValue implements ES IsRegExp: an object whose Symbol.match is truthy
 // is "regexp-like", otherwise the real [[RegExpMatcher]] (o.regex) decides.
@@ -190,14 +212,14 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(strings.ToUpper(string(b))), nil
+		return rt.newString(jsToUpperCase(b)), nil
 	})
 	rt.defMethod(proto, "toLowerCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(strings.ToLower(string(b))), nil
+		return rt.newString(jsToLowerCase(b)), nil
 	})
 	rt.defMethod(proto, "trim", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
@@ -300,14 +322,14 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(strings.ToLower(string(b))), nil
+		return rt.newString(jsToLowerCase(b)), nil
 	})
 	rt.defMethod(proto, "toLocaleUpperCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(strings.ToUpper(string(b))), nil
+		return rt.newString(jsToUpperCase(b)), nil
 	})
 
 	pad := func(atStart bool) nativeFunc {
