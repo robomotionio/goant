@@ -418,7 +418,9 @@ func (rt *Runtime) newResizableArrayBuffer(byteLen, maxLen int) Value {
 // newTypedArray builds a view of `kind` from a constructor argument.
 func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError) {
 	h, o := rt.objects.alloc()
-	o.proto = rt.typedArrayProtos[kind]
+	// Honor a subclass new.target's prototype (falls back to the intrinsic when
+	// not constructing, e.g. internal map/filter/toReversed allocations).
+	o.proto = rt.newTargetProto(rt.typedArrayProtos[kind])
 	o.shape = newShape()
 	o.typeTag = TTypedArray
 	o.flags.extensible = true
@@ -573,6 +575,15 @@ func (rt *Runtime) initTypedArrays() {
 		rt.objPtr(proto).defineOwn("BYTES_PER_ELEMENT", mknum(float64(info.size)), 0)
 		// from / of statics.
 		rt.defMethod(cobj, "from", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			// `this` is the constructor to build the result with (TypedArrayCreate).
+			if !rt.isConstructorValue(this) {
+				return mkundef(), rt.typeError("TypedArray.from called on a non-constructor")
+			}
+			mapFn := arg(args, 1)
+			if !mapFn.IsUndefined() && !rt.isCallable(mapFn) {
+				return mkundef(), rt.typeError("TypedArray.from mapfn is not callable")
+			}
+			thisArg := arg(args, 2)
 			src := arg(args, 0)
 			var items []Value
 			if rt.isIterable(src) {
@@ -582,35 +593,43 @@ func (rt *Runtime) initTypedArrays() {
 				}
 				items = it
 			} else {
-				n, _ := rt.lengthOf(src)
+				n, e := rt.lengthOf(src)
+				if e != nil {
+					return mkundef(), e
+				}
+				items = make([]Value, n)
 				for i := 0; i < n; i++ {
-					el, _ := rt.getElement(src, mknum(float64(i)))
-					items = append(items, el)
+					if items[i], e = rt.getElement(src, mknum(float64(i))); e != nil {
+						return mkundef(), e
+					}
 				}
 			}
-			mapFn := arg(args, 1)
-			arrV, _ := rt.newTypedArray(kind, []Value{mknum(float64(len(items)))})
-			ao := rt.objPtr(arrV)
+			arrV, e := rt.typedArrayCreate(this, len(items))
+			if e != nil {
+				return mkundef(), e
+			}
 			for i, it := range items {
 				v := it
 				if rt.isCallable(mapFn) {
-					mv, e := rt.callValue(mapFn, arg(args, 2), []Value{it, mknum(float64(i))})
-					if e != nil {
+					if v, e = rt.callValue(mapFn, thisArg, []Value{it, mknum(float64(i))}); e != nil {
 						return mkundef(), e
 					}
-					v = mv
 				}
-				n, _ := rt.toNumber(v)
-				rt.taSet(ao, i, n)
+				if e := rt.setElement(arrV, mknum(float64(i)), v); e != nil {
+					return mkundef(), e
+				}
 			}
 			return arrV, nil
 		})
 		rt.defMethod(cobj, "of", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			arrV, _ := rt.newTypedArray(kind, []Value{mknum(float64(len(args)))})
-			ao := rt.objPtr(arrV)
+			arrV, e := rt.typedArrayCreate(this, len(args))
+			if e != nil {
+				return mkundef(), e
+			}
 			for i, it := range args {
-				n, _ := rt.toNumber(it)
-				rt.taSet(ao, i, n)
+				if e := rt.setElement(arrV, mknum(float64(i)), it); e != nil {
+					return mkundef(), e
+				}
 			}
 			return arrV, nil
 		})
@@ -1177,6 +1196,31 @@ func (rt *Runtime) typedArraySpeciesCreate(this Value, args []Value) (Value, *Th
 		return mkundef(), rt.typeError("TypedArray species constructor returned a detached TypedArray")
 	}
 	if len(args) == 1 && args[0].IsNumber() && rt.taCurrentLen(ro) < int(args[0].Number()) {
+		return mkundef(), rt.typeError("Derived TypedArray constructor created an array shorter than requested")
+	}
+	return res, nil
+}
+
+// typedArrayCreate implements TypedArrayCreateFromConstructor(C, «length»): C
+// must be a constructor; the result must be a non-out-of-bounds TypedArray at
+// least length elements long. Used by %TypedArray%.from / of, whose `this` is
+// the constructor to build the result with.
+func (rt *Runtime) typedArrayCreate(C Value, length int) (Value, *ThrowError) {
+	if !rt.isConstructorValue(C) {
+		return mkundef(), rt.typeError("TypedArray.from/of called on a non-constructor")
+	}
+	res, e := rt.construct(C, []Value{mknum(float64(length))})
+	if e != nil {
+		return mkundef(), e
+	}
+	ro := rt.objPtr(res)
+	if ro == nil || ro.ta == nil {
+		return mkundef(), rt.typeError("TypedArray constructor did not return a TypedArray")
+	}
+	if rt.taOutOfBounds(ro) {
+		return mkundef(), rt.typeError("TypedArray constructor returned a detached or out-of-bounds TypedArray")
+	}
+	if rt.taCurrentLen(ro) < length {
 		return mkundef(), rt.typeError("Derived TypedArray constructor created an array shorter than requested")
 	}
 	return res, nil
