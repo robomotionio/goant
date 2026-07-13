@@ -165,10 +165,20 @@ func (p *parser) isStrictRestrictedAssignTarget(n *Node) bool {
 }
 
 func (p *parser) strictCheckBindingIdent(s string) {
-	if !p.lx.strict || s == "" {
+	if s == "" {
 		return
 	}
-	if p.strictForbiddenBinding(s) {
+	// `yield`/`await` are reserved as binding identifiers inside a generator /
+	// async body (regardless of strict mode).
+	if p.inGenerator && s == "yield" {
+		p.errorf("'yield' cannot be used as a binding identifier in a generator")
+		return
+	}
+	if p.inAsync && s == "await" {
+		p.errorf("'await' cannot be used as a binding identifier in an async function")
+		return
+	}
+	if p.lx.strict && p.strictForbiddenBinding(s) {
 		p.errorf("Invalid binding identifier '%s' in strict mode", s)
 	}
 }
@@ -1410,6 +1420,14 @@ func (p *parser) parseFunc() *Node {
 	}
 	if isIdentLikeTok(p.next()) {
 		fn.Str = p.tokIdentStr()
+		// The function name is a BindingIdentifier evaluated in the ENCLOSING
+		// yield/await context (inGenerator/inAsync were already reset for this
+		// function's own body), so check it against the saved outer context.
+		if savedGen && fn.Str == "yield" {
+			p.errorf("'yield' cannot be used as a binding identifier in a generator")
+		} else if savedAsync && fn.Str == "await" {
+			p.errorf("'await' cannot be used as a binding identifier in an async function")
+		}
 		p.strictCheckBindingIdent(fn.Str)
 		p.consume()
 	}
