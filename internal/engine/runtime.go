@@ -66,6 +66,7 @@ type Runtime struct {
 	dataViewProto    Value
 	typedArrayProto  Value   // %TypedArray%.prototype
 	typedArrayProtos []Value // per-kind prototypes (indexed by taKind)
+	typedArrayCtors  []Value // per-kind constructors (indexed by taKind), for @@species defaults
 
 	// curGen is the coroutine currently executing on the JS "thread" (nil on the
 	// main frame). Generator/async suspension hands control between the driver

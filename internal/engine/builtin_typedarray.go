@@ -343,6 +343,7 @@ func (rt *Runtime) initTypedArrays() {
 	tp.defineOwn("constructor", taCtor, attrWritable|attrConfigurable)
 
 	rt.typedArrayProtos = make([]Value, len(taKinds))
+	rt.typedArrayCtors = make([]Value, len(taKinds))
 	for k := range taKinds {
 		kind := taKind(k)
 		proto := rt.newObject(taProto)
@@ -354,6 +355,7 @@ func (rt *Runtime) initTypedArrays() {
 			}
 			return rt.newTypedArray(kind, args)
 		})
+		rt.typedArrayCtors[k] = ctor
 		cobj := rt.objPtr(ctor)
 		cobj.proto = taCtor // Int8Array.__proto__ === %TypedArray%
 		cobj.defineOwn("prototype", proto, 0)
@@ -805,6 +807,38 @@ func (rt *Runtime) toIndex(v Value) (int, *ThrowError) {
 	return int(n), nil
 }
 
+// typedArraySpeciesCreate implements TypedArraySpeciesCreate(exemplar, args):
+// construct a new TypedArray using exemplar.constructor[@@species] (defaulting
+// to the intrinsic for exemplar's element kind). The result must be a
+// non-detached TypedArray, and — for a single numeric length argument — at
+// least that long.
+func (rt *Runtime) typedArraySpeciesCreate(this Value, args []Value) (Value, *ThrowError) {
+	o := rt.objPtr(this)
+	if o == nil || o.ta == nil {
+		return mkundef(), rt.typeError("not a TypedArray")
+	}
+	def := rt.typedArrayCtors[o.ta.kind]
+	C, e := rt.speciesConstructor(this, def)
+	if e != nil {
+		return mkundef(), e
+	}
+	res, e := rt.construct(C, args)
+	if e != nil {
+		return mkundef(), e
+	}
+	ro := rt.objPtr(res)
+	if ro == nil || ro.ta == nil {
+		return mkundef(), rt.typeError("TypedArray species constructor did not return a TypedArray")
+	}
+	if rt.taDetached(ro) {
+		return mkundef(), rt.typeError("TypedArray species constructor returned a detached TypedArray")
+	}
+	if len(args) == 1 && args[0].IsNumber() && ro.ta.length < int(args[0].Number()) {
+		return mkundef(), rt.typeError("Derived TypedArray constructor created an array shorter than requested")
+	}
+	return res, nil
+}
+
 // taLength returns a TypedArray's element length (for lengthOf / methods).
 func (rt *Runtime) taLength(o *object) int {
 	if o.ta != nil && !rt.taDetached(o) {
@@ -871,7 +905,10 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	m("map", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		cb := arg(args, 0)
 		l := length(this)
-		out, _ := rt.newTypedArray(rt.objPtr(this).ta.kind, []Value{mknum(float64(l))})
+		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(l))})
+		if e != nil {
+			return mkundef(), e
+		}
 		oo := rt.objPtr(out)
 		for i := 0; i < l; i++ {
 			r, e := rt.callValue(cb, arg(args, 1), []Value{get(this, i), mknum(float64(i)), this})
@@ -896,7 +933,10 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 				keep = append(keep, el.Number())
 			}
 		}
-		out, _ := rt.newTypedArray(rt.objPtr(this).ta.kind, []Value{mknum(float64(len(keep)))})
+		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(len(keep)))})
+		if e != nil {
+			return mkundef(), e
+		}
 		oo := rt.objPtr(out)
 		for i, v := range keep {
 			rt.taSet(oo, i, v)
@@ -1099,7 +1139,10 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		if end < start {
 			end = start
 		}
-		out, _ := rt.newTypedArray(o.ta.kind, []Value{mknum(float64(end - start))})
+		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(end - start))})
+		if e != nil {
+			return mkundef(), e
+		}
 		oo := rt.objPtr(out)
 		for i := 0; i < end-start; i++ {
 			el, _ := rt.taGet(o, start+i)
@@ -1138,8 +1181,12 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		if end < start {
 			end = start
 		}
-		v := mkval(TTypedArray, uint64(rt.newTypedArrayView(o.ta, start, end-start)))
-		return v, nil
+		// subarray shares the buffer: SpeciesConstructor is invoked with
+		// (buffer, absoluteByteOffset, newLength).
+		byteOffset := o.ta.byteOffset + start*o.ta.size()
+		return rt.typedArraySpeciesCreate(this, []Value{
+			o.ta.buf, mknum(float64(byteOffset)), mknum(float64(end - start)),
+		})
 	})
 	m("copyWithin", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
