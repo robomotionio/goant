@@ -1,5 +1,7 @@
 package engine
 
+import "strconv"
+
 // Property and element access used by the interpreter's GET_FIELD/PUT_FIELD/
 // GET_ELEM/PUT_ELEM opcodes (ant ops/property.h + ant.c). Layers accessor
 // invocation, array fast-path, string indexing, and array `.length` on top of
@@ -392,7 +394,23 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 		return nil
 	}
 	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TArr {
-		rt.arraySet(rt.objPtr(obj), idx, v)
+		o := rt.objPtr(obj)
+		// Fast paths: a live in-range element, or an index at/past the current
+		// length (no named index property lives there — a defineProperty on an
+		// index extends the length past it). Otherwise a hole inside the logical
+		// array may be shadowed by a named index property defined with attributes
+		// (non-writable data rejects the write; an accessor invokes its setter) —
+		// honor it; absent one, keep the array fast.
+		if (int(idx) < len(o.arr) && !o.arr[idx].IsEmpty()) || idx >= o.arrLen {
+			rt.arraySet(o, idx, v)
+			return nil
+		}
+		name := strconv.Itoa(int(idx))
+		if o.shape.lookupInterned(name) >= 0 {
+			_, e := rt.setFieldR(obj, name, v)
+			return e
+		}
+		rt.arraySet(o, idx, v)
 		return nil
 	}
 	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TTypedArray {
