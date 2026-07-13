@@ -627,7 +627,15 @@ func (o *object) ownDescriptor(key string) ownDesc {
 	if o.isAccessorSlot(uint32(slot)) {
 		p := o.shape.propAt(uint32(slot))
 		d.isAccessor = true
-		d.getter, d.setter = p.getter, p.setter
+		// A missing get/set is undefined, not the zero-value Value (which reads as
+		// the number 0).
+		d.getter, d.setter = mkundef(), mkundef()
+		if p.hasGetter {
+			d.getter = p.getter
+		}
+		if p.hasSetter {
+			d.setter = p.setter
+		}
 	} else {
 		d.value = o.slotGet(uint32(slot))
 	}
@@ -745,7 +753,15 @@ func (o *object) ownDescriptorSym(off uint32) ownDesc {
 	if o.isAccessorSlot(uint32(slot)) {
 		p := o.shape.propAt(uint32(slot))
 		d.isAccessor = true
-		d.getter, d.setter = p.getter, p.setter
+		// A missing get/set is undefined, not the zero-value Value (which reads as
+		// the number 0).
+		d.getter, d.setter = mkundef(), mkundef()
+		if p.hasGetter {
+			d.getter = p.getter
+		}
+		if p.hasSetter {
+			d.setter = p.setter
+		}
 	} else {
 		d.value = o.slotGet(uint32(slot))
 	}
