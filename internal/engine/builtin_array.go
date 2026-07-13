@@ -260,6 +260,9 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), e
 		}
 		for i := 0; i < n; i++ {
+			if !rt.hasElem(this, i) { // indexOf skips holes (HasProperty)
+				continue
+			}
 			el, e := rt.getElement(this, mknum(float64(i)))
 			if e != nil {
 				return mkundef(), e
@@ -642,6 +645,9 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), e
 		}
 		for i := 0; i < n; i++ {
+			if !rt.hasElem(this, i) { // forEach skips holes
+				continue
+			}
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			if _, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this}); e != nil {
 				return mkundef(), e
@@ -660,6 +666,9 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), e
 		}
 		for i := 0; i < n; i++ {
+			if !rt.hasElem(this, i) { // map skips holes, leaving a hole in the result
+				continue
+			}
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			mapped, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
@@ -681,6 +690,9 @@ func (rt *Runtime) initArrayBuiltin() {
 		}
 		outIdx := 0
 		for i := 0; i < n; i++ {
+			if !rt.hasElem(this, i) { // filter skips holes
+				continue
+			}
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			keep, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
@@ -704,13 +716,24 @@ func (rt *Runtime) initArrayBuiltin() {
 		if len(args) > 1 {
 			acc = args[1]
 		} else {
-			if n == 0 {
+			// Seed the accumulator with the first present element (holes skipped).
+			found := false
+			for ; i < n; i++ {
+				if rt.hasElem(this, i) {
+					acc, _ = rt.getElement(this, mknum(float64(i)))
+					i++
+					found = true
+					break
+				}
+			}
+			if !found {
 				return mkundef(), rt.typeError("Reduce of empty array with no initial value")
 			}
-			acc, _ = rt.getElement(this, mknum(0))
-			i = 1
 		}
 		for ; i < n; i++ {
+			if !rt.hasElem(this, i) { // reduce skips holes
+				continue
+			}
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			acc, e = rt.callValue(cb, mkundef(), []Value{acc, el, mknum(float64(i)), this})
 			if e != nil {
@@ -819,6 +842,9 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), e
 		}
 		for i := 0; i < n; i++ {
+			if !rt.hasElem(this, i) { // some/every skip holes
+				continue
+			}
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
@@ -837,6 +863,9 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), e
 		}
 		for i := 0; i < n; i++ {
+			if !rt.hasElem(this, i) { // some/every skip holes
+				continue
+			}
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
@@ -882,6 +911,9 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), e
 		}
 		for i := 0; i < n; i++ {
+			if !rt.hasElem(this, i) { // some/every skip holes
+				continue
+			}
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
@@ -900,6 +932,9 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), e
 		}
 		for i := 0; i < n; i++ {
+			if !rt.hasElem(this, i) { // some/every skip holes
+				continue
+			}
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
 			if e != nil {
@@ -918,6 +953,9 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), e
 		}
 		for i := n - 1; i >= 0; i-- {
+			if !rt.hasElem(this, i) { // lastIndexOf skips holes
+				continue
+			}
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			if rt.strictEquals(el, target) {
 				return mknum(float64(i)), nil
@@ -936,13 +974,23 @@ func (rt *Runtime) initArrayBuiltin() {
 		if len(args) > 1 {
 			acc = args[1]
 		} else {
-			if n == 0 {
+			found := false
+			for ; i >= 0; i-- {
+				if rt.hasElem(this, i) {
+					acc, _ = rt.getElement(this, mknum(float64(i)))
+					i--
+					found = true
+					break
+				}
+			}
+			if !found {
 				return mkundef(), rt.typeError("Reduce of empty array with no initial value")
 			}
-			acc, _ = rt.getElement(this, mknum(float64(i)))
-			i--
 		}
 		for ; i >= 0; i-- {
+			if !rt.hasElem(this, i) { // reduceRight skips holes
+				continue
+			}
 			el, _ := rt.getElement(this, mknum(float64(i)))
 			acc, e = rt.callValue(cb, mkundef(), []Value{acc, el, mknum(float64(i)), this})
 			if e != nil {
