@@ -665,9 +665,12 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 
 // objectDefineProperties applies a map of descriptors (Object.defineProperties).
 func (rt *Runtime) objectDefineProperties(obj, props Value) *ThrowError {
-	po := rt.objPtr(props)
-	if po == nil {
-		return rt.typeError("Property descriptors must be an object")
+	// ObjectDefineProperties (20.1.2.3.1) begins with ToObject(Properties): a
+	// primitive is boxed (its wrapper has no own enumerable descriptors, so it is
+	// a no-op), and null/undefined is a TypeError.
+	props, e := rt.toObjectValue(props)
+	if e != nil {
+		return e
 	}
 	// Enumerate via [[OwnPropertyKeys]] + [[GetOwnProperty]] (proxy traps), then
 	// read each descriptor object via [[Get]].
