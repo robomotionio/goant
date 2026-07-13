@@ -600,6 +600,9 @@ func (rt *Runtime) initStringRegexpMethods() {
 	sp := rt.objPtr(rt.stringProto)
 
 	rt.defMethod(sp, "search", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if this.IsNullish() { // RequireObjectCoercible before delegating to @@search
+			return mkundef(), rt.typeError("String.prototype.search called on null or undefined")
+		}
 		if r, ok, e := rt.delegateSymbolMethod(rt.symSearch, arg(args, 0), this); ok {
 			return r, e
 		}
@@ -619,6 +622,9 @@ func (rt *Runtime) initStringRegexpMethods() {
 	})
 
 	rt.defMethod(sp, "match", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if this.IsNullish() { // RequireObjectCoercible before delegating to @@match
+			return mkundef(), rt.typeError("String.prototype.match called on null or undefined")
+		}
 		if r, ok, e := rt.delegateSymbolMethod(rt.symMatch, arg(args, 0), this); ok {
 			return r, e
 		}
@@ -660,6 +666,9 @@ func (rt *Runtime) initStringRegexpMethods() {
 	})
 
 	rt.defMethod(sp, "replace", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if this.IsNullish() { // RequireObjectCoercible before delegating to @@replace
+			return mkundef(), rt.typeError("String.prototype.replace called on null or undefined")
+		}
 		// GetMethod(searchValue, @@replace) via [[Get]] so a Proxy trap sees it.
 		if pat := arg(args, 0); !pat.IsNullish() {
 			m, e := rt.getElement(pat, rt.symReplace)
@@ -678,6 +687,9 @@ func (rt *Runtime) initStringRegexpMethods() {
 	})
 
 	rt.defMethod(sp, "matchAll", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if this.IsNullish() { // RequireObjectCoercible
+			return mkundef(), rt.typeError("String.prototype.matchAll called on null or undefined")
+		}
 		s, e := rt.toStringValue(this)
 		if e != nil {
 			return mkundef(), e
@@ -722,6 +734,9 @@ func (rt *Runtime) initStringRegexpMethods() {
 	})
 
 	rt.defMethod(sp, "replaceAll", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if this.IsNullish() { // RequireObjectCoercible
+			return mkundef(), rt.typeError("String.prototype.replaceAll called on null or undefined")
+		}
 		search := arg(args, 0)
 		if o := rt.objPtr(search); o != nil && o.regex != nil {
 			if !o.regex.Global {
