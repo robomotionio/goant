@@ -173,6 +173,11 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 		return true, rt.proxySet(o.proxy, rt.internString(name), v, obj)
 	}
 	if obj.Type() == TArr && name == "length" {
+		// A non-writable length rejects any [[Set]] (OpPutField throws in strict
+		// mode / stays silent otherwise; mutators check the rejection explicitly).
+		if o := rt.objPtr(obj); o != nil && o.flags.arrLenNonWritable {
+			return false, nil
+		}
 		e := rt.setArrayLength(obj, v)
 		return e == nil, e
 	}

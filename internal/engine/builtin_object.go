@@ -228,7 +228,7 @@ func (rt *Runtime) initObjectBuiltin() {
 					do := rt.newPlainObject()
 					dp := rt.objPtr(do)
 					dp.defineOwn("value", mknum(float64(o.arrLen)), attrDefault)
-					dp.defineOwn("writable", mktrue(), attrDefault)
+					dp.defineOwn("writable", mkbool(!o.flags.arrLenNonWritable), attrDefault)
 					dp.defineOwn("enumerable", mkfalse(), attrDefault)
 					dp.defineOwn("configurable", mkfalse(), attrDefault)
 					return do, nil
@@ -701,8 +701,32 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	// the length. An index with non-default attributes falls through to a named
 	// property (element reads fall back to it) but still extends the length.
 	if obj.Type() == TArr && !sym {
-		if name == "length" && hasVal && !hasGet && !hasSet {
-			return rt.setArrayLength(obj, val)
+		if name == "length" && !hasGet && !hasSet {
+			// Array exotic length [[DefineOwnProperty]]: a non-writable length cannot
+			// be changed or made writable again; a value sets the length; writable:false
+			// locks it.
+			if o.flags.arrLenNonWritable {
+				if hasVal {
+					if nl, e := rt.toNumber(val); e != nil {
+						return e
+					} else if uint32(nl) != o.arrLen || float64(uint32(nl)) != nl {
+						return rt.typeError("Cannot redefine property: length")
+					}
+				}
+				if hasW && writable {
+					return rt.typeError("Cannot redefine property: length")
+				}
+				return nil
+			}
+			if hasVal {
+				if e := rt.setArrayLength(obj, val); e != nil {
+					return e
+				}
+			}
+			if hasW && !writable {
+				o.flags.arrLenNonWritable = true
+			}
+			return nil
 		}
 		if idx, ok := canonicalIndex(name); ok {
 			if writable && enumerable && configurable {
@@ -922,6 +946,11 @@ func (rt *Runtime) sealObject(v Value, freeze bool) *ThrowError {
 	icEpochBump()
 	if freeze {
 		o.flags.frozen = true
+		if v.Type() == TArr {
+			// A frozen array's length becomes non-writable (its elements are locked
+			// by the attribute sweep above).
+			o.flags.arrLenNonWritable = true
+		}
 	}
 	o.flags.sealed = true
 	return nil

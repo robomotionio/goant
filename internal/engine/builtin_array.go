@@ -184,6 +184,30 @@ func (rt *Runtime) arrayCreate(length int) (Value, *ThrowError) {
 	return a, nil
 }
 
+// setLengthOrThrow performs Set(O, "length", n, true): a TypeError if the length
+// is not writable. The array mutators always Set length with throw=true.
+func (rt *Runtime) setLengthOrThrow(obj Value, n float64) *ThrowError {
+	ok, e := rt.setFieldR(obj, "length", mknum(n))
+	if e != nil {
+		return e
+	}
+	if !ok {
+		return rt.typeError("Cannot assign to read only property 'length'")
+	}
+	return nil
+}
+
+// arrayRejectsGrowth reports whether adding a new index to obj is rejected (a
+// non-extensible or non-writable-length array); the growing mutators throw
+// up-front rather than partially mutating.
+func (rt *Runtime) arrayRejectsGrowth(obj Value) bool {
+	if obj.Type() != TArr {
+		return false
+	}
+	o := rt.objPtr(obj)
+	return o != nil && (!o.flags.extensible || o.flags.arrLenNonWritable)
+}
+
 func (rt *Runtime) arraySpeciesCreate(this Value, length int) (Value, *ThrowError) {
 	// ArraySpeciesCreate (23.1.3.1): a non-array uses ArrayCreate(length); otherwise
 	// read constructor and its @@species (both via [[Get]], so a Proxy observes
@@ -221,67 +245,116 @@ func (rt *Runtime) initArrayBuiltin() {
 	// Mutators are generic: they read length + elements through the ordinary
 	// property protocol, so they work on arrays and array-like objects alike.
 	rt.defMethod(proto, "push", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		if float64(n)+float64(len(args)) > 9007199254740991 {
+			return mkundef(), rt.typeError("Pushing past the maximum array length")
+		}
+		if len(args) > 0 && rt.arrayRejectsGrowth(obj) {
+			return mkundef(), rt.typeError("Cannot add property " + numberToString(float64(n)) + ", object is not extensible")
+		}
 		for _, a := range args {
-			if e := rt.setElement(this, mknum(float64(n)), a); e != nil {
+			if e := rt.setElement(obj, mknum(float64(n)), a); e != nil {
 				return mkundef(), e
 			}
 			n++
 		}
-		if e := rt.setField(this, "length", mknum(float64(n))); e != nil {
+		if e := rt.setLengthOrThrow(obj, float64(n)); e != nil {
 			return mkundef(), e
 		}
 		return mknum(float64(n)), nil
 	})
 	rt.defMethod(proto, "pop", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		if n == 0 {
-			rt.setField(this, "length", mknum(0))
-			return mkundef(), nil
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
 		}
-		v, _ := rt.getElement(this, mknum(float64(n-1)))
-		rt.deleteElement(this, mknum(float64(n-1)))
-		rt.setField(this, "length", mknum(float64(n-1)))
+		// A locked (non-writable) array length rejects the shrink up-front, before
+		// any element is deleted.
+		if o := rt.objPtr(obj); o != nil && obj.Type() == TArr && o.flags.arrLenNonWritable {
+			return mkundef(), rt.typeError("Cannot assign to read only property 'length'")
+		}
+		if n == 0 {
+			return mkundef(), rt.setLengthOrThrow(obj, 0)
+		}
+		v, e := rt.getElement(obj, mknum(float64(n-1)))
+		if e != nil {
+			return mkundef(), e
+		}
+		if _, e := rt.deleteElement(obj, mknum(float64(n-1))); e != nil {
+			return mkundef(), e
+		}
+		if e := rt.setLengthOrThrow(obj, float64(n-1)); e != nil {
+			return mkundef(), e
+		}
 		return v, nil
 	})
 	rt.defMethod(proto, "shift", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		if n == 0 {
-			rt.setField(this, "length", mknum(0))
-			return mkundef(), nil
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
 		}
-		first, _ := rt.getElement(this, mknum(0))
+		if o := rt.objPtr(obj); o != nil && obj.Type() == TArr && o.flags.arrLenNonWritable {
+			return mkundef(), rt.typeError("Cannot assign to read only property 'length'")
+		}
+		if n == 0 {
+			return mkundef(), rt.setLengthOrThrow(obj, 0)
+		}
+		first, e := rt.getElement(obj, mknum(0))
+		if e != nil {
+			return mkundef(), e
+		}
 		// 23.1.3.27: shift each element down one; a hole propagates as a Delete of
 		// the destination rather than an overwrite.
 		for k := 1; k < n; k++ {
 			from := mknum(float64(k))
 			to := mknum(float64(k - 1))
-			if rt.hasElem(this, k) {
-				v, _ := rt.getElement(this, from)
-				if e := rt.setElement(this, to, v); e != nil {
+			present, e := rt.hasElemE(obj, k)
+			if e != nil {
+				return mkundef(), e
+			}
+			if present {
+				v, e := rt.getElement(obj, from)
+				if e != nil {
+					return mkundef(), e
+				}
+				if e := rt.setElement(obj, to, v); e != nil {
 					return mkundef(), e
 				}
 			} else {
-				if _, e := rt.deleteElement(this, to); e != nil {
+				if _, e := rt.deleteElement(obj, to); e != nil {
 					return mkundef(), e
 				}
 			}
 		}
-		rt.deleteElement(this, mknum(float64(n-1)))
-		rt.setField(this, "length", mknum(float64(n-1)))
+		if _, e := rt.deleteElement(obj, mknum(float64(n-1))); e != nil {
+			return mkundef(), e
+		}
+		if e := rt.setLengthOrThrow(obj, float64(n-1)); e != nil {
+			return mkundef(), e
+		}
 		return first, nil
 	})
 	rt.defMethod(proto, "unshift", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		n, e := rt.lengthOf(obj)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -289,27 +362,42 @@ func (rt *Runtime) initArrayBuiltin() {
 		// then prepend the new items.
 		k := len(args)
 		if k > 0 {
+			if float64(n)+float64(k) > 9007199254740991 {
+				return mkundef(), rt.typeError("Unshifting past the maximum array length")
+			}
+			if rt.arrayRejectsGrowth(obj) {
+				return mkundef(), rt.typeError("Cannot add property " + numberToString(float64(n)) + ", object is not extensible")
+			}
 			for i := n; i > 0; i-- {
 				from := i - 1
 				to := i - 1 + k
-				if rt.hasElem(this, from) {
-					v, _ := rt.getElement(this, mknum(float64(from)))
-					if e := rt.setElement(this, mknum(float64(to)), v); e != nil {
+				present, e := rt.hasElemE(obj, from)
+				if e != nil {
+					return mkundef(), e
+				}
+				if present {
+					v, e := rt.getElement(obj, mknum(float64(from)))
+					if e != nil {
+						return mkundef(), e
+					}
+					if e := rt.setElement(obj, mknum(float64(to)), v); e != nil {
 						return mkundef(), e
 					}
 				} else {
-					if _, e := rt.deleteElement(this, mknum(float64(to))); e != nil {
+					if _, e := rt.deleteElement(obj, mknum(float64(to))); e != nil {
 						return mkundef(), e
 					}
 				}
 			}
 			for i := 0; i < k; i++ {
-				if e := rt.setElement(this, mknum(float64(i)), args[i]); e != nil {
+				if e := rt.setElement(obj, mknum(float64(i)), args[i]); e != nil {
 					return mkundef(), e
 				}
 			}
 		}
-		rt.setField(this, "length", mknum(float64(n+k)))
+		if e := rt.setLengthOrThrow(obj, float64(n+k)); e != nil {
+			return mkundef(), e
+		}
 		return mknum(float64(n + k)), nil
 	})
 
@@ -1019,7 +1107,9 @@ func (rt *Runtime) initArrayBuiltin() {
 		for i := 0; i < itemCount; i++ {
 			rt.setElement(this, mknum(float64(start+i)), items[i])
 		}
-		rt.setField(this, "length", mknum(float64(n-delCount+itemCount)))
+		if e := rt.setLengthOrThrow(this, float64(n-delCount+itemCount)); e != nil {
+			return mkundef(), e
+		}
 		return removed, nil
 	})
 	rt.defMethod(proto, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

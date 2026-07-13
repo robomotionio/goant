@@ -27,6 +27,10 @@ type objFlags struct {
 	mayHaveHoles      bool
 	mayHaveDenseElems bool
 	gcPermanent       bool
+	// arrLenNonWritable marks an array whose "length" property is non-writable
+	// (Object.defineProperty(a,'length',{writable:false}) or Object.freeze). The
+	// length may not change and the array may not grow past it.
+	arrLenNonWritable bool
 }
 
 // extraSlot is one internal slot entry (ant ant_extra_slot_t).
