@@ -35,7 +35,11 @@ func (rt *Runtime) initObjectBuiltin() {
 		}
 		if this.Type() == TArr {
 			if idx, ok := arrayIndex(arg(args, 0)); ok {
-				return mkbool(idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty()), nil
+				if idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
+					return mktrue(), nil
+				}
+				// Not in fast element storage — an index defined with non-default
+				// attributes lives as a named own property; fall through to hasOwn.
 			}
 			if name == "length" {
 				return mktrue(), nil

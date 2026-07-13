@@ -53,6 +53,7 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 		// Ordinary [[Get]] walking the prototype chain with the original receiver.
 		// A Proxy encountered in the chain dispatches its [[Get]] trap (receiver
 		// stays obj), which resolveProp would otherwise walk straight past.
+		idx, isIdx := canonicalIndex(name)
 		cur := obj
 		for depth := 0; depth < maxProtoChainDepth; depth++ {
 			o := rt.objPtr(cur)
@@ -61,6 +62,13 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 			}
 			if o.proxy != nil {
 				return rt.proxyGet(o.proxy, rt.internString(name), obj)
+			}
+			// An index in a prototype's element backing store (e.g. Array.prototype[0])
+			// is inherited too — the shape lookup below only sees named properties.
+			if isIdx {
+				if v, ok := rt.ownIndexElement(o, cur, idx); ok {
+					return v, nil
+				}
 			}
 			if slot := o.shape.lookupInterned(name); slot >= 0 {
 				if o.isAccessorSlot(uint32(slot)) {

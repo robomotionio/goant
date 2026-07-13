@@ -155,7 +155,11 @@ func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
 	}
 	if idx, ok := arrayIndex(key); ok && obj.Type() == TArr {
 		o := rt.objPtr(obj)
-		return idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty(), nil
+		if idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
+			return true, nil
+		}
+		// A hole (or out-of-range index) is not own, but HasProperty still walks
+		// the prototype chain (e.g. an index inherited from Array.prototype).
 	}
 	name, e := rt.propKeyString(key)
 	if e != nil {

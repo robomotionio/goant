@@ -488,6 +488,15 @@ func (rt *Runtime) getProp(obj Value, key string) (Value, bool) {
 func (rt *Runtime) hasProp(obj Value, key string) bool {
 	idx, isIdx := canonicalIndex(key)
 	cur := obj
+	// Primitive receiver: objPtr is nil, so an in-range string index counts as an
+	// own property and the prototype walk starts at the wrapper prototype (so e.g.
+	// inherited Boolean.prototype/Number.prototype properties are observable).
+	if !obj.IsObjectType() && obj.Type() != TTypedArray && !obj.IsNullish() {
+		if isIdx && obj.Type() == TStr && int(idx) < utf16Len(rt.strBytes(obj)) {
+			return true
+		}
+		cur = rt.primitiveProto(obj)
+	}
 	for depth := 0; depth < maxProtoChainDepth; depth++ {
 		o := rt.objPtr(cur)
 		if o == nil {
@@ -529,18 +538,56 @@ func (rt *Runtime) hasOwnPropertyOf(obj Value, key string) (bool, *ThrowError) {
 }
 
 // hasOwnIndex reports whether obj owns integer index idx in its element backing
-// store (array elements, typed-array slots, or string code units).
+// store (array elements, typed-array slots, or string code units). It keys off
+// the object's own kind (o.typeTag/o.ta/o.boxed), not the Value's tag: a stored
+// prototype handle can lose its TArr tag, so switching on obj.Type() would miss
+// an inherited array element during a prototype walk.
 func (rt *Runtime) hasOwnIndex(obj Value, o *object, idx uint32) bool {
-	switch obj.Type() {
-	case TArr:
-		return idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty()
-	case TTypedArray:
+	if o == nil {
+		return obj.Type() == TStr && int(idx) < utf16Len(rt.strBytes(obj))
+	}
+	switch {
+	case o.ta != nil:
 		_, ok := rt.taGet(o, int(idx))
 		return ok
-	case TStr:
-		return int(idx) < utf16Len(rt.strBytes(obj))
+	case o.typeTag == TArr:
+		return idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty()
+	case o.boxed.Type() == TStr:
+		// String exotic object (new String(...)): indices below the wrapped
+		// string's length are own data properties.
+		return int(idx) < utf16Len(rt.strBytes(o.boxed))
 	}
 	return false
+}
+
+// ownIndexElement reads obj's own integer-indexed element from its backing store
+// (array/typed-array/string-wrapper), returning ok=false when idx is a hole or
+// out of range. Like hasOwnIndex it keys off the object's own kind so a prototype
+// walk observes inherited array elements even through an untagged proto handle.
+func (rt *Runtime) ownIndexElement(o *object, obj Value, idx uint32) (Value, bool) {
+	if o == nil {
+		if obj.Type() == TStr {
+			b := rt.strBytes(obj)
+			if int(idx) < utf16Len(b) {
+				return rt.charAt(b, int(idx)), true
+			}
+		}
+		return mkundef(), false
+	}
+	switch {
+	case o.ta != nil:
+		return rt.taGet(o, int(idx))
+	case o.typeTag == TArr:
+		if idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
+			return o.arr[idx], true
+		}
+	case o.boxed.Type() == TStr:
+		b := rt.strBytes(o.boxed)
+		if int(idx) < utf16Len(b) {
+			return rt.charAt(b, int(idx)), true
+		}
+	}
+	return mkundef(), false
 }
 
 // isAccessorSlot reports whether a shape slot is an accessor property.

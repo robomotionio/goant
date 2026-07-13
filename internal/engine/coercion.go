@@ -133,7 +133,13 @@ func (rt *Runtime) toObjectValue(v Value) (Value, *ThrowError) {
 		return v, nil
 	}
 	w := rt.newObject(rt.primitiveProto(v))
-	rt.objPtr(w).boxed = v
+	o := rt.objPtr(w)
+	o.boxed = v
+	if v.Type() == TStr {
+		// A String exotic object carries a non-writable, non-enumerable,
+		// non-configurable "length" own property (matches new String(...)).
+		o.defineOwn("length", mknum(float64(utf16Len(rt.strBytes(v)))), 0)
+	}
 	return w, nil
 }
 

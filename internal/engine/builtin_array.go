@@ -302,7 +302,16 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		for i := 0; i < n; i++ {
+		if n == 0 {
+			return mknum(-1), nil
+		}
+		// fromIndex: relativeIndexE gives the spec's k (+Inf -> n so the loop
+		// is skipped and we return -1; -Inf -> 0; negative counts from the end).
+		k, e := rt.relativeIndexE(arg(args, 1), n)
+		if e != nil {
+			return mkundef(), e
+		}
+		for i := k; i < n; i++ {
 			if !rt.hasElem(this, i) { // indexOf skips holes (HasProperty)
 				continue
 			}
