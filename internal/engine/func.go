@@ -25,7 +25,8 @@ type svFunc struct {
 
 	maxLocals  int
 	maxStack   int
-	paramCount int
+	paramCount int // positional parameter slots (used by frame init)
+	fnLength   int // Function.length: params before the first default/rest
 	srcStart   int
 	srcEnd     int
 

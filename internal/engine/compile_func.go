@@ -333,6 +333,16 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		}
 	}
 	c.fn.paramCount = paramCount
+	// Function.length (ExpectedArgumentCount): the number of parameters before
+	// the first one with a default initializer or the rest parameter. A
+	// destructuring parameter without a default still counts.
+	c.fn.fnLength = 0
+	for _, p := range n.Args {
+		if p.Kind == NAssignPat || p.Kind == NRest {
+			break
+		}
+		c.fn.fnLength++
+	}
 
 	// Bind `this` / self-name / arguments BEFORE evaluating parameter defaults,
 	// since default expressions may reference them (e.g. `m(o = this)`).

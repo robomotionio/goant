@@ -29,7 +29,7 @@ func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 	obj.closure = ch
 
 	// .length and .name (non-enumerable, configurable) per spec.
-	obj.defineOwn("length", mknum(float64(fn.paramCount)), attrConfigurable)
+	obj.defineOwn("length", mknum(float64(fn.fnLength)), attrConfigurable)
 	obj.defineOwn("name", rt.internString(fn.name), attrConfigurable)
 
 	fnVal := mkval(TFunc, uint64(oh))
