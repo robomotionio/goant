@@ -909,77 +909,130 @@ func (rt *Runtime) initArrayBuiltin() {
 
 	// Iteration methods taking a callback(value, index, array).
 	rt.defMethod(proto, "forEach", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		cb := arg(args, 0)
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.forEach callback is not a function")
+		}
 		for i := 0; i < n; i++ {
-			if !rt.hasElem(this, i) { // forEach skips holes
+			present, e := rt.hasElemE(obj, i) // forEach skips holes
+			if e != nil {
+				return mkundef(), e
+			}
+			if !present {
 				continue
 			}
-			el, _ := rt.getElement(this, mknum(float64(i)))
-			if _, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this}); e != nil {
+			el, e := rt.getElement(obj, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
+			if _, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), obj}); e != nil {
 				return mkundef(), e
 			}
 		}
 		return mkundef(), nil
 	})
 	rt.defMethod(proto, "map", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		cb := arg(args, 0)
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		res, e := rt.arraySpeciesCreate(this, n)
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.map callback is not a function")
+		}
+		res, e := rt.arraySpeciesCreate(obj, n)
 		if e != nil {
 			return mkundef(), e
 		}
 		for i := 0; i < n; i++ {
-			if !rt.hasElem(this, i) { // map skips holes, leaving a hole in the result
-				continue
-			}
-			el, _ := rt.getElement(this, mknum(float64(i)))
-			mapped, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
+			present, e := rt.hasElemE(obj, i) // map skips holes (result keeps the hole)
 			if e != nil {
 				return mkundef(), e
 			}
-			rt.setElement(res, mknum(float64(i)), mapped)
+			if !present {
+				continue
+			}
+			el, e := rt.getElement(obj, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
+			mapped, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), obj})
+			if e != nil {
+				return mkundef(), e
+			}
+			if e := rt.createDataProperty(res, mknum(float64(i)), mapped); e != nil {
+				return mkundef(), e
+			}
 		}
 		return res, nil
 	})
 	rt.defMethod(proto, "filter", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		cb := arg(args, 0)
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		res, e := rt.arraySpeciesCreate(this, 0)
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.filter callback is not a function")
+		}
+		res, e := rt.arraySpeciesCreate(obj, 0)
 		if e != nil {
 			return mkundef(), e
 		}
 		outIdx := 0
 		for i := 0; i < n; i++ {
-			if !rt.hasElem(this, i) { // filter skips holes
+			present, e := rt.hasElemE(obj, i) // filter skips holes
+			if e != nil {
+				return mkundef(), e
+			}
+			if !present {
 				continue
 			}
-			el, _ := rt.getElement(this, mknum(float64(i)))
-			keep, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
+			el, e := rt.getElement(obj, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
+			keep, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), obj})
 			if e != nil {
 				return mkundef(), e
 			}
 			if rt.toBoolean(keep) {
-				rt.setElement(res, mknum(float64(outIdx)), el)
+				if e := rt.createDataProperty(res, mknum(float64(outIdx)), el); e != nil {
+					return mkundef(), e
+				}
 				outIdx++
 			}
 		}
 		return res, nil
 	})
 	rt.defMethod(proto, "reduce", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		cb := arg(args, 0)
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
+		}
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.reduce callback is not a function")
 		}
 		var acc Value
 		i := 0
@@ -989,8 +1042,14 @@ func (rt *Runtime) initArrayBuiltin() {
 			// Seed the accumulator with the first present element (holes skipped).
 			found := false
 			for ; i < n; i++ {
-				if rt.hasElem(this, i) {
-					acc, _ = rt.getElement(this, mknum(float64(i)))
+				present, e := rt.hasElemE(obj, i)
+				if e != nil {
+					return mkundef(), e
+				}
+				if present {
+					if acc, e = rt.getElement(obj, mknum(float64(i))); e != nil {
+						return mkundef(), e
+					}
 					i++
 					found = true
 					break
@@ -1001,12 +1060,18 @@ func (rt *Runtime) initArrayBuiltin() {
 			}
 		}
 		for ; i < n; i++ {
-			if !rt.hasElem(this, i) { // reduce skips holes
+			present, e := rt.hasElemE(obj, i) // reduce skips holes
+			if e != nil {
+				return mkundef(), e
+			}
+			if !present {
 				continue
 			}
-			el, _ := rt.getElement(this, mknum(float64(i)))
-			acc, e = rt.callValue(cb, mkundef(), []Value{acc, el, mknum(float64(i)), this})
+			el, e := rt.getElement(obj, mknum(float64(i)))
 			if e != nil {
+				return mkundef(), e
+			}
+			if acc, e = rt.callValue(cb, mkundef(), []Value{acc, el, mknum(float64(i)), obj}); e != nil {
 				return mkundef(), e
 			}
 		}
@@ -1235,17 +1300,31 @@ func (rt *Runtime) initArrayBuiltin() {
 	})
 
 	rt.defMethod(proto, "every", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		cb := arg(args, 0)
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.every callback is not a function")
+		}
 		for i := 0; i < n; i++ {
-			if !rt.hasElem(this, i) { // some/every skip holes
+			present, e := rt.hasElemE(obj, i) // every skips holes
+			if e != nil {
+				return mkundef(), e
+			}
+			if !present {
 				continue
 			}
-			el, _ := rt.getElement(this, mknum(float64(i)))
-			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
+			el, e := rt.getElement(obj, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
+			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), obj})
 			if e != nil {
 				return mkundef(), e
 			}
@@ -1256,17 +1335,31 @@ func (rt *Runtime) initArrayBuiltin() {
 		return mktrue(), nil
 	})
 	rt.defMethod(proto, "some", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		cb := arg(args, 0)
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.some callback is not a function")
+		}
 		for i := 0; i < n; i++ {
-			if !rt.hasElem(this, i) { // some/every skip holes
+			present, e := rt.hasElemE(obj, i) // some skips holes
+			if e != nil {
+				return mkundef(), e
+			}
+			if !present {
 				continue
 			}
-			el, _ := rt.getElement(this, mknum(float64(i)))
-			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
+			el, e := rt.getElement(obj, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
+			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), obj})
 			if e != nil {
 				return mkundef(), e
 			}
@@ -1324,10 +1417,17 @@ func (rt *Runtime) initArrayBuiltin() {
 		return mknum(-1), nil
 	})
 	rt.defMethod(proto, "reduceRight", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		cb := arg(args, 0)
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
+		}
+		n, e := rt.lengthOf(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Array.prototype.reduceRight callback is not a function")
 		}
 		var acc Value
 		i := n - 1
@@ -1336,8 +1436,14 @@ func (rt *Runtime) initArrayBuiltin() {
 		} else {
 			found := false
 			for ; i >= 0; i-- {
-				if rt.hasElem(this, i) {
-					acc, _ = rt.getElement(this, mknum(float64(i)))
+				present, e := rt.hasElemE(obj, i)
+				if e != nil {
+					return mkundef(), e
+				}
+				if present {
+					if acc, e = rt.getElement(obj, mknum(float64(i))); e != nil {
+						return mkundef(), e
+					}
 					i--
 					found = true
 					break
@@ -1348,12 +1454,18 @@ func (rt *Runtime) initArrayBuiltin() {
 			}
 		}
 		for ; i >= 0; i-- {
-			if !rt.hasElem(this, i) { // reduceRight skips holes
+			present, e := rt.hasElemE(obj, i) // reduceRight skips holes
+			if e != nil {
+				return mkundef(), e
+			}
+			if !present {
 				continue
 			}
-			el, _ := rt.getElement(this, mknum(float64(i)))
-			acc, e = rt.callValue(cb, mkundef(), []Value{acc, el, mknum(float64(i)), this})
+			el, e := rt.getElement(obj, mknum(float64(i)))
 			if e != nil {
+				return mkundef(), e
+			}
+			if acc, e = rt.callValue(cb, mkundef(), []Value{acc, el, mknum(float64(i)), obj}); e != nil {
 				return mkundef(), e
 			}
 		}
