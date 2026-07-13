@@ -43,6 +43,10 @@ type parser struct {
 	// funcDepth > 0 inside any function/arrow body, so a `return` outside every
 	// function (top-level script or eval code) is a SyntaxError.
 	funcDepth int
+	// newTargetOK is true inside a non-arrow function/method body (where
+	// new.target is meaningful); an arrow inherits the enclosing value, so
+	// `new.target` at the top level or in a top-level arrow is a SyntaxError.
+	newTargetOK bool
 }
 
 // Parse tokenizes and parses src into an AST (N_PROGRAM root node).
@@ -709,6 +713,10 @@ func (p *parser) parseNew() *Node {
 		p.consume()
 		if p.next() == TokIdentifier && p.tlen() == 6 && p.tokStr() == "target" {
 			p.consume()
+			if !p.newTargetOK {
+				p.errorf("new.target expression is not allowed here")
+				return p.mk(NEmpty)
+			}
 			return p.mk(NNewTarget)
 		}
 		p.unexpected()
@@ -1449,7 +1457,10 @@ func (p *parser) parseFunc() *Node {
 	p.inAsync = isAsync         // the body establishes the await context
 	p.inGenerator = isGenerator // and the yield context
 	p.funcDepth++               // return is legal inside the body
+	savedNT := p.newTargetOK
+	p.newTargetOK = true // a non-arrow function body has a meaningful new.target
 	fn.Body = p.parseBlock(true)
+	p.newTargetOK = savedNT
 	p.funcDepth--
 	fn.SrcEnd = uint32(p.toff() + p.tlen())
 	// A function with a non-simple parameter list (rest / default / destructuring)
