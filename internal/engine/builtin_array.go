@@ -126,35 +126,48 @@ func (rt *Runtime) arrayFromCtor(this Value, length int) (Value, *ThrowError) {
 	return rt.newArray(), nil
 }
 
+// arrayCreate implements ArrayCreate(length): a fresh array of the given length,
+// throwing RangeError when length exceeds the 2^32-1 array-length ceiling. The
+// length is tracked without materializing holes (sparse), so a large length is
+// cheap.
+func (rt *Runtime) arrayCreate(length int) (Value, *ThrowError) {
+	if length < 0 || length > 0xFFFFFFFF {
+		return mkundef(), rt.rangeError("Invalid array length")
+	}
+	a := rt.newArray()
+	rt.objPtr(a).arrLen = uint32(length)
+	return a, nil
+}
+
 func (rt *Runtime) arraySpeciesCreate(this Value, length int) (Value, *ThrowError) {
-	// ArraySpeciesCreate (23.1.3.1): a non-array uses a plain array; otherwise
+	// ArraySpeciesCreate (23.1.3.1): a non-array uses ArrayCreate(length); otherwise
 	// read constructor and its @@species (both via [[Get]], so a Proxy observes
-	// them) and construct from it.
+	// them). A non-undefined, non-constructor species is a TypeError.
 	if !rt.isArrayValue(this) {
-		return rt.newArray(), nil
+		return rt.arrayCreate(length)
 	}
 	ctor, e := rt.getField(this, "constructor")
 	if e != nil {
 		return mkundef(), e
 	}
 	if ctor.IsObjectType() && rt.symSpecies != 0 {
+		// C is replaced by Get(C, @@species): undefined/null species -> default array.
 		sp, e := rt.getElement(ctor, rt.symSpecies)
 		if e != nil {
 			return mkundef(), e
 		}
-		if sp.IsNull() {
+		ctor = sp
+		if ctor.IsNull() {
 			ctor = mkundef()
-		} else if !sp.IsUndefined() {
-			ctor = sp
 		}
 	}
 	if ctor.IsUndefined() {
-		return rt.newArray(), nil
+		return rt.arrayCreate(length)
 	}
-	if rt.isCallable(ctor) {
-		return rt.construct(ctor, []Value{mknum(float64(length))})
+	if !rt.isConstructorValue(ctor) {
+		return mkundef(), rt.typeError("Array species constructor is not a constructor")
 	}
-	return rt.newArray(), nil
+	return rt.construct(ctor, []Value{mknum(float64(length))})
 }
 
 func (rt *Runtime) initArrayBuiltin() {
@@ -613,21 +626,53 @@ func (rt *Runtime) initArrayBuiltin() {
 	})
 
 	rt.defMethod(proto, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		n, e := rt.lengthOf(this)
+		obj, e := rt.toObjectValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		start := relIndex(rt, arg(args, 0), n, 0)
-		end := relIndex(rt, arg(args, 1), n, n)
-		res, e := rt.arraySpeciesCreate(this, end-start)
+		n, e := rt.lengthOf(obj)
 		if e != nil {
 			return mkundef(), e
 		}
+		start, e := rt.relativeIndexE(arg(args, 0), n)
+		if e != nil {
+			return mkundef(), e
+		}
+		end := n
+		if len(args) > 1 && !arg(args, 1).IsUndefined() {
+			if end, e = rt.relativeIndexE(arg(args, 1), n); e != nil {
+				return mkundef(), e
+			}
+		}
+		count := end - start
+		if count < 0 {
+			count = 0
+		}
+		res, e := rt.arraySpeciesCreate(obj, count)
+		if e != nil {
+			return mkundef(), e
+		}
+		// Copy each present index (HasProperty walks the prototype) via
+		// CreateDataPropertyOrThrow, then Set the result length.
 		out := 0
-		for i := start; i < end; i++ {
-			el, _ := rt.getElement(this, mknum(float64(i)))
-			rt.setElement(res, mknum(float64(out)), el)
+		for k := start; k < end; k++ {
+			present, e := rt.hasElemE(obj, k)
+			if e != nil {
+				return mkundef(), e
+			}
+			if present {
+				el, e := rt.getElement(obj, mknum(float64(k)))
+				if e != nil {
+					return mkundef(), e
+				}
+				if e := rt.createDataProperty(res, mknum(float64(out)), el); e != nil {
+					return mkundef(), e
+				}
+			}
 			out++
+		}
+		if e := rt.setField(res, "length", mknum(float64(out))); e != nil {
+			return mkundef(), e
 		}
 		return res, nil
 	})

@@ -33,17 +33,15 @@ func (rt *Runtime) initObjectBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if this.Type() == TArr {
-			if idx, ok := arrayIndex(arg(args, 0)); ok {
-				if idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
-					return mktrue(), nil
-				}
-				// Not in fast element storage — an index defined with non-default
-				// attributes lives as a named own property; fall through to hasOwn.
-			}
-			if name == "length" {
-				return mktrue(), nil
-			}
+		// An index in element backing store (array/typed-array/string-wrapper) is an
+		// own property; canonicalIndex parses the key STRING (arrayIndex only takes a
+		// numeric Value, so a string index like "0" was wrongly missed). An index not
+		// in fast storage falls through to hasOwn (an attribute-defined named index).
+		if idx, ok := canonicalIndex(name); ok && rt.hasOwnIndex(obj, o, idx) {
+			return mktrue(), nil
+		}
+		if this.Type() == TArr && name == "length" {
+			return mktrue(), nil
 		}
 		return mkbool(o.hasOwn(name)), nil
 	})

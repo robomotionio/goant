@@ -127,9 +127,11 @@ func (rt *Runtime) setField(obj Value, name string, v Value) *ThrowError {
 	return e
 }
 
-// createDataProperty implements CreateDataProperty(O, P, V): defines a fresh
-// enumerable/writable/configurable own data property. On a Proxy this uses the
-// defineProperty trap (a plain [[Set]] would wrongly fire the set trap).
+// createDataProperty implements CreateDataPropertyOrThrow(O, P, V): defines a
+// fresh enumerable/writable/configurable own data property, throwing a TypeError
+// if [[DefineOwnProperty]] is rejected (non-extensible target, or a
+// non-configurable existing property). On a Proxy this uses the defineProperty
+// trap (a plain [[Set]] would wrongly fire the set trap).
 func (rt *Runtime) createDataProperty(obj, key, v Value) *ThrowError {
 	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
 		desc := rt.newPlainObject()
@@ -140,7 +142,24 @@ func (rt *Runtime) createDataProperty(obj, key, v Value) *ThrowError {
 		do.defineOwn("configurable", mktrue(), attrDefault)
 		return rt.proxyDefineProperty(o.proxy, rt.toPropertyKeyValue(key), desc)
 	}
-	return rt.setElement(obj, key, v)
+	// Fast path: a fresh index on an ordinary extensible array with no shadowing
+	// named/accessor slot is a plain create with default element attributes.
+	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TArr {
+		o := rt.objPtr(obj)
+		if o.flags.extensible && o.shape.lookupInterned(strconv.Itoa(int(idx))) < 0 {
+			rt.arraySet(o, idx, v)
+			return nil
+		}
+	}
+	// General case: ordinary [[DefineOwnProperty]] with a default data descriptor,
+	// which throws when the definition is rejected.
+	desc := rt.newPlainObject()
+	do := rt.objPtr(desc)
+	do.defineOwn("value", v, attrDefault)
+	do.defineOwn("writable", mktrue(), attrDefault)
+	do.defineOwn("enumerable", mktrue(), attrDefault)
+	do.defineOwn("configurable", mktrue(), attrDefault)
+	return rt.objectDefinePropertyKey(obj, rt.toPropertyKeyValue(key), desc)
 }
 
 // setFieldR writes obj.name = v, returning whether the write took effect (false
