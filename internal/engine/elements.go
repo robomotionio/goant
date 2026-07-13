@@ -178,8 +178,7 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 		if o := rt.objPtr(obj); o != nil && o.flags.arrLenNonWritable {
 			return false, nil
 		}
-		e := rt.setArrayLength(obj, v)
-		return e == nil, e
+		return rt.setArrayLength(obj, v)
 	}
 	if obj.IsObjectType() || obj.Type() == TTypedArray {
 		// Ordinary [[Set]]: walk the chain for an accessor (call its setter with
@@ -563,21 +562,61 @@ func (rt *Runtime) arraySet(o *object, idx uint32, v Value) {
 	}
 }
 
-func (rt *Runtime) setArrayLength(obj Value, v Value) *ThrowError {
+// setArrayLength implements ArraySetLength for a plain value. Returns ok=false
+// (no error) when a non-configurable index in [newLen, oldLen) blocks the shrink
+// (length is clamped just above it); an invalid length value is a RangeError.
+func (rt *Runtime) setArrayLength(obj Value, v Value) (bool, *ThrowError) {
 	n, e := rt.toNumber(v)
 	if e != nil {
-		return e
+		return false, e
 	}
 	newLen := uint32(n)
 	if float64(newLen) != n {
-		return rt.rangeError("Invalid array length")
+		return false, rt.rangeError("Invalid array length")
 	}
 	o := rt.objPtr(obj)
-	if newLen < uint32(len(o.arr)) {
-		o.arr = o.arr[:newLen]
+	if newLen >= o.arrLen {
+		o.arrLen = newLen
+		return true, nil
 	}
-	o.arrLen = newLen
-	return nil
+	// Shrinking: the fast arr[] elements are always configurable, but an index
+	// defined with non-default attributes lives in the shape and may be
+	// non-configurable. Find the highest such blocking index in [newLen, oldLen).
+	blocked := int64(-1)
+	for i := 0; i < o.shape.count(); i++ {
+		p := &o.shape.props[i]
+		if p.key.sym {
+			continue
+		}
+		if idx, ok := canonicalIndex(p.key.str); ok && idx >= newLen && idx < o.arrLen {
+			if p.attrs&attrConfigurable == 0 && int64(idx) > blocked {
+				blocked = int64(idx)
+			}
+		}
+	}
+	effective := newLen
+	ok := true
+	if blocked >= 0 {
+		effective = uint32(blocked) + 1
+		ok = false
+	}
+	// Delete configurable index properties at or above the effective length.
+	for i := 0; i < o.shape.count(); {
+		p := &o.shape.props[i]
+		if !p.key.sym {
+			if idx, isIdx := canonicalIndex(p.key.str); isIdx && idx >= effective && idx < o.arrLen {
+				if o.deleteOwn(p.key.str) {
+					continue // shape shifted; re-check this slot
+				}
+			}
+		}
+		i++
+	}
+	if int(effective) < len(o.arr) {
+		o.arr = o.arr[:effective]
+	}
+	o.arrLen = effective
+	return ok, nil
 }
 
 // charAt returns the one-UTF-16-unit string at index i.

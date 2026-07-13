@@ -719,8 +719,13 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 				return nil
 			}
 			if hasVal {
-				if e := rt.setArrayLength(obj, val); e != nil {
+				ok, e := rt.setArrayLength(obj, val)
+				if e != nil {
 					return e
+				}
+				if !ok {
+					// A non-configurable element blocked the requested shrink.
+					return rt.typeError("Cannot redefine property: length")
 				}
 			}
 			if hasW && !writable {
