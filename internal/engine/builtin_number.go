@@ -103,11 +103,17 @@ func (rt *Runtime) initNumberBuiltin() {
 	ctor := rt.newNativeFunc("Number", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		n := 0.0
 		if len(args) > 0 {
-			v, e := rt.toNumber(args[0])
+			// Number(value) uses ToNumeric: a BigInt operand converts to the
+			// nearest float (𝔽(ℝ(value))) rather than throwing as ToNumber would.
+			prim, e := rt.toPrimitive(args[0], "number")
 			if e != nil {
 				return mkundef(), e
 			}
-			n = v
+			if prim.Type() == TBigInt {
+				n, _ = rt.bigIntVal(prim).Float64()
+			} else if n, e = rt.toNumber(prim); e != nil {
+				return mkundef(), e
+			}
 		}
 		// new Number(x) (incl. `super(x)` from a subclass): a Number exotic object
 		// wrapping the primitive in its [[NumberData]] slot.

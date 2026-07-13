@@ -386,6 +386,11 @@ func (rt *Runtime) taSetBig(o *object, i int, v *big.Int) bool {
 	return true
 }
 
+// maxByteLen caps ArrayBuffer/TypedArray allocations: a larger request throws a
+// RangeError (CreateByteDataBlock "impossible to create") instead of letting the
+// underlying make() panic on an unsatisfiable size.
+const maxByteLen = 0x7FFF_FFFF
+
 func (rt *Runtime) newArrayBuffer(byteLen int) Value {
 	v := rt.newObject(rt.arrayBufferProto)
 	o := rt.objPtr(v)
@@ -398,12 +403,13 @@ func (rt *Runtime) newArrayBuffer(byteLen int) Value {
 }
 
 // newResizableArrayBuffer creates an ArrayBuffer of byteLen bytes that can grow
-// or shrink up to maxLen. Storage is pre-allocated to maxLen (cap) so resize()
-// only re-slices, keeping every existing view's byte window valid.
+// or shrink up to maxLen. resize() reallocates and copies (the spec's default
+// HostResizeArrayBuffer); views read the buffer's current bytes on each access,
+// so they follow the reallocation.
 func (rt *Runtime) newResizableArrayBuffer(byteLen, maxLen int) Value {
 	v := rt.newObject(rt.arrayBufferProto)
 	o := rt.objPtr(v)
-	o.abuf = make([]byte, byteLen, maxLen)
+	o.abuf = make([]byte, byteLen)
 	o.abMax = maxLen
 	o.abResizable = true
 	return v
@@ -425,6 +431,9 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 		n, e := rt.toIndex(a0)
 		if e != nil {
 			return mkundef(), e
+		}
+		if n > maxByteLen/size {
+			return mkundef(), rt.rangeError("Invalid typed array length")
 		}
 		buf := rt.newArrayBuffer(n * size)
 		o.ta = &typedArray{buf: buf, kind: kind, length: n}
@@ -763,14 +772,11 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 		if n > o.abMax {
 			return mkundef(), rt.rangeError("ArrayBuffer.prototype.resize length exceeds maxByteLength")
 		}
-		old := len(o.abuf)
-		o.abuf = o.abuf[:n] // cap is abMax >= n, so the storage never moves
-		// Keep bytes outside the live region zeroed so a later grow reveals zeros.
-		if n > old {
-			clear(o.abuf[old:n])
-		} else {
-			clear(o.abuf[n:old])
-		}
+		// Reallocate and copy min(old, new) bytes; grown bytes start zeroed, and
+		// shrink-then-grow reveals zeros — matching the spec's default resize.
+		nb := make([]byte, n)
+		copy(nb, o.abuf)
+		o.abuf = nb
 		return mkundef(), nil
 	})
 	rt.defMethod(po, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -834,10 +840,16 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 		}
 		var buf Value
 		if maxLen < 0 {
+			if n > maxByteLen {
+				return mkundef(), rt.rangeError("ArrayBuffer allocation failed: length too large")
+			}
 			buf = rt.newArrayBuffer(n)
 		} else {
 			if n > maxLen {
 				return mkundef(), rt.rangeError("ArrayBuffer length exceeds maxByteLength")
+			}
+			if maxLen > maxByteLen {
+				return mkundef(), rt.rangeError("ArrayBuffer allocation failed: maxByteLength too large")
 			}
 			buf = rt.newResizableArrayBuffer(n, maxLen)
 		}
