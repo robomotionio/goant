@@ -728,14 +728,14 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	proto := rt.newObject(rt.objectProto)
 	rt.arrayBufferProto = proto
 	po := rt.objPtr(proto)
-	po.defineAccessor("byteLength", rt.newNativeFunc("byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	po.defineAccessor("byteLength", rt.newNativeFunc("get byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if o := rt.objPtr(this); o != nil {
 			return mknum(float64(len(o.abuf))), nil
 		}
 		return mknum(0), nil
 	}), mkundef(), true, false, attrConfigurable)
 	// detached: an ArrayBuffer whose bytes have been transferred away (abuf nil).
-	po.defineAccessor("detached", rt.newNativeFunc("detached", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	po.defineAccessor("detached", rt.newNativeFunc("get detached", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		return mkbool(o != nil && o.abuf == nil), nil
 	}), mkundef(), true, false, attrConfigurable)
@@ -816,7 +816,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 		copy(rt.objPtr(nb).abuf, o.abuf[start:end])
 		return nb, nil
 	})
-	po.defineAccessor("maxByteLength", rt.newNativeFunc("maxByteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	po.defineAccessor("maxByteLength", rt.newNativeFunc("get maxByteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		if o == nil || o.ta != nil || o.dv != nil {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.maxByteLength on incompatible receiver")
@@ -826,7 +826,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 		}
 		return mknum(float64(o.abMax)), nil
 	}), mkundef(), true, false, attrConfigurable)
-	po.defineAccessor("resizable", rt.newNativeFunc("resizable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	po.defineAccessor("resizable", rt.newNativeFunc("get resizable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		if o == nil || o.ta != nil || o.dv != nil {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.resizable on incompatible receiver")
@@ -1060,7 +1060,7 @@ func (rt *Runtime) initDataViewBuiltin() {
 			return mkundef(), nil
 		})
 	}
-	po.defineAccessor("byteLength", rt.newNativeFunc("byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	po.defineAccessor("byteLength", rt.newNativeFunc("get byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		if o == nil || o.dv == nil {
 			return mkundef(), rt.typeError("DataView.prototype.byteLength on incompatible receiver")
@@ -1070,7 +1070,7 @@ func (rt *Runtime) initDataViewBuiltin() {
 		}
 		return mknum(float64(rt.dvCurrentLen(o))), nil
 	}), mkundef(), true, false, attrConfigurable)
-	po.defineAccessor("byteOffset", rt.newNativeFunc("byteOffset", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	po.defineAccessor("byteOffset", rt.newNativeFunc("get byteOffset", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		if o == nil || o.dv == nil {
 			return mkundef(), rt.typeError("DataView.prototype.byteOffset on incompatible receiver")
@@ -1080,7 +1080,7 @@ func (rt *Runtime) initDataViewBuiltin() {
 		}
 		return mknum(float64(o.dv.byteOffset)), nil
 	}), mkundef(), true, false, attrConfigurable)
-	po.defineAccessor("buffer", rt.newNativeFunc("buffer", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	po.defineAccessor("buffer", rt.newNativeFunc("get buffer", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		if o == nil || o.dv == nil {
 			return mkundef(), rt.typeError("DataView.prototype.buffer on incompatible receiver")
@@ -1287,27 +1287,34 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		}
 		return 0
 	}
-	tp.defineAccessor("length", rt.newNativeFunc("length", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	// These getters require a TypedArray receiver ([[TypedArrayName]] internal
+	// slot) — a non-TypedArray this is a TypeError — and their function name is
+	// "get <prop>".
+	taGetter := func(prop string, fn nativeFunc) Value {
+		return rt.newNativeFunc("get "+prop, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			o := rt.objPtr(this)
+			if o == nil || o.ta == nil {
+				return mkundef(), rt.typeError("TypedArray.prototype." + prop + " getter called on a non-TypedArray")
+			}
+			return fn(rt, this, args)
+		})
+	}
+	tp.defineAccessor("length", taGetter("length", func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return mknum(float64(length(this))), nil
 	}), mkundef(), true, false, attrConfigurable)
-	tp.defineAccessor("byteLength", rt.newNativeFunc("byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if o := rt.objPtr(this); o != nil && o.ta != nil {
-			return mknum(float64(rt.taCurrentLen(o) * o.ta.size())), nil
-		}
-		return mknum(0), nil
+	tp.defineAccessor("byteLength", taGetter("byteLength", func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		return mknum(float64(rt.taCurrentLen(o) * o.ta.size())), nil
 	}), mkundef(), true, false, attrConfigurable)
-	tp.defineAccessor("byteOffset", rt.newNativeFunc("byteOffset", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	tp.defineAccessor("byteOffset", taGetter("byteOffset", func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		// byteOffset reads as 0 for an out-of-bounds (or detached) view.
-		if o := rt.objPtr(this); o != nil && o.ta != nil && !rt.taOutOfBounds(o) {
+		if o := rt.objPtr(this); !rt.taOutOfBounds(o) {
 			return mknum(float64(o.ta.byteOffset)), nil
 		}
 		return mknum(0), nil
 	}), mkundef(), true, false, attrConfigurable)
-	tp.defineAccessor("buffer", rt.newNativeFunc("buffer", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if o := rt.objPtr(this); o != nil && o.ta != nil {
-			return o.ta.buf, nil
-		}
-		return mkundef(), nil
+	tp.defineAccessor("buffer", taGetter("buffer", func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.objPtr(this).ta.buf, nil
 	}), mkundef(), true, false, attrConfigurable)
 
 	get := func(this Value, i int) Value { v, _ := rt.getElement(this, mknum(float64(i))); return v }
