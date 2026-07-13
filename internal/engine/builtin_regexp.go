@@ -738,11 +738,41 @@ func (rt *Runtime) initStringRegexpMethods() {
 			return mkundef(), rt.typeError("String.prototype.replaceAll called on null or undefined")
 		}
 		search := arg(args, 0)
-		if o := rt.objPtr(search); o != nil && o.regex != nil {
-			if !o.regex.Global {
-				return mkundef(), rt.typeError("replaceAll must be called with a global RegExp")
+		if search.IsObjectType() {
+			// Only an Object searchValue is inspected: a RegExp must be global, then
+			// GetMethod(search, @@replace) and, if present, delegate (the observable
+			// protocol; abrupts propagate). A primitive skips straight to ToString.
+			isRe, e := rt.isRegExp(search)
+			if e != nil {
+				return mkundef(), e
 			}
-			return rt.stringReplace(this, search, arg(args, 1))
+			if isRe {
+				flags, e := rt.getField(search, "flags")
+				if e != nil {
+					return mkundef(), e
+				}
+				if flags.IsNullish() {
+					return mkundef(), rt.typeError("String.prototype.replaceAll called with a non-global RegExp argument")
+				}
+				fs, e := rt.toStringValue(flags)
+				if e != nil {
+					return mkundef(), e
+				}
+				if !strings.ContainsRune(string(rt.strBytes(fs)), 'g') {
+					return mkundef(), rt.typeError("replaceAll must be called with a global RegExp")
+				}
+			}
+			replacer, e := rt.getElement(search, rt.symReplace)
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.isCallable(replacer) {
+				sv, e := rt.toStringValue(this)
+				if e != nil {
+					return mkundef(), e
+				}
+				return rt.callValue(replacer, search, []Value{sv, arg(args, 1)})
+			}
 		}
 		s, e := rt.toStringValue(this)
 		if e != nil {
@@ -1308,18 +1338,24 @@ func expandReplacement(tmpl, match string, position int, input []rune, groups []
 			}
 		case c >= '1' && c <= '9':
 			n := int(c - '0')
-			// Two-digit group reference when valid.
+			consumed := 1
+			// Prefer a two-digit reference when it names an existing capture.
 			if i+2 < len(tmpl) && tmpl[i+2] >= '0' && tmpl[i+2] <= '9' {
-				two := n*10 + int(tmpl[i+2]-'0')
-				if two < len(groups) {
+				if two := n*10 + int(tmpl[i+2]-'0'); two >= 1 && two < len(groups) {
 					n = two
-					i++
+					consumed = 2
 				}
 			}
-			if n < len(groups) && groups[n].Index >= 0 {
-				out.WriteString(groups[n].Value)
+			if n >= 1 && n < len(groups) {
+				if groups[n].Index >= 0 {
+					out.WriteString(groups[n].Value)
+				}
+				i += consumed
+			} else {
+				// Not a valid capture reference: the '$' is literal (the digits are
+				// written as ordinary characters on the following iterations).
+				out.WriteByte('$')
 			}
-			i++
 		default:
 			out.WriteByte('$')
 		}
