@@ -254,7 +254,7 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 		return rt.proxyGet(o.proxy, rt.toPropertyKeyValue(key), obj)
 	}
 	if key.IsSymbol() {
-		return rt.getFieldSymbol(obj, key.handle()), nil
+		return rt.getFieldSymbol(obj, key.handle())
 	}
 	if idx, ok := rt.arrayIndexOf(key); ok {
 		switch obj.Type() {
@@ -298,7 +298,7 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 // getFieldSymbol reads a symbol-keyed property through the prototype chain. For
 // a primitive receiver the walk begins at its wrapper prototype (so e.g.
 // ""[Symbol.iterator] resolves through String.prototype).
-func (rt *Runtime) getFieldSymbol(obj Value, sym uint32) Value {
+func (rt *Runtime) getFieldSymbol(obj Value, sym uint32) (Value, *ThrowError) {
 	cur := obj
 	if !obj.IsObjectType() && obj.Type() != TTypedArray && !obj.IsNullish() {
 		cur = rt.primitiveProto(obj)
@@ -312,16 +312,15 @@ func (rt *Runtime) getFieldSymbol(obj Value, sym uint32) Value {
 			if o.isAccessorSlot(uint32(slot)) {
 				p := o.shape.propAt(uint32(slot))
 				if p.hasGetter {
-					v, _ := rt.callValue(p.getter, obj, nil)
-					return v
+					return rt.callValue(p.getter, obj, nil)
 				}
-				return mkundef()
+				return mkundef(), nil
 			}
-			return o.slotGet(uint32(slot))
+			return o.slotGet(uint32(slot)), nil
 		}
 		cur = o.proto
 	}
-	return mkundef()
+	return mkundef(), nil
 }
 
 // getSuperProp implements a super-property read (`super.x` / `super[k]`):
@@ -604,7 +603,10 @@ func (rt *Runtime) copyDataProps(target, src Value) *ThrowError {
 	}
 	for _, off := range so.ownSymbolKeys() {
 		if d := so.ownDescriptorSym(off); d.exists && d.enumerable {
-			v := rt.getFieldSymbol(src, off)
+			v, e := rt.getFieldSymbol(src, off)
+			if e != nil {
+				return e
+			}
 			if o := rt.objPtr(target); o != nil {
 				o.defineOwnSymbol(off, v, attrDefault)
 			}

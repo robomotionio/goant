@@ -226,7 +226,8 @@ func (rt *Runtime) isIterable(v Value) bool {
 		return true
 	}
 	if (v.IsObjectType() || v.Type() == TTypedArray) && rt.symIterator != 0 {
-		return rt.isCallable(rt.getFieldSymbol(v, rt.symIterator.handle()))
+		it, _ := rt.getFieldSymbol(v, rt.symIterator.handle())
+		return rt.isCallable(it)
 	}
 	return false
 }
@@ -238,7 +239,10 @@ func (rt *Runtime) iterateProtocol(v Value) ([]Value, bool, *ThrowError) {
 	if !v.IsObjectType() || rt.symIterator == 0 {
 		return nil, false, nil
 	}
-	itFn := rt.getFieldSymbol(v, rt.symIterator.handle())
+	itFn, e := rt.getFieldSymbol(v, rt.symIterator.handle())
+	if e != nil {
+		return nil, true, e
+	}
 	if !rt.isCallable(itFn) {
 		return nil, false, nil
 	}

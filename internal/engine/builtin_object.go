@@ -1012,7 +1012,7 @@ func (rt *Runtime) objectToStringTag(v Value) string {
 			lookup = rt.primitiveProto(v)
 		}
 		if lookup.IsObjectType() {
-			if tag := rt.getFieldSymbol(lookup, rt.symToStringTag.handle()); tag.IsString() {
+			if tag, _ := rt.getFieldSymbol(lookup, rt.symToStringTag.handle()); tag.IsString() {
 				builtin = string(rt.strBytes(tag))
 			}
 		}

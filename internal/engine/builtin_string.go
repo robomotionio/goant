@@ -40,7 +40,7 @@ func (rt *Runtime) isRegExpValue(v Value) bool {
 		return false
 	}
 	if rt.symMatch != 0 {
-		if m := rt.getFieldSymbol(v, rt.symMatch.handle()); !m.IsUndefined() {
+		if m, _ := rt.getFieldSymbol(v, rt.symMatch.handle()); !m.IsUndefined() {
 			return rt.toBoolean(m)
 		}
 	}
