@@ -32,6 +32,49 @@ func (rt *Runtime) relativeIndex(v Value, n int) int {
 	return k
 }
 
+// toIntegerOrInfinity implements ToIntegerOrInfinity(value): NaN → 0, ±Infinity
+// preserved, otherwise truncated toward zero, propagating an abrupt ToNumber.
+func (rt *Runtime) toIntegerOrInfinity(v Value) (float64, *ThrowError) {
+	n, e := rt.toNumber(v)
+	if e != nil {
+		return 0, e
+	}
+	if math.IsNaN(n) {
+		return 0, nil
+	}
+	if math.IsInf(n, 0) {
+		return n, nil
+	}
+	return math.Trunc(n), nil
+}
+
+// relativeIndexE clamps a relative index argument to [0, n] with the spec's
+// negative-from-end / overflow handling, propagating abrupt coercions.
+func (rt *Runtime) relativeIndexE(v Value, n int) (int, *ThrowError) {
+	if v.IsUndefined() {
+		return 0, nil
+	}
+	d, e := rt.toIntegerOrInfinity(v)
+	if e != nil {
+		return 0, e
+	}
+	if math.IsInf(d, -1) {
+		return 0, nil
+	}
+	if math.IsInf(d, 1) {
+		return n, nil
+	}
+	k := int(d)
+	if k < 0 {
+		if k += n; k < 0 {
+			k = 0
+		}
+	} else if k > n {
+		k = n
+	}
+	return k, nil
+}
+
 // sortValues sorts a slice in place with JS Array.prototype.sort semantics
 // (undefined last; comparator or default ToString ordering).
 func (rt *Runtime) sortValues(vs []Value, cmp Value) *ThrowError {

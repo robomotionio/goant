@@ -1462,37 +1462,85 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	})
 	m("fill", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		v, _ := rt.toNumber(arg(args, 0))
 		l := length(this)
-		start := rt.relativeIndex(arg(args, 1), l)
+		// Coerce value (BigInt vs Number) then the bounds, propagating aborts.
+		var fv float64
+		var bv *big.Int
+		var e *ThrowError
+		if isBigIntKind(o.ta.kind) {
+			bv, e = rt.toBigInt(arg(args, 0))
+		} else {
+			fv, e = rt.toNumber(arg(args, 0))
+		}
+		if e != nil {
+			return mkundef(), e
+		}
+		start, e := rt.relativeIndexE(arg(args, 1), l)
+		if e != nil {
+			return mkundef(), e
+		}
 		end := l
 		if !arg(args, 2).IsUndefined() {
-			end = rt.relativeIndex(arg(args, 2), l)
+			if end, e = rt.relativeIndexE(arg(args, 2), l); e != nil {
+				return mkundef(), e
+			}
+		}
+		// Coercion may have detached or resized the buffer.
+		if rt.taOutOfBounds(o) {
+			return mkundef(), rt.typeError("Cannot fill a detached or out-of-bounds TypedArray")
+		}
+		if l2 := rt.taCurrentLen(o); end > l2 {
+			end = l2
+			if start > l2 {
+				start = l2
+			}
 		}
 		for i := start; i < end; i++ {
-			rt.taSet(o, i, v)
+			if bv != nil {
+				rt.taSetBig(o, i, bv)
+			} else {
+				rt.taSet(o, i, fv)
+			}
 		}
 		return this, nil
 	})
 	m("slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		l := length(this)
-		start := rt.relativeIndex(arg(args, 0), l)
-		end := l
-		if !arg(args, 1).IsUndefined() {
-			end = rt.relativeIndex(arg(args, 1), l)
-		}
-		if end < start {
-			end = start
-		}
-		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(end - start))})
+		start, e := rt.relativeIndexE(arg(args, 0), l)
 		if e != nil {
 			return mkundef(), e
 		}
-		oo := rt.objPtr(out)
-		for i := 0; i < end-start; i++ {
-			el, _ := rt.taGet(o, start+i)
-			rt.taSet(oo, i, el.Number())
+		end := l
+		if !arg(args, 1).IsUndefined() {
+			if end, e = rt.relativeIndexE(arg(args, 1), l); e != nil {
+				return mkundef(), e
+			}
+		}
+		count := end - start
+		if count < 0 {
+			count = 0
+		}
+		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(count))})
+		if e != nil {
+			return mkundef(), e
+		}
+		if count > 0 {
+			// The species constructor may have detached or resized the source.
+			if rt.taOutOfBounds(o) {
+				return mkundef(), rt.typeError("Cannot slice a detached or out-of-bounds TypedArray")
+			}
+			if l2 := rt.taCurrentLen(o); start+count > l2 {
+				if count = l2 - start; count < 0 {
+					count = 0
+				}
+			}
+			for i := 0; i < count; i++ {
+				el, _ := rt.taGet(o, start+i)
+				if err := rt.setElement(out, mknum(float64(i)), el); err != nil {
+					return mkundef(), err
+				}
+			}
 		}
 		return out, nil
 	})
@@ -1519,41 +1567,76 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	m("subarray", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		l := length(this)
-		start := rt.relativeIndex(arg(args, 0), l)
-		end := l
-		if !arg(args, 1).IsUndefined() {
-			end = rt.relativeIndex(arg(args, 1), l)
-		}
-		if end < start {
-			end = start
+		start, e := rt.relativeIndexE(arg(args, 0), l)
+		if e != nil {
+			return mkundef(), e
 		}
 		// subarray shares the buffer: SpeciesConstructor is invoked with
-		// (buffer, absoluteByteOffset, newLength).
+		// (buffer, absoluteByteOffset, newLength). A length-tracking source with
+		// no end argument yields another length-tracking view (undefined length).
 		byteOffset := o.ta.byteOffset + start*o.ta.size()
+		lenArg := mkundef()
+		if !(o.ta.track && arg(args, 1).IsUndefined()) {
+			end := l
+			if !arg(args, 1).IsUndefined() {
+				if end, e = rt.relativeIndexE(arg(args, 1), l); e != nil {
+					return mkundef(), e
+				}
+			}
+			if end < start {
+				end = start
+			}
+			lenArg = mknum(float64(end - start))
+		}
 		return rt.typedArraySpeciesCreate(this, []Value{
-			o.ta.buf, mknum(float64(byteOffset)), mknum(float64(end - start)),
+			o.ta.buf, mknum(float64(byteOffset)), lenArg,
 		})
 	})
 	m("copyWithin", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		l := length(this)
-		to := rt.relativeIndex(arg(args, 0), l)
-		from := rt.relativeIndex(arg(args, 1), l)
+		to, e := rt.relativeIndexE(arg(args, 0), l)
+		if e != nil {
+			return mkundef(), e
+		}
+		from, e := rt.relativeIndexE(arg(args, 1), l)
+		if e != nil {
+			return mkundef(), e
+		}
 		final := l
 		if !arg(args, 2).IsUndefined() {
-			final = rt.relativeIndex(arg(args, 2), l)
+			if final, e = rt.relativeIndexE(arg(args, 2), l); e != nil {
+				return mkundef(), e
+			}
+		}
+		// Coercion may have detached or resized the buffer; re-validate and clamp.
+		if rt.taOutOfBounds(o) {
+			return mkundef(), rt.typeError("Cannot copyWithin a detached or out-of-bounds TypedArray")
+		}
+		if l2 := rt.taCurrentLen(o); l2 < l {
+			l = l2
+			for _, p := range []*int{&to, &from, &final} {
+				if *p > l {
+					*p = l
+				}
+			}
 		}
 		count := final - from
 		if count > l-to {
 			count = l - to
 		}
-		buf := make([]float64, 0, count)
+		bigKind := isBigIntKind(o.ta.kind)
+		tmp := make([]Value, count)
 		for i := 0; i < count; i++ {
-			el, _ := rt.taGet(o, from+i)
-			buf = append(buf, el.Number())
+			tmp[i], _ = rt.taGet(o, from+i)
 		}
 		for i := 0; i < count; i++ {
-			rt.taSet(o, to+i, buf[i])
+			if bigKind {
+				bi, _ := rt.toBigInt(tmp[i])
+				rt.taSetBig(o, to+i, bi)
+			} else {
+				rt.taSet(o, to+i, tmp[i].Number())
+			}
 		}
 		return this, nil
 	})
