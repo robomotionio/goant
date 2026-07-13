@@ -604,6 +604,18 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 			o.defineAccessorSymbol(symOff, g, s, hg, hs, attrs)
 		} else {
 			o.defineAccessor(name, g, s, hg, hs, attrs)
+			// An accessor on an array index moves out of fast storage and extends
+			// the array length like any index [[DefineOwnProperty]].
+			if obj.Type() == TArr {
+				if idx, ok := canonicalIndex(name); ok {
+					if int(idx) < len(o.arr) {
+						o.arr[idx] = tEmpty
+					}
+					if idx+1 > o.arrLen {
+						o.arrLen = idx + 1
+					}
+				}
+			}
 		}
 		return nil
 	}
@@ -617,15 +629,29 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	if hasVal {
 		val = valV
 	}
-	// Array exotic [[DefineOwnProperty]]: a plain data descriptor on a canonical
-	// index writes the element storage (which reads prefer over a named property),
-	// and a value on "length" retargets the array's length.
+	// Array exotic [[DefineOwnProperty]]: a plain (all-default) data descriptor on
+	// a canonical index writes fast element storage; a value on "length" retargets
+	// the length. An index with non-default attributes falls through to a named
+	// property (element reads fall back to it) but still extends the length.
 	if obj.Type() == TArr && !sym {
 		if name == "length" && hasVal && !hasGet && !hasSet {
 			return rt.setArrayLength(obj, val)
 		}
-		if idx, ok := canonicalIndex(name); ok && writable && enumerable && configurable {
-			rt.arraySet(o, idx, val)
+		if idx, ok := canonicalIndex(name); ok {
+			if writable && enumerable && configurable {
+				rt.arraySet(o, idx, val)
+				return nil
+			}
+			// Move the index out of fast storage into a named property (with its
+			// attributes); clear any shadowing fast element so reads see the named
+			// one, and extend the length past it.
+			if int(idx) < len(o.arr) {
+				o.arr[idx] = tEmpty
+			}
+			o.defineOwn(name, val, attrs)
+			if idx+1 > o.arrLen { // array [[DefineOwnProperty]] extends length
+				o.arrLen = idx + 1
+			}
 			return nil
 		}
 	}

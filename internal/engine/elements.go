@@ -20,13 +20,15 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 			o := rt.objPtr(obj)
 			return mknum(float64(o.arrLen)), nil
 		}
-		// Canonical index keys reach array elements (e.g. arr["0"]).
+		// Canonical index keys reach array elements (e.g. arr["0"]). A hit in fast
+		// storage wins; otherwise fall through to the ordinary [[Get]] below, which
+		// finds an index defined with non-default attributes (stored as a named
+		// property) or an inherited one, then the prototype chain.
 		if idx, ok := canonicalIndex(name); ok {
 			o := rt.objPtr(obj)
 			if idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
 				return o.arr[idx], nil
 			}
-			return mkundef(), nil
 		}
 	case TStr:
 		if name == "length" {
@@ -219,14 +221,12 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 			return mkundef(), nil
 		case TArr:
 			o := rt.objPtr(obj)
-			if idx < o.arrLen && int(idx) < len(o.arr) {
-				el := o.arr[idx]
-				if el.IsEmpty() {
-					return mkundef(), nil
-				}
-				return el, nil
+			if idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
+				return o.arr[idx], nil
 			}
-			return mkundef(), nil
+			// Not in fast element storage: an index defined with non-default
+			// attributes or as an accessor lives as a named property — fall through
+			// to the named-property + prototype-chain lookup below.
 		case TStr:
 			b := rt.strBytes(obj)
 			if int(idx) < utf16Len(b) {
