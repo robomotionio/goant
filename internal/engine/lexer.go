@@ -532,7 +532,15 @@ func parseDecimalLiteral(buf string) (length int, value float64, ok bool) {
 		digits = stripSep(digits)
 	}
 	v, err := parseJSFloat(digits)
-	return n, v, err == nil
+	if err != nil {
+		// Overflow to ±Inf is a valid numeric literal (StringNumericValue rounds an
+		// out-of-range magnitude to Infinity); only a genuine parse failure is !ok.
+		if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
+			return n, v, true
+		}
+		return n, v, false
+	}
+	return n, v, true
 }
 
 // parseJSFloat parses a cleaned decimal literal (no separators) to float64 with
