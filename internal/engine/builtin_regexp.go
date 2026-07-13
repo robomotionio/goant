@@ -233,7 +233,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 			return mkundef(), e
 		}
 		fullUnicode := rt.toBoolean(uv)
-		if e := rt.setField(this, "lastIndex", mknum(0)); e != nil {
+		if e := rt.setLastIndexOrThrow(this, 0); e != nil {
 			return mkundef(), e
 		}
 		res := rt.newArray()
@@ -261,9 +261,17 @@ func (rt *Runtime) initRegExpBuiltin() {
 			rt.arraySet(ro, ro.arrLen, matchStr)
 			n++
 			if len(rt.strBytes(matchStr)) == 0 {
-				li, _ := rt.getField(this, "lastIndex")
-				liN, _ := rt.toNumber(li)
-				rt.setField(this, "lastIndex", mknum(rt.advanceStringIndex(s, liN, fullUnicode)))
+				li, e := rt.getField(this, "lastIndex")
+				if e != nil {
+					return mkundef(), e
+				}
+				liN, e := rt.toIntegerOrInfinity(li)
+				if e != nil {
+					return mkundef(), e
+				}
+				if e := rt.setLastIndexOrThrow(this, rt.advanceStringIndex(s, liN, fullUnicode)); e != nil {
+					return mkundef(), e
+				}
 			}
 		}
 	})
