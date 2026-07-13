@@ -581,7 +581,13 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 		}
 		return nil
 	}
+	// A newly created data property (or one converted from an accessor) whose
+	// descriptor omits `value` defaults to undefined — NOT the zero Value, which
+	// NaN-decodes to the number 0. Only an existing data property keeps its value.
 	val := existing.value
+	if !existing.exists || existing.isAccessor {
+		val = mkundef()
+	}
 	if hasVal {
 		val = valV
 	}
