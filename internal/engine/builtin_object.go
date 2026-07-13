@@ -213,8 +213,11 @@ func (rt *Runtime) initObjectBuiltin() {
 					dp.defineOwn("configurable", mkfalse(), attrDefault)
 					return do, nil
 				}
-				if idx, ok := arrayIndex(arg(args, 1)); ok && idx < o.arrLen {
-					v, _ := rt.getElement(arg(args, 0), arg(args, 1))
+				// canonicalIndex parses the key STRING; arrayIndex only accepts a
+				// numeric Value, so a string index key ("0") wrongly returned no
+				// descriptor. hasOwnIndex confirms the element is present (not a hole).
+				if idx, ok := canonicalIndex(name); ok && rt.hasOwnIndex(arg(args, 0), o, idx) {
+					v, _ := rt.getElement(arg(args, 0), mknum(float64(idx)))
 					return rt.makeDataDescriptor(v, true, true, true), nil
 				}
 			}
