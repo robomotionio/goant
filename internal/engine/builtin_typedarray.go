@@ -566,6 +566,15 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	rt.defGlobal("ArrayBuffer", ctor)
 }
 
+// dvDetached reports whether DataView o's backing ArrayBuffer has been detached.
+func (rt *Runtime) dvDetached(o *object) bool {
+	if o == nil || o.dv == nil {
+		return false
+	}
+	b := rt.objPtr(o.dv.buf)
+	return b == nil || b.abuf == nil
+}
+
 func (rt *Runtime) initDataViewBuiltin() {
 	proto := rt.newObject(rt.objectProto)
 	rt.dataViewProto = proto
@@ -602,6 +611,9 @@ func (rt *Runtime) initDataViewBuiltin() {
 			}
 			off := o.dv.byteOffset + int(argNum(rt, args, 0))
 			le := rt.toBoolean(arg(args, 1))
+			if rt.dvDetached(o) {
+				return mkundef(), rt.typeError("Cannot get value from a detached ArrayBuffer")
+			}
 			if off < 0 || off+t.size > len(o.dv.bytes) {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
@@ -613,11 +625,15 @@ func (rt *Runtime) initDataViewBuiltin() {
 				return mkundef(), rt.typeError("DataView.prototype.set" + t.name + " on incompatible receiver")
 			}
 			off := o.dv.byteOffset + int(argNum(rt, args, 0))
+			val := argNum(rt, args, 1)
 			le := rt.toBoolean(arg(args, 2))
+			if rt.dvDetached(o) {
+				return mkundef(), rt.typeError("Cannot set value on a detached ArrayBuffer")
+			}
 			if off < 0 || off+t.size > len(o.dv.bytes) {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
-			t.enc(o.dv.bytes, off, argNum(rt, args, 1), le)
+			t.enc(o.dv.bytes, off, val, le)
 			return mkundef(), nil
 		})
 	}
@@ -634,6 +650,9 @@ func (rt *Runtime) initDataViewBuiltin() {
 			}
 			off := o.dv.byteOffset + int(argNum(rt, args, 0))
 			le := rt.toBoolean(arg(args, 1))
+			if rt.dvDetached(o) {
+				return mkundef(), rt.typeError("Cannot get value from a detached ArrayBuffer")
+			}
 			if off < 0 || off+8 > len(o.dv.bytes) {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
@@ -654,6 +673,9 @@ func (rt *Runtime) initDataViewBuiltin() {
 				return mkundef(), e
 			}
 			le := rt.toBoolean(arg(args, 2))
+			if rt.dvDetached(o) {
+				return mkundef(), rt.typeError("Cannot set value on a detached ArrayBuffer")
+			}
 			if off < 0 || off+8 > len(o.dv.bytes) {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
@@ -662,10 +684,31 @@ func (rt *Runtime) initDataViewBuiltin() {
 		})
 	}
 	po.defineAccessor("byteLength", rt.newNativeFunc("byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if o := rt.objPtr(this); o != nil && o.dv != nil {
-			return mknum(float64(o.dv.byteLength)), nil
+		o := rt.objPtr(this)
+		if o == nil || o.dv == nil {
+			return mkundef(), rt.typeError("DataView.prototype.byteLength on incompatible receiver")
 		}
-		return mknum(0), nil
+		if rt.dvDetached(o) {
+			return mkundef(), rt.typeError("Cannot read byteLength of a detached ArrayBuffer")
+		}
+		return mknum(float64(o.dv.byteLength)), nil
+	}), mkundef(), true, false, attrConfigurable)
+	po.defineAccessor("byteOffset", rt.newNativeFunc("byteOffset", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || o.dv == nil {
+			return mkundef(), rt.typeError("DataView.prototype.byteOffset on incompatible receiver")
+		}
+		if rt.dvDetached(o) {
+			return mkundef(), rt.typeError("Cannot read byteOffset of a detached ArrayBuffer")
+		}
+		return mknum(float64(o.dv.byteOffset)), nil
+	}), mkundef(), true, false, attrConfigurable)
+	po.defineAccessor("buffer", rt.newNativeFunc("buffer", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || o.dv == nil {
+			return mkundef(), rt.typeError("DataView.prototype.buffer on incompatible receiver")
+		}
+		return o.dv.buf, nil
 	}), mkundef(), true, false, attrConfigurable)
 	rt.setStringTag(proto, "DataView")
 
