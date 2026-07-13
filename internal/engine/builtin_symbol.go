@@ -98,6 +98,7 @@ func (rt *Runtime) initSymbolBuiltin() {
 	rt.symIsConcatSpreadable = wk("isConcatSpreadable")
 	rt.symSpecies = wk("species")
 	rt.symMatch = wk("match")
+	rt.symMatchAll = wk("matchAll")
 	rt.symReplace = wk("replace")
 	rt.symSearch = wk("search")
 	rt.symSplit = wk("split")

@@ -92,6 +92,7 @@ type Runtime struct {
 	symToPrimitive        Value
 	symToStringTag        Value
 	symMatch              Value
+	symMatchAll           Value
 	symReplace            Value
 	symSearch             Value
 	symSplit              Value

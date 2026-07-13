@@ -347,6 +347,49 @@ func (rt *Runtime) initRegExpBuiltin() {
 		// A non-RegExp splitter: run the fully generic exec-driven algorithm.
 		return rt.regexpSymbolSplitGeneric(splitter, arg(args, 0), arg(args, 1), unicode)
 	})
+	defSym(rt.symMatchAll, func(this Value, args []Value) (Value, *ThrowError) {
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.matchAll] called on incompatible receiver")
+		}
+		sv, e := rt.toStringValue(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		// matcher = Construct(SpeciesConstructor(R, %RegExp%), (R, flags)); iterate
+		// from its lastIndex.
+		C, e := rt.speciesConstructor(this, rt.regexpCtor)
+		if e != nil {
+			return mkundef(), e
+		}
+		flagsV, e := rt.getField(this, "flags")
+		if e != nil {
+			return mkundef(), e
+		}
+		flagsS, e := rt.toStringValue(flagsV)
+		if e != nil {
+			return mkundef(), e
+		}
+		matcher, e := rt.construct(C, []Value{this, flagsS})
+		if e != nil {
+			return mkundef(), e
+		}
+		if mo := rt.objPtr(matcher); mo == nil || mo.regex == nil {
+			return mkundef(), rt.typeError("RegExp[Symbol.matchAll] species constructor did not return a RegExp")
+		}
+		li, e := rt.getField(this, "lastIndex")
+		if e != nil {
+			return mkundef(), e
+		}
+		liN, e := rt.toNumber(li)
+		if e != nil {
+			return mkundef(), e
+		}
+		start := 0
+		if liN > 0 {
+			start = int(liN)
+		}
+		return rt.regexpMatchAllIterator(matcher, sv, start), nil
+	})
 }
 
 // newRegExp compiles a pattern/flags pair into a RegExp object.
@@ -457,6 +500,46 @@ func (rt *Runtime) isRegExp(v Value) (bool, *ThrowError) {
 	}
 	o := rt.objPtr(v)
 	return o != nil && o.regex != nil, nil
+}
+
+// regexpMatchAllIterator eagerly collects each match of reObj against s starting
+// at startPos into a match-result array (with index/input), then returns an
+// iterator over them (a non-global RegExp yields at most one).
+func (rt *Runtime) regexpMatchAllIterator(reObj, s Value, startPos int) Value {
+	re := rt.objPtr(reObj).regex
+	input := []rune(string(rt.strBytes(s)))
+	var results []Value
+	pos := startPos
+	if pos < 0 {
+		pos = 0
+	}
+	for pos <= len(input) {
+		m, err := re.Exec(input, pos)
+		if err != nil || m == nil {
+			break
+		}
+		res := rt.newArray()
+		ro := rt.objPtr(res)
+		for i, g := range m.Groups {
+			if g.Index < 0 && i > 0 {
+				rt.arraySet(ro, uint32(i), mkundef())
+			} else {
+				rt.arraySet(ro, uint32(i), rt.newString(g.Value))
+			}
+		}
+		ro.defineOwn("index", mknum(float64(m.Index)), attrDefault)
+		ro.defineOwn("input", s, attrDefault)
+		results = append(results, res)
+		if !re.Global {
+			break
+		}
+		adv := m.Index + m.Groups[0].Length
+		if adv <= pos {
+			adv = pos + 1
+		}
+		pos = adv
+	}
+	return rt.sliceIterator(results)
 }
 
 // advanceStringIndex implements AdvanceStringIndex (22.2.7.3): +1, or +2 when
@@ -690,47 +773,52 @@ func (rt *Runtime) initStringRegexpMethods() {
 		if this.IsNullish() { // RequireObjectCoercible
 			return mkundef(), rt.typeError("String.prototype.matchAll called on null or undefined")
 		}
+		regexp := arg(args, 0)
+		if regexp.IsObjectType() {
+			// A RegExp argument must be global; then GetMethod(regexp, @@matchAll)
+			// and delegate if callable (abrupts propagate).
+			isRe, e := rt.isRegExp(regexp)
+			if e != nil {
+				return mkundef(), e
+			}
+			if isRe {
+				flags, e := rt.getField(regexp, "flags")
+				if e != nil {
+					return mkundef(), e
+				}
+				if flags.IsNullish() {
+					return mkundef(), rt.typeError("String.prototype.matchAll called with a non-global RegExp argument")
+				}
+				fs, e := rt.toStringValue(flags)
+				if e != nil {
+					return mkundef(), e
+				}
+				if !strings.ContainsRune(string(rt.strBytes(fs)), 'g') {
+					return mkundef(), rt.typeError("String.prototype.matchAll called with a non-global RegExp argument")
+				}
+			}
+			matcher, e := rt.getElement(regexp, rt.symMatchAll)
+			if e != nil {
+				return mkundef(), e
+			}
+			if rt.isCallable(matcher) {
+				sv, e := rt.toStringValue(this)
+				if e != nil {
+					return mkundef(), e
+				}
+				return rt.callValue(matcher, regexp, []Value{sv})
+			}
+		}
+		// Default: RegExpCreate(regexp, "g") then iterate.
 		s, e := rt.toStringValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		pat := arg(args, 0)
-		if o := rt.objPtr(pat); o != nil && o.regex != nil && !o.regex.Global {
-			return mkundef(), rt.typeError("String.prototype.matchAll called with a non-global RegExp argument")
-		}
-		reObj, e := rt.regexpArg(pat)
+		reObj, e := rt.construct(rt.regexpCtor, []Value{regexp, rt.newString("g")})
 		if e != nil {
 			return mkundef(), e
 		}
-		re := rt.objPtr(reObj).regex
-		input := []rune(string(rt.strBytes(s)))
-		// Precompute all match-result arrays, then hand back an iterator.
-		var results []Value
-		pos := 0
-		for {
-			m, err := re.Exec(input, pos)
-			if err != nil || m == nil {
-				break
-			}
-			res := rt.newArray()
-			ro := rt.objPtr(res)
-			for i, g := range m.Groups {
-				if g.Index < 0 && i > 0 {
-					rt.arraySet(ro, uint32(i), mkundef())
-				} else {
-					rt.arraySet(ro, uint32(i), rt.newString(g.Value))
-				}
-			}
-			ro.defineOwn("index", mknum(float64(m.Index)), attrDefault)
-			ro.defineOwn("input", s, attrDefault)
-			results = append(results, res)
-			adv := m.Index + m.Groups[0].Length
-			if adv <= pos {
-				adv = pos + 1
-			}
-			pos = adv
-		}
-		return rt.sliceIterator(results), nil
+		return rt.regexpMatchAllIterator(reObj, s, 0), nil
 	})
 
 	rt.defMethod(sp, "replaceAll", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
