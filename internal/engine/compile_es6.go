@@ -366,6 +366,26 @@ func (c *compiler) compileSuperCall(n *Node) {
 // prototype's method with the current `this`.
 func (c *compiler) compileSuperMethodCall(n *Node) {
 	member := n.Left
+	// Spread args: emit [method, this, argsArray] for APPLY.
+	if hasSpread(n.Args) {
+		if !c.resolveClassBinding("*superproto*") {
+			c.syntaxErrorf("'super' keyword unexpected here")
+			return
+		}
+		if member.Flags&1 != 0 {
+			c.compileExpr(member.Right)
+			c.emit(OpGetElem)
+		} else {
+			c.emitFieldOp(OpGetField, member.Right.Str)
+		} // [method]
+		if !c.resolveClassBinding("*this*") {
+			c.emit(OpUndef)
+		} // [method, this]
+		c.buildSpreadArray(n.Args) // [method, this, argsArray]
+		c.emit(OpApply)
+		c.emitU16(0)
+		return
+	}
 	// this = current this
 	if !c.resolveClassBinding("*this*") {
 		c.emit(OpUndef)
