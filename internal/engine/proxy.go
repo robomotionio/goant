@@ -43,9 +43,17 @@ func (p *proxyState) trap(rt *Runtime, name string) (Value, *ThrowError) {
 	if p.revoked {
 		return mkundef(), rt.typeError("Cannot perform '" + name + "' on a proxy that has been revoked")
 	}
+	// GetMethod(handler, name): a nullish trap means "use the target's default";
+	// a present but non-callable trap is a TypeError.
 	t, e := rt.getField(p.handler, name)
 	if e != nil {
 		return mkundef(), e
+	}
+	if t.IsNullish() {
+		return mkundef(), nil
+	}
+	if !rt.isCallable(t) {
+		return mkundef(), rt.typeError("'" + name + "' trap is not a function")
 	}
 	return t, nil
 }
