@@ -1444,11 +1444,17 @@ func (p *parser) parseObject() *Node {
 			prop.Right.Flags |= fnMethod
 			prop.Right.SrcOff = prop.SrcOff
 		} else {
-			// Shorthand `{ id }` / `{ id = default }`: id is an IdentifierReference,
-			// so it may not be a reserved word (even one written with escapes, since
-			// prop.Left.Str is the decoded StringValue). `enum` and `extends` are
-			// reserved but have no dedicated token — they lex as identifiers — so
-			// they are checked by name.
+			// Shorthand `{ id }` / `{ id = default }`: the key must be a plain
+			// IdentifierReference — a numeric/string literal or a computed key needs
+			// an explicit `: value` and is not a valid shorthand.
+			if prop.Flags&fnComputed != 0 || prop.Left == nil || prop.Left.Kind != NIdent {
+				p.errorf("Unexpected token; a shorthand property must be an identifier")
+				return n
+			}
+			// id is an IdentifierReference, so it may not be a reserved word (even one
+			// written with escapes, since prop.Left.Str is the decoded StringValue).
+			// `enum` and `extends` are reserved but have no dedicated token — they lex
+			// as identifiers — so they are checked by name.
 			if prop.Left.Kind == NIdent && (isReservedWordTok(parseKeyword(prop.Left.Str)) ||
 				prop.Left.Str == "enum" || prop.Left.Str == "extends") {
 				p.errorf("Unexpected reserved word")
