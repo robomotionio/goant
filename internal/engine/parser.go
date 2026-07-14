@@ -360,6 +360,22 @@ func pushArrowParamsFromExpr(fn, expr *Node) {
 
 // ---- member/call suffixes ----
 
+// isClassFieldMember reports whether a class member node is a field (not a
+// method, generator, or accessor): its value is an initializer expression
+// rather than a concise-method function.
+func isClassFieldMember(m *Node) bool {
+	if m == nil || m.Kind != NMethod {
+		return false
+	}
+	if m.Flags&(fnGetter|fnSetter) != 0 {
+		return false
+	}
+	if m.Right != nil && m.Right.Kind == NFunc && m.Right.Flags&fnMethod != 0 {
+		return false
+	}
+	return true
+}
+
 // isPrivateMemberProp reports whether an NMember's property node names a private
 // identifier (goant stores `.#x` as an NIdent whose text keeps the leading '#').
 func isPrivateMemberProp(prop *Node) bool {
@@ -1662,6 +1678,28 @@ func (p *parser) parseClass() *Node {
 			method.Right = p.mk(NUndef)
 			if p.tok() == TokSemicolon {
 				p.consume()
+			}
+		}
+		// Class member name early errors (non-computed, non-private names):
+		//   - a field may not be named "constructor"; a static field may not be
+		//     named "prototype";
+		//   - a static method may not be named "prototype".
+		if method.Flags&fnComputed == 0 {
+			if name, ok := propKeyName(method.Left); ok {
+				field := isClassFieldMember(method)
+				static := method.Flags&fnStatic != 0
+				if name == "#constructor" {
+					p.errorf("Class private name #constructor is reserved")
+					return cls
+				}
+				if field && name == "constructor" {
+					p.errorf("Classes may not have a field named 'constructor'")
+					return cls
+				}
+				if static && name == "prototype" {
+					p.errorf("Classes may not have a static property named 'prototype'")
+					return cls
+				}
 			}
 		}
 		cls.Args = append(cls.Args, method)
