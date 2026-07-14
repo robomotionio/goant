@@ -414,15 +414,43 @@ func (p *jsonParser) parseLit(lit string, v Value) (Value, error) {
 
 func (p *jsonParser) parseNumber() (Value, error) {
 	start := p.pos
+	bad := func() (Value, error) { return mkundef(), &jsonError{"Invalid number in JSON"} }
+	digit := func() bool { return p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' }
 	if p.pos < len(p.src) && p.src[p.pos] == '-' {
 		p.pos++
 	}
-	for p.pos < len(p.src) {
-		c := p.src[p.pos]
-		if (c >= '0' && c <= '9') || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-' {
+	// Integer part: a single 0, or a nonzero digit followed by more digits (JSON
+	// forbids leading zeros).
+	if p.pos < len(p.src) && p.src[p.pos] == '0' {
+		p.pos++
+	} else if digit() {
+		for digit() {
 			p.pos++
-		} else {
-			break
+		}
+	} else {
+		return bad()
+	}
+	// Fraction: '.' then at least one digit.
+	if p.pos < len(p.src) && p.src[p.pos] == '.' {
+		p.pos++
+		if !digit() {
+			return bad()
+		}
+		for digit() {
+			p.pos++
+		}
+	}
+	// Exponent: [eE][+-]? then at least one digit.
+	if p.pos < len(p.src) && (p.src[p.pos] == 'e' || p.src[p.pos] == 'E') {
+		p.pos++
+		if p.pos < len(p.src) && (p.src[p.pos] == '+' || p.src[p.pos] == '-') {
+			p.pos++
+		}
+		if !digit() {
+			return bad()
+		}
+		for digit() {
+			p.pos++
 		}
 	}
 	f, err := strconv.ParseFloat(p.src[start:p.pos], 64)
@@ -483,6 +511,10 @@ func (p *jsonParser) parseString() (string, error) {
 			}
 			p.pos++
 			continue
+		}
+		if c < 0x20 {
+			// A JSON string may not contain an unescaped control character.
+			return "", &jsonError{"Bad control character in JSON string"}
 		}
 		b.WriteByte(c)
 		p.pos++
