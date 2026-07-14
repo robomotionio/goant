@@ -36,7 +36,11 @@ func (rt *Runtime) initIteratorProto() {
 // marks the helper done; `done` is shared with the step closure so an exhausted
 // or already-returned helper does not re-close the source.
 func (rt *Runtime) newIteratorObjectE(source Value, done *bool, next func() (Value, bool, *ThrowError)) Value {
-	v := rt.newObject(rt.iteratorProto)
+	proto := rt.iteratorProto
+	if rt.iterHelperProto != 0 {
+		proto = rt.iterHelperProto
+	}
+	v := rt.newObject(proto)
 	o := rt.objPtr(v)
 	rt.defMethod(o, "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		val, d, e := next()
@@ -175,6 +179,11 @@ func (rt *Runtime) sliceIterator(vs []Value) Value {
 func (rt *Runtime) initIteratorHelpers() {
 	proto := rt.objPtr(rt.iteratorProto)
 	drain := func(this Value) ([]Value, *ThrowError) { return rt.iterableValues(this) }
+
+	// %IteratorHelperPrototype%: the [[Prototype]] of a map/filter/take/drop/
+	// flatMap result, tagged "Iterator Helper".
+	rt.iterHelperProto = rt.newObject(rt.iteratorProto)
+	rt.setStringTag(rt.iterHelperProto, "Iterator Helper")
 
 	if rt.symDispose != 0 {
 		// Iterator.prototype[@@dispose] closes the iterator (calls its `return`).

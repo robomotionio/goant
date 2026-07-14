@@ -51,6 +51,7 @@ type Runtime struct {
 	promiseCtor           Value // the %Promise% constructor (species fast-path check)
 	genProto              Value // %GeneratorPrototype%
 	iteratorProto         Value // %IteratorPrototype%
+	iterHelperProto       Value // %IteratorHelperPrototype% (map/filter/… results)
 	asyncIteratorProto    Value // %AsyncIteratorPrototype%
 	asyncGenProto         Value // %AsyncGeneratorPrototype%
 	arrayIterProto        Value // %ArrayIteratorPrototype%
