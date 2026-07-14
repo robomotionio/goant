@@ -2398,6 +2398,7 @@ func (p *parser) parseFor() *Node {
 		p.consume()
 		n := p.mk(NForIn)
 		n.Left = initNode
+		p.validateArrayPattern(initNode)
 		n.Right = p.parseExpr()
 		p.expect(TokRParen)
 		n.Body = p.parseStmt()
@@ -2417,6 +2418,7 @@ func (p *parser) parseFor() *Node {
 		}
 		n := p.mk(kind)
 		n.Left = initNode
+		p.validateArrayPattern(initNode)
 		n.Right = p.parseAssign()
 		p.expect(TokRParen)
 		n.Body = p.parseStmt()
