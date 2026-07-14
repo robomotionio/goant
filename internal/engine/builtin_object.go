@@ -246,7 +246,11 @@ func (rt *Runtime) initObjectBuiltin() {
 		return rt.descriptorToObject(d), nil
 	})
 	rt.defMethod(cobj, "getOwnPropertyNames", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.ownPropertyNames(arg(args, 0), false), nil
+		obj, e := rt.toObjectValue(arg(args, 0)) // ToObject (null/undefined -> TypeError)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.ownPropertyNames(obj, false), nil
 	})
 	rt.defMethod(cobj, "hasOwn", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		obj, e := rt.toObjectValue(arg(args, 0))
@@ -313,17 +317,31 @@ func (rt *Runtime) initObjectBuiltin() {
 		return res, nil
 	})
 	rt.defMethod(cobj, "getOwnPropertyDescriptors", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(arg(args, 0))
-		if o == nil {
-			return mkundef(), rt.typeError("Object.getOwnPropertyDescriptors called on non-object")
+		obj, e := rt.toObjectValue(arg(args, 0)) // ToObject: a primitive is wrapped
+		if e != nil {
+			return mkundef(), e
 		}
+		o := rt.objPtr(obj)
 		res := rt.newPlainObject()
 		reso := rt.objPtr(res)
-		if arg(args, 0).Type() == TArr {
+		switch obj.Type() {
+		case TArr:
 			for i := uint32(0); i < o.arrLen; i++ {
 				if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
 					reso.defineOwn(strconv.Itoa(int(i)), rt.makeDataDescriptor(o.arr[i], true, true, true), attrDefault)
 				}
+			}
+		case TTypedArray:
+			for i, l := 0, rt.taLength(o); i < l; i++ {
+				if val, ok := rt.taGet(o, i); ok {
+					reso.defineOwn(strconv.Itoa(i), rt.makeDataDescriptor(val, true, true, true), attrDefault)
+				}
+			}
+		}
+		if o.boxed.Type() == TStr {
+			b := rt.strBytes(o.boxed)
+			for i, l := 0, utf16Len(b); i < l; i++ {
+				reso.defineOwn(strconv.Itoa(i), rt.makeDataDescriptor(rt.charAt(b, i), false, true, false), attrDefault)
 			}
 		}
 		for _, k := range o.ownKeys() {
@@ -472,13 +490,27 @@ func (rt *Runtime) initObjectBuiltin() {
 			return mkundef(), e
 		}
 		for _, entry := range vals {
-			k, _ := rt.getElement(entry, mknum(0))
-			v, _ := rt.getElement(entry, mknum(1))
-			name, e := rt.propKeyString(k)
+			if !entry.IsObjectType() {
+				return mkundef(), rt.typeError("iterator value is not an entry object")
+			}
+			k, e := rt.getElement(entry, mknum(0))
 			if e != nil {
 				return mkundef(), e
 			}
-			o.defineOwn(name, v, attrDefault)
+			v, e := rt.getElement(entry, mknum(1))
+			if e != nil {
+				return mkundef(), e
+			}
+			// CreateDataPropertyOnObject with ToPropertyKey(k) (symbol keys allowed).
+			pk, e := rt.toPropertyKey(k)
+			if e != nil {
+				return mkundef(), e
+			}
+			if pk.IsSymbol() {
+				o.defineOwnSymbol(pk.handle(), v, attrDefault)
+			} else {
+				o.defineOwn(string(rt.strBytes(pk)), v, attrDefault)
+			}
 		}
 		return res, nil
 	})
@@ -1041,6 +1073,11 @@ func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) Value {
 		// Integer indices [0, length) are the typed array's own enumerable data
 		// properties (length lives on the prototype).
 		for i, l := 0, rt.taLength(o); i < l; i++ {
+			rt.arraySet(ao, ao.arrLen, rt.newString(strconv.Itoa(i)))
+		}
+	}
+	if o.boxed.Type() == TStr { // String wrapper: char indices are own (then "length")
+		for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
 			rt.arraySet(ao, ao.arrLen, rt.newString(strconv.Itoa(i)))
 		}
 	}
