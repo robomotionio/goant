@@ -1519,12 +1519,13 @@ func (p *parser) parseObject() *Node {
 				return n
 			}
 			// `yield`/`await` may not be a shorthand IdentifierReference inside a
-			// generator / async body (where they are always keywords).
+			// generator / async body (where they are always keywords). A class
+			// static block reserves `await` too (`{ static { var {await} = {} } }`).
 			if prop.Left.Kind == NIdent && p.inGenerator && prop.Left.Str == "yield" {
 				p.errorf("'yield' cannot be used as an identifier here")
 				return n
 			}
-			if prop.Left.Kind == NIdent && p.inAsync && prop.Left.Str == "await" {
+			if prop.Left.Kind == NIdent && (p.inAsync || p.inStaticBlock) && prop.Left.Str == "await" {
 				p.errorf("'await' cannot be used as an identifier here")
 				return n
 			}
@@ -2054,6 +2055,10 @@ func (p *parser) parseFunc() *Node {
 		yieldGen, awaitAsync := savedGen, savedAsync
 		if isExpr {
 			yieldGen, awaitAsync = isGenerator, isAsync
+		} else if savedSB {
+			// A FunctionDeclaration directly in a class static block: `await` is
+			// reserved there (`static { function await() {} }` is a SyntaxError).
+			awaitAsync = true
 		}
 		if yieldGen && fn.Str == "yield" {
 			p.errorf("'yield' cannot be used as a binding identifier in a generator")
@@ -3231,7 +3236,7 @@ func (p *parser) parseExprStmt() *Node {
 	// generator/strict context for yield, an async context for await).
 	labelTok := p.tok() == TokIdentifier || isContextualIdentTok(p.tok()) ||
 		(p.tok() == TokYield && !p.inGenerator && !p.lx.strict) ||
-		(p.tok() == TokAwait && !p.inAsync)
+		(p.tok() == TokAwait && !p.inAsync && !p.inStaticBlock)
 	if labelTok {
 		if p.la() == TokColon {
 			label := p.mk(NLabel)
