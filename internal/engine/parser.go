@@ -986,6 +986,22 @@ func (p *parser) parseArray() *Node {
 	return n
 }
 
+// isReservedWordTok reports whether a token is a reserved word that may never be
+// used as a binding identifier or identifier reference. The contextual keywords
+// (async/await/from/let/of/yield/as/static/using/undefined/…) are excluded — they
+// are handled by strictCheckBindingIdent or their own context checks.
+func isReservedWordTok(t Token) bool {
+	switch t {
+	case TokBreak, TokCase, TokCatch, TokClass, TokConst, TokContinue,
+		TokDefault, TokDelete, TokDo, TokDebugger, TokElse, TokExport,
+		TokFinally, TokFor, TokFunc, TokIf, TokImport, TokIn, TokInstanceof,
+		TokNew, TokReturn, TokSuper, TokSwitch, TokThis, TokThrow, TokTry,
+		TokVar, TokVoid, TokWhile, TokWith, TokTypeof, TokNull, TokTrue, TokFalse:
+		return true
+	}
+	return false
+}
+
 // validatePatternTarget dispatches to the array/object pattern validator for a
 // nested destructuring target (a no-op for a plain identifier/member target).
 func (p *parser) validatePatternTarget(n *Node) {
@@ -1898,6 +1914,10 @@ func (p *parser) parseVarDecl(kind VarKind, allowUninitConst bool) *Node {
 			p.unexpected()
 			return v
 		default:
+			if isReservedWordTok(p.tok()) {
+				p.errorf("Unexpected reserved word")
+				return v
+			}
 			decl.Left = p.mkIdentFromTok()
 			p.strictCheckBindingIdent(decl.Left.Str)
 			p.consume()
