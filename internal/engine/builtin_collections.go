@@ -227,7 +227,13 @@ func (rt *Runtime) initMapBuiltin() {
 		}
 		o.coll = &collection{index: map[string]int{}}
 		if it := arg(args, 0); !it.IsNullish() {
-			setFn, _ := rt.getField(this, "set")
+			setFn, e := rt.getField(this, "set")
+			if e != nil {
+				return mkundef(), e
+			}
+			if !rt.isCallable(setFn) {
+				return mkundef(), rt.typeError("Map: 'set' is not callable")
+			}
 			if e := rt.iterateWithClose(it, func(entry Value) (bool, *ThrowError) {
 				// Each iterator value must be an entry object; a primitive aborts
 				// the loop with a TypeError, which closes the iterator.
@@ -382,7 +388,13 @@ func (rt *Runtime) initSetBuiltin() {
 		}
 		o.coll = &collection{index: map[string]int{}, isSet: true}
 		if it := arg(args, 0); !it.IsNullish() {
-			addFn, _ := rt.getField(this, "add")
+			addFn, e := rt.getField(this, "add")
+			if e != nil {
+				return mkundef(), e
+			}
+			if !rt.isCallable(addFn) {
+				return mkundef(), rt.typeError("Set: 'add' is not callable")
+			}
 			if e := rt.iterateWithClose(it, func(v Value) (bool, *ThrowError) {
 				_, e := rt.callValue(addFn, this, []Value{v})
 				return false, e

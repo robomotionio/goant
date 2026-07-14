@@ -203,11 +203,26 @@ func (rt *Runtime) initWeakMapBuiltin() {
 		}
 		o.coll = &collection{index: map[string]int{}, weak: true}
 		if it := arg(args, 0); !it.IsNullish() {
-			setFn, _ := rt.getField(this, "set")
+			setFn, e := rt.getField(this, "set")
+			if e != nil {
+				return mkundef(), e
+			}
+			if !rt.isCallable(setFn) {
+				return mkundef(), rt.typeError("WeakMap: 'set' is not callable")
+			}
 			if e := rt.iterateWithClose(it, func(entry Value) (bool, *ThrowError) {
-				k, _ := rt.getElement(entry, mknum(0))
-				v, _ := rt.getElement(entry, mknum(1))
-				_, e := rt.callValue(setFn, this, []Value{k, v})
+				if !entry.IsObjectType() {
+					return false, rt.typeError("Iterator value " + rt.inspect(entry, false) + " is not an entry object")
+				}
+				k, e := rt.getElement(entry, mknum(0))
+				if e != nil {
+					return false, e
+				}
+				v, e := rt.getElement(entry, mknum(1))
+				if e != nil {
+					return false, e
+				}
+				_, e = rt.callValue(setFn, this, []Value{k, v})
 				return false, e
 			}); e != nil {
 				return mkundef(), e
@@ -267,7 +282,13 @@ func (rt *Runtime) initWeakSetBuiltin() {
 		}
 		o.coll = &collection{index: map[string]int{}, isSet: true, weak: true}
 		if it := arg(args, 0); !it.IsNullish() {
-			addFn, _ := rt.getField(this, "add")
+			addFn, e := rt.getField(this, "add")
+			if e != nil {
+				return mkundef(), e
+			}
+			if !rt.isCallable(addFn) {
+				return mkundef(), rt.typeError("WeakSet: 'add' is not callable")
+			}
 			if e := rt.iterateWithClose(it, func(v Value) (bool, *ThrowError) {
 				_, e := rt.callValue(addFn, this, []Value{v})
 				return false, e

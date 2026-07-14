@@ -90,10 +90,19 @@ func (rt *Runtime) iterateIteratorWithClose(iter Value, fn func(v Value) (stop b
 		if !r.IsObjectType() {
 			return rt.typeError("iterator result is not an object")
 		}
-		if d, _ := rt.getField(r, "done"); rt.toBoolean(d) {
+		d, e := rt.getField(r, "done")
+		if e != nil {
+			return e
+		}
+		if rt.toBoolean(d) {
 			return nil
 		}
-		val, _ := rt.getField(r, "value")
+		// IteratorValue is a plain ? (propagate, no IteratorClose): the abrupt
+		// came from the iterator's own result object, not the loop body.
+		val, e := rt.getField(r, "value")
+		if e != nil {
+			return e
+		}
 		stop, ferr := fn(val)
 		if ferr != nil {
 			rt.iteratorClose(iter)
