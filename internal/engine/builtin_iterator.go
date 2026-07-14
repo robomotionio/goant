@@ -150,6 +150,42 @@ func (rt *Runtime) iterHelperLimit(this, limitArg Value) (Value, int, *ThrowErro
 // getIteratorFlattenable implements GetIteratorFlattenable(obj, reject-primitives)
 // for flatMap: obj must be an Object; if it has a callable @@iterator, call it,
 // otherwise use obj itself as the iterator.
+// setterIgnoresPrototype implements SetterThatIgnoresPrototypeProperties(this,
+// home, key, v): assigning through the home object itself throws (emulating a
+// non-writable data property), otherwise the value is created as — or set on —
+// an own property of the receiver, bypassing the inherited accessor. Used by the
+// %Iterator.prototype% constructor / @@toStringTag setters.
+func (rt *Runtime) setterIgnoresPrototype(this, home, key, v Value) *ThrowError {
+	if !this.IsObjectLike() {
+		return rt.typeError("setter called on a non-object")
+	}
+	if this == home {
+		return rt.typeError("Cannot assign to a read-only property of the prototype")
+	}
+	exists := false
+	o := rt.objPtr(this)
+	if o.proxy != nil {
+		d, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, key)
+		if e != nil {
+			return e
+		}
+		exists = !d.IsUndefined()
+	} else {
+		_, exists = rt.targetOwnDesc(this, key)
+	}
+	if !exists {
+		return rt.createDataProperty(this, key, v)
+	}
+	ok, e := rt.ordinarySet(this, key, v, this)
+	if e != nil {
+		return e
+	}
+	if !ok {
+		return rt.typeError("Cannot assign to read-only property")
+	}
+	return nil
+}
+
 func (rt *Runtime) getIteratorFlattenable(obj Value) (Value, *ThrowError) {
 	if !obj.IsObjectType() {
 		return mkundef(), rt.typeError("flatMap callback did not return an object")
@@ -549,7 +585,17 @@ func (rt *Runtime) initIteratorHelpers() {
 	})
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", rt.iteratorProto, 0)
-	proto.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
+	// %Iterator.prototype%.constructor is an accessor (Iterator Helpers): the
+	// getter always yields %Iterator%, and the setter installs an own data
+	// property on the receiver (SetterThatIgnoresPrototypeProperties), throwing
+	// when applied to the prototype itself.
+	ctorGet := rt.newNativeFunc("get constructor", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
+		return ctor, nil
+	})
+	ctorSet := rt.newNativeFunc("set constructor", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return mkundef(), rt.setterIgnoresPrototype(this, rt.iteratorProto, rt.internString("constructor"), arg(args, 0))
+	})
+	proto.defineAccessor("constructor", ctorGet, ctorSet, true, true, attrConfigurable)
 	rt.defMethod(cobj, "from", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		src := arg(args, 0)
 		if !src.IsObjectType() {
@@ -814,7 +860,16 @@ func (rt *Runtime) initIteratorHelpers() {
 		return rt.newZipIterator(iters, nexts, mode, padding, finish), nil
 	})
 	if rt.symToStringTag != 0 {
-		proto.defineOwnSymbol(rt.symToStringTag.handle(), rt.newString("Iterator"), attrConfigurable)
+		// %Iterator.prototype%[@@toStringTag] is likewise an accessor: getter
+		// returns "Iterator", setter is SetterThatIgnoresPrototypeProperties.
+		ttKey := mkval(TSymbol, uint64(rt.symToStringTag.handle()))
+		ttGet := rt.newNativeFunc("get [Symbol.toStringTag]", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
+			return rt.newString("Iterator"), nil
+		})
+		ttSet := rt.newNativeFunc("set [Symbol.toStringTag]", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			return mkundef(), rt.setterIgnoresPrototype(this, rt.iteratorProto, ttKey, arg(args, 0))
+		})
+		proto.defineAccessorSymbol(rt.symToStringTag.handle(), ttGet, ttSet, true, true, attrConfigurable)
 	}
 	rt.defGlobal("Iterator", ctor)
 }
