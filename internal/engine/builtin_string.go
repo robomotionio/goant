@@ -160,7 +160,9 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if rt.isRegExpValue(arg(args, 0)) {
+		if isRe, e := rt.isRegExp(arg(args, 0)); e != nil {
+			return mkundef(), e
+		} else if isRe {
 			return mkundef(), rt.typeError("First argument to String.prototype.includes must not be a regular expression")
 		}
 		sub, e := rt.stringArg(args, 0)
@@ -178,7 +180,9 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if rt.isRegExpValue(arg(args, 0)) {
+		if isRe, e := rt.isRegExp(arg(args, 0)); e != nil {
+			return mkundef(), e
+		} else if isRe {
 			return mkundef(), rt.typeError("First argument to String.prototype.startsWith must not be a regular expression")
 		}
 		sub, e := rt.stringArg(args, 0)
@@ -198,7 +202,9 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if rt.isRegExpValue(arg(args, 0)) {
+		if isRe, e := rt.isRegExp(arg(args, 0)); e != nil {
+			return mkundef(), e
+		} else if isRe {
 			return mkundef(), rt.typeError("First argument to String.prototype.endsWith must not be a regular expression")
 		}
 		sub, e := rt.stringArg(args, 0)
