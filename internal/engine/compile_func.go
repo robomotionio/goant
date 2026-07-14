@@ -10,6 +10,27 @@ package engine
 // callable before their textual position (ant function hoisting). blockScoped
 // marks a nested block: in strict mode its function declarations are lexically
 // scoped to the block rather than the enclosing function.
+// functionSelfNameShadowed reports whether a same-named parameter or a top-level
+// body `var` shadows the function's self-name binding. Both reuse the name's slot
+// in the flat-local model, so the self-name must not be created there — the
+// parameter / var binding is a normal mutable one. A body `let`/`const`/`class`
+// shadows via a fresh (block-scoped) slot and so is not considered here.
+func functionSelfNameShadowed(n *Node) bool {
+	name := n.Str
+	for _, p := range n.Args {
+		var names []string
+		collectPatternNames(p, &names)
+		for _, nm := range names {
+			if nm == name {
+				return true
+			}
+		}
+	}
+	bodyVars := map[string]bool{}
+	collectBodyVarNames(n.Body, bodyVars)
+	return bodyVars[name]
+}
+
 func (c *compiler) hoistFunctions(list []*Node, blockScoped bool) {
 	for _, stmt := range list {
 		fn := stmt
@@ -572,8 +593,13 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	}
 	// A named function is self-bound: its name refers to itself inside the body
 	// (named function expressions; also enables recursion for declarations). A
-	// name assigned by NamedEvaluation does NOT create this binding.
-	if n.Str != "" && n.Flags&fnArrow == 0 && n.Flags&fnInferredName == 0 {
+	// name assigned by NamedEvaluation does NOT create this binding. The self-name
+	// lives in an outer environment, so a same-named parameter or a top-level body
+	// `var` (both of which reuse the slot here) SHADOWS it with a mutable binding —
+	// skip the self-name entirely in that case (`function g(g){}`,
+	// `function g(){ var g }`). A body `let`/`const` shadows via a fresh slot.
+	if n.Str != "" && n.Flags&fnArrow == 0 && n.Flags&fnInferredName == 0 &&
+		!functionSelfNameShadowed(n) {
 		slot := c.declareVar(n.Str, false)
 		// A named function EXPRESSION's self-reference is immutable (assigning to it
 		// is a strict-mode TypeError, a sloppy no-op); a declaration's name is the
