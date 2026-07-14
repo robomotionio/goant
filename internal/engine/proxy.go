@@ -573,28 +573,37 @@ func (rt *Runtime) proxyIsExtensible(p *proxyState) (bool, *ThrowError) {
 	return false, nil
 }
 
-func (rt *Runtime) proxyPreventExtensions(p *proxyState) *ThrowError {
+// proxyPreventExtensions implements the proxy [[PreventExtensions]], returning
+// the boolean result (the trap's ToBoolean-ed return, or true when no trap) so
+// callers can enforce "throw if false" (Object.*) or return it (Reflect.*).
+func (rt *Runtime) proxyPreventExtensions(p *proxyState) (bool, *ThrowError) {
 	trap, e := p.trap(rt, "preventExtensions")
 	if e != nil {
-		return e
+		return false, e
 	}
 	if rt.isCallable(trap) {
 		r, e := rt.callValue(trap, p.handler, []Value{p.target})
 		if e != nil {
-			return e
+			return false, e
 		}
+		ok := rt.toBoolean(r)
 		// Invariant: if the trap succeeds, the target must now be non-extensible.
-		if rt.toBoolean(r) {
+		if ok {
 			if to := rt.objPtr(p.target); to != nil && to.flags.extensible {
-				return rt.typeError("'preventExtensions' on proxy: trap returned truish but the proxy target is extensible")
+				return false, rt.typeError("'preventExtensions' on proxy: trap returned truish but the proxy target is extensible")
 			}
 		}
-		return nil
+		return ok, nil
 	}
+	// No trap: forward to target.[[PreventExtensions]] (through its trap if the
+	// target is itself a proxy).
 	if to := rt.objPtr(p.target); to != nil {
+		if to.proxy != nil {
+			return rt.proxyPreventExtensions(to.proxy)
+		}
 		to.flags.extensible = false
 	}
-	return nil
+	return true, nil
 }
 
 func (rt *Runtime) proxyApply(p *proxyState, thisArg Value, args []Value) (Value, *ThrowError) {

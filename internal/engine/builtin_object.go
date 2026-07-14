@@ -155,7 +155,9 @@ func (rt *Runtime) initObjectBuiltin() {
 			return mkundef(), rt.typeError("Object prototype may only be an Object or null")
 		}
 		obj := rt.newObject(p)
-		if props := arg(args, 1); props.IsObjectType() {
+		// A present Properties argument runs ObjectDefineProperties, which begins
+		// with ToObject(Properties) — so null throws and a string boxes.
+		if props := arg(args, 1); !props.IsUndefined() {
 			if e := rt.objectDefineProperties(obj, props); e != nil {
 				return mkundef(), e
 			}
@@ -303,9 +305,13 @@ func (rt *Runtime) initObjectBuiltin() {
 		return res, nil
 	})
 	rt.defMethod(cobj, "getOwnPropertySymbols", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		obj, e := rt.toObjectValue(arg(args, 0)) // ToObject: null/undefined throws; a primitive is boxed
+		if e != nil {
+			return mkundef(), e
+		}
 		res := rt.newArray()
 		ra := rt.objPtr(res)
-		if o := rt.objPtr(arg(args, 0)); o != nil {
+		if o := rt.objPtr(obj); o != nil {
 			for _, off := range o.ownSymbolKeys() {
 				rt.arraySet(ra, ra.arrLen, mkval(TSymbol, uint64(off)))
 			}
@@ -357,8 +363,12 @@ func (rt *Runtime) initObjectBuiltin() {
 	rt.defMethod(cobj, "preventExtensions", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if o := rt.objPtr(arg(args, 0)); o != nil {
 			if o.proxy != nil {
-				if e := rt.proxyPreventExtensions(o.proxy); e != nil {
+				ok, e := rt.proxyPreventExtensions(o.proxy)
+				if e != nil {
 					return mkundef(), e
+				}
+				if !ok { // O.[[PreventExtensions]]() returned false
+					return mkundef(), rt.typeError("Object.preventExtensions: proxy preventExtensions trap returned false")
 				}
 			} else {
 				o.flags.extensible = false
@@ -1166,9 +1176,14 @@ func (rt *Runtime) sealObject(v Value, freeze bool) *ThrowError {
 	}
 	if o.proxy != nil {
 		// SetIntegrityLevel via the proxy's preventExtensions + ownKeys +
-		// getOwnPropertyDescriptor + defineProperty traps.
-		if e := rt.proxyPreventExtensions(o.proxy); e != nil {
+		// getOwnPropertyDescriptor + defineProperty traps. A false result from
+		// [[PreventExtensions]] makes SetIntegrityLevel fail (a TypeError here).
+		ok, e := rt.proxyPreventExtensions(o.proxy)
+		if e != nil {
 			return e
+		}
+		if !ok {
+			return rt.typeError("Object.freeze/seal: proxy preventExtensions trap returned false")
 		}
 		keys, e := rt.proxyOwnKeys(o.proxy)
 		if e != nil {

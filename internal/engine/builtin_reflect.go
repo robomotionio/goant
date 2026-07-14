@@ -266,10 +266,11 @@ func (rt *Runtime) initReflectBuiltin() {
 			return mkundef(), rt.typeError("Reflect.preventExtensions called on non-object")
 		}
 		if o.proxy != nil {
-			if e := rt.proxyPreventExtensions(o.proxy); e != nil {
+			ok, e := rt.proxyPreventExtensions(o.proxy)
+			if e != nil {
 				return mkundef(), e
 			}
-			return mktrue(), nil
+			return mkbool(ok), nil // Reflect returns the boolean status
 		}
 		o.flags.extensible = false
 		return mktrue(), nil
