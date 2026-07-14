@@ -231,6 +231,29 @@ func hasNonSimpleParams(fn *Node) bool {
 	return false
 }
 
+// paramsReferenceArguments reports whether any parameter's default initializer
+// (including a nested destructuring default) reads `arguments`. Binding-name
+// positions are ignored — a parameter merely *named* `arguments` shadows the
+// arguments object rather than referencing it.
+func paramsReferenceArguments(params []*Node) bool {
+	for _, p := range params {
+		if paramDefaultRefsArguments(p) {
+			return true
+		}
+	}
+	return false
+}
+
+func paramDefaultRefsArguments(n *Node) bool {
+	// A bare identifier parameter is a binding name, not a reference; anything
+	// else (a default, rest, or destructuring pattern) may read arguments in a
+	// value position.
+	if n == nil || n.Kind == NIdent {
+		return false
+	}
+	return referencesArguments(n)
+}
+
 // referencesArguments reports whether the subtree reads `arguments`, not
 // crossing into nested non-arrow functions (ant ast_references_arguments).
 func referencesArguments(n *Node) bool {

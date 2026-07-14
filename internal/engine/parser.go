@@ -2069,7 +2069,10 @@ func (p *parser) parseFunc() *Node {
 	if !p.lx.strict && bodyHasUseStrict(fn.Body) {
 		p.checkStrictParams(fn)
 	}
-	if fn.Flags&fnArrow == 0 && referencesArguments(fn.Body) {
+	if fn.Flags&fnArrow == 0 && (referencesArguments(fn.Body) || paramsReferenceArguments(fn.Args)) {
+		// `arguments` is available in parameter default expressions too (they are
+		// evaluated after the arguments object is instantiated), so a reference
+		// there — `function*(x = arguments[2]){}` — must mark the function.
 		fn.Flags |= fnUsesArgs
 	}
 	if fn.Flags&fnArrow == 0 && referencesNewTarget(fn.Body) {

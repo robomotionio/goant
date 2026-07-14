@@ -575,8 +575,10 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		c.emitByte(1) // current function value
 		c.emitOpU16(OpPutLocal, uint16(slot))
 	}
-	// If a non-arrow function references `arguments`, bind it at entry.
-	if n.Flags&fnArrow == 0 && referencesArguments(n.Body) {
+	// If a non-arrow function references `arguments` — in its body or a parameter
+	// default (evaluated after the arguments object exists) — bind it at entry,
+	// before the defaults run.
+	if n.Flags&fnArrow == 0 && (referencesArguments(n.Body) || paramsReferenceArguments(n.Args)) {
 		slot := c.declareVar("arguments", false)
 		c.emit(OpSpecialObj)
 		c.emitByte(0)
