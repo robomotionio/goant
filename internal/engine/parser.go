@@ -1644,7 +1644,10 @@ func (p *parser) parseClass() *Node {
 		}
 		if p.tlen() == 3 && (p.tokStr() == "get" || p.tokStr() == "set") {
 			la := p.la()
-			if la != TokLParen && la != TokAssign && la != TokSemicolon && la != TokRBrace {
+			// `get`/`set` names an accessor only when a PropertyName follows. `(`, `=`,
+			// `;`, `}` make it a plain field/method name; `*` does too (an accessor is
+			// never a generator), leaving the `*` to start the next member.
+			if la != TokLParen && la != TokAssign && la != TokSemicolon && la != TokRBrace && la != TokMul {
 				if p.tokStr()[0] == 'g' {
 					flags |= fnGetter
 				} else {
