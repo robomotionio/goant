@@ -62,13 +62,10 @@ func (rt *Runtime) initFunctionBuiltin() {
 		thisArg := arg(args, 0)
 		var callArgs []Value
 		if a := arg(args, 1); !a.IsNullish() {
-			n, e := rt.lengthOf(a)
+			var e *ThrowError
+			callArgs, e = rt.createListFromArrayLike(a)
 			if e != nil {
 				return mkundef(), e
-			}
-			callArgs = make([]Value, n)
-			for i := 0; i < n; i++ {
-				callArgs[i], _ = rt.getElement(a, mknum(float64(i)))
 			}
 		}
 		return rt.callValue(this, thisArg, callArgs)

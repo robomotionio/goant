@@ -177,6 +177,30 @@ func (rt *Runtime) lengthOf(v Value) (int, *ThrowError) {
 	return int(n), nil
 }
 
+// createListFromArrayLike implements CreateListFromArrayLike(obj) with the
+// default element-type list (any value): the argument must be an Object (else a
+// TypeError), and elements 0..ToLength(obj.length)-1 are read with abrupt
+// propagation. Callers that permit a nullish argument (e.g. Function.prototype.
+// apply) must guard it before calling.
+func (rt *Runtime) createListFromArrayLike(a Value) ([]Value, *ThrowError) {
+	if rt.objPtr(a) == nil {
+		return nil, rt.typeError("CreateListFromArrayLike called on non-object")
+	}
+	n, e := rt.lengthOf(a)
+	if e != nil {
+		return nil, e
+	}
+	list := make([]Value, n)
+	for i := 0; i < n; i++ {
+		v, e := rt.getElement(a, mknum(float64(i)))
+		if e != nil {
+			return nil, e
+		}
+		list[i] = v
+	}
+	return list, nil
+}
+
 // hasElem implements the spec HasProperty(O, i) for an integer index, used by
 // the generic array algorithms to skip holes (and to route through a Proxy's
 // [[HasProperty]] trap).

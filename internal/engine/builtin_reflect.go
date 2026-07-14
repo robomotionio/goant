@@ -319,13 +319,11 @@ func (rt *Runtime) initReflectBuiltin() {
 		if !rt.isCallable(fn) {
 			return mkundef(), rt.typeError("Reflect.apply target is not a function")
 		}
-		var callArgs []Value
-		if list := arg(args, 2); !list.IsNullish() {
-			var e *ThrowError
-			callArgs, e = rt.iterableValues(list)
-			if e != nil {
-				return mkundef(), e
-			}
+		// Reflect.apply uses CreateListFromArrayLike (length + indexed Gets), which
+		// throws on a non-object argumentsList — not the iterator protocol.
+		callArgs, e := rt.createListFromArrayLike(arg(args, 2))
+		if e != nil {
+			return mkundef(), e
 		}
 		return rt.callValue(fn, arg(args, 1), callArgs)
 	})
@@ -334,13 +332,10 @@ func (rt *Runtime) initReflectBuiltin() {
 		if !rt.isCallable(fn) {
 			return mkundef(), rt.typeError("Reflect.construct target is not a constructor")
 		}
-		var callArgs []Value
-		if list := arg(args, 1); !list.IsNullish() {
-			var e *ThrowError
-			callArgs, e = rt.iterableValues(list)
-			if e != nil {
-				return mkundef(), e
-			}
+		// Reflect.construct uses CreateListFromArrayLike, not the iterator protocol.
+		callArgs, e := rt.createListFromArrayLike(arg(args, 1))
+		if e != nil {
+			return mkundef(), e
 		}
 		newTarget := fn
 		if nt := arg(args, 2); !nt.IsUndefined() {
