@@ -32,7 +32,7 @@ func (rt *Runtime) initWeakRefBuiltin() {
 			return mkundef(), rt.typeError("Constructor WeakRef requires 'new'")
 		}
 		target := arg(args, 0)
-		if !validWeakKey(target) {
+		if !rt.canBeHeldWeakly(target) {
 			return mkundef(), rt.typeError("WeakRef: target must be an object or symbol")
 		}
 		o.boxed = target
@@ -53,7 +53,7 @@ func (rt *Runtime) initFinalizationRegistryBuiltin() {
 	proto := rt.newObject(rt.objectProto)
 	po := rt.objPtr(proto)
 	rt.defMethod(po, "register", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if !arg(args, 0).IsObjectType() && arg(args, 0).Type() != TSymbol {
+		if !rt.canBeHeldWeakly(arg(args, 0)) {
 			return mkundef(), rt.typeError("FinalizationRegistry.register: target must be an object or symbol")
 		}
 		return mkundef(), nil
@@ -89,9 +89,22 @@ func (rt *Runtime) weakCollOf(this Value, wantSet bool, name string) (*collectio
 	return o.coll, nil
 }
 
-// validWeakKey reports whether v may key a weak collection (objects and symbols).
-func validWeakKey(v Value) bool {
-	return v.IsObjectType() || v.Type() == TSymbol
+// canBeHeldWeakly implements CanBeHeldWeakly: an Object, or a Symbol that is not
+// registered in the global symbol registry (Symbol.for symbols cannot be held
+// weakly, since they are never collected).
+func (rt *Runtime) canBeHeldWeakly(v Value) bool {
+	if v.IsObjectType() {
+		return true
+	}
+	if v.Type() == TSymbol {
+		for _, sym := range rt.symbolRegistry {
+			if sym == v {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func (rt *Runtime) initWeakMapBuiltin() {
@@ -104,7 +117,7 @@ func (rt *Runtime) initWeakMapBuiltin() {
 			return mkundef(), e
 		}
 		k := arg(args, 0)
-		if !validWeakKey(k) {
+		if !rt.canBeHeldWeakly(k) {
 			return mkundef(), rt.typeError("Invalid value used as weak map key")
 		}
 		ck := rt.canonicalKey(k)
@@ -134,7 +147,7 @@ func (rt *Runtime) initWeakMapBuiltin() {
 			return mkundef(), e
 		}
 		k := arg(args, 0)
-		if !validWeakKey(k) {
+		if !rt.canBeHeldWeakly(k) {
 			return mkundef(), rt.typeError("Invalid value used as weak map key")
 		}
 		ck := rt.canonicalKey(k)
@@ -155,7 +168,7 @@ func (rt *Runtime) initWeakMapBuiltin() {
 			return mkundef(), e
 		}
 		k := arg(args, 0)
-		if !validWeakKey(k) {
+		if !rt.canBeHeldWeakly(k) {
 			return mkundef(), rt.typeError("Invalid value used as weak map key")
 		}
 		cb := arg(args, 1)
@@ -248,7 +261,7 @@ func (rt *Runtime) initWeakSetBuiltin() {
 			return mkundef(), e
 		}
 		k := arg(args, 0)
-		if !validWeakKey(k) {
+		if !rt.canBeHeldWeakly(k) {
 			return mkundef(), rt.typeError("Invalid value used in weak set")
 		}
 		ck := rt.canonicalKey(k)
