@@ -3161,7 +3161,9 @@ func (p *parser) parseExprStmt() *Node {
 			p.consume()
 			p.next()
 			p.consume()
-			label.Body = p.parseStmt()
+			// A LabelledItem is a single-Statement context, so a leading `let`
+			// there is an identifier (like a loop/if body): `l: let\nx` is `let;`.
+			label.Body = p.parseSubStmt()
 			// A LabelledItem is a Statement or (Annex B, sloppy only) a plain
 			// FunctionDeclaration — never a lexical/class/async/generator declaration.
 			// A nested labelled statement (including a labelled function) is a
