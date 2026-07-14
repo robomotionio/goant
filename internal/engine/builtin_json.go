@@ -615,7 +615,11 @@ func (p *jsonParser) parseString() (string, error) {
 				}
 				var cp uint32
 				for k := 1; k <= 4; k++ {
-					cp = cp<<4 | hexVal(p.src[p.pos+k])
+					h := p.src[p.pos+k]
+					if !isXDigitByte(h) { // all four must be hex digits
+						return "", &jsonError{"Invalid unicode escape in JSON string"}
+					}
+					cp = cp<<4 | hexVal(h)
 				}
 				b.WriteString(string([]byte(string(rune(cp)))))
 				p.pos += 4
