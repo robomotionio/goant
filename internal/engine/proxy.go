@@ -385,30 +385,32 @@ func (rt *Runtime) proxyGetPrototypeOf(p *proxyState) (Value, *ThrowError) {
 	if e != nil {
 		return mkundef(), e
 	}
-	if rt.isCallable(trap) {
-		r, e := rt.callValue(trap, p.handler, []Value{p.target})
-		if e != nil {
-			return mkundef(), e
-		}
-		if !r.IsObjectType() && !r.IsNull() {
-			return mkundef(), rt.typeError("'getPrototypeOf' on proxy: trap returned neither object nor null")
-		}
-		// Invariant: a non-extensible target must report its actual prototype.
-		if !rt.targetExtensible(p.target) {
-			actual := mknull()
-			if to := rt.objPtr(p.target); to != nil {
-				actual = to.proto
-			}
-			if !rt.sameValue(r, actual) {
-				return mkundef(), rt.typeError("'getPrototypeOf' on proxy: proxy target is non-extensible but the trap did not return its actual prototype")
-			}
-		}
+	if !rt.isCallable(trap) {
+		return rt.getPrototypeOfValue(p.target) // forward to the target (proxy → its trap)
+	}
+	r, e := rt.callValue(trap, p.handler, []Value{p.target})
+	if e != nil {
+		return mkundef(), e
+	}
+	if !r.IsObjectType() && !r.IsNull() {
+		return mkundef(), rt.typeError("'getPrototypeOf' on proxy: trap returned neither object nor null")
+	}
+	// Invariant: a non-extensible target must report its actual prototype.
+	extensibleTarget, e := rt.isExtensibleValue(p.target)
+	if e != nil {
+		return mkundef(), e
+	}
+	if extensibleTarget {
 		return r, nil
 	}
-	if to := rt.objPtr(p.target); to != nil {
-		return to.proto, nil
+	targetProto, e := rt.getPrototypeOfValue(p.target)
+	if e != nil {
+		return mkundef(), e
 	}
-	return mknull(), nil
+	if !rt.sameValue(r, targetProto) {
+		return mkundef(), rt.typeError("'getPrototypeOf' on proxy: proxy target is non-extensible but the trap did not return its actual prototype")
+	}
+	return r, nil
 }
 
 func (rt *Runtime) proxyGetOwnPropertyDescriptor(p *proxyState, key Value) (Value, *ThrowError) {
@@ -593,26 +595,23 @@ func (rt *Runtime) proxyIsExtensible(p *proxyState) (bool, *ThrowError) {
 	if e != nil {
 		return false, e
 	}
-	if rt.isCallable(trap) {
-		r, e := rt.callValue(trap, p.handler, []Value{p.target})
-		if e != nil {
-			return false, e
-		}
-		res := rt.toBoolean(r)
-		// Invariant: the trap result must match the target's actual extensibility.
-		actual := false
-		if to := rt.objPtr(p.target); to != nil {
-			actual = to.flags.extensible
-		}
-		if res != actual {
-			return false, rt.typeError("'isExtensible' on proxy: trap result does not reflect extensibility of proxy target")
-		}
-		return res, nil
+	if !rt.isCallable(trap) {
+		return rt.isExtensibleValue(p.target) // forward to the target (proxy → its trap)
 	}
-	if to := rt.objPtr(p.target); to != nil {
-		return to.flags.extensible, nil
+	r, e := rt.callValue(trap, p.handler, []Value{p.target})
+	if e != nil {
+		return false, e
 	}
-	return false, nil
+	res := rt.toBoolean(r)
+	// Invariant: the trap result must match the target's actual extensibility.
+	actual, e := rt.isExtensibleValue(p.target)
+	if e != nil {
+		return false, e
+	}
+	if res != actual {
+		return false, rt.typeError("'isExtensible' on proxy: trap result does not reflect extensibility of proxy target")
+	}
+	return res, nil
 }
 
 // proxyPreventExtensions implements the proxy [[PreventExtensions]], returning
