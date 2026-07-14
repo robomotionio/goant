@@ -1107,6 +1107,13 @@ func (p *parser) validatePatternTarget(n *Node) {
 		p.validateArrayPattern(n)
 	case n.Kind == NObject:
 		p.validateObjectPattern(n)
+	case n.Kind == NIdent:
+		// A leaf AssignmentTarget inside a destructuring assignment pattern may not
+		// be `eval`/`arguments` in strict mode (same restriction as a simple
+		// assignment target).
+		if p.isStrictRestrictedAssignTarget(n) {
+			p.errorf("cannot modify eval or arguments in strict mode")
+		}
 	}
 }
 
@@ -1166,7 +1173,7 @@ func (p *parser) validateArrayPattern(n *Node) {
 			return
 		}
 		switch e.Kind {
-		case NArray, NObject:
+		case NArray, NObject, NIdent:
 			p.validatePatternTarget(e)
 		case NSpread, NRest:
 			// A rest element is a BindingRestElement / AssignmentRestElement: it may
