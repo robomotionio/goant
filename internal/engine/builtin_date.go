@@ -26,12 +26,16 @@ func (rt *Runtime) initDateBuiltin() {
 		return rt.dateMs(this)
 	})
 	rt.defMethod(proto, "setTime", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := rt.dateMs(this); e != nil { // RequireInternalSlot([[DateValue]]) before ToNumber
+			return mkundef(), e
+		}
 		ms, e := rt.toNumber(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		rt.setDateMs(this, timeClip(ms))
-		return mknum(timeClip(ms)), nil
+		nm := timeClip(ms)
+		rt.setDateMs(this, nm)
+		return mknum(nm), nil
 	})
 
 	// Component getters (UTC == local here).
@@ -66,7 +70,14 @@ func (rt *Runtime) initDateBuiltin() {
 	getter("getMilliseconds", func(t time.Time) int { return t.Nanosecond() / 1e6 })
 	getter("getUTCMilliseconds", func(t time.Time) int { return t.Nanosecond() / 1e6 })
 	rt.defMethod(proto, "getTimezoneOffset", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return mknum(0), nil
+		v, e := rt.dateMs(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		if math.IsNaN(v.Number()) {
+			return mknum(math.NaN()), nil
+		}
+		return mknum(0), nil // UTC == local in this environment
 	})
 
 	// pick returns the i-th coerced component value (as an int) if it was
@@ -233,12 +244,18 @@ func (rt *Runtime) initDateBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if math.IsNaN(v.Number()) {
+			return rt.internString("Invalid Date"), nil
+		}
 		return rt.newString(msToTime(v.Number()).Format("Mon Jan 02 2006")), nil
 	})
 	rt.defMethod(proto, "toTimeString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		v, e := rt.dateMs(this)
 		if e != nil {
 			return mkundef(), e
+		}
+		if math.IsNaN(v.Number()) {
+			return rt.internString("Invalid Date"), nil
 		}
 		return rt.newString(msToTime(v.Number()).Format("15:04:05 GMT+0000 (Coordinated Universal Time)")), nil
 	})
