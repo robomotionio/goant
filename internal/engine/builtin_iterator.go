@@ -596,32 +596,71 @@ func (rt *Runtime) initIteratorHelpers() {
 		return mkundef(), rt.setterIgnoresPrototype(this, rt.iteratorProto, rt.internString("constructor"), arg(args, 0))
 	})
 	proto.defineAccessor("constructor", ctorGet, ctorSet, true, true, attrConfigurable)
+	// %WrapForValidIteratorPrototype%: the shared [[Prototype]] of the wrappers
+	// Iterator.from returns for a foreign iterator (chains to %Iterator.prototype%).
+	wrapProto := rt.newObject(rt.iteratorProto)
 	rt.defMethod(cobj, "from", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		src := arg(args, 0)
-		if !src.IsObjectType() {
-			vs, e := rt.iterableValues(src)
+		O := arg(args, 0)
+		// GetIteratorFlattenable(O, iterate-string-primitives): non-object non-string
+		// primitives are rejected; a String is iterated via its wrapper prototype.
+		if !O.IsObjectType() && !O.IsString() {
+			return mkundef(), rt.typeError("Iterator.from called on a non-iterable primitive")
+		}
+		method := mkundef()
+		if rt.symIterator != 0 {
+			m, e := rt.getElement(O, rt.symIterator) // GetMethod(O, @@iterator) (boxes a String)
 			if e != nil {
 				return mkundef(), e
 			}
-			return rt.sliceIterator(vs), nil
+			method = m
 		}
-		// Resolve the underlying iterator (via @@iterator when present).
-		it := src
-		if rt.symIterator != 0 {
-			if m, _ := rt.getElement(src, rt.symIterator); rt.isCallable(m) {
-				r, e := rt.callValue(m, src, nil)
-				if e != nil {
-					return mkundef(), e
-				}
-				it = r
+		var iterator Value
+		if method.IsNullish() {
+			iterator = O // no @@iterator: O is itself the iterator
+		} else if !rt.isCallable(method) {
+			return mkundef(), rt.typeError("Iterator.from: @@iterator is not callable")
+		} else {
+			it, e := rt.callValue(method, O, nil)
+			if e != nil {
+				return mkundef(), e
 			}
+			if !it.IsObjectType() {
+				return mkundef(), rt.typeError("Iterator.from: @@iterator returned a non-object")
+			}
+			iterator = it
 		}
-		// If it already inherits %IteratorPrototype%, return it; else wrap so the
-		// Iterator helpers apply (%WrapForValidIteratorPrototype%).
-		if rt.hasInProtoChain(it, rt.iteratorProto) {
-			return it, nil
+		// GetIteratorDirect: read "next" exactly once.
+		nextMethod, e := rt.getField(iterator, "next")
+		if e != nil {
+			return mkundef(), e
 		}
-		return rt.wrapIterator(it), nil
+		// An iterator that already inherits %Iterator.prototype% is returned as-is.
+		if rt.hasInProtoChain(iterator, rt.iteratorProto) {
+			return iterator, nil
+		}
+		// Otherwise wrap it so the Iterator helpers apply. next() forwards to the
+		// captured next method; return() forwards to the underlying iterator's
+		// return (undefined → a done result).
+		w := rt.newObject(wrapProto)
+		wo := rt.objPtr(w)
+		itr, nm := iterator, nextMethod
+		rt.defMethod(wo, "next", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
+			return rt.callValue(nm, itr, nil)
+		})
+		rt.defMethod(wo, "return", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
+			rf, e := rt.getField(itr, "return")
+			if e != nil {
+				return mkundef(), e
+			}
+			if rf.IsNullish() {
+				return rt.genResult(mkundef(), true), nil
+			}
+			if !rt.isCallable(rf) {
+				return mkundef(), rt.typeError("Iterator.from: return is not callable")
+			}
+			return rt.callValue(rf, itr, nil)
+		})
+		return w, nil
 	})
 	rt.defMethod(cobj, "concat", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		// Eagerly validate every argument (in order): each must be an Object with
