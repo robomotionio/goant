@@ -2730,9 +2730,7 @@ func (p *parser) parseStmt() *Node {
 	if p.tok() == TokUsing {
 		p.consume()
 		n := p.parseVarDecl(VarUsing, false)
-		if p.next() == TokSemicolon {
-			p.consume()
-		}
+		p.semicolon()
 		return n
 	}
 	if p.tok() == TokAwait {
@@ -2742,9 +2740,7 @@ func (p *parser) parseStmt() *Node {
 		if p.tok() == TokUsing {
 			p.consume()
 			n := p.parseVarDecl(VarAwaitUsing, false)
-			if p.next() == TokSemicolon {
-				p.consume()
-			}
+			p.semicolon()
 			return n
 		}
 		p.lx.restore(saved)
@@ -2759,9 +2755,7 @@ func (p *parser) parseStmt() *Node {
 	case TokVar:
 		p.consume()
 		n := p.parseVarDecl(VarVar, false)
-		if p.next() == TokSemicolon {
-			p.consume()
-		}
+		p.semicolon()
 		return n
 	case TokLet:
 		// In a single-statement context (a loop or if body) a Declaration is not a
@@ -2787,16 +2781,12 @@ func (p *parser) parseStmt() *Node {
 		}
 		p.consume()
 		n := p.parseVarDecl(VarLet, false)
-		if p.next() == TokSemicolon {
-			p.consume()
-		}
+		p.semicolon()
 		return n
 	case TokConst:
 		p.consume()
 		n := p.parseVarDecl(VarConst, false)
-		if p.next() == TokSemicolon {
-			p.consume()
-		}
+		p.semicolon()
 		return n
 	case TokIf:
 		return p.parseIf()
@@ -2811,10 +2801,15 @@ func (p *parser) parseStmt() *Node {
 	case TokThrow:
 		p.consume()
 		n := p.mk(NThrow)
-		n.Right = p.parseExpr()
-		if p.next() == TokSemicolon {
-			p.consume()
+		// `throw [no LineTerminator here] Expression ;` — a line terminator (or an
+		// immediate `;`) after `throw` leaves it without an operand: an early
+		// SyntaxError (ASI never supplies the missing Expression).
+		if p.next() == TokSemicolon || p.hadNewline() {
+			p.errorf("Illegal newline after throw")
+			return n
 		}
+		n.Right = p.parseExpr()
+		p.semicolon()
 		return n
 	case TokBreak:
 		return p.parseBreakContinue(NBreak)
@@ -2826,9 +2821,7 @@ func (p *parser) parseStmt() *Node {
 		return p.parseSwitch()
 	case TokDebugger:
 		p.consume()
-		if p.next() == TokSemicolon {
-			p.consume()
-		}
+		p.semicolon()
 		return p.mk(NDebugger)
 	case TokWith:
 		return p.parseWith()
