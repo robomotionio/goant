@@ -133,6 +133,16 @@ func (rt *Runtime) forInKeys(obj Value) Value {
 				}
 			}
 		}
+		if cur.Type() == TTypedArray {
+			// Integer-indexed elements are enumerable own properties of a typed array.
+			for i, l := 0, rt.taLength(o); i < l; i++ {
+				k := numberToString(float64(i))
+				if !seen[k] {
+					seen[k] = true
+					rt.arraySet(ao, ao.arrLen, rt.newString(k))
+				}
+			}
+		}
 		// Every own key (enumerable or not) shadows inherited keys of the same name;
 		// only enumerable own keys are actually enumerated.
 		keys, enum := o.ownKeysForIn()
