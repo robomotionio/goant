@@ -535,36 +535,177 @@ func (rt *Runtime) newSetFrom(elems []Value) Value {
 	return v
 }
 
-// defineSetOperations installs the ES2024/2025 Set-theory methods.
+// setRecord is GetSetRecord(obj): the "other" argument of a Set method plus its
+// validated numeric size and its has/keys methods, all read once up front.
+type setRecord struct {
+	obj  Value
+	size float64
+	has  Value
+	keys Value
+}
+
+// getSetRecord validates and reads the set-like "other" argument: an Object with
+// a non-NaN, non-negative size (ToIntegerOrInfinity) and callable has/keys.
+func (rt *Runtime) getSetRecord(v Value) (*setRecord, *ThrowError) {
+	if !v.IsObjectType() {
+		return nil, rt.typeError("Set method argument must be an object")
+	}
+	rawSize, e := rt.getField(v, "size")
+	if e != nil {
+		return nil, e
+	}
+	numSize, e := rt.toNumber(rawSize)
+	if e != nil {
+		return nil, e
+	}
+	if math.IsNaN(numSize) {
+		return nil, rt.typeError("Set method argument has an invalid size")
+	}
+	intSize := math.Trunc(numSize)
+	if intSize < 0 {
+		return nil, rt.rangeError("Set method argument has a negative size")
+	}
+	has, e := rt.getField(v, "has")
+	if e != nil {
+		return nil, e
+	}
+	if !rt.isCallable(has) {
+		return nil, rt.typeError("Set method argument has no callable 'has' method")
+	}
+	keys, e := rt.getField(v, "keys")
+	if e != nil {
+		return nil, e
+	}
+	if !rt.isCallable(keys) {
+		return nil, rt.typeError("Set method argument has no callable 'keys' method")
+	}
+	return &setRecord{obj: v, size: intSize, has: has, keys: keys}, nil
+}
+
+// recordHas dispatches rec.[[Has]](v) → boolean.
+func (rt *Runtime) recordHas(rec *setRecord, v Value) (bool, *ThrowError) {
+	r, e := rt.callValue(rec.has, rec.obj, []Value{v})
+	if e != nil {
+		return false, e
+	}
+	return rt.toBoolean(r), nil
+}
+
+// forEachSetRecordKey drives rec.[[Keys]]() as an iterator, calling fn for each
+// value; fn returning stop=true closes the iterator and ends the walk.
+func (rt *Runtime) forEachSetRecordKey(rec *setRecord, fn func(Value) (bool, *ThrowError)) *ThrowError {
+	iter, e := rt.callValue(rec.keys, rec.obj, nil)
+	if e != nil {
+		return e
+	}
+	if !iter.IsObjectType() {
+		return rt.typeError("Set method argument keys() did not return an object")
+	}
+	next, e := rt.getField(iter, "next")
+	if e != nil {
+		return e
+	}
+	if !rt.isCallable(next) {
+		return rt.typeError("Set method argument keys() iterator has no next method")
+	}
+	const maxEager = 1 << 24
+	for i := 0; i < maxEager; i++ {
+		res, e := rt.callValue(next, iter, nil)
+		if e != nil {
+			return e
+		}
+		if !res.IsObjectType() {
+			return rt.typeError("iterator result is not an object")
+		}
+		done, e := rt.getField(res, "done")
+		if e != nil {
+			return e
+		}
+		if rt.toBoolean(done) {
+			return nil
+		}
+		val, e := rt.getField(res, "value")
+		if e != nil {
+			return e
+		}
+		stop, e := fn(val)
+		if e != nil {
+			return e
+		}
+		if stop {
+			if ret, _ := rt.getField(iter, "return"); rt.isCallable(ret) {
+				rt.callValue(ret, iter, nil) // IteratorClose (best effort)
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// keySet returns the SameValueZero canonical-key set of a slice of values.
+func (rt *Runtime) keySet(elems []Value) map[string]bool {
+	m := make(map[string]bool, len(elems))
+	for _, v := range elems {
+		m[rt.canonicalKey(v)] = true
+	}
+	return m
+}
+
+// defineSetOperations installs the ES2025 Set-theory methods, following the
+// spec's observable has-vs-keys dispatch (a method that iterates its own,
+// smaller set calls other.has() per element; otherwise it drains other.keys()).
 func (rt *Runtime) defineSetOperations(po *object) {
 	rt.defMethod(po, "union", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		s, e := rt.collOf(this, true)
 		if e != nil {
 			return mkundef(), e
 		}
-		other, e := rt.setLikeElements(arg(args, 0))
+		rec, e := rt.getSetRecord(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newSetFrom(append(rt.setElements(s), other...)), nil
+		out := append([]Value(nil), rt.setElements(s)...)
+		if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
+			out = append(out, v)
+			return false, nil
+		}); e != nil {
+			return mkundef(), e
+		}
+		return rt.newSetFrom(out), nil
 	})
 	rt.defMethod(po, "intersection", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		s, e := rt.collOf(this, true)
 		if e != nil {
 			return mkundef(), e
 		}
-		other, e := rt.setLikeElements(arg(args, 0))
+		rec, e := rt.getSetRecord(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		om := map[string]bool{}
-		for _, v := range other {
-			om[rt.canonicalKey(v)] = true
-		}
+		thisElems := rt.setElements(s)
 		var out []Value
-		for _, v := range rt.setElements(s) {
-			if om[rt.canonicalKey(v)] {
-				out = append(out, v)
+		if float64(len(thisElems)) <= rec.size {
+			for _, el := range thisElems {
+				in, e := rt.recordHas(rec, el)
+				if e != nil {
+					return mkundef(), e
+				}
+				if in {
+					out = append(out, el)
+				}
+			}
+		} else {
+			thisKeys := rt.keySet(thisElems)
+			seen := map[string]bool{}
+			if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
+				ck := rt.canonicalKey(v)
+				if thisKeys[ck] && !seen[ck] {
+					seen[ck] = true
+					out = append(out, v)
+				}
+				return false, nil
+			}); e != nil {
+				return mkundef(), e
 			}
 		}
 		return rt.newSetFrom(out), nil
@@ -574,18 +715,34 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		other, e := rt.setLikeElements(arg(args, 0))
+		rec, e := rt.getSetRecord(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		om := map[string]bool{}
-		for _, v := range other {
-			om[rt.canonicalKey(v)] = true
-		}
+		thisElems := rt.setElements(s)
 		var out []Value
-		for _, v := range rt.setElements(s) {
-			if !om[rt.canonicalKey(v)] {
-				out = append(out, v)
+		if float64(len(thisElems)) <= rec.size {
+			for _, el := range thisElems {
+				in, e := rt.recordHas(rec, el)
+				if e != nil {
+					return mkundef(), e
+				}
+				if !in {
+					out = append(out, el)
+				}
+			}
+		} else {
+			remove := map[string]bool{}
+			if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
+				remove[rt.canonicalKey(v)] = true
+				return false, nil
+			}); e != nil {
+				return mkundef(), e
+			}
+			for _, el := range thisElems {
+				if !remove[rt.canonicalKey(el)] {
+					out = append(out, el)
+				}
 			}
 		}
 		return rt.newSetFrom(out), nil
@@ -595,32 +752,34 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		other, e := rt.setLikeElements(arg(args, 0))
+		rec, e := rt.getSetRecord(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		// Result = this's elements not in other (in this's order), then other's
-		// elements not in this (in other's order) — a clone of this with each of
-		// other's keys toggled.
-		sm := map[string]bool{}
-		for _, v := range rt.setElements(s) {
-			sm[rt.canonicalKey(v)] = true
-		}
-		om := map[string]bool{}
-		for _, v := range other {
-			om[rt.canonicalKey(v)] = true
+		thisElems := rt.setElements(s)
+		thisKeys := rt.keySet(thisElems)
+		// Drain other's keys (deduped); result = this-not-in-other ++ other-not-in-this.
+		otherKeys := map[string]bool{}
+		var otherOnly []Value
+		if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
+			ck := rt.canonicalKey(v)
+			if !otherKeys[ck] {
+				otherKeys[ck] = true
+				if !thisKeys[ck] {
+					otherOnly = append(otherOnly, v)
+				}
+			}
+			return false, nil
+		}); e != nil {
+			return mkundef(), e
 		}
 		var out []Value
-		for _, v := range rt.setElements(s) {
-			if !om[rt.canonicalKey(v)] {
-				out = append(out, v)
+		for _, el := range thisElems {
+			if !otherKeys[rt.canonicalKey(el)] {
+				out = append(out, el)
 			}
 		}
-		for _, v := range other {
-			if !sm[rt.canonicalKey(v)] {
-				out = append(out, v)
-			}
-		}
+		out = append(out, otherOnly...)
 		return rt.newSetFrom(out), nil
 	})
 	rt.defMethod(po, "isSubsetOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -628,16 +787,20 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		other, e := rt.setLikeElements(arg(args, 0))
+		rec, e := rt.getSetRecord(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		om := map[string]bool{}
-		for _, v := range other {
-			om[rt.canonicalKey(v)] = true
+		thisElems := rt.setElements(s)
+		if float64(len(thisElems)) > rec.size {
+			return mkfalse(), nil
 		}
-		for _, v := range rt.setElements(s) {
-			if !om[rt.canonicalKey(v)] {
+		for _, el := range thisElems {
+			in, e := rt.recordHas(rec, el)
+			if e != nil {
+				return mkundef(), e
+			}
+			if !in {
 				return mkfalse(), nil
 			}
 		}
@@ -648,39 +811,59 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		other, e := rt.setLikeElements(arg(args, 0))
+		rec, e := rt.getSetRecord(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		sm := map[string]bool{}
-		for _, v := range rt.setElements(s) {
-			sm[rt.canonicalKey(v)] = true
+		thisKeys := rt.keySet(rt.setElements(s))
+		if float64(len(thisKeys)) < rec.size {
+			return mkfalse(), nil
 		}
-		for _, v := range other {
-			if !sm[rt.canonicalKey(v)] {
-				return mkfalse(), nil
+		result := true
+		if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
+			if !thisKeys[rt.canonicalKey(v)] {
+				result = false
+				return true, nil // stop
 			}
+			return false, nil
+		}); e != nil {
+			return mkundef(), e
 		}
-		return mktrue(), nil
+		return mkbool(result), nil
 	})
 	rt.defMethod(po, "isDisjointFrom", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		s, e := rt.collOf(this, true)
 		if e != nil {
 			return mkundef(), e
 		}
-		other, e := rt.setLikeElements(arg(args, 0))
+		rec, e := rt.getSetRecord(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		sm := map[string]bool{}
-		for _, v := range rt.setElements(s) {
-			sm[rt.canonicalKey(v)] = true
-		}
-		for _, v := range other {
-			if sm[rt.canonicalKey(v)] {
-				return mkfalse(), nil
+		thisElems := rt.setElements(s)
+		if float64(len(thisElems)) <= rec.size {
+			for _, el := range thisElems {
+				in, e := rt.recordHas(rec, el)
+				if e != nil {
+					return mkundef(), e
+				}
+				if in {
+					return mkfalse(), nil
+				}
 			}
+			return mktrue(), nil
 		}
-		return mktrue(), nil
+		thisKeys := rt.keySet(thisElems)
+		result := true
+		if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
+			if thisKeys[rt.canonicalKey(v)] {
+				result = false
+				return true, nil // stop
+			}
+			return false, nil
+		}); e != nil {
+			return mkundef(), e
+		}
+		return mkbool(result), nil
 	})
 }
