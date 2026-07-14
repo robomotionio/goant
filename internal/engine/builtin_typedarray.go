@@ -1157,9 +1157,10 @@ func (rt *Runtime) initDataViewBuiltin() {
 		}
 		bufV := arg(args, 0)
 		bo := rt.objPtr(bufV)
-		// RequireInternalSlot([[ArrayBufferData]]): reject non-ArrayBuffers (and
-		// buffers already detached, which have no usable storage).
-		if bo == nil || bo.abuf == nil {
+		// RequireInternalSlot([[ArrayBufferData]]): reject non-ArrayBuffers. A
+		// detached buffer STILL has the slot, so it passes here — the detach is
+		// checked only after ToIndex(byteOffset) (which may run user code).
+		if bo == nil || !bo.abObj {
 			return mkundef(), rt.typeError("First argument to DataView constructor must be an ArrayBuffer")
 		}
 		// ToIndex(byteOffset) may run user code (valueOf) that detaches the buffer.
