@@ -346,7 +346,9 @@ func (p *parser) parseBindingPattern() *Node {
 		return arr
 	}
 	if p.tok() == TokLBrace {
-		return p.parseObject()
+		obj := p.parseObject()
+		p.validateObjectPattern(obj)
+		return obj
 	}
 	if isIdentLikeTok(p.tok()) || p.tok() == TokUndef {
 		// `undefined` is not a reserved word, so it is a valid BindingIdentifier
@@ -984,6 +986,53 @@ func (p *parser) parseArray() *Node {
 	return n
 }
 
+// validatePatternTarget dispatches to the array/object pattern validator for a
+// nested destructuring target (a no-op for a plain identifier/member target).
+func (p *parser) validatePatternTarget(n *Node) {
+	switch {
+	case n == nil:
+	case n.Kind == NArray:
+		p.validateArrayPattern(n)
+	case n.Kind == NObject:
+		p.validateObjectPattern(n)
+	}
+}
+
+// validateObjectPattern raises a SyntaxError when an object pattern misuses its
+// rest element (an AssignmentRestProperty / BindingRestProperty must be the last
+// element, may not be followed by a comma, and may not carry a default). It
+// recurses into nested patterns.
+func (p *parser) validateObjectPattern(n *Node) {
+	if n == nil || n.Kind != NObject {
+		return
+	}
+	if n.Flags&nodeRestComma != 0 {
+		p.errorf("Rest element must be last element")
+		return
+	}
+	for i, prop := range n.Args {
+		if prop == nil {
+			continue
+		}
+		if prop.Kind == NSpread || prop.Kind == NRest {
+			if i != len(n.Args)-1 {
+				p.errorf("Rest element must be last element")
+				return
+			}
+			if prop.Right != nil && (prop.Right.Kind == NAssign || prop.Right.Kind == NAssignPat) {
+				p.errorf("`...` rest element may not have a default initializer")
+				return
+			}
+			continue
+		}
+		target := prop.Right
+		if target != nil && (target.Kind == NAssign || target.Kind == NAssignPat) {
+			target = target.Left
+		}
+		p.validatePatternTarget(target)
+	}
+}
+
 // validateArrayPattern raises a SyntaxError when an array pattern misuses its
 // rest element: a rest must be the last element and may not be followed by a
 // comma (BindingRestElement / AssignmentRestElement). It recurses into nested
@@ -1005,8 +1054,8 @@ func (p *parser) validateArrayPattern(n *Node) {
 			return
 		}
 		switch e.Kind {
-		case NArray:
-			p.validateArrayPattern(e)
+		case NArray, NObject:
+			p.validatePatternTarget(e)
 		case NSpread, NRest:
 			// A rest element is a BindingRestElement / AssignmentRestElement: it may
 			// not carry a default initializer (`[...x = 1]` is an early SyntaxError).
@@ -1014,9 +1063,9 @@ func (p *parser) validateArrayPattern(n *Node) {
 				p.errorf("`...` rest element may not have a default initializer")
 				return
 			}
-			p.validateArrayPattern(e.Right)
+			p.validatePatternTarget(e.Right)
 		case NAssign, NAssignPat:
-			p.validateArrayPattern(e.Left)
+			p.validatePatternTarget(e.Left)
 		}
 	}
 }
@@ -1071,6 +1120,7 @@ func (p *parser) parseObject() *Node {
 			n.Args = append(n.Args, spread)
 			if p.next() == TokComma {
 				p.consume()
+				n.Flags |= nodeRestComma // a rest followed by a comma is invalid in a pattern
 			}
 			continue
 		}
@@ -1469,9 +1519,9 @@ func (p *parser) parseAssign() *Node {
 			p.errorf("Invalid left-hand side in assignment")
 			return p.mk(NEmpty)
 		}
-		if op == TokAssign && left.Kind == NArray {
-			// Destructuring assignment: the array pattern's rest must be last.
-			p.validateArrayPattern(left)
+		if op == TokAssign && (left.Kind == NArray || left.Kind == NObject) {
+			// Destructuring assignment: validate the array/object pattern.
+			p.validatePatternTarget(left)
 		}
 		p.consume()
 		n := p.mk(NAssign)
@@ -1843,6 +1893,7 @@ func (p *parser) parseVarDecl(kind VarKind, allowUninitConst bool) *Node {
 			p.validateArrayPattern(decl.Left)
 		case TokLBrace:
 			decl.Left = p.parseObject()
+			p.validateObjectPattern(decl.Left)
 		case TokErr:
 			p.unexpected()
 			return v
