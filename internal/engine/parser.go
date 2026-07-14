@@ -2083,6 +2083,11 @@ func (p *parser) parseClass() *Node {
 	if isIdentLikeTok(p.next()) && !(p.tlen() == 7 && p.tokStr() == "extends") {
 		cls.Str = p.tokIdentStr()
 		p.consume()
+	} else if p.next() == TokAwait && !p.inAsync {
+		// A class body is strict, but `await` is not a strict-reserved word, so it
+		// is a valid class name outside an async (or module) context.
+		cls.Str = "await"
+		p.consume()
 	}
 	if p.next() == TokIdentifier && p.tlen() == 7 && p.tokStr() == "extends" {
 		p.consume()
