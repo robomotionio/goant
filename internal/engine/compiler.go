@@ -297,8 +297,11 @@ func (c *compiler) compileStmt(n *Node) {
 	case NFunc:
 		// Function declarations are hoisted (bound before the body runs). A
 		// parenthesized function *expression* statement contributes a completion
-		// value (used by eval); a bare one is a no-op.
-		if n.Flags&fnParen != 0 {
+		// value (used by eval); a bare one is a no-op. An arrow is never a
+		// declaration — a bare arrow-expression statement (`(a, a) => {}`) must
+		// still be compiled so its early errors (duplicate params, a lexical
+		// redeclaration in the body, `super` misuse) surface.
+		if n.Flags&(fnParen|fnArrow) != 0 {
 			c.compileExpr(n)
 			if c.isScript {
 				c.emitOpU16(OpSetLocal, uint16(c.completionSlot))
