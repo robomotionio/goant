@@ -57,7 +57,9 @@ func (rt *Runtime) initCollections() {
 
 func (rt *Runtime) collOf(this Value, wantSet bool) (*collection, *ThrowError) {
 	o := rt.objPtr(this)
-	if o == nil || o.coll == nil || o.coll.isSet != wantSet {
+	// A weak collection (WeakMap/WeakSet) has a coll but no [[MapData]]/[[SetData]]
+	// slot, so a strong Map/Set method must reject it.
+	if o == nil || o.coll == nil || o.coll.weak || o.coll.isSet != wantSet {
 		name := "Map"
 		if wantSet {
 			name = "Set"
