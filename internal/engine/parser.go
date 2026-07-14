@@ -396,6 +396,16 @@ func (p *parser) parseBindingPattern() *Node {
 		p.validateObjectPattern(obj)
 		return obj
 	}
+	// `yield`/`await` are contextual: valid BindingIdentifiers except where the
+	// current context reserves them (a generator body for yield, an async body for
+	// await, or strict mode) — strictCheckBindingIdent enforces exactly that.
+	if p.tok() == TokYield || p.tok() == TokAwait {
+		id := mkIdent(p.tokStr())
+		id.SrcOff = uint32(p.toff())
+		p.strictCheckBindingIdent(id.Str)
+		p.consume()
+		return id
+	}
 	if isIdentLikeTok(p.tok()) || p.tok() == TokUndef {
 		// `undefined` is not a reserved word, so it is a valid BindingIdentifier
 		// (it shadows the global `undefined` inside the binding's scope). The lexer
@@ -1775,6 +1785,50 @@ func (p *parser) parseParenExpr() *Node {
 
 // ---- functions & classes ----
 
+// paramsContainYieldAwait reports whether any of a function's parameter nodes
+// contains a YieldExpression (when yield) or an AwaitExpression (when await) —
+// an early error for a generator's / async function's FormalParameters. It does
+// not descend into a nested non-arrow function, which establishes its own
+// yield/await context; an arrow inherits the enclosing one, so it is searched.
+func paramsContainYieldAwait(params []*Node, yield, await bool) bool {
+	var walk func(n *Node) bool
+	walk = func(n *Node) bool {
+		if n == nil {
+			return false
+		}
+		switch n.Kind {
+		case NYield:
+			if yield {
+				return true
+			}
+		case NAwait:
+			if await {
+				return true
+			}
+		case NFunc:
+			if n.Flags&fnArrow == 0 {
+				return false
+			}
+		}
+		if walk(n.Left) || walk(n.Right) || walk(n.Body) ||
+			walk(n.Init) || walk(n.Cond) || walk(n.Update) {
+			return true
+		}
+		for _, a := range n.Args {
+			if walk(a) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, p := range params {
+		if walk(p) {
+			return true
+		}
+	}
+	return false
+}
+
 // checkStrictParams enforces the strict-mode FormalParameters early errors on a
 // simple (identifier) parameter list: names must be unique and none may be
 // `eval`, `arguments`, or a strict future-reserved word. Non-simple lists are
@@ -1830,6 +1884,12 @@ func (p *parser) parseFunc() *Node {
 		p.consume()
 	}
 	p.expect(TokLParen)
+	// A generator's FormalParameters are [+Yield] and an async function's are
+	// [+Await]: `yield`/`await` are forbidden as a parameter binding there (and a
+	// yield/await expression in a default is a separate early error, below). The
+	// name above was intentionally checked in the *enclosing* context.
+	p.inGenerator = isGenerator
+	p.inAsync = isAsync
 	for p.next() != TokRParen && p.tok() != TokEOF {
 		if p.tok() == TokRest {
 			p.consume()
@@ -1857,6 +1917,12 @@ func (p *parser) parseFunc() *Node {
 		}
 	}
 	p.expect(TokRParen)
+	// A YieldExpression may not appear in a generator's FormalParameters, nor an
+	// AwaitExpression in an async function's (`function*(x = yield)`,
+	// `async function(x = await p)`).
+	if paramsContainYieldAwait(fn.Args, isGenerator, isAsync) {
+		p.errorf("yield/await is not allowed in this function's parameters")
+	}
 	// In strict code, parameter names must be unique and not reserved/eval/
 	// arguments (checked here because the enclosing strictness is already known
 	// for a preceding directive). If the enclosing code is sloppy, the function's
