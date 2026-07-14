@@ -46,7 +46,13 @@ func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 		if !fn.isGenerator {
 			rt.objPtr(proto).defineOwn("constructor", fnVal, attrWritable|attrConfigurable)
 		}
-		obj.defineOwn("prototype", proto, attrWritable)
+		// A class constructor's `prototype` is non-writable (and non-enumerable,
+		// non-configurable); an ordinary function's is writable.
+		var protoAttr uint8 = attrWritable
+		if fn.isClassCtor {
+			protoAttr = 0
+		}
+		obj.defineOwn("prototype", proto, protoAttr)
 	}
 	return fnVal
 }
