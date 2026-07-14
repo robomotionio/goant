@@ -58,6 +58,7 @@ func (rt *Runtime) initMath() {
 	unary("acosh", math.Acosh)
 	unary("atanh", math.Atanh)
 	unary("fround", jsFround)
+	unary("f16round", jsF16round)
 	unary("clz32", jsClz32)
 
 	binary := func(name string, f func(a, b float64) float64) {
@@ -200,6 +201,14 @@ func jsFround(x float64) float64 {
 		return x
 	}
 	return float64(float32(x))
+}
+
+// jsF16round implements Math.f16round: round to the nearest IEEE-754 binary16
+// (half-precision) value, ties to even, then widen back to float64. Reuses the
+// exact binary64↔binary16 conversion from the Float16Array/DataView path (which
+// already handles NaN, ±Inf, ±0, subnormals, and overflow-to-infinity).
+func jsF16round(x float64) float64 {
+	return float16ToFloat64(float16FromFloat64(x))
 }
 
 func jsClz32(x float64) float64 {
