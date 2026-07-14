@@ -528,7 +528,7 @@ func (rt *Runtime) newSetFrom(elems []Value) Value {
 		ck := rt.canonicalKey(e)
 		if _, ok := c.index[ck]; !ok {
 			c.index[ck] = len(c.keys)
-			c.keys = append(c.keys, e)
+			c.keys = append(c.keys, normMapKey(e)) // canonicalize -0 to +0
 			c.vals = append(c.vals, mkundef())
 		}
 	}
