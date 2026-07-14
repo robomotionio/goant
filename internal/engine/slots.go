@@ -47,6 +47,7 @@ const (
 	slotMatchallRx
 	slotMatchallStr
 	slotMatchallDone
+	slotRawJSON // a JSON.rawJSON object's [[RawJSON]] text (a String)
 	slotMax = 255
 )
 

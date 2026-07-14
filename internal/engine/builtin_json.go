@@ -83,6 +83,53 @@ func (rt *Runtime) initJSONBuiltin() {
 		return v, nil
 	})
 
+	// JSON.rawJSON(text): a frozen, null-prototype object whose [[RawJSON]] text is
+	// emitted verbatim by stringify. text must be a non-empty JSON primitive with
+	// no leading/trailing whitespace.
+	rt.defMethod(jo, "rawJSON", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		s, e := rt.toStringValue(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		js := string(rt.strBytes(s))
+		jsonSyntaxErr := func(msg string) *ThrowError {
+			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(msg)})
+			return &ThrowError{Value: ev, rt: rt}
+		}
+		isWS := func(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+		if js == "" || isWS(js[0]) || isWS(js[len(js)-1]) {
+			return mkundef(), jsonSyntaxErr("JSON.rawJSON text must be a non-empty string with no leading or trailing whitespace")
+		}
+		p := &jsonParser{rt: rt, src: js}
+		v, perr := p.parse()
+		if perr != nil {
+			return mkundef(), jsonSyntaxErr(perr.Error())
+		}
+		p.skipWS()
+		if p.pos != len(p.src) {
+			return mkundef(), jsonSyntaxErr("Unexpected non-whitespace character after JSON")
+		}
+		switch v.Type() {
+		case TNull, TBool, TNum, TStr: // a JSON primitive
+		default:
+			return mkundef(), jsonSyntaxErr("JSON.rawJSON text must be a primitive value")
+		}
+		raw := rt.newObject(mknull())
+		o := rt.objPtr(raw)
+		o.defineOwn("rawJSON", rt.newString(js), attrEnumerable)
+		o.setSlot(slotRawJSON, rt.newString(js))
+		if e := rt.sealObject(raw, true); e != nil {
+			return mkundef(), e
+		}
+		return raw, nil
+	})
+	rt.defMethod(jo, "isRawJSON", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if o := rt.objPtr(arg(args, 0)); o != nil && o.getSlot(slotRawJSON).Type() == TStr {
+			return mktrue(), nil
+		}
+		return mkfalse(), nil
+	})
+
 	rt.setStringTag(json, "JSON")
 	rt.objPtr(rt.global).defineOwn("JSON", json, attrWritable|attrConfigurable)
 }
@@ -155,6 +202,12 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 		return "", false, nil
 	default:
 		if v.IsObjectType() {
+			// A JSON.rawJSON object emits its [[RawJSON]] text verbatim.
+			if o := rt.objPtr(v); o != nil {
+				if raw := o.getSlot(slotRawJSON); raw.Type() == TStr {
+					return string(rt.strBytes(raw)), true, nil
+				}
+			}
 			// A Proxy wrapping an array serializes as an array (via its traps).
 			if o := rt.objPtr(v); o != nil && o.proxy != nil && rt.isArrayValue(v) {
 				return st.stringifyArray(v, indent)
@@ -374,7 +427,11 @@ func (p *jsonParser) parseNumber() (Value, error) {
 	}
 	f, err := strconv.ParseFloat(p.src[start:p.pos], 64)
 	if err != nil {
-		return mkundef(), &jsonError{"Invalid number in JSON"}
+		// A magnitude that overflows to ±Infinity (ErrRange) is still valid JSON;
+		// ParseFloat returns the correct ±Inf. Any other error is a syntax error.
+		if ne, ok := err.(*strconv.NumError); !ok || ne.Err != strconv.ErrRange {
+			return mkundef(), &jsonError{"Invalid number in JSON"}
+		}
 	}
 	return mknum(f), nil
 }
