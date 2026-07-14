@@ -1591,6 +1591,46 @@ func (rt *Runtime) jsRelational(op Opcode, a, b Value) (Value, *ThrowError) {
 			return mkbool(cmp >= 0), nil
 		}
 	}
+	// A BigInt operand mixed with a String or Number is compared mathematically
+	// (spec Abstract Relational Comparison), rather than ToNumber'd (which throws
+	// on a BigInt). An invalid BigInt string, or a NaN Number, makes the result
+	// false.
+	if a.Type() == TBigInt && b.IsString() {
+		n, ok := stringToBigInt(string(rt.strBytes(b)))
+		if !ok {
+			return mkfalse(), nil
+		}
+		return relBool(op, rt.bigIntVal(a).Cmp(n)), nil
+	}
+	if a.IsString() && b.Type() == TBigInt {
+		n, ok := stringToBigInt(string(rt.strBytes(a)))
+		if !ok {
+			return mkfalse(), nil
+		}
+		return relBool(op, n.Cmp(rt.bigIntVal(b))), nil
+	}
+	if a.Type() == TBigInt {
+		n, e := rt.toNumber(b) // b is Number/Boolean (String handled above)
+		if e != nil {
+			return mkundef(), e
+		}
+		cmp, ok := cmpBigIntNumber(rt.bigIntVal(a), n)
+		if !ok {
+			return mkfalse(), nil
+		}
+		return relBool(op, cmp), nil
+	}
+	if b.Type() == TBigInt {
+		n, e := rt.toNumber(a)
+		if e != nil {
+			return mkundef(), e
+		}
+		cmp, ok := cmpBigIntNumber(rt.bigIntVal(b), n)
+		if !ok {
+			return mkfalse(), nil
+		}
+		return relBool(op, -cmp), nil
+	}
 	na, ea := rt.toNumber(a)
 	if ea != nil {
 		return mkundef(), ea
@@ -1616,6 +1656,34 @@ func (rt *Runtime) jsRelational(op Opcode, a, b Value) (Value, *ThrowError) {
 }
 
 // abstractEquals implements the ECMAScript "==" algorithm for primitives.
+// relBool maps a comparison sign (-1/0/1) to the boolean for a relational op.
+func relBool(op Opcode, cmp int) Value {
+	switch op {
+	case OpLt:
+		return mkbool(cmp < 0)
+	case OpLe:
+		return mkbool(cmp <= 0)
+	case OpGt:
+		return mkbool(cmp > 0)
+	default: // OpGe
+		return mkbool(cmp >= 0)
+	}
+}
+
+// cmpBigIntNumber compares a BigInt with a Number mathematically, returning the
+// sign of (bi − n) and whether the comparison is defined (false for a NaN n).
+func cmpBigIntNumber(bi *big.Int, n float64) (int, bool) {
+	switch {
+	case math.IsNaN(n):
+		return 0, false
+	case math.IsInf(n, 1):
+		return -1, true // bi < +Infinity
+	case math.IsInf(n, -1):
+		return 1, true // bi > -Infinity
+	}
+	return new(big.Float).SetInt(bi).Cmp(big.NewFloat(n)), true
+}
+
 func (rt *Runtime) abstractEquals(a, b Value) bool {
 	ta, tb := a.Type(), b.Type()
 	if ta == tb {
@@ -1638,6 +1706,24 @@ func (rt *Runtime) abstractEquals(a, b Value) bool {
 	}
 	if tb == TBool {
 		return rt.abstractEquals(a, mknum(boolToNum(b)))
+	}
+	// BigInt vs Number: equal iff the Number is the BigInt's exact (integer) value.
+	if ta == TBigInt && tb == TNum {
+		cmp, ok := cmpBigIntNumber(rt.bigIntVal(a), b.Number())
+		return ok && cmp == 0
+	}
+	if ta == TNum && tb == TBigInt {
+		cmp, ok := cmpBigIntNumber(rt.bigIntVal(b), a.Number())
+		return ok && cmp == 0
+	}
+	// BigInt vs String: parse the string as a BigInt (invalid → not equal).
+	if ta == TBigInt && tb == TStr {
+		n, ok := stringToBigInt(string(rt.strBytes(b)))
+		return ok && rt.bigIntVal(a).Cmp(n) == 0
+	}
+	if ta == TStr && tb == TBigInt {
+		n, ok := stringToBigInt(string(rt.strBytes(a)))
+		return ok && rt.bigIntVal(b).Cmp(n) == 0
 	}
 	// object vs primitive (number/string/symbol): ToPrimitive the object side,
 	// then re-compare (ES abstract equality steps 10-11).
