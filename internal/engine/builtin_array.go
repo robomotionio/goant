@@ -1206,11 +1206,45 @@ func (rt *Runtime) initArrayBuiltin() {
 		return removed, nil
 	})
 	rt.defMethod(proto, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		joinFn, _ := rt.getField(this, "join")
-		if rt.isCallable(joinFn) {
-			return rt.callValue(joinFn, this, nil)
+		o, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
 		}
-		return rt.internString(""), nil
+		n, e := rt.lengthOf(o)
+		if e != nil {
+			return mkundef(), e
+		}
+		var out []byte
+		for i := 0; i < n; i++ {
+			if i > 0 {
+				out = append(out, ',')
+			}
+			el, e := rt.getElement(o, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
+			if el.IsNullish() { // undefined/null contribute the empty string
+				continue
+			}
+			// ToString(? Invoke(element, "toLocaleString")).
+			tls, e := rt.getField(el, "toLocaleString")
+			if e != nil {
+				return mkundef(), e
+			}
+			if !rt.isCallable(tls) {
+				return mkundef(), rt.typeError("element toLocaleString is not a function")
+			}
+			r, e := rt.callValue(tls, el, nil)
+			if e != nil {
+				return mkundef(), e
+			}
+			s, e := rt.toStringValue(r)
+			if e != nil {
+				return mkundef(), e
+			}
+			out = append(out, rt.strBytes(s)...)
+		}
+		return rt.newStringBytes(out), nil
 	})
 
 	rt.defMethod(proto, "find", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
