@@ -694,11 +694,27 @@ func (c *compiler) checkCatchParamConflict(n *Node) {
 	}
 	pset := map[string]bool{}
 	for _, nm := range paramNames {
+		// BoundNames of a CatchParameter must be unique: `catch ([x, x])` /
+		// `catch ({a: x, b: x})` is an early SyntaxError.
+		if pset[nm] {
+			c.syntaxErrorf("Duplicate binding '%s' in catch parameter", nm)
+			return
+		}
 		pset[nm] = true
 	}
 	isPattern := n.CatchParam.Kind == NArray || n.CatchParam.Kind == NObject
 	for _, stmt := range n.CatchBody.Args {
-		if stmt == nil || stmt.Kind != NVar {
+		if stmt == nil {
+			continue
+		}
+		// A directly-nested FunctionDeclaration is a LexicallyDeclaredName of the
+		// catch Block; if its name is a catch-parameter bound name it is a
+		// redeclaration (Annex B relaxes only `var`, not functions).
+		if stmt.Kind == NFunc && stmt.Flags&fnArrow == 0 && stmt.Str != "" && pset[stmt.Str] {
+			c.syntaxErrorf("Identifier '%s' has already been declared", stmt.Str)
+			return
+		}
+		if stmt.Kind != NVar {
 			continue
 		}
 		lexical := stmt.VarKind == VarLet || stmt.VarKind == VarConst
