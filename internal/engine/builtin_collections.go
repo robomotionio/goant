@@ -433,11 +433,82 @@ func (rt *Runtime) setElements(s *collection) []Value {
 }
 
 // setLikeElements extracts elements from a Set or any iterable "set-like".
+// setLikeElements implements GetSetRecord for the Set-method "other" argument:
+// it must be an Object with a numeric non-negative size and callable has/keys;
+// the elements come from draining keys(). (The result-only algorithms here read
+// keys rather than dispatching has() per element, which is sufficient for the
+// membership tests but not the exact has-vs-keys call sequence.)
 func (rt *Runtime) setLikeElements(v Value) ([]Value, *ThrowError) {
+	if !v.IsObjectType() {
+		return nil, rt.typeError("Set operation argument must be an object")
+	}
+	rawSize, e := rt.getField(v, "size")
+	if e != nil {
+		return nil, e
+	}
+	numSize, e := rt.toNumber(rawSize)
+	if e != nil {
+		return nil, e
+	}
+	if numSize != numSize { // NaN
+		return nil, rt.typeError("Set operation argument has an invalid size")
+	}
+	if numSize < 0 {
+		return nil, rt.rangeError("Set operation argument has a negative size")
+	}
+	has, e := rt.getField(v, "has")
+	if e != nil {
+		return nil, e
+	}
+	if !rt.isCallable(has) {
+		return nil, rt.typeError("Set operation argument has no callable 'has' method")
+	}
+	keysFn, e := rt.getField(v, "keys")
+	if e != nil {
+		return nil, e
+	}
+	if !rt.isCallable(keysFn) {
+		return nil, rt.typeError("Set operation argument has no callable 'keys' method")
+	}
+	// Native Set fast path: keys() would yield exactly these values.
 	if o := rt.objPtr(v); o != nil && o.coll != nil && o.coll.isSet {
 		return rt.setElements(o.coll), nil
 	}
-	return rt.iterableValues(v)
+	iter, e := rt.callValue(keysFn, v, nil)
+	if e != nil {
+		return nil, e
+	}
+	next, e := rt.getField(iter, "next")
+	if e != nil {
+		return nil, e
+	}
+	if !rt.isCallable(next) {
+		return nil, rt.typeError("Set operation argument keys() did not return an iterator")
+	}
+	var out []Value
+	const maxEager = 1 << 20
+	for i := 0; i < maxEager; i++ {
+		res, e := rt.callValue(next, iter, nil)
+		if e != nil {
+			return nil, e
+		}
+		if !res.IsObjectType() {
+			return nil, rt.typeError("iterator result is not an object")
+		}
+		done, e := rt.getField(res, "done")
+		if e != nil {
+			return nil, e
+		}
+		if rt.toBoolean(done) {
+			break
+		}
+		val, e := rt.getField(res, "value")
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, val)
+	}
+	return out, nil
 }
 
 // newSetFrom builds a fresh Set populated with the given elements.
