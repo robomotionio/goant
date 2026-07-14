@@ -52,6 +52,12 @@ type parser struct {
 	// there). Unlike inAsync it is CLEARED when entering a nested function or
 	// arrow, whose own async-ness then governs await.
 	inStaticBlock bool
+	// singleStmt is a one-shot flag set by parseSubStmt before parsing the body
+	// of a loop/if (a single-Statement context, where a Declaration is not
+	// allowed). parseStmt captures and clears it immediately; it governs the
+	// sloppy-mode disambiguation of a leading `let` (an identifier there, never a
+	// LexicalDeclaration).
+	singleStmt bool
 }
 
 // Parse tokenizes and parses src into an AST (N_PROGRAM root node).
@@ -2708,7 +2714,17 @@ func (p *parser) parseExportStmt() *Node {
 
 // ---- statements ----
 
+// parseSubStmt parses the body of a loop or if branch: a single-Statement
+// context in which a Declaration is not a valid production. The one-shot flag is
+// consumed at the top of parseStmt.
+func (p *parser) parseSubStmt() *Node {
+	p.singleStmt = true
+	return p.parseStmt()
+}
+
 func (p *parser) parseStmt() *Node {
+	singleStmt := p.singleStmt
+	p.singleStmt = false
 	p.next()
 
 	if p.tok() == TokUsing {
@@ -2748,6 +2764,27 @@ func (p *parser) parseStmt() *Node {
 		}
 		return n
 	case TokLet:
+		// In a single-statement context (a loop or if body) a Declaration is not a
+		// valid production, so a leading `let` is only the start of a
+		// LexicalDeclaration when it unambiguously begins one — `let [` (a
+		// restricted form, even across a line terminator) or, on the SAME line,
+		// `let {` / `let <BindingIdentifier>`. Those route to the declaration path
+		// and become an early error (isForbiddenLoopBody / isForbiddenIfBody). Any
+		// other follow token, or an intervening line terminator, makes `let` an
+		// identifier ExpressionStatement (sloppy mode): `for (…) let\nx = 1` is
+		// `let;` then `x = 1`, whereas `for (…) let x = 1` is a SyntaxError.
+		if singleStmt {
+			la := p.la()
+			declStart := la == TokLBracket
+			if !declStart && !p.lookaheadCrossesLineTerminator() {
+				declStart = la == TokLBrace || la == TokIdentifier ||
+					isContextualIdentTok(la) || la == TokLet ||
+					la == TokYield || la == TokAwait || la == TokStatic
+			}
+			if !declStart {
+				break // `let` is an identifier: fall to the expression statement
+			}
+		}
 		p.consume()
 		n := p.parseVarDecl(VarLet, false)
 		if p.next() == TokSemicolon {
@@ -2838,14 +2875,14 @@ func (p *parser) parseIf() *Node {
 	p.expect(TokLParen)
 	n.Cond = p.parseExpr()
 	p.expect(TokRParen)
-	n.Left = p.parseStmt()
+	n.Left = p.parseSubStmt()
 	if isForbiddenIfBody(n.Left, p.lx.strict) {
 		p.errorf("Declaration cannot appear in a single-statement context")
 		return n
 	}
 	if p.next() == TokElse {
 		p.consume()
-		n.Right = p.parseStmt()
+		n.Right = p.parseSubStmt()
 		if isForbiddenIfBody(n.Right, p.lx.strict) {
 			p.errorf("Declaration cannot appear in a single-statement context")
 			return n
@@ -2860,7 +2897,7 @@ func (p *parser) parseWhile() *Node {
 	p.expect(TokLParen)
 	n.Cond = p.parseExpr()
 	p.expect(TokRParen)
-	n.Body = p.parseStmt()
+	n.Body = p.parseSubStmt()
 	if isForbiddenLoopBody(n.Body) {
 		p.errorf("Lexical declaration cannot appear in single-statement context")
 	}
@@ -2870,7 +2907,7 @@ func (p *parser) parseWhile() *Node {
 func (p *parser) parseDoWhile() *Node {
 	p.consume()
 	n := p.mk(NDoWhile)
-	n.Body = p.parseStmt()
+	n.Body = p.parseSubStmt()
 	if isForbiddenLoopBody(n.Body) {
 		p.errorf("Lexical declaration cannot appear in single-statement context")
 	}
@@ -2942,7 +2979,7 @@ func (p *parser) parseFor() *Node {
 		p.validatePatternTarget(initNode)
 		n.Right = p.parseExpr()
 		p.expect(TokRParen)
-		n.Body = p.parseStmt()
+		n.Body = p.parseSubStmt()
 		if initNode != nil && initNode.Kind == NVar && varDeclHasInitializer(initNode) {
 			// A for-in head declaration may not carry an initializer, except the
 			// sloppy-mode legacy form `var <Identifier> = init` (Annex B.3.6).
@@ -2973,7 +3010,7 @@ func (p *parser) parseFor() *Node {
 		}
 		n.Right = p.parseAssign()
 		p.expect(TokRParen)
-		n.Body = p.parseStmt()
+		n.Body = p.parseSubStmt()
 		if isForbiddenLoopBody(n.Body) {
 			p.errorf("Lexical declaration cannot appear in single-statement context")
 		}
@@ -3001,7 +3038,7 @@ func (p *parser) parseFor() *Node {
 		n.Update = p.parseExpr()
 	}
 	p.expect(TokRParen)
-	n.Body = p.parseStmt()
+	n.Body = p.parseSubStmt()
 	if isForbiddenLoopBody(n.Body) {
 		p.errorf("Lexical declaration cannot appear in single-statement context")
 	}
@@ -3114,7 +3151,7 @@ func (p *parser) parseWith() *Node {
 	p.expect(TokLParen)
 	n.Left = p.parseExpr()
 	p.expect(TokRParen)
-	n.Body = p.parseStmt()
+	n.Body = p.parseSubStmt()
 	return n
 }
 
