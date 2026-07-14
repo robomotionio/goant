@@ -116,7 +116,7 @@ func (rt *Runtime) initJSONBuiltin() {
 			return mkundef(), e
 		}
 		p := &jsonParser{rt: rt, src: string(rt.strBytes(s))}
-		v, perr := p.parse()
+		v, src, perr := p.parse()
 		if perr != nil {
 			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
 			return mkundef(), &ThrowError{Value: ev, rt: rt}
@@ -129,7 +129,7 @@ func (rt *Runtime) initJSONBuiltin() {
 		if reviver := arg(args, 1); rt.isCallable(reviver) {
 			holder := rt.newPlainObject()
 			rt.objPtr(holder).defineOwn("", v, attrDefault)
-			return rt.jsonRevive(holder, "", reviver)
+			return rt.jsonRevive(holder, "", reviver, src)
 		}
 		return v, nil
 	})
@@ -152,7 +152,7 @@ func (rt *Runtime) initJSONBuiltin() {
 			return mkundef(), jsonSyntaxErr("JSON.rawJSON text must be a non-empty string with no leading or trailing whitespace")
 		}
 		p := &jsonParser{rt: rt, src: js}
-		v, perr := p.parse()
+		v, _, perr := p.parse()
 		if perr != nil {
 			return mkundef(), jsonSyntaxErr(perr.Error())
 		}
@@ -468,10 +468,29 @@ func (p *jsonParser) skipWS() {
 	}
 }
 
-func (p *jsonParser) parse() (Value, error) {
+// jsonSrc is the parse record for one JSON value: its source substring plus,
+// for composites, the child records. It backs the reviver's context.source (the
+// JSON source-text-access proposal): a primitive value exposes its source text;
+// an object/array (composite) exposes none.
+type jsonSrc struct {
+	text      string              // source substring for this value
+	composite bool                // an object or array (no context.source)
+	props     map[string]*jsonSrc // object entries by key
+	elems     []*jsonSrc          // array element records, by index
+}
+
+func (p *jsonParser) parse() (Value, *jsonSrc, error) {
 	p.skipWS()
 	if p.pos >= len(p.src) {
-		return mkundef(), &jsonError{"Unexpected end of JSON input"}
+		return mkundef(), nil, &jsonError{"Unexpected end of JSON input"}
+	}
+	start := p.pos
+	// prim wraps a primitive parse result with its source span.
+	prim := func(v Value, err error) (Value, *jsonSrc, error) {
+		if err != nil {
+			return mkundef(), nil, err
+		}
+		return v, &jsonSrc{text: p.src[start:p.pos]}, nil
 	}
 	c := p.src[p.pos]
 	switch {
@@ -482,19 +501,19 @@ func (p *jsonParser) parse() (Value, error) {
 	case c == '"':
 		s, err := p.parseString()
 		if err != nil {
-			return mkundef(), err
+			return mkundef(), nil, err
 		}
-		return p.rt.newString(s), nil
+		return prim(p.rt.newString(s), nil)
 	case c == 't':
-		return p.parseLit("true", mktrue())
+		return prim(p.parseLit("true", mktrue()))
 	case c == 'f':
-		return p.parseLit("false", mkfalse())
+		return prim(p.parseLit("false", mkfalse()))
 	case c == 'n':
-		return p.parseLit("null", mknull())
+		return prim(p.parseLit("null", mknull()))
 	case c == '-' || (c >= '0' && c <= '9'):
-		return p.parseNumber()
+		return prim(p.parseNumber())
 	}
-	return mkundef(), &jsonError{"Unexpected token in JSON"}
+	return mkundef(), nil, &jsonError{"Unexpected token in JSON"}
 }
 
 func (p *jsonParser) parseLit(lit string, v Value) (Value, error) {
@@ -615,24 +634,26 @@ func (p *jsonParser) parseString() (string, error) {
 	return "", &jsonError{"Unterminated JSON string"}
 }
 
-func (p *jsonParser) parseArray() (Value, error) {
+func (p *jsonParser) parseArray() (Value, *jsonSrc, error) {
 	p.pos++ // [
 	arr := p.rt.newArray()
 	ao := p.rt.objPtr(arr)
+	src := &jsonSrc{composite: true}
 	p.skipWS()
 	if p.pos < len(p.src) && p.src[p.pos] == ']' {
 		p.pos++
-		return arr, nil
+		return arr, src, nil
 	}
 	for {
-		v, err := p.parse()
+		v, csrc, err := p.parse()
 		if err != nil {
-			return mkundef(), err
+			return mkundef(), nil, err
 		}
 		p.rt.arraySet(ao, ao.arrLen, v)
+		src.elems = append(src.elems, csrc)
 		p.skipWS()
 		if p.pos >= len(p.src) {
-			return mkundef(), &jsonError{"Unterminated JSON array"}
+			return mkundef(), nil, &jsonError{"Unterminated JSON array"}
 		}
 		if p.src[p.pos] == ',' {
 			p.pos++
@@ -641,43 +662,45 @@ func (p *jsonParser) parseArray() (Value, error) {
 		}
 		if p.src[p.pos] == ']' {
 			p.pos++
-			return arr, nil
+			return arr, src, nil
 		}
-		return mkundef(), &jsonError{"Expected ',' or ']' in JSON array"}
+		return mkundef(), nil, &jsonError{"Expected ',' or ']' in JSON array"}
 	}
 }
 
-func (p *jsonParser) parseObject() (Value, error) {
+func (p *jsonParser) parseObject() (Value, *jsonSrc, error) {
 	p.pos++ // {
 	obj := p.rt.newPlainObject()
 	o := p.rt.objPtr(obj)
+	src := &jsonSrc{composite: true, props: map[string]*jsonSrc{}}
 	p.skipWS()
 	if p.pos < len(p.src) && p.src[p.pos] == '}' {
 		p.pos++
-		return obj, nil
+		return obj, src, nil
 	}
 	for {
 		p.skipWS()
 		if p.pos >= len(p.src) || p.src[p.pos] != '"' {
-			return mkundef(), &jsonError{"Expected string key in JSON object"}
+			return mkundef(), nil, &jsonError{"Expected string key in JSON object"}
 		}
 		key, err := p.parseString()
 		if err != nil {
-			return mkundef(), err
+			return mkundef(), nil, err
 		}
 		p.skipWS()
 		if p.pos >= len(p.src) || p.src[p.pos] != ':' {
-			return mkundef(), &jsonError{"Expected ':' in JSON object"}
+			return mkundef(), nil, &jsonError{"Expected ':' in JSON object"}
 		}
 		p.pos++
-		v, err := p.parse()
+		v, csrc, err := p.parse()
 		if err != nil {
-			return mkundef(), err
+			return mkundef(), nil, err
 		}
 		o.defineOwn(key, v, attrDefault)
+		src.props[key] = csrc // last duplicate key wins, matching the value
 		p.skipWS()
 		if p.pos >= len(p.src) {
-			return mkundef(), &jsonError{"Unterminated JSON object"}
+			return mkundef(), nil, &jsonError{"Unterminated JSON object"}
 		}
 		if p.src[p.pos] == ',' {
 			p.pos++
@@ -685,9 +708,9 @@ func (p *jsonParser) parseObject() (Value, error) {
 		}
 		if p.src[p.pos] == '}' {
 			p.pos++
-			return obj, nil
+			return obj, src, nil
 		}
-		return mkundef(), &jsonError{"Expected ',' or '}' in JSON object"}
+		return mkundef(), nil, &jsonError{"Expected ',' or '}' in JSON object"}
 	}
 }
 
@@ -698,7 +721,7 @@ func (p *jsonParser) parseObject() (Value, error) {
 // context). Get/length/ownKeys/delete/define all propagate abrupt completions
 // (a Proxy trap that throws surfaces); an ordinary rejected define/delete (a
 // non-configurable property) is a silent no-op, not a throw.
-func (rt *Runtime) jsonRevive(holder Value, key string, reviver Value) (Value, *ThrowError) {
+func (rt *Runtime) jsonRevive(holder Value, key string, reviver Value, src *jsonSrc) (Value, *ThrowError) {
 	val, e := rt.getField(holder, key)
 	if e != nil {
 		return mkundef(), e
@@ -724,7 +747,13 @@ func (rt *Runtime) jsonRevive(holder Value, key string, reviver Value) (Value, *
 				return mkundef(), e
 			}
 			for i := 0; i < n; i++ {
-				nv, e := rt.jsonRevive(val, numberToString(float64(i)), reviver)
+				// The child's parse record is the one recorded at this index; an index
+				// beyond the originally-parsed length (grown during revival) has none.
+				var csrc *jsonSrc
+				if src != nil && i < len(src.elems) {
+					csrc = src.elems[i]
+				}
+				nv, e := rt.jsonRevive(val, numberToString(float64(i)), reviver, csrc)
 				if e != nil {
 					return mkundef(), e
 				}
@@ -738,7 +767,11 @@ func (rt *Runtime) jsonRevive(holder Value, key string, reviver Value) (Value, *
 				return mkundef(), e
 			}
 			for _, k := range keys {
-				nv, e := rt.jsonRevive(val, k, reviver)
+				var csrc *jsonSrc
+				if src != nil && src.props != nil {
+					csrc = src.props[k]
+				}
+				nv, e := rt.jsonRevive(val, k, reviver, csrc)
 				if e != nil {
 					return mkundef(), e
 				}
@@ -748,10 +781,13 @@ func (rt *Runtime) jsonRevive(holder Value, key string, reviver Value) (Value, *
 			}
 		}
 	}
-	// The reviver receives a context object as its third argument (the JSON
-	// source-text-access proposal, adopted in V8); source tracking is not yet
-	// wired, so the object carries no "source" property (destructures to
-	// undefined) — matching the composite-value case.
+	// The reviver's third argument is a context object (the JSON source-text-access
+	// proposal, adopted in V8). Its "source" property is the value's source text —
+	// present only for a primitive value that came straight from the parse (a
+	// composite value, or one created/replaced during revival, has none).
 	ctx := rt.newPlainObject()
+	if src != nil && !src.composite && !(val.IsObjectType() || val.Type() == TArr) {
+		rt.objPtr(ctx).defineOwn("source", rt.newString(src.text), attrDefault)
+	}
 	return rt.callValue(reviver, holder, []Value{rt.newString(key), val, ctx})
 }
