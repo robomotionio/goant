@@ -170,7 +170,7 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 		return false, rt.typeError("cannot set properties of " + rt.nullishName(obj))
 	}
 	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
-		return true, rt.proxySet(o.proxy, rt.internString(name), v, obj)
+		return rt.proxySet(o.proxy, rt.internString(name), v, obj)
 	}
 	if obj.Type() == TArr && name == "length" {
 		// A non-writable length rejects any [[Set]] (OpPutField throws in strict
@@ -192,7 +192,7 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 				break
 			}
 			if o.proxy != nil {
-				return true, rt.proxySet(o.proxy, rt.internString(name), v, obj)
+				return rt.proxySet(o.proxy, rt.internString(name), v, obj)
 			}
 			if slot := o.shape.lookupInterned(name); slot >= 0 {
 				if o.isAccessorSlot(uint32(slot)) {
@@ -457,7 +457,7 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 	}
 	key = pk
 	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
-		return rt.proxySet(o.proxy, rt.toPropertyKeyValue(key), v, obj)
+		if _, e := rt.proxySet(o.proxy, rt.toPropertyKeyValue(key), v, obj); e != nil { return e } else { return nil }
 	}
 	if key.IsSymbol() {
 		// Ordinary [[Set]] for a symbol key: walk the chain for an accessor (call
@@ -471,7 +471,7 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 				break
 			}
 			if o.proxy != nil {
-				return rt.proxySet(o.proxy, key, v, obj)
+				if _, e := rt.proxySet(o.proxy, key, v, obj); e != nil { return e } else { return nil }
 			}
 			if slot := o.shape.lookupSymbol(sym); slot >= 0 {
 				if o.isAccessorSlot(uint32(slot)) {

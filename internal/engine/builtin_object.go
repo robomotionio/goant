@@ -670,7 +670,8 @@ func (rt *Runtime) setThrow(to, key, val Value) *ThrowError {
 			return nil
 		}
 		if o.proxy != nil {
-			return rt.proxySet(o.proxy, key, val, to)
+			_, e := rt.proxySet(o.proxy, key, val, to)
+			return e
 		}
 		sym := key.handle()
 		if d := o.ownDescriptorSym(sym); d.exists {

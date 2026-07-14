@@ -53,8 +53,7 @@ func (rt *Runtime) reflectSet(target, key, val, receiver Value) (bool, *ThrowErr
 			break
 		}
 		if o.proxy != nil {
-			e := rt.proxySet(o.proxy, pk, val, receiver)
-			return e == nil, e
+			return rt.proxySet(o.proxy, pk, val, receiver)
 		}
 		d := rt.ownDescOf(o, pk)
 		if d.exists {

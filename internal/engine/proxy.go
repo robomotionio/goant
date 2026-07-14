@@ -126,37 +126,36 @@ func (rt *Runtime) proxyGet(p *proxyState, key, receiver Value) (Value, *ThrowEr
 	return res, nil
 }
 
-func (rt *Runtime) proxySet(p *proxyState, key, val, receiver Value) *ThrowError {
+func (rt *Runtime) proxySet(p *proxyState, key, val, receiver Value) (bool, *ThrowError) {
 	trap, e := p.trap(rt, "set")
 	if e != nil {
-		return e
+		return false, e
 	}
 	if rt.isCallable(trap) {
 		r, e := rt.callValue(trap, p.handler, []Value{p.target, rt.toPropertyKeyValue(key), val, receiver})
 		if e != nil {
-			return e
+			return false, e
 		}
 		if !rt.toBoolean(r) {
-			return nil // trap reported failure; [[Set]] just returns false
+			return false, nil // trap reported failure; [[Set]] returns false
 		}
 		// [[Set]] invariant: cannot successfully assign a value differing from a
 		// non-configurable non-writable data property, nor set a non-configurable
 		// accessor that lacks a setter.
 		if d, ok := rt.targetOwnDesc(p.target, key); ok && !d.configable {
 			if !d.isAccessor && !d.writable && !rt.sameValue(val, d.value) {
-				return rt.typeError("'set' on proxy: trap returned truish for a non-writable, non-configurable property with a different value")
+				return false, rt.typeError("'set' on proxy: trap returned truish for a non-writable, non-configurable property with a different value")
 			}
 			if d.isAccessor && !rt.isCallable(d.setter) {
-				return rt.typeError("'set' on proxy: trap returned truish for a non-configurable accessor property with an undefined setter")
+				return false, rt.typeError("'set' on proxy: trap returned truish for a non-configurable accessor property with an undefined setter")
 			}
 		}
-		return nil
+		return true, nil
 	}
 	// No set trap: perform the ordinary [[Set]] on the target, but with the proxy
 	// as the receiver so a data-property assignment routes back through the
 	// proxy's [[DefineOwnProperty]] / [[GetOwnProperty]] traps (10.5.9).
-	_, e = rt.ordinarySet(p.target, key, val, receiver)
-	return e
+	return rt.ordinarySet(p.target, key, val, receiver)
 }
 
 // ordinarySet implements OrdinarySet(O, P, V, Receiver): walk O's chain for the
@@ -170,7 +169,7 @@ func (rt *Runtime) ordinarySet(o, key, val, receiver Value) (bool, *ThrowError) 
 			break
 		}
 		if oo.proxy != nil {
-			return true, rt.proxySet(oo.proxy, key, val, receiver)
+			return rt.proxySet(oo.proxy, key, val, receiver)
 		}
 		if d, exists := rt.targetOwnDesc(cur, key); exists {
 			if d.isAccessor {
