@@ -132,6 +132,20 @@ func (rt *Runtime) setField(obj Value, name string, v Value) *ThrowError {
 	return e
 }
 
+// setFieldThrow performs Set(obj, name, v, true): like setField but a rejected
+// write (a non-writable data property or a setterless accessor) is a TypeError
+// rather than a silent no-op.
+func (rt *Runtime) setFieldThrow(obj Value, name string, v Value) *ThrowError {
+	ok, e := rt.setFieldR(obj, name, v)
+	if e != nil {
+		return e
+	}
+	if !ok {
+		return rt.typeError("Cannot assign to read-only property '" + name + "'")
+	}
+	return nil
+}
+
 // createDataProperty implements CreateDataPropertyOrThrow(O, P, V): defines a
 // fresh enumerable/writable/configurable own data property, throwing a TypeError
 // if [[DefineOwnProperty]] is rejected (non-extensible target, or a

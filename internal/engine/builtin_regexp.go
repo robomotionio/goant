@@ -227,18 +227,16 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		gv, e := rt.getField(this, "global")
+		// ES2024: read "flags" once (ToString) and derive g / u|v from the string,
+		// rather than reading "global"/"unicode" separately.
+		flagsStr, e := rt.regExpFlagsString(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		if !rt.toBoolean(gv) {
+		if !flagsContain(flagsStr, 'g') {
 			return rt.regExpExecAbstract(this, s)
 		}
-		uv, e := rt.getField(this, "unicode")
-		if e != nil {
-			return mkundef(), e
-		}
-		fullUnicode := rt.toBoolean(uv)
+		fullUnicode := flagsContain(flagsStr, 'u') || flagsContain(flagsStr, 'v')
 		if e := rt.setLastIndexOrThrow(this, 0); e != nil {
 			return mkundef(), e
 		}
@@ -301,8 +299,8 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if n, _ := rt.toNumber(prevLI); n != 0 {
-			if e := rt.setField(this, "lastIndex", mknum(0)); e != nil {
+		if !rt.sameValue(prevLI, mknum(0)) { // SameValue(previousLastIndex, +0)
+			if e := rt.setFieldThrow(this, "lastIndex", mknum(0)); e != nil {
 				return mkundef(), e
 			}
 		}
@@ -310,9 +308,12 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		curLI, _ := rt.getField(this, "lastIndex")
+		curLI, e := rt.getField(this, "lastIndex")
+		if e != nil {
+			return mkundef(), e
+		}
 		if !rt.sameValue(curLI, prevLI) {
-			if e := rt.setField(this, "lastIndex", prevLI); e != nil {
+			if e := rt.setFieldThrow(this, "lastIndex", prevLI); e != nil {
 				return mkundef(), e
 			}
 		}
@@ -598,6 +599,46 @@ func nonEmptySource(p string) string {
 }
 
 // regexpExec runs RegExp.prototype.exec, returning a match-result array or null.
+// regExpFlagsString performs ToString(? Get(R, "flags")) — the single flags read
+// the RegExp Symbol methods use (its getter observes the individual flag props).
+func (rt *Runtime) regExpFlagsString(r Value) ([]byte, *ThrowError) {
+	fv, e := rt.getField(r, "flags")
+	if e != nil {
+		return nil, e
+	}
+	fs, e := rt.toStringValue(fv)
+	if e != nil {
+		return nil, e
+	}
+	return rt.strBytes(fs), nil
+}
+
+// toLengthClamped implements ToLength: ToIntegerOrInfinity clamped to
+// [0, 2^53 - 1].
+func (rt *Runtime) toLengthClamped(v Value) (float64, *ThrowError) {
+	n, e := rt.toIntegerOrInfinity(v)
+	if e != nil {
+		return 0, e
+	}
+	if n <= 0 {
+		return 0, nil
+	}
+	if n > 9007199254740991 {
+		return 9007199254740991, nil
+	}
+	return n, nil
+}
+
+// flagsContain reports whether the flags string contains flag character c.
+func flagsContain(s []byte, c byte) bool {
+	for _, b := range s {
+		if b == c {
+			return true
+		}
+	}
+	return false
+}
+
 // regExpExecAbstract is the spec RegExpExec(R, S) abstract operation: it reads
 // R.exec via [[Get]] (routing through a Proxy trap / a user-supplied exec) and
 // calls it when callable, otherwise falls back to the builtin exec. S must be
@@ -1164,7 +1205,7 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 	}
 	flags := string(rt.strBytes(flagsS))
 	global := strings.ContainsRune(flags, 'g')
-	fullUnicode := strings.ContainsRune(flags, 'u')
+	fullUnicode := strings.ContainsRune(flags, 'u') || strings.ContainsRune(flags, 'v')
 	if global {
 		if e := rt.setLastIndexOrThrow(rx, 0); e != nil {
 			return mkundef(), e
@@ -1192,9 +1233,15 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 			return mkundef(), e
 		}
 		if len(rt.strBytes(ms)) == 0 {
-			li, _ := rt.getField(rx, "lastIndex")
-			liN, _ := rt.toNumber(li)
-			if e := rt.setField(rx, "lastIndex", mknum(rt.advanceStringIndex(sV, liN, fullUnicode))); e != nil {
+			li, e := rt.getField(rx, "lastIndex")
+			if e != nil {
+				return mkundef(), e
+			}
+			liN, e := rt.toLengthClamped(li) // ToLength: clamp to [0, 2^53-1]
+			if e != nil {
+				return mkundef(), e
+			}
+			if e := rt.setFieldThrow(rx, "lastIndex", mknum(rt.advanceStringIndex(sV, liN, fullUnicode))); e != nil {
 				return mkundef(), e
 			}
 		}
@@ -1336,7 +1383,7 @@ func (rt *Runtime) regexpSymbolSplitGeneric(splitter, strVal, limitV Value, unic
 	p := 0
 	q := 0
 	for q < len(S) {
-		if e := rt.setField(splitter, "lastIndex", mknum(float64(q))); e != nil {
+		if e := rt.setFieldThrow(splitter, "lastIndex", mknum(float64(q))); e != nil {
 			return mkundef(), e
 		}
 		z, e := rt.abstractRegExpExec(splitter, sV)
