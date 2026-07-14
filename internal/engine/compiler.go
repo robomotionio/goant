@@ -853,7 +853,24 @@ func (c *compiler) compileDelete(n *Node) {
 		c.emit(OpDelete)
 		return
 	}
-	// `delete x`, `delete 1`, etc. → true (no binding removed).
+	// `delete x` (unqualified reference): a resolvable environment binding
+	// (local/upvalue/parameter, or a script-level var/function which is a
+	// non-configurable global property) can't be removed, but a plain
+	// global-object property (an implicit global) can. Resolve it: a binding
+	// yields false; otherwise delete through the global object, whose
+	// configurability decides the result (var/function → false, implicit → true).
+	if target != nil && target.Kind == NIdent && c.withDepth == 0 {
+		name := target.Str
+		if c.resolveLocal(name) >= 0 || c.resolveUpvalue(name) >= 0 {
+			c.emit(OpFalse)
+			return
+		}
+		c.emit(OpGlobal)
+		c.emitConst(c.rt.internString(name))
+		c.emit(OpDelete)
+		return
+	}
+	// `delete 1`, `delete this`, or an unqualified name inside `with` → true.
 	c.emit(OpTrue)
 }
 
