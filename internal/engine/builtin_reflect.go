@@ -66,14 +66,14 @@ func (rt *Runtime) reflectSet(target, key, val, receiver Value) (bool, *ThrowErr
 				}
 				return true, nil
 			}
-			if !d.writable || !receiver.IsObjectType() {
+			if !d.writable || !receiver.IsObjectLike() {
 				return false, nil
 			}
 			return rt.setDataOnReceiver(receiver, pk, val)
 		}
 		cur = o.proto
 	}
-	if !receiver.IsObjectType() {
+	if !receiver.IsObjectLike() {
 		return false, nil
 	}
 	return rt.setDataOnReceiver(receiver, pk, val)
