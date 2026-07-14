@@ -786,17 +786,12 @@ func (p *parser) parsePrimary() *Node {
 			p.consume()
 			return n
 		}
-		p.consume()
-		n := p.mk(NYield)
-		if p.next() == TokMul {
-			p.consume()
-			n.Flags = 1
-		}
-		if t := p.tok(); t != TokSemicolon && t != TokRBrace && t != TokRParen &&
-			t != TokRBracket && t != TokEOF && t != TokComma {
-			n.Right = p.parseAssign()
-		}
-		return n
+		// In a generator a YieldExpression is at the AssignmentExpression level
+		// (handled by parseAssign); reaching it here means it appeared as a
+		// unary/binary operand or other sub-expression position — `void yield`,
+		// `1 + yield`, `yield 3 + yield 4` — which is an early SyntaxError.
+		p.errorf("A yield expression is only allowed at the top of an assignment expression")
+		return p.mk(NEmpty)
 	case TokAwait:
 		// Outside an async function, `await` is a plain identifier.
 		if !p.inAsync {
@@ -1701,7 +1696,38 @@ func isValidAssignTarget(n *Node, compound bool) bool {
 	return false
 }
 
+// parseYieldExpr parses a YieldExpression in a generator body. It sits at the
+// AssignmentExpression level, so its operand is itself an AssignmentExpression
+// (`yield a = b`, `yield yield x`), and `yield` may not be a sub-expression
+// operand — parsePrimary rejects a `yield` reached below this level.
+func (p *parser) parseYieldExpr() *Node {
+	p.consume() // yield
+	n := p.mk(NYield)
+	if p.next() == TokMul {
+		if p.hadNewline() {
+			// yield [no LineTerminator here] * — a newline before `*` is invalid.
+			p.errorf("No line terminator is allowed before '*' in a yield expression")
+			return p.mk(NEmpty)
+		}
+		p.consume()
+		n.Flags = 1
+	}
+	// yield [no LineTerminator here] AssignmentExpression: without `*`, a newline
+	// terminates the expression (bare `yield`); `yield*` always takes an operand.
+	if n.Flags&1 == 0 && p.hadNewline() {
+		return n
+	}
+	if t := p.tok(); t != TokSemicolon && t != TokRBrace && t != TokRParen &&
+		t != TokRBracket && t != TokEOF && t != TokComma && t != TokColon {
+		n.Right = p.parseAssign()
+	}
+	return n
+}
+
 func (p *parser) parseAssign() *Node {
+	if p.inGenerator && p.next() == TokYield {
+		return p.parseYieldExpr()
+	}
 	left := p.parseTernary()
 	op := p.next()
 	if op == TokArrow {
