@@ -1120,8 +1120,24 @@ func (c *compiler) compileAssign(n *Node) {
 	// SET_* keeps the value on the stack (assignment is an expression).
 	switch {
 	case slot >= 0:
+		// TDZ: a plain assignment to a let binding still in its dead zone (declared
+		// later in the block) is a ReferenceError. A compound assignment already
+		// read the binding above (which throws on the hole); a plain `=` did not, so
+		// probe with a checked read that throws on the EMPTY hole and is otherwise a
+		// harmless read-and-discard of the old value.
+		if n.Op == TokAssign && c.locals[slot].blockScoped {
+			c.emitOpU16(OpGetLocal, uint16(slot))
+			c.emit(OpPop)
+		}
 		c.emitOpU16(OpSetLocal, uint16(slot))
 	case uv >= 0:
+		// A captured let/const may also be assigned in its TDZ (via a closure); a
+		// checked read throws on the hole, and a captured var cell is never a hole,
+		// so probing every plain upvalue assignment is safe.
+		if n.Op == TokAssign {
+			c.emitOpU16(OpGetUpval, uint16(uv))
+			c.emit(OpPop)
+		}
 		c.emitOpU16(OpSetUpval, uint16(uv))
 	case c.withDepth > 0:
 		c.emit(OpDup)

@@ -287,12 +287,22 @@ func (c *compiler) compileIdentStore(name string) {
 			c.emitConstAssignError()
 			return
 		}
+		// TDZ: destructuring-assigning to a let binding still in its dead zone is a
+		// ReferenceError — probe with a checked read (throws on the EMPTY hole).
+		if c.locals[slot].blockScoped {
+			c.emitOpU16(OpGetLocal, uint16(slot))
+			c.emit(OpPop)
+		}
 		c.emitOpU16(OpPutLocal, uint16(slot))
 		return
 	}
 	switch {
 	case c.resolveUpvalue(name) >= 0:
-		c.emitOpU16(OpPutUpval, uint16(c.resolveUpvalue(name)))
+		uv := c.resolveUpvalue(name)
+		// TDZ probe for a captured let/const (harmless for a var cell, never a hole).
+		c.emitOpU16(OpGetUpval, uint16(uv))
+		c.emit(OpPop)
+		c.emitOpU16(OpPutUpval, uint16(uv))
 	case c.withDepth > 0:
 		c.emitWithVar(OpWithPutVar, name)
 	default:
