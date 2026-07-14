@@ -84,6 +84,11 @@ type Runtime struct {
 	macrotasks []macrotask
 	timerSeq   uint64
 
+	// FinalizationRegistry [[Cells]], keyed by the registry object. Cleanup
+	// callbacks never fire (no tracing GC), but register/unregister bookkeeping
+	// and its brand check are program-observable.
+	finRegistries map[*object][]finCell
+
 	// Well-known symbols and the Symbol.for registry.
 	symbolCounter         uint64
 	symbolRegistry        map[string]Value

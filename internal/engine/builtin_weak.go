@@ -46,20 +46,76 @@ func (rt *Runtime) initWeakRefBuiltin() {
 	rt.defGlobal("WeakRef", ctor)
 }
 
+// finCell is one FinalizationRegistry [[Cells]] record. hasToken distinguishes
+// an absent unregisterToken (spec ~empty~) from an undefined one.
+type finCell struct {
+	target   Value
+	held     Value
+	token    Value
+	hasToken bool
+}
+
+// finRegistryOf returns the receiver's registry object if it is branded as a
+// FinalizationRegistry (present in rt.finRegistries), else a TypeError.
+func (rt *Runtime) finRegistryOf(this Value) (*object, *ThrowError) {
+	o := rt.objPtr(this)
+	if o != nil {
+		if _, ok := rt.finRegistries[o]; ok {
+			return o, nil
+		}
+	}
+	return nil, rt.typeError("method called on incompatible receiver (not a FinalizationRegistry)")
+}
+
 // initFinalizationRegistryBuiltin installs FinalizationRegistry. Cleanup
-// callbacks never fire (no tracing GC), so register/unregister are inert; the
-// constructor and prototype shape match the spec.
+// callbacks never fire (no tracing GC), but the register/unregister [[Cells]]
+// bookkeeping and brand checks are program-observable and implemented to spec.
 func (rt *Runtime) initFinalizationRegistryBuiltin() {
 	proto := rt.newObject(rt.objectProto)
 	po := rt.objPtr(proto)
 	rt.defMethod(po, "register", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if !rt.canBeHeldWeakly(arg(args, 0)) {
-			return mkundef(), rt.typeError("FinalizationRegistry.register: target must be an object or symbol")
+		o, e := rt.finRegistryOf(this)
+		if e != nil {
+			return mkundef(), e
 		}
+		target, held, token := arg(args, 0), arg(args, 1), arg(args, 2)
+		if !rt.canBeHeldWeakly(target) {
+			return mkundef(), rt.typeError("FinalizationRegistry.register: target cannot be held weakly")
+		}
+		if rt.sameValue(target, held) {
+			return mkundef(), rt.typeError("FinalizationRegistry.register: heldValue must not be the target")
+		}
+		cell := finCell{target: target, held: held}
+		if !token.IsUndefined() {
+			if !rt.canBeHeldWeakly(token) {
+				return mkundef(), rt.typeError("FinalizationRegistry.register: unregisterToken cannot be held weakly")
+			}
+			cell.token, cell.hasToken = token, true
+		}
+		rt.finRegistries[o] = append(rt.finRegistries[o], cell)
 		return mkundef(), nil
 	})
 	rt.defMethod(po, "unregister", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return mkfalse(), nil
+		o, e := rt.finRegistryOf(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		token := arg(args, 0)
+		if !rt.canBeHeldWeakly(token) {
+			return mkundef(), rt.typeError("FinalizationRegistry.unregister: unregisterToken cannot be held weakly")
+		}
+		cells := rt.finRegistries[o]
+		kept := cells[:0]
+		removed := false
+		for _, c := range cells {
+			if c.hasToken && rt.sameValue(c.token, token) {
+				removed = true
+				continue
+			}
+			kept = append(kept, c)
+		}
+		rt.finRegistries[o] = kept
+		return mkbool(removed), nil
 	})
 	ctor := rt.newNativeFunc("FinalizationRegistry", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
@@ -70,6 +126,10 @@ func (rt *Runtime) initFinalizationRegistryBuiltin() {
 			return mkundef(), rt.typeError("FinalizationRegistry: cleanup callback must be callable")
 		}
 		o.boxed = arg(args, 0)
+		if rt.finRegistries == nil {
+			rt.finRegistries = map[*object][]finCell{}
+		}
+		rt.finRegistries[o] = nil // brand: a registry with an empty [[Cells]]
 		return this, nil
 	})
 	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
