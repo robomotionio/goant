@@ -382,29 +382,42 @@ func (rt *Runtime) initObjectBuiltin() {
 	})
 
 	rt.defMethod(cobj, "assign", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		target := arg(args, 0)
-		if target.IsNullish() {
-			return mkundef(), rt.typeError("Cannot convert undefined or null to object")
+		to, e := rt.toObjectValue(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
 		}
 		for _, src := range args[1:] {
 			if src.IsNullish() {
 				continue
 			}
-			so := rt.objPtr(src)
-			if so == nil {
-				continue
+			from, e := rt.toObjectValue(src)
+			if e != nil {
+				return mkundef(), e
 			}
-			for _, k := range rt.enumerableOwnKeys(src) {
-				v, e := rt.getField(src, k)
+			// CopyDataProperties: enumerable own string+symbol keys, in
+			// [[OwnPropertyKeys]] order, each Get then Set(to, key, val, true).
+			keys, e := rt.ownKeyValues(from)
+			if e != nil {
+				return mkundef(), e
+			}
+			for _, key := range keys {
+				enum, exists, e := rt.ownKeyEnumerable(from, key)
 				if e != nil {
 					return mkundef(), e
 				}
-				if e := rt.setField(target, k, v); e != nil {
+				if !exists || !enum {
+					continue
+				}
+				val, e := rt.getElement(from, key)
+				if e != nil {
+					return mkundef(), e
+				}
+				if e := rt.setThrow(to, key, val); e != nil {
 					return mkundef(), e
 				}
 			}
 		}
-		return target, nil
+		return to, nil
 	})
 	rt.defMethod(cobj, "is", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return mkbool(rt.sameValue(arg(args, 0), arg(args, 1))), nil
@@ -528,6 +541,130 @@ func (rt *Runtime) enumerableOwnKeysE(v Value) ([]string, *ThrowError) {
 	}
 	keys = append(keys, o.ownKeysEnumerable()...)
 	return keys, nil
+}
+
+// ownKeyValues returns an object's own property keys (string then symbol) as
+// property-key Values in [[OwnPropertyKeys]] order, routing a Proxy through its
+// ownKeys trap. Used by Object.assign (CopyDataProperties).
+func (rt *Runtime) ownKeyValues(v Value) ([]Value, *ThrowError) {
+	o := rt.objPtr(v)
+	if o == nil {
+		return nil, nil
+	}
+	if o.proxy != nil {
+		return rt.proxyOwnKeys(o.proxy)
+	}
+	var keys []Value
+	switch v.Type() {
+	case TArr:
+		for i := uint32(0); i < o.arrLen; i++ {
+			if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
+				keys = append(keys, rt.newString(numberToString(float64(i))))
+			}
+		}
+	case TTypedArray:
+		for i, l := 0, rt.taLength(o); i < l; i++ {
+			keys = append(keys, rt.newString(strconv.Itoa(i)))
+		}
+	}
+	if o.boxed.Type() == TStr {
+		for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+			keys = append(keys, rt.newString(strconv.Itoa(i)))
+		}
+	}
+	for _, k := range o.ownKeys() {
+		keys = append(keys, rt.newString(k))
+	}
+	for _, off := range o.ownSymbolKeys() {
+		keys = append(keys, mkval(TSymbol, uint64(off)))
+	}
+	return keys, nil
+}
+
+// ownKeyEnumerable reports whether key is an own enumerable property of v (and
+// whether it exists at all), via [[GetOwnProperty]] (a Proxy's trap).
+func (rt *Runtime) ownKeyEnumerable(v, key Value) (bool, bool, *ThrowError) {
+	o := rt.objPtr(v)
+	if o == nil {
+		return false, false, nil
+	}
+	if o.proxy != nil {
+		desc, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, key)
+		if e != nil {
+			return false, false, e
+		}
+		if desc.IsUndefined() {
+			return false, false, nil
+		}
+		en, _ := rt.getField(desc, "enumerable")
+		return rt.toBoolean(en), true, nil
+	}
+	if key.IsSymbol() {
+		d := o.ownDescriptorSym(key.handle())
+		return d.enumerable, d.exists, nil
+	}
+	name := string(rt.strBytes(key))
+	if idx, ok := canonicalIndex(name); ok && rt.hasOwnIndex(v, o, idx) {
+		return true, true, nil // array/typed-array/string element: enumerable data
+	}
+	d := o.ownDescriptor(name)
+	return d.enumerable, d.exists, nil
+}
+
+// setThrow performs Set(O, key, val, true): a TypeError when the write is
+// rejected (non-writable / non-extensible / a setter-less accessor).
+func (rt *Runtime) setThrow(to, key, val Value) *ThrowError {
+	if key.IsSymbol() {
+		o := rt.objPtr(to)
+		if o == nil {
+			return nil
+		}
+		if o.proxy != nil {
+			return rt.proxySet(o.proxy, key, val, to)
+		}
+		sym := key.handle()
+		if d := o.ownDescriptorSym(sym); d.exists {
+			if d.isAccessor {
+				if d.setter.IsUndefined() {
+					return rt.typeError("Cannot set property (setter-less accessor)")
+				}
+				_, e := rt.callValue(d.setter, to, []Value{val})
+				return e
+			}
+			if !d.writable {
+				return rt.typeError("Cannot assign to read only property (symbol)")
+			}
+			attrs := uint8(0)
+			if d.writable {
+				attrs |= attrWritable
+			}
+			if d.enumerable {
+				attrs |= attrEnumerable
+			}
+			if d.configable {
+				attrs |= attrConfigurable
+			}
+			o.defineOwnSymbol(sym, val, attrs)
+			return nil
+		}
+		if !o.flags.extensible {
+			return rt.typeError("Cannot add property, object is not extensible")
+		}
+		o.defineOwnSymbol(sym, val, attrDefault)
+		return nil
+	}
+	name := string(rt.strBytes(key))
+	if idx, ok := canonicalIndex(name); ok && (to.Type() == TArr || to.Type() == TTypedArray) {
+		return rt.setElement(to, mknum(float64(idx)), val)
+	}
+	ok, e := rt.setFieldR(to, name, val)
+	if e != nil {
+		return e
+	}
+	if !ok {
+		return rt.typeError("Cannot assign to read only property '" + name + "'")
+	}
+	return nil
 }
 
 // objectDefineProperty applies an ES5 property descriptor to obj[name].

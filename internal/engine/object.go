@@ -724,6 +724,12 @@ func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
 	if o == nil {
 		return
 	}
+	enumerable := flags&4 != 0 // bit 4: object-literal accessor (enumerable)
+	flags &= 3
+	accAttrs := uint8(attrConfigurable)
+	if enumerable {
+		accAttrs |= attrEnumerable
+	}
 	k := rt.toPropertyKeyValue(key)
 	if k.IsSymbol() {
 		sym := k.handle()
@@ -746,7 +752,7 @@ func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
 		} else {
 			s, hs = accFn, true
 		}
-		o.defineAccessorSymbol(sym, g, s, hg, hs, attrConfigurable)
+		o.defineAccessorSymbol(sym, g, s, hg, hs, accAttrs)
 		return
 	}
 	name, e := rt.propKeyString(k)
@@ -774,7 +780,7 @@ func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
 	} else {
 		s, hs = accFn, true
 	}
-	o.defineAccessor(name, g, s, hg, hs, attrConfigurable)
+	o.defineAccessor(name, g, s, hg, hs, accAttrs)
 }
 
 // ownDescriptorSym is ownDescriptor for a symbol-keyed property.

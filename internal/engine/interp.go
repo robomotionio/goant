@@ -462,6 +462,8 @@ restart:
 		case OpDefineMethod:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			flags := code[ip+5]
+			enumerable := flags&4 != 0 // bit 4: object-literal accessor (enumerable)
+			flags &= 3
 			accFn := pop()
 			if o := rt.objPtr(peek()); o != nil {
 				switch flags {
@@ -479,8 +481,11 @@ restart:
 					} else {
 						s, hs = accFn, true
 					}
-					// Class prototype accessors are non-enumerable.
-					o.defineAccessor(name, g, s, hg, hs, attrConfigurable)
+					attrs := uint8(attrConfigurable) // class accessors are non-enumerable
+					if enumerable {
+						attrs |= attrEnumerable
+					}
+					o.defineAccessor(name, g, s, hg, hs, attrs)
 				}
 			}
 			ip += 6

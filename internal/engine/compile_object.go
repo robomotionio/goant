@@ -18,10 +18,12 @@ func (c *compiler) compileObject(n *Node) {
 			continue
 		}
 		if prop.Flags&(fnGetter|fnSetter) != 0 {
-			flags := byte(1) // getter
+			// Bit 4 marks an object-literal accessor as enumerable (class accessors,
+			// emitted elsewhere without the bit, are non-enumerable).
+			flags := byte(1) | 4 // getter, enumerable
 			prefix := "get "
 			if prop.Flags&fnSetter != 0 {
-				flags = 2 // setter
+				flags = 2 | 4 // setter, enumerable
 				prefix = "set "
 			}
 			name, ok := propKeyName(prop.Left)
