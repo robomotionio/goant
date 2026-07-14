@@ -135,6 +135,11 @@ func (rt *Runtime) toObjectValue(v Value) (Value, *ThrowError) {
 	w := rt.newObject(rt.primitiveProto(v))
 	o := rt.objPtr(w)
 	o.boxed = v
+	if v.Type() == TNum {
+		// A Number wrapper's [[NumberData]] is marked in slotPrimitive so it is
+		// distinguishable from a plain object (whose zero-value boxed reads as 0).
+		o.setSlot(slotPrimitive, v)
+	}
 	if v.Type() == TStr {
 		// A String exotic object carries a non-writable, non-enumerable,
 		// non-configurable "length" own property (matches new String(...)).

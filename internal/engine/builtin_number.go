@@ -7,14 +7,20 @@ import "math"
 
 func (rt *Runtime) initNumberBuiltin() {
 	proto := rt.objPtr(rt.numberProto)
+	// Number.prototype is itself a Number wrapper whose [[NumberData]] is +0.
+	proto.setSlot(slotPrimitive, mknum(0))
 
 	numOf := func(this Value) (float64, bool) {
 		if this.Type() == TNum {
 			return this.Number(), true
 		}
-		// Unwrap a boxed Number object (new Number(x) / Object(x)).
-		if o := rt.objPtr(this); o != nil && o.boxed.Type() == TNum {
-			return o.boxed.Number(), true
+		// Unwrap a Number object (new Number(x) / Object(x) / Number.prototype). The
+		// [[NumberData]] lives in slotPrimitive — not o.boxed, whose zero value
+		// decodes as the number 0 and would misidentify every plain object.
+		if o := rt.objPtr(this); o != nil {
+			if b := o.getSlot(slotPrimitive); b.Type() == TNum {
+				return b.Number(), true
+			}
 		}
 		return 0, false
 	}
@@ -133,6 +139,7 @@ func (rt *Runtime) initNumberBuiltin() {
 		// wrapping the primitive in its [[NumberData]] slot.
 		if o := rt.objPtr(this); o != nil {
 			o.boxed = mknum(n)
+			o.setSlot(slotPrimitive, mknum(n)) // [[NumberData]] marker
 			return this, nil
 		}
 		return mknum(n), nil

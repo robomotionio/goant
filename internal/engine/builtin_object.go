@@ -1276,6 +1276,8 @@ func (rt *Runtime) objectToStringTag(v Value) string {
 				builtin = "String"
 			case o.boxed.Type() == TBool:
 				builtin = "Boolean"
+			case o.getSlot(slotPrimitive).Type() == TNum: // Number wrapper ([[NumberData]])
+				builtin = "Number"
 			case o.hasOwn("callee") && o.hasOwn("length"):
 				builtin = "Arguments"
 			}
