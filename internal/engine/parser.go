@@ -189,6 +189,26 @@ func isLexicalDeclStmt(n *Node) bool {
 			n.VarKind == VarUsing || n.VarKind == VarAwaitUsing)
 }
 
+// isForbiddenLoopBody reports whether a statement may not be the body of a
+// for/for-in/for-of/while/do-while loop: a lexical declaration, or a
+// function/generator/async-function/class declaration (the loop body is a
+// Statement, which excludes all Declarations — no Annex B exception here).
+func isForbiddenLoopBody(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	if isLexicalDeclStmt(n) {
+		return true
+	}
+	switch n.Kind {
+	case NFunc:
+		return n.Flags&(fnArrow|fnFuncExpr) == 0 && n.Str != ""
+	case NClass:
+		return n.Str != ""
+	}
+	return false
+}
+
 func varDeclHasInitializer(n *Node) bool {
 	if n == nil || n.Kind != NVar {
 		return false
@@ -2303,7 +2323,7 @@ func (p *parser) parseWhile() *Node {
 	n.Cond = p.parseExpr()
 	p.expect(TokRParen)
 	n.Body = p.parseStmt()
-	if isLexicalDeclStmt(n.Body) {
+	if isForbiddenLoopBody(n.Body) {
 		p.errorf("Lexical declaration cannot appear in single-statement context")
 	}
 	return n
@@ -2313,7 +2333,7 @@ func (p *parser) parseDoWhile() *Node {
 	p.consume()
 	n := p.mk(NDoWhile)
 	n.Body = p.parseStmt()
-	if isLexicalDeclStmt(n.Body) {
+	if isForbiddenLoopBody(n.Body) {
 		p.errorf("Lexical declaration cannot appear in single-statement context")
 	}
 	p.expect(TokWhile)
@@ -2384,7 +2404,7 @@ func (p *parser) parseFor() *Node {
 		if p.lx.strict && initNode != nil && initNode.Kind == NVar && varDeclHasInitializer(initNode) {
 			p.errorf("for-in loop variable declaration may not have an initializer in strict mode")
 		}
-		if isLexicalDeclStmt(n.Body) {
+		if isForbiddenLoopBody(n.Body) {
 			p.errorf("Lexical declaration cannot appear in single-statement context")
 		}
 		return n
@@ -2400,7 +2420,7 @@ func (p *parser) parseFor() *Node {
 		n.Right = p.parseAssign()
 		p.expect(TokRParen)
 		n.Body = p.parseStmt()
-		if isLexicalDeclStmt(n.Body) {
+		if isForbiddenLoopBody(n.Body) {
 			p.errorf("Lexical declaration cannot appear in single-statement context")
 		}
 		return n
@@ -2428,7 +2448,7 @@ func (p *parser) parseFor() *Node {
 	}
 	p.expect(TokRParen)
 	n.Body = p.parseStmt()
-	if isLexicalDeclStmt(n.Body) {
+	if isForbiddenLoopBody(n.Body) {
 		p.errorf("Lexical declaration cannot appear in single-statement context")
 	}
 	return n
