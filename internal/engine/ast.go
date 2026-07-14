@@ -423,7 +423,7 @@ func collectBodyVarNames(n *Node, out map[string]bool) {
 
 func collectVarFuncNames(stmts []*Node, out map[string]bool) {
 	for _, n := range stmts {
-		collectVarFuncNamesNode(n, out)
+		collectVarFuncNamesNode(n, out, true)
 	}
 }
 
@@ -464,13 +464,20 @@ func collectBindingNames(pat *Node, out map[string]bool) {
 	}
 }
 
-func collectVarFuncNamesNode(n *Node, out map[string]bool) {
+// collectVarFuncNamesNode collects the names that a top-level slice binds
+// globally: var declarations (which hoist through every nested construct),
+// top-level function/class declarations, and — inside nested blocks — only
+// Annex B plain FunctionDeclarations. A class, async function, or generator
+// declaration nested in a block is lexically block-scoped and must NOT leak to
+// the global scope, so it is collected only when topLevel is true.
+func collectVarFuncNamesNode(n *Node, out map[string]bool, topLevel bool) {
 	if n == nil {
 		return
 	}
 	switch n.Kind {
 	case NFunc:
-		if n.Str != "" && n.Flags&fnArrow == 0 {
+		if n.Str != "" && n.Flags&fnArrow == 0 &&
+			(topLevel || n.Flags&(fnAsync|fnGenerator) == 0) {
 			out[n.Str] = true
 		}
 	case NVar:
@@ -482,28 +489,40 @@ func collectVarFuncNamesNode(n *Node, out map[string]bool) {
 			}
 		}
 	case NClass:
-		// Class declarations are lexically scoped, but the slice binds them
-		// globally; pre-register the name to satisfy strict-mode resolution.
-		if n.Str != "" {
+		// Class declarations are lexically scoped; the slice binds only a
+		// top-level one globally. A class nested in a block does not leak.
+		if topLevel && n.Str != "" {
 			out[n.Str] = true
 		}
-	case NBlock, NCase, NProgram:
-		collectVarFuncNames(n.Args, out)
+	case NBlock, NCase:
+		for _, s := range n.Args {
+			collectVarFuncNamesNode(s, out, false)
+		}
+	case NProgram:
+		for _, s := range n.Args {
+			collectVarFuncNamesNode(s, out, topLevel)
+		}
+	case NLabel:
+		// A labelled statement stays at the enclosing level (a top-level
+		// `l: function f(){}` still hoists).
+		collectVarFuncNamesNode(n.Body, out, topLevel)
 	case NIf:
-		collectVarFuncNamesNode(n.Left, out)
-		collectVarFuncNamesNode(n.Right, out)
-	case NWhile, NDoWhile, NWith, NLabel:
-		collectVarFuncNamesNode(n.Body, out)
+		collectVarFuncNamesNode(n.Left, out, false)
+		collectVarFuncNamesNode(n.Right, out, false)
+	case NWhile, NDoWhile, NWith:
+		collectVarFuncNamesNode(n.Body, out, false)
 	case NFor, NForIn, NForOf:
-		collectVarFuncNamesNode(n.Init, out)
-		collectVarFuncNamesNode(n.Left, out)
-		collectVarFuncNamesNode(n.Body, out)
+		collectVarFuncNamesNode(n.Init, out, false)
+		collectVarFuncNamesNode(n.Left, out, false)
+		collectVarFuncNamesNode(n.Body, out, false)
 	case NTry:
-		collectVarFuncNamesNode(n.Body, out)
-		collectVarFuncNamesNode(n.CatchBody, out)
-		collectVarFuncNamesNode(n.FinallyBody, out)
+		collectVarFuncNamesNode(n.Body, out, false)
+		collectVarFuncNamesNode(n.CatchBody, out, false)
+		collectVarFuncNamesNode(n.FinallyBody, out, false)
 	case NSwitch:
-		collectVarFuncNames(n.Args, out)
+		for _, s := range n.Args {
+			collectVarFuncNamesNode(s, out, false)
+		}
 	}
 }
 
