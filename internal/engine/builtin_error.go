@@ -147,6 +147,26 @@ func (rt *Runtime) initErrorBuiltin() {
 	rt.errors.suppressedProto = supProto
 	rt.defGlobal("SuppressedError", supCtor)
 
+	// Error.isError(arg): whether arg has an [[ErrorData]] internal slot (ES2025).
+	// A Proxy is unwrapped to its target; a revoked Proxy throws a TypeError.
+	rt.defMethod(rt.objPtr(base), "isError", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		v := arg(args, 0)
+		for {
+			o := rt.objPtr(v)
+			if o == nil {
+				return mkfalse(), nil
+			}
+			if o.proxy != nil {
+				if o.proxy.revoked {
+					return mkundef(), rt.typeError("Cannot perform 'isError' on a proxy that has been revoked")
+				}
+				v = o.proxy.target
+				continue
+			}
+			return mkbool(o.brandID() == brandError), nil
+		}
+	})
+
 	rt.defGlobal("Error", base)
 	rt.defGlobal("TypeError", rt.errors.typeErr)
 	rt.defGlobal("RangeError", rt.errors.rangeErr)
