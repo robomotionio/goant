@@ -380,8 +380,8 @@ func (c *compiler) compileFunctionBody(n *Node) {
 			}
 			paramCount++
 		case NRest:
-			if p.Right == nil || p.Right.Kind != NIdent {
-				c.errorf("destructuring rest parameters not yet supported (slice)")
+			if p.Right == nil || (p.Right.Kind != NIdent && p.Right.Kind != NArray && p.Right.Kind != NObject) {
+				c.errorf("unsupported rest parameter form (slice)")
 				return
 			}
 			restParam = p
@@ -453,12 +453,17 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		c.emitOpU16(OpPutLocal, uint16(slot))
 	}
 
-	// Rest parameter: collect args[restIndex:] into an array.
+	// Rest parameter: collect args[restIndex:] into an array, then bind it (a
+	// plain name) or destructure it (a `...[a,b]` / `...{a}` pattern).
 	if restParam != nil {
-		slot := c.declareVar(restParam.Right.Str, false)
 		c.emit(OpRest)
 		c.emitU16(uint16(restIndex))
-		c.emitOpU16(OpPutLocal, uint16(slot))
+		if restParam.Right.Kind == NIdent {
+			slot := c.declareVar(restParam.Right.Str, false)
+			c.emitOpU16(OpPutLocal, uint16(slot))
+		} else {
+			c.destructureTarget(restParam.Right, VarLet)
+		}
 	}
 	// Default parameters. When the list is all simple/default NIdent parameters
 	// (no destructuring), bind them left-to-right through the temporal dead zone:
