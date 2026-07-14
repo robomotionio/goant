@@ -1279,6 +1279,13 @@ func (p *parser) parseObject() *Node {
 			prop.Right.Flags |= fnMethod
 			prop.Right.SrcOff = prop.SrcOff
 		} else {
+			// Shorthand `{ id }` / `{ id = default }`: id is an IdentifierReference,
+			// so it may not be a reserved word (even one written with escapes, since
+			// prop.Left.Str is the decoded StringValue).
+			if prop.Left.Kind == NIdent && isReservedWordTok(parseKeyword(prop.Left.Str)) {
+				p.errorf("Unexpected reserved word")
+				return n
+			}
 			prop.Right = mkIdent(prop.Left.Str)
 			if p.next() == TokAssign {
 				p.consume()
