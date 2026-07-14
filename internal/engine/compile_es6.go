@@ -846,7 +846,7 @@ func (c *compiler) compileTemplate(n *Node) {
 	// value there is undefined). The segments are the even-indexed args.
 	for i := 0; i < len(segs); i += 2 {
 		if segs[i].Flags&fnInvalidCooked != 0 {
-			c.errorf("Invalid or unexpected token")
+			c.syntaxErrorf("Invalid or unexpected token in template literal")
 			return
 		}
 	}
