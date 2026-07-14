@@ -338,92 +338,140 @@ func (rt *Runtime) initIteratorHelpers() {
 		}), nil
 	})
 	rt.defMethod(proto, "reduce", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := drain(this)
+		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "reduce")
 		if e != nil {
 			return mkundef(), e
 		}
-		cb := arg(args, 0)
-		acc := arg(args, 1)
-		start := 0
-		if len(args) < 2 {
-			if len(vs) == 0 {
+		var acc Value
+		idx := 0
+		if len(args) >= 2 {
+			acc = args[1]
+		} else {
+			v, d, se := rt.iterStepValue(this, next)
+			if se != nil {
+				return mkundef(), se
+			}
+			if d {
 				return mkundef(), rt.typeError("Reduce of empty iterator with no initial value")
 			}
-			acc = vs[0]
-			start = 1
+			acc, idx = v, 1
 		}
-		for i := start; i < len(vs); i++ {
-			r, e := rt.callValue(cb, mkundef(), []Value{acc, vs[i], mknum(float64(i))})
-			if e != nil {
-				return mkundef(), e
+		for {
+			v, d, se := rt.iterStepValue(this, next)
+			if se != nil {
+				return mkundef(), se
+			}
+			if d {
+				return acc, nil
+			}
+			r, ce := rt.callValue(cb, mkundef(), []Value{acc, v, mknum(float64(idx))})
+			idx++
+			if ce != nil {
+				rt.iteratorClose(this)
+				return mkundef(), ce
 			}
 			acc = r
 		}
-		return acc, nil
 	})
 	rt.defMethod(proto, "forEach", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := drain(this)
+		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "forEach")
 		if e != nil {
 			return mkundef(), e
 		}
-		cb := arg(args, 0)
-		for i, v := range vs {
-			if _, e := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(i))}); e != nil {
-				return mkundef(), e
+		idx := 0
+		for {
+			v, d, se := rt.iterStepValue(this, next)
+			if se != nil {
+				return mkundef(), se
+			}
+			if d {
+				return mkundef(), nil
+			}
+			_, ce := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(idx))})
+			idx++
+			if ce != nil {
+				rt.iteratorClose(this)
+				return mkundef(), ce
 			}
 		}
-		return mkundef(), nil
 	})
 	rt.defMethod(proto, "some", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := drain(this)
+		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "some")
 		if e != nil {
 			return mkundef(), e
 		}
-		cb := arg(args, 0)
-		for i, v := range vs {
-			r, e := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(i))})
-			if e != nil {
-				return mkundef(), e
+		idx := 0
+		for {
+			v, d, se := rt.iterStepValue(this, next)
+			if se != nil {
+				return mkundef(), se
+			}
+			if d {
+				return mkfalse(), nil
+			}
+			r, ce := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(idx))})
+			idx++
+			if ce != nil {
+				rt.iteratorClose(this)
+				return mkundef(), ce
 			}
 			if rt.toBoolean(r) {
+				rt.iteratorClose(this)
 				return mktrue(), nil
 			}
 		}
-		return mkfalse(), nil
 	})
 	rt.defMethod(proto, "every", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := drain(this)
+		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "every")
 		if e != nil {
 			return mkundef(), e
 		}
-		cb := arg(args, 0)
-		for i, v := range vs {
-			r, e := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(i))})
-			if e != nil {
-				return mkundef(), e
+		idx := 0
+		for {
+			v, d, se := rt.iterStepValue(this, next)
+			if se != nil {
+				return mkundef(), se
+			}
+			if d {
+				return mktrue(), nil
+			}
+			r, ce := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(idx))})
+			idx++
+			if ce != nil {
+				rt.iteratorClose(this)
+				return mkundef(), ce
 			}
 			if !rt.toBoolean(r) {
+				rt.iteratorClose(this)
 				return mkfalse(), nil
 			}
 		}
-		return mktrue(), nil
 	})
 	rt.defMethod(proto, "find", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := drain(this)
+		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "find")
 		if e != nil {
 			return mkundef(), e
 		}
-		cb := arg(args, 0)
-		for i, v := range vs {
-			r, e := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(i))})
-			if e != nil {
-				return mkundef(), e
+		idx := 0
+		for {
+			v, d, se := rt.iterStepValue(this, next)
+			if se != nil {
+				return mkundef(), se
+			}
+			if d {
+				return mkundef(), nil
+			}
+			r, ce := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(idx))})
+			idx++
+			if ce != nil {
+				rt.iteratorClose(this)
+				return mkundef(), ce
 			}
 			if rt.toBoolean(r) {
+				rt.iteratorClose(this)
 				return v, nil
 			}
 		}
-		return mkundef(), nil
 	})
 
 	// Iterator global: an abstract constructor (throws unless subclassed) whose
