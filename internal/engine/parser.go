@@ -2086,9 +2086,10 @@ func (p *parser) parseClass() *Node {
 	if isIdentLikeTok(p.next()) && !(p.tlen() == 7 && p.tokStr() == "extends") {
 		cls.Str = p.tokIdentStr()
 		p.consume()
-	} else if p.next() == TokAwait && !p.inAsync {
+	} else if p.next() == TokAwait && !p.inAsync && !p.inStaticBlock {
 		// A class body is strict, but `await` is not a strict-reserved word, so it
-		// is a valid class name outside an async (or module) context.
+		// is a valid class name outside an async (or module / class-static-block)
+		// context, all of which reserve await.
 		cls.Str = "await"
 		p.consume()
 	}
@@ -2123,16 +2124,17 @@ func (p *parser) parseClass() *Node {
 				// expression are early errors, checked once the block is parsed.
 				savedStrict, savedNT := p.lx.strict, p.newTargetOK
 				savedAsync, savedGen := p.inAsync, p.inGenerator
-				savedSB := p.inStaticBlock
+				savedSB, savedFD := p.inStaticBlock, p.funcDepth
 				p.lx.strict = true
 				p.newTargetOK = true
 				p.inAsync = false
 				p.inGenerator = false
 				p.inStaticBlock = true
+				p.funcDepth = 0 // a static block is not a function body: `return` is illegal
 				block := p.parseBlock(false)
 				p.lx.strict, p.newTargetOK = savedStrict, savedNT
 				p.inAsync, p.inGenerator = savedAsync, savedGen
-				p.inStaticBlock = savedSB
+				p.inStaticBlock, p.funcDepth = savedSB, savedFD
 				block.Kind = NStaticBlock
 				block.Flags = fnStatic | fnClassBody
 				if nodeContainsArguments(block) {
