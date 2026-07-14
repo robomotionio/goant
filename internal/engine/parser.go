@@ -1480,6 +1480,10 @@ func (p *parser) parseObject() *Node {
 				def.Left = prop.Right
 				def.Right = p.parseAssign()
 				prop.Right = def
+				// `{ id = expr }` is a CoverInitializedName: valid only when this
+				// object is later reinterpreted as a destructuring pattern. Compiling
+				// it as a plain object literal is an early SyntaxError.
+				n.Flags |= nodeHasCoverInit
 			}
 		}
 		n.Args = append(n.Args, prop)

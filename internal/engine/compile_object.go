@@ -6,6 +6,13 @@ package engine
 // method names in literals are added as the port continues.
 
 func (c *compiler) compileObject(n *Node) {
+	// A CoverInitializedName (`{ x = 1 }`) is only valid once the object has been
+	// reinterpreted as a destructuring pattern (which compiles via destructureObject,
+	// not here); reaching compileObject means it is a plain object literal.
+	if n.Flags&nodeHasCoverInit != 0 {
+		c.syntaxErrorf("Invalid shorthand property initializer")
+		return
+	}
 	c.emit(OpObject)
 	for _, prop := range n.Args {
 		if prop.Kind == NSpread {

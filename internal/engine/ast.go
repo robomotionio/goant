@@ -117,6 +117,7 @@ const (
 	fnClassCtor       = 1 << 19 // a class constructor (must be invoked with new)
 	fnFuncExpr        = 1 << 20 // a function expression (immutable self-name binding)
 	nodeRestComma     = 1 << 21 // an array literal whose rest element is followed by a comma (invalid as a binding/assignment pattern)
+	nodeHasCoverInit  = 1 << 22 // an object literal with a CoverInitializedName (`{x = 1}`) — valid only when reinterpreted as a destructuring pattern
 )
 
 // Export flags (ant ast.h EX_*).
