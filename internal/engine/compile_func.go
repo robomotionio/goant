@@ -522,6 +522,15 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		if c.fn.isClassCtor && !c.classDerived {
 			c.emitInstanceFieldInit()
 		}
+		if c.fn.isGenerator {
+			// Generator body barrier: parameters (above) are instantiated eagerly at
+			// call time, then the coroutine suspends here so the body proper does not
+			// run until the first resume. newGenerator drives to this point once; the
+			// tEmpty sentinel marks the barrier yield and its resume value is dropped.
+			c.emit(OpEmpty)
+			c.emit(OpYield)
+			c.emit(OpPop)
+		}
 		c.compileStmts(n.Body.Args)
 		// A class constructor's implicit completion returns its (possibly
 		// super-rebound) `this`, so subclassing an exotic native yields the object

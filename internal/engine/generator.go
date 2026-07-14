@@ -131,7 +131,7 @@ func (rt *Runtime) suspend(value Value) (resumed Value, inject *genResume) {
 // ---- generator objects ----
 
 // newGenerator creates a generator object wrapping an unstarted coroutine.
-func (rt *Runtime) newGenerator(fn *svFunc, cl *closure, fnVal, thisVal Value, args []Value) Value {
+func (rt *Runtime) newGenerator(fn *svFunc, cl *closure, fnVal, thisVal Value, args []Value) (Value, *ThrowError) {
 	proto := rt.genProto
 	if fn.isAsync && rt.asyncGenProto != 0 {
 		proto = rt.asyncGenProto // async generator: %AsyncGeneratorPrototype%
@@ -145,7 +145,16 @@ func (rt *Runtime) newGenerator(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 	v := rt.newObject(proto)
 	o := rt.objPtr(v)
 	o.gen = rt.newGenState(fn, cl, fnVal, thisVal, args)
-	return v
+	// FunctionDeclarationInstantiation (parameter destructuring / defaults) runs
+	// eagerly at call time: drive the coroutine up to the body barrier the
+	// compiler emits (OpEmpty;OpYield) right after parameter binding. A parameter
+	// error therefore throws synchronously at the call, and the generator is left
+	// suspended at the start of its body (the body proper runs on the first
+	// resume). The tEmpty sentinel value marks the barrier yield.
+	if m := rt.genDrive(o.gen, genNext, mkundef()); m.err != nil {
+		return mkundef(), m.err
+	}
+	return v, nil
 }
 
 // genResult builds an IteratorResult object { value, done }.

@@ -275,7 +275,7 @@ func (rt *Runtime) callValue(fnVal, thisVal Value, args []Value) (Value, *ThrowE
 		return mkundef(), rt.typeError("value is not a function")
 	}
 	if cl.fn.isGenerator {
-		return rt.newGenerator(cl.fn, cl, fnVal, thisVal, args), nil
+		return rt.newGenerator(cl.fn, cl, fnVal, thisVal, args)
 	}
 	if cl.fn.isAsync {
 		return rt.runAsync(cl.fn, cl, fnVal, thisVal, args), nil
