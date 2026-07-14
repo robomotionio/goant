@@ -769,6 +769,16 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 			return e
 		}
 		existing = o.ownDescriptor(name)
+		// A live element in fast array storage is an own data property with default
+		// attributes even though it has no shape slot; synthesize its descriptor so a
+		// partial redefinition (e.g. {configurable:false}) preserves the existing
+		// value/attributes instead of treating the index as new — which would default
+		// the value to undefined and drop the element.
+		if !existing.exists && obj.Type() == TArr {
+			if idx, ok := canonicalIndex(name); ok && int(idx) < len(o.arr) && o.arr[idx] != tEmpty {
+				existing = ownDesc{exists: true, value: o.arr[idx], writable: true, enumerable: true, configable: true}
+			}
+		}
 	}
 	// A new property cannot be defined on a non-extensible object; a
 	// non-configurable existing property cannot be redefined.

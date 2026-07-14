@@ -685,35 +685,67 @@ func (p *jsonParser) parseObject() (Value, error) {
 	}
 }
 
-// jsonRevive walks a parsed value applying the reviver (JSON.parse reviver).
+// jsonRevive implements InternalizeJSONProperty(holder, name): it recurses into
+// a composite value's elements/properties, writing each revived result back via
+// the observable operations — [[Delete]] when the reviver returns undefined,
+// CreateDataProperty otherwise — then calls the reviver with (name, value,
+// context). Get/length/ownKeys/delete/define all propagate abrupt completions
+// (a Proxy trap that throws surfaces); an ordinary rejected define/delete (a
+// non-configurable property) is a silent no-op, not a throw.
 func (rt *Runtime) jsonRevive(holder Value, key string, reviver Value) (Value, *ThrowError) {
-	val, _ := rt.getField(holder, key)
-	if val.Type() == TArr {
-		o := rt.objPtr(val)
-		for i := uint32(0); i < o.arrLen; i++ {
-			nv, e := rt.jsonRevive(val, numberToString(float64(i)), reviver)
-			if e != nil {
-				return mkundef(), e
+	val, e := rt.getField(holder, key)
+	if e != nil {
+		return mkundef(), e
+	}
+	// writeBack applies step 2.b.iii/2.c.ii: delete when undefined, else
+	// CreateDataProperty (a rejected ordinary define is a discarded boolean).
+	writeBack := func(k Value, nv Value) *ThrowError {
+		if nv.IsUndefined() {
+			if _, e := rt.deleteElement(val, k); e != nil {
+				return e
 			}
-			if nv.IsUndefined() {
-				rt.setElement(val, mknum(float64(i)), mkundef())
-			} else {
-				rt.setElement(val, mknum(float64(i)), nv)
-			}
+			return nil
 		}
-	} else if val.IsObjectType() {
-		o := rt.objPtr(val)
-		for _, k := range o.ownKeysEnumerable() {
-			nv, e := rt.jsonRevive(val, k, reviver)
+		if e := rt.createDataProperty(val, k, nv); e != nil && !e.rejected {
+			return e
+		}
+		return nil
+	}
+	if val.IsObjectType() || val.Type() == TArr {
+		if rt.isArrayValue(val) {
+			n, e := rt.lengthOf(val) // LengthOfArrayLike = ToLength(Get(val,"length"))
 			if e != nil {
 				return mkundef(), e
 			}
-			if nv.IsUndefined() {
-				o.deleteOwn(k)
-			} else {
-				o.defineOwn(k, nv, attrDefault)
+			for i := 0; i < n; i++ {
+				nv, e := rt.jsonRevive(val, numberToString(float64(i)), reviver)
+				if e != nil {
+					return mkundef(), e
+				}
+				if e := writeBack(mknum(float64(i)), nv); e != nil {
+					return mkundef(), e
+				}
+			}
+		} else {
+			keys, e := rt.enumerableOwnKeysE(val) // EnumerableOwnPropertyNames (proxy-aware)
+			if e != nil {
+				return mkundef(), e
+			}
+			for _, k := range keys {
+				nv, e := rt.jsonRevive(val, k, reviver)
+				if e != nil {
+					return mkundef(), e
+				}
+				if e := writeBack(rt.newString(k), nv); e != nil {
+					return mkundef(), e
+				}
 			}
 		}
 	}
-	return rt.callValue(reviver, holder, []Value{rt.newString(key), val})
+	// The reviver receives a context object as its third argument (the JSON
+	// source-text-access proposal, adopted in V8); source tracking is not yet
+	// wired, so the object carries no "source" property (destructures to
+	// undefined) — matching the composite-value case.
+	ctx := rt.newPlainObject()
+	return rt.callValue(reviver, holder, []Value{rt.newString(key), val, ctx})
 }
