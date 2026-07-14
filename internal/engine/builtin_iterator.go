@@ -174,6 +174,27 @@ func (rt *Runtime) initIteratorHelpers() {
 	proto := rt.objPtr(rt.iteratorProto)
 	drain := func(this Value) ([]Value, *ThrowError) { return rt.iterableValues(this) }
 
+	if rt.symDispose != 0 {
+		// Iterator.prototype[@@dispose] closes the iterator (calls its `return`).
+		proto.defineOwnSymbol(rt.symDispose.handle(), rt.newNativeFunc("[Symbol.dispose]", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			if !this.IsObjectType() {
+				return mkundef(), rt.typeError("Iterator.prototype[Symbol.dispose] called on a non-object")
+			}
+			rf, e := rt.getField(this, "return")
+			if e != nil {
+				return mkundef(), e
+			}
+			if !rf.IsNullish() {
+				if !rt.isCallable(rf) {
+					return mkundef(), rt.typeError("'return' is not a function")
+				}
+				if _, e := rt.callValue(rf, this, nil); e != nil {
+					return mkundef(), e
+				}
+			}
+			return mkundef(), nil
+		}), attrWritable|attrConfigurable)
+	}
 	rt.defMethod(proto, "toArray", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		vs, e := drain(this)
 		if e != nil {
