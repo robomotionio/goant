@@ -428,6 +428,12 @@ func (rt *Runtime) initPromiseBuiltin() {
 	})
 
 	ctor := rt.newNativeFunc("Promise", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// Promise() must be invoked with `new` (NewTarget defined); a plain call —
+		// including Promise.call(anObject, ...) — is a TypeError before the
+		// executor is examined.
+		if !rt.constructing() {
+			return mkundef(), rt.typeError("Constructor Promise requires 'new'")
+		}
 		executor := arg(args, 0)
 		if !rt.isCallable(executor) {
 			return mkundef(), rt.typeError("Promise resolver is not a function")
