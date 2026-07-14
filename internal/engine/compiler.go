@@ -1071,6 +1071,8 @@ func (c *compiler) compileAssign(n *Node) {
 		c.emit(OpDup)
 		skip := c.emitJump(jmpOp)
 		c.emit(OpPop)
+		// NamedEvaluation: `x ||= () => {}` names the anonymous RHS "x".
+		nameAnonExpr(n.Right, name)
 		c.compileExpr(n.Right)
 		storeVar()
 		c.patchJump(skip)
