@@ -589,6 +589,12 @@ func (p *parser) checkArrowEarlyErrors(fn *Node) {
 	if bodyHasUseStrict(fn.Body) && hasNonSimpleParams(fn) {
 		p.errorf("Illegal 'use strict' directive in function with non-simple parameter list")
 	}
+	// An async arrow's parameters are [+Await]: `await` may not appear there,
+	// whether as a binding name or a reference (`async (await) => {}`,
+	// `async (x = await) => {}`).
+	if fn.Flags&fnAsync != 0 && paramsReferenceName(fn.Args, "await") {
+		p.errorf("'await' is not allowed in the parameters of an async arrow function")
+	}
 	// Arrow parameters come from a parenthesized cover grammar, so the rest and
 	// destructuring-pattern early errors are validated here rather than in parseFunc.
 	for i, param := range fn.Args {

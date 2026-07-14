@@ -231,6 +231,53 @@ func hasNonSimpleParams(fn *Node) bool {
 	return false
 }
 
+// paramsReferenceName reports whether any parameter node contains the identifier
+// `name` (as a binding or a reference), not descending into a nested non-arrow
+// function; arrows inherit the enclosing context and are searched. Used to reject
+// `await` in the parameters of an async arrow function.
+func paramsReferenceName(params []*Node, name string) bool {
+	var walk func(n *Node) bool
+	walk = func(n *Node) bool {
+		if n == nil {
+			return false
+		}
+		if n.Kind == NIdent && n.Str == name {
+			return true
+		}
+		if n.Kind == NFunc {
+			// A nested non-arrow function has its own context. A nested arrow
+			// inherits the await context only for its PARAMETERS, not its body
+			// (`() => await` is fine as a default, `(await) => {}` is not), so search
+			// its parameters but not its body.
+			if n.Flags&fnArrow == 0 {
+				return false
+			}
+			for _, a := range n.Args {
+				if walk(a) {
+					return true
+				}
+			}
+			return false
+		}
+		if walk(n.Left) || walk(n.Right) || walk(n.Cond) || walk(n.Body) ||
+			walk(n.Init) || walk(n.Update) {
+			return true
+		}
+		for _, a := range n.Args {
+			if walk(a) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, p := range params {
+		if walk(p) {
+			return true
+		}
+	}
+	return false
+}
+
 // paramsReferenceArguments reports whether any parameter's default initializer
 // (including a nested destructuring default) reads `arguments`. Binding-name
 // positions are ignored — a parameter merely *named* `arguments` shadows the
