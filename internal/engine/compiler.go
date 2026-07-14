@@ -824,7 +824,10 @@ func (c *compiler) compileUpdate(n *Node) {
 		c.errorf("only identifier increment/decrement is supported (slice)")
 		return
 	}
-	prefix := n.Flags == 1
+	// The prefix marker is bit 0; a parenthesized `(++x)` also carries fnParen
+	// (bit 9), so test the bit rather than equality (else `(++x)` mis-compiles as
+	// a postfix update, yielding the pre-increment value).
+	prefix := n.Flags&1 != 0
 	incOp := OpInc
 	if n.Op == TokPostDec {
 		incOp = OpDec
