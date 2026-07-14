@@ -259,7 +259,8 @@ func (c *compiler) compileMemberUpdate(n *Node) {
 
 	oldSlot := c.tempLocal()
 	c.loadMember(member, tSlot, kSlot) // [val]
-	c.emit(OpUplus)                    // ToNumber
+	c.emit(OpNeg)                      // ToNumeric(old): -(-x) preserves BigInt/fp
+	c.emit(OpNeg)
 	c.emitOpU16(OpPutLocal, uint16(oldSlot))
 
 	newSlot := c.tempLocal()

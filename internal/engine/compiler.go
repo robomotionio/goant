@@ -898,9 +898,14 @@ func (c *compiler) compileUpdate(n *Node) {
 		storeKeep()
 		return
 	}
-	// x++: result = ToNumber(x); x = that + 1.
+	// x++: result = ToNumeric(x); x = that ± 1. The update uses ToNumeric (which
+	// preserves BigInt), not ToNumber — double negation implements it fp-exactly
+	// (-(-x) === x for every float), coercing strings/objects via the first neg's
+	// ToNumber while keeping BigInt (OpNeg has a BigInt branch). OpUplus would
+	// throw on BigInt. incOp (OpInc/OpDec) then adds the unit, also BigInt-aware.
 	load()
-	c.emit(OpUplus) // ToNumber(old)
+	c.emit(OpNeg)
+	c.emit(OpNeg)
 	c.emit(OpDup)
 	c.emit(incOp)
 	storeConsume()

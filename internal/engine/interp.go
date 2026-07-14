@@ -793,22 +793,32 @@ restart:
 			ip++
 		case OpInc:
 			a := pop()
-			n, e := rt.toNumber(a)
-			if e != nil {
-				thrown = e
-				goto unwind
+			if a.Type() == TBigInt {
+				push(rt.newBigInt(new(big.Int).Add(rt.bigIntVal(a), big.NewInt(1))))
+				ip++
+			} else {
+				n, e := rt.toNumber(a)
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				push(mknum(n + 1))
+				ip++
 			}
-			push(mknum(n + 1))
-			ip++
 		case OpDec:
 			a := pop()
-			n, e := rt.toNumber(a)
-			if e != nil {
-				thrown = e
-				goto unwind
+			if a.Type() == TBigInt {
+				push(rt.newBigInt(new(big.Int).Sub(rt.bigIntVal(a), big.NewInt(1))))
+				ip++
+			} else {
+				n, e := rt.toNumber(a)
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				push(mknum(n - 1))
+				ip++
 			}
-			push(mknum(n - 1))
-			ip++
 		case OpNot:
 			push(mkbool(!rt.toBoolean(pop())))
 			ip++
