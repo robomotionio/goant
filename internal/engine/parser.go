@@ -1025,6 +1025,12 @@ func (p *parser) parsePrivateName() *Node {
 func (p *parser) parseArray() *Node {
 	p.consume()
 	n := p.mk(NArray)
+	// `in` is always permitted inside array-literal brackets, even when the
+	// enclosing context suppresses it (a for-in/for-of head): the [~In] guard
+	// only governs the head's top level, not a nested element or default.
+	outerNoIn := p.noIn
+	p.noIn = false
+	defer func() { p.noIn = outerNoIn }()
 	for p.next() != TokRBracket && p.tok() != TokEOF {
 		if p.tok() == TokComma {
 			p.consume()
@@ -1216,6 +1222,11 @@ func (p *parser) parseObject() *Node {
 	p.consume()
 	n := p.mk(NObject)
 	protoSet := false
+	// As with array literals, `in` is unrestricted inside object-literal braces
+	// regardless of an enclosing for-head [~In] context.
+	outerNoIn := p.noIn
+	p.noIn = false
+	defer func() { p.noIn = outerNoIn }()
 	for p.next() != TokRBrace && p.tok() != TokEOF {
 		prop := p.mk(NProperty)
 
