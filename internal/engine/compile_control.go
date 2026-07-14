@@ -552,6 +552,15 @@ func (c *compiler) compileSwitch(n *Node) {
 	discSlot := c.addLocal("*switch*", false)
 	c.emitOpU16(OpPutLocal, uint16(discSlot))
 
+	// A switch statement's value is UpdateEmpty(CaseBlockEvaluation, undefined):
+	// it never carries a preceding statement's completion value, so seed the
+	// completion slot with undefined before any clause may set it (`1; switch(x){}`
+	// completes with undefined, not 1).
+	if c.isScript {
+		c.emit(OpUndef)
+		c.emitOpU16(OpPutLocal, uint16(c.completionSlot))
+	}
+
 	// The clauses of a switch share a single lexical (CaseBlock) scope, so their
 	// let/const/class bindings are hoisted together — a name declared in two
 	// clauses is a duplicate (early SyntaxError), and TDZ spans the whole block.
