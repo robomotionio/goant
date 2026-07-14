@@ -193,15 +193,17 @@ func isLexicalDeclStmt(n *Node) bool {
 			n.VarKind == VarUsing || n.VarKind == VarAwaitUsing)
 }
 
-// isForbiddenIfBody reports whether a statement may not be the body of an
-// `if`/`else`: a lexical declaration, a class, or an async/generator/
-// async-generator declaration is always forbidden; a plain FunctionDeclaration
-// is allowed only in sloppy mode (Annex B labelled/if function declarations).
-func isForbiddenIfBody(n *Node, strict bool) bool {
+// isDeclNotStatement reports whether n is a Declaration that may not stand where
+// only a Statement (optionally an Annex B FunctionDeclaration) is allowed: a
+// lexical/class/async/generator/async-generator declaration always, and a plain
+// FunctionDeclaration in strict mode (Annex B permits it in sloppy). This is the
+// LabelledItem rule; if/else and iteration bodies additionally forbid a labelled
+// FunctionDeclaration (see isForbiddenIfBody / isForbiddenLoopBody).
+func isDeclNotStatement(n *Node, strict bool) bool {
 	if n == nil {
 		return false
 	}
-	if isLexicalDeclStmt(n) || isLabelledFunction(n) {
+	if isLexicalDeclStmt(n) {
 		return true
 	}
 	switch n.Kind {
@@ -217,6 +219,14 @@ func isForbiddenIfBody(n *Node, strict bool) bool {
 		return n.Str != ""
 	}
 	return false
+}
+
+// isForbiddenIfBody reports whether a statement may not be the body of an
+// `if`/`else`: any Declaration that isn't an Annex B sloppy FunctionDeclaration,
+// or a labelled FunctionDeclaration (which is fine at StatementList level but not
+// as a single-statement body).
+func isForbiddenIfBody(n *Node, strict bool) bool {
+	return isDeclNotStatement(n, strict) || isLabelledFunction(n)
 }
 
 // isLabelledFunction reports whether n is a (possibly multiply) labelled
@@ -2964,6 +2974,14 @@ func (p *parser) parseExprStmt() *Node {
 			p.next()
 			p.consume()
 			label.Body = p.parseStmt()
+			// A LabelledItem is a Statement or (Annex B, sloppy only) a plain
+			// FunctionDeclaration — never a lexical/class/async/generator declaration.
+			// A nested labelled statement (including a labelled function) is a
+			// Statement, so isLabelledFunction is deliberately not consulted here.
+			if isDeclNotStatement(label.Body, p.lx.strict) {
+				p.errorf("Declaration cannot appear in a single-statement context")
+				return label
+			}
 			return label
 		}
 	}
