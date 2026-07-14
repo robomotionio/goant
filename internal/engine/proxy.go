@@ -350,6 +350,12 @@ func (rt *Runtime) proxyOwnKeys(p *proxyState) ([]Value, *ThrowError) {
 		}
 		return keys, nil
 	}
+	// Missing trap: forward to target.[[OwnPropertyKeys]]. When the target is
+	// itself a proxy, route through its trap rather than reading the target
+	// object's ordinary keys (which would ignore the inner proxy entirely).
+	if to := rt.objPtr(p.target); to != nil && to.proxy != nil {
+		return rt.proxyOwnKeys(to.proxy)
+	}
 	return rt.targetOwnKeyList(p.target), nil
 }
 
@@ -449,10 +455,14 @@ func (rt *Runtime) proxyGetOwnPropertyDescriptor(p *proxyState, key Value) (Valu
 		}
 		return completed, nil
 	}
-	// Forward to target.
+	// Forward to target.[[GetOwnProperty]]. A proxy target routes through its own
+	// trap rather than exposing the (empty) ordinary descriptor beneath it.
 	to := rt.objPtr(p.target)
 	if to == nil {
 		return mkundef(), nil
+	}
+	if to.proxy != nil {
+		return rt.proxyGetOwnPropertyDescriptor(to.proxy, key)
 	}
 	var d ownDesc
 	if key.IsSymbol() {
