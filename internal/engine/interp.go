@@ -855,13 +855,19 @@ restart:
 			ip += 3
 		case OpBnot:
 			a := pop()
-			n, e := rt.toInt32(a)
-			if e != nil {
-				thrown = e
-				goto unwind
+			if a.Type() == TBigInt {
+				// BigInt::bitwiseNOT: ~x = -(x + 1).
+				push(rt.newBigInt(new(big.Int).Not(rt.bigIntVal(a))))
+				ip++
+			} else {
+				n, e := rt.toInt32(a)
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				push(mknum(float64(^n)))
+				ip++
 			}
-			push(mknum(float64(^n)))
-			ip++
 		case OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr:
 			b, a := pop(), pop()
 			v, e := rt.jsBitwise(op, a, b)
