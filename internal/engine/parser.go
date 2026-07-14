@@ -2996,6 +2996,13 @@ func (p *parser) parseFor() *Node {
 		}
 		n := p.mk(kind)
 		n.Left = initNode
+		// `for ( [lookahead ∉ { async of }] LeftHandSideExpression of ...)`: a
+		// bare (unparenthesized) `async` immediately before `of` is a Syntax Error
+		// in a plain for-of, disambiguating it from an async arrow head.
+		if !isForAwait && initNode != nil && initNode.Kind == NIdent &&
+			initNode.Str == "async" && initNode.Flags&fnParen == 0 {
+			p.errorf("'async' may not be the left-hand side of a for-of statement")
+		}
 		p.validatePatternTarget(initNode)
 		// A for-of head declaration may never carry an initializer.
 		if initNode != nil && initNode.Kind == NVar && varDeclHasInitializer(initNode) {
