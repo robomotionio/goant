@@ -561,6 +561,9 @@ func (rt *Runtime) initStringBuiltin() {
 	// String.prototype[Symbol.iterator] iterates by code point (astral-aware).
 	if rt.symIterator != 0 {
 		strIter := rt.newNativeFunc("[Symbol.iterator]", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			if this.IsNullish() { // RequireObjectCoercible
+				return mkundef(), rt.typeError("String.prototype[Symbol.iterator] called on null or undefined")
+			}
 			s, e := rt.toStringValue(this)
 			if e != nil {
 				return mkundef(), e

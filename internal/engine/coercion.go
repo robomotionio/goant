@@ -86,7 +86,12 @@ func (rt *Runtime) toPrimitive(v Value, hint string) (Value, *ThrowError) {
 		if e != nil {
 			return mkundef(), e
 		}
-		if rt.isCallable(exotic) {
+		// GetMethod(@@toPrimitive): undefined/null falls back to the ordinary
+		// algorithm; a present-but-not-callable value is a TypeError.
+		if !exotic.IsNullish() {
+			if !rt.isCallable(exotic) {
+				return mkundef(), rt.typeError("Symbol.toPrimitive method is not a function")
+			}
 			h := hint
 			if h == "" {
 				h = "default"
