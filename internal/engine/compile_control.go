@@ -327,6 +327,14 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 		return
 	}
 
+	// A let/const for-head binding is in its temporal dead zone while the source
+	// expression is evaluated (the head creates a new lexical scope), so seed it
+	// with the EMPTY hole first — a closure in the RHS that reads it then throws.
+	if lexSlot >= 0 {
+		c.emit(OpEmpty)
+		c.emitOpU16(OpPutLocal, uint16(lexSlot))
+	}
+
 	// Annex B.3.6: a `var` loop variable may carry an initializer in a for-in head
 	// (non-strict — the parser rejects it in strict mode). Evaluate it once, before
 	// the object expression, and seed the loop variable with it.
