@@ -1042,6 +1042,14 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 				}
 			}
 		}
+		// AllocateArrayBuffer step 1: OrdinaryCreateFromConstructor (resolve the
+		// prototype, surfacing a throwing new.target.prototype getter) happens
+		// BEFORE CreateByteDataBlock's size check, so a bad prototype beats the
+		// allocation RangeError.
+		ntProto, e := rt.newTargetProtoE(rt.arrayBufferProto)
+		if e != nil {
+			return mkundef(), e
+		}
 		var buf Value
 		if maxLen < 0 {
 			if n > maxByteLen {
@@ -1057,9 +1065,8 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 			}
 			buf = rt.newResizableArrayBuffer(n, maxLen)
 		}
-		// Honor a subclass new.target's prototype.
-		if p := rt.newTargetProto(rt.arrayBufferProto); p.IsObjectType() {
-			rt.objPtr(buf).proto = p
+		if ntProto.IsObjectType() {
+			rt.objPtr(buf).proto = ntProto
 		}
 		return buf, nil
 	})
