@@ -3198,6 +3198,11 @@ func (p *parser) parseWith() *Node {
 	n.Left = p.parseExpr()
 	p.expect(TokRParen)
 	n.Body = p.parseSubStmt()
+	// A `with` body is a single Statement: a Declaration (let/const/class or any
+	// FunctionDeclaration, including a labelled one) is not allowed there.
+	if isForbiddenLoopBody(n.Body) {
+		p.errorf("Declaration cannot appear in a single-statement context")
+	}
 	return n
 }
 
