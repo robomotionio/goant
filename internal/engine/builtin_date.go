@@ -415,6 +415,11 @@ func (rt *Runtime) computeDateMs(args []Value) (float64, *ThrowError) {
 		return float64(time.Now().UnixMilli()), nil
 	case 1:
 		a := args[0]
+		// Date(value): if value is a Date object, copy its [[DateValue]] directly
+		// (thisTimeValue) — no ToPrimitive/ToString/ToNumber on the argument.
+		if o := rt.objPtr(a); o != nil && o.brandID() == brandDate {
+			return o.boxed.Number(), nil
+		}
 		if a.IsString() {
 			return parseDate(string(rt.strBytes(a))), nil
 		}
