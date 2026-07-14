@@ -155,6 +155,28 @@ func (rt *Runtime) newTargetProto(fallback Value) Value {
 	return fallback
 }
 
+// newTargetProtoE is newTargetProto with abrupt-completion propagation: a
+// throwing "prototype" getter on new.target surfaces as a thrown error rather
+// than silently falling back (GetPrototypeFromConstructor's ? Get(nt,
+// "prototype")).
+func (rt *Runtime) newTargetProtoE(fallback Value) (Value, *ThrowError) {
+	nt := rt.pendingNewTarget
+	if nt.IsUndefined() {
+		return fallback, nil
+	}
+	if rt.pendingNewTargetProto != 0 && rt.pendingNewTargetProto.IsObjectType() {
+		return rt.pendingNewTargetProto, nil
+	}
+	p, e := rt.getField(nt, "prototype")
+	if e != nil {
+		return mkundef(), e
+	}
+	if p.IsObjectType() {
+		return p, nil
+	}
+	return fallback, nil
+}
+
 // constructing reports whether the current native builtin was invoked via
 // [[Construct]] (new.target is set). Native constructors read this first thing
 // to enforce "requires 'new'", since a method call like global.ArrayBuffer(n)

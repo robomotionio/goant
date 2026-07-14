@@ -1192,8 +1192,12 @@ func (rt *Runtime) initDataViewBuiltin() {
 			}
 		}
 		// OrdinaryCreateFromConstructor honors a subclass new.target; resolving its
-		// prototype can run a user getter that detaches the buffer, re-checked next.
-		viewProto := rt.newTargetProto(proto)
+		// prototype can run a user getter that throws (propagated) or detaches the
+		// buffer (re-checked next).
+		viewProto, pe := rt.newTargetProtoE(proto)
+		if pe != nil {
+			return mkundef(), pe
+		}
 		if bo.abuf == nil {
 			return mkundef(), rt.typeError("Cannot construct DataView on a detached ArrayBuffer")
 		}
