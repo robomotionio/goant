@@ -3181,8 +3181,21 @@ func (p *parser) parseExprStmt() *Node {
 		}
 	}
 	expr := p.parseExpr()
+	p.semicolon()
+	return expr
+}
+
+// semicolon consumes a statement-terminating semicolon, applying automatic
+// semicolon insertion: an explicit `;` is consumed; otherwise a `}` / EOF, or a
+// line terminator before the next token, ends the statement without one. Any
+// other token (a second token on the same line, e.g. `a b`) is a SyntaxError.
+func (p *parser) semicolon() {
 	if p.next() == TokSemicolon {
 		p.consume()
+		return
 	}
-	return expr
+	if p.tok() == TokRBrace || p.tok() == TokEOF || p.hadNewline() {
+		return
+	}
+	p.errorf("Unexpected token %q; expected a semicolon or line terminator", p.tokStr())
 }
