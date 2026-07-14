@@ -47,8 +47,9 @@ const (
 	slotMatchallRx
 	slotMatchallStr
 	slotMatchallDone
-	slotRawJSON // a JSON.rawJSON object's [[RawJSON]] text (a String)
-	slotMax = 255
+	slotRawJSON          // a JSON.rawJSON object's [[RawJSON]] text (a String)
+	slotImmutableBuffer  // marks an ArrayBuffer's [[ArrayBufferIsImmutable]] slot
+	slotMax             = 255
 )
 
 // brand ids for object internal-class checks (ant BRAND_*).

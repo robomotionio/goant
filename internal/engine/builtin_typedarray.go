@@ -535,6 +535,34 @@ func (rt *Runtime) isArrayBufferValue(v Value) bool {
 	return o != nil && o.abuf != nil && o.ta == nil && o.dv == nil
 }
 
+// abIsImmutable reports whether an ArrayBuffer object carries the
+// [[ArrayBufferIsImmutable]] slot (Immutable ArrayBuffer proposal).
+func (rt *Runtime) abIsImmutable(o *object) bool {
+	return o != nil && rt.toBoolean(o.getSlot(slotImmutableBuffer))
+}
+
+// resolveABBound maps a ToIntegerOrInfinity result to a byte offset in [0, n]
+// (ResolveBounds: -∞→0, negative→max(n+d,0), else→min(d,n)).
+func resolveABBound(d float64, n int) int {
+	switch {
+	case math.IsInf(d, -1):
+		return 0
+	case math.IsInf(d, 1):
+		return n
+	}
+	k := int(d)
+	if k < 0 {
+		if k += n; k < 0 {
+			k = 0
+		}
+		return k
+	}
+	if k > n {
+		return n
+	}
+	return k
+}
+
 func (rt *Runtime) initTypedArrays() {
 	// %TypedArray%.prototype shared by all element kinds.
 	taProto := rt.newObject(rt.objectProto)
@@ -772,6 +800,9 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 			if o.abuf == nil {
 				return mkundef(), rt.typeError("Cannot transfer a detached ArrayBuffer")
 			}
+			if rt.abIsImmutable(o) {
+				return mkundef(), rt.typeError("Cannot transfer an immutable ArrayBuffer")
+			}
 			var nb Value
 			if preserveResizability && o.abResizable {
 				max := o.abMax
@@ -789,6 +820,76 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	}
 	rt.defMethod(po, "transfer", 0, transfer(true))
 	rt.defMethod(po, "transferToFixedLength", 0, transfer(false))
+	// transferToImmutable([newLength]) — ArrayBufferCopyAndDetach with an
+	// immutable result: copy min(newLength, current) bytes into a new immutable
+	// buffer (zero-filling any growth) and detach the source.
+	rt.defMethod(po, "transferToImmutable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || !o.abObj {
+			return mkundef(), rt.typeError("ArrayBuffer.prototype.transferToImmutable on incompatible receiver")
+		}
+		newLen := len(o.abuf)
+		if a := arg(args, 0); !a.IsUndefined() {
+			n, e := rt.toIndex(a)
+			if e != nil {
+				return mkundef(), e
+			}
+			newLen = n
+		}
+		if o.abuf == nil {
+			return mkundef(), rt.typeError("Cannot transfer a detached ArrayBuffer")
+		}
+		if rt.abIsImmutable(o) {
+			return mkundef(), rt.typeError("Cannot transfer an immutable ArrayBuffer")
+		}
+		if newLen > maxByteLen {
+			return mkundef(), rt.rangeError("transferToImmutable length too large")
+		}
+		nb := rt.newArrayBuffer(newLen)
+		copy(rt.objPtr(nb).abuf, o.abuf) // copyLength = min(newLen, old) via slice bounds
+		rt.objPtr(nb).setSlot(slotImmutableBuffer, mkbool(true))
+		o.abuf = nil // detach the source
+		return nb, nil
+	})
+	// sliceToImmutable([start[, end]]) — copy the [start, end) bytes into a new
+	// immutable buffer without detaching or aliasing the source. Bounds resolve
+	// against the length captured before the (side-effecting) index coercions;
+	// the detached check and a currentLen<final RangeError happen after.
+	rt.defMethod(po, "sliceToImmutable", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || !o.abObj {
+			return mkundef(), rt.typeError("ArrayBuffer.prototype.sliceToImmutable on incompatible receiver")
+		}
+		n := len(o.abuf)
+		ds, e := rt.toIntegerOrInfinity(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		first := resolveABBound(ds, n)
+		var de float64
+		if a := arg(args, 1); a.IsUndefined() {
+			de = float64(n)
+		} else if de, e = rt.toIntegerOrInfinity(a); e != nil {
+			return mkundef(), e
+		}
+		final := resolveABBound(de, n)
+		newLen := final - first
+		if newLen < 0 {
+			newLen = 0
+		}
+		if o.abuf == nil {
+			return mkundef(), rt.typeError("Cannot slice a detached ArrayBuffer")
+		}
+		if len(o.abuf) < final {
+			return mkundef(), rt.rangeError("sliceToImmutable range exceeds the resized buffer")
+		}
+		nb := rt.newArrayBuffer(newLen)
+		if newLen > 0 {
+			copy(rt.objPtr(nb).abuf, o.abuf[first:first+newLen])
+		}
+		rt.objPtr(nb).setSlot(slotImmutableBuffer, mkbool(true))
+		return nb, nil
+	})
 	rt.defMethod(po, "resize", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		if o == nil || o.ta != nil || o.dv != nil || !o.abResizable {
@@ -887,7 +988,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	})
 	po.defineAccessor("maxByteLength", rt.newNativeFunc("get maxByteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || o.ta != nil || o.dv != nil {
+		if o == nil || !o.abObj {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.maxByteLength on incompatible receiver")
 		}
 		if o.abuf == nil {
@@ -897,10 +998,18 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	}), mkundef(), true, false, attrConfigurable)
 	po.defineAccessor("resizable", rt.newNativeFunc("get resizable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || o.ta != nil || o.dv != nil {
+		if o == nil || !o.abObj {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.resizable on incompatible receiver")
 		}
 		return mkbool(o.abResizable), nil
+	}), mkundef(), true, false, attrConfigurable)
+	// immutable getter (Immutable ArrayBuffer proposal): IsImmutableBuffer.
+	po.defineAccessor("immutable", rt.newNativeFunc("get immutable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || !o.abObj {
+			return mkundef(), rt.typeError("ArrayBuffer.prototype.immutable on incompatible receiver")
+		}
+		return mkbool(rt.abIsImmutable(o)), nil
 	}), mkundef(), true, false, attrConfigurable)
 	rt.setStringTag(proto, "ArrayBuffer")
 
