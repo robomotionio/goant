@@ -927,6 +927,18 @@ func (p *parser) parseNew() *Node {
 			return callee
 		}
 	}
+	// `import(...)` is a CallExpression, so neither it nor a member access rooted
+	// at it (`new import(x).prop`) is a valid MemberExpression operand for `new`.
+	for b := callee; b != nil && b.Kind == NMember; b = b.Left {
+		if b.Left != nil && b.Left.Kind == NImport {
+			callee = b.Left
+			break
+		}
+	}
+	if callee != nil && callee.Kind == NImport {
+		p.errorf("Invalid new expression: import() is not a valid constructor")
+		return p.mk(NEmpty)
+	}
 	n.Left = callee
 	if p.next() == TokLParen {
 		p.consume()
@@ -951,15 +963,47 @@ func (p *parser) parseNew() *Node {
 }
 
 func (p *parser) parseImportExpr() *Node {
-	p.consume()
-	if p.next() != TokLParen {
-		return mkIdent("import")
+	p.consume() // 'import'
+	switch p.next() {
+	case TokDot:
+		// `import.meta` is valid only in a Module goal; every other `import.<x>`
+		// (the unadopted import.defer / import.source proposals) is never valid.
+		// The runner evaluates scripts, so either way this is an early error here.
+		p.errorf("'import.meta' may only appear in a module")
+		return p.mk(NEmpty)
+	case TokLParen:
+		p.consume()
+		n := p.mk(NImport)
+		if p.next() == TokRParen {
+			p.errorf("import() requires a specifier argument")
+			return p.mk(NEmpty)
+		}
+		// ImportCall arguments are AssignmentExpressions (a specifier and an
+		// optional options object) — not a comma sequence, and no spread.
+		if p.next() == TokRest {
+			p.errorf("`...` spread is not allowed in import()")
+			return p.mk(NEmpty)
+		}
+		n.Right = p.parseAssign()
+		if p.next() == TokComma {
+			p.consume()
+			if p.next() != TokRParen {
+				if p.next() == TokRest {
+					p.errorf("`...` spread is not allowed in import()")
+					return p.mk(NEmpty)
+				}
+				n.Left = p.parseAssign()
+				if p.next() == TokComma {
+					p.consume() // trailing comma
+				}
+			}
+		}
+		p.expect(TokRParen)
+		return n
+	default:
+		p.errorf("'import' is only valid in a call import(...) here")
+		return p.mk(NEmpty)
 	}
-	p.consume()
-	n := p.mk(NImport)
-	n.Right = p.parseExpr()
-	p.expect(TokRParen)
-	return n
 }
 
 func (p *parser) parseRegex() *Node {
