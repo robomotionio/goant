@@ -58,6 +58,11 @@ type parser struct {
 	// sloppy-mode disambiguation of a leading `let` (an identifier there, never a
 	// LexicalDeclaration).
 	singleStmt bool
+	// pendingFuncExpr is a one-shot flag a caller sets immediately before
+	// parseFunc to mark that it is parsing a FunctionExpression (not a
+	// declaration). A FunctionExpression's name is [~Yield, ~Await], so `yield`/
+	// `await` are valid there even inside an enclosing generator/async function.
+	pendingFuncExpr bool
 }
 
 // Parse tokenizes and parses src into an AST (N_PROGRAM root node).
@@ -793,6 +798,7 @@ func (p *parser) parsePrimary() *Node {
 		return p.parseObject()
 	case TokFunc:
 		p.consume()
+		p.pendingFuncExpr = true
 		fn := p.parseFunc()
 		fn.Flags |= fnFuncExpr
 		return fn
@@ -919,6 +925,7 @@ func (p *parser) parseAsyncPrimary() *Node {
 		p.next()
 		p.consume()
 		p.pendingAsync = true
+		p.pendingFuncExpr = true
 		fn := p.parseFunc()
 		fn.Flags |= fnAsync | fnFuncExpr
 		fn.SrcOff = asyncOff
@@ -2016,6 +2023,8 @@ func (p *parser) parseFunc() *Node {
 	p.pendingAsync = false
 	isGenerator := p.pendingGenerator // a method whose `*` the caller already ate
 	p.pendingGenerator = false
+	isExpr := p.pendingFuncExpr
+	p.pendingFuncExpr = false
 	savedAsync := p.inAsync
 	savedGen := p.inGenerator
 	savedSB := p.inStaticBlock
@@ -2030,14 +2039,25 @@ func (p *parser) parseFunc() *Node {
 	if isGenerator {
 		fn.Flags |= fnGenerator
 	}
-	if isIdentLikeTok(p.next()) {
+	// The optional BindingIdentifier accepts the contextual keywords
+	// yield/await/let/static as names too; their validity in the current context
+	// is enforced just below (generator/async) and by strictCheckBindingIdent.
+	nameTok := p.next()
+	if isIdentLikeTok(nameTok) || nameTok == TokYield || nameTok == TokAwait ||
+		nameTok == TokLet || nameTok == TokStatic {
 		fn.Str = p.tokIdentStr()
-		// The function name is a BindingIdentifier evaluated in the ENCLOSING
-		// yield/await context (inGenerator/inAsync were already reset for this
-		// function's own body), so check it against the saved outer context.
-		if savedGen && fn.Str == "yield" {
+		// A FunctionDeclaration's name is a BindingIdentifier in the ENCLOSING
+		// yield/await context; a FunctionExpression's name is [~Yield, ~Await],
+		// constrained only by the function's OWN generator/async-ness. So
+		// `function* g(){ (function yield(){}); }` is valid but
+		// `function* yield(){}` (a generator expression) is not.
+		yieldGen, awaitAsync := savedGen, savedAsync
+		if isExpr {
+			yieldGen, awaitAsync = isGenerator, isAsync
+		}
+		if yieldGen && fn.Str == "yield" {
 			p.errorf("'yield' cannot be used as a binding identifier in a generator")
-		} else if savedAsync && fn.Str == "await" {
+		} else if awaitAsync && fn.Str == "await" {
 			p.errorf("'await' cannot be used as a binding identifier in an async function")
 		}
 		p.strictCheckBindingIdent(fn.Str)
