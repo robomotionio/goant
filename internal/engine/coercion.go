@@ -148,9 +148,10 @@ func (rt *Runtime) toObjectValue(v Value) (Value, *ThrowError) {
 	w := rt.newObject(rt.primitiveProto(v))
 	o := rt.objPtr(w)
 	o.boxed = v
-	if v.Type() == TNum {
-		// A Number wrapper's [[NumberData]] is marked in slotPrimitive so it is
-		// distinguishable from a plain object (whose zero-value boxed reads as 0).
+	if v.Type() == TNum || v.Type() == TBigInt {
+		// A Number/BigInt wrapper's [[NumberData]]/[[BigIntData]] is marked in
+		// slotPrimitive so it is distinguishable from a plain object (whose
+		// zero-value boxed reads as the number 0).
 		o.setSlot(slotPrimitive, v)
 	}
 	if v.Type() == TStr {

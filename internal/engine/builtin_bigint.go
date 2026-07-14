@@ -144,13 +144,9 @@ func (rt *Runtime) initBigIntBuiltin() {
 	rt.setStringTag(proto, "BigInt")
 
 	rt.defMethod(cobj, "asIntN", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		bitsN, e := rt.toNumber(arg(args, 0))
+		bits, e := rt.toIndex(arg(args, 0)) // ToIndex first (undefined→0, out-of-range→RangeError)
 		if e != nil {
 			return mkundef(), e
-		}
-		bits := int(bitsN)
-		if bits < 0 {
-			return mkundef(), rt.rangeError("Invalid bit count for BigInt.as*IntN")
 		}
 		bi, e := rt.toBigInt(arg(args, 1))
 		if e != nil {
@@ -159,13 +155,9 @@ func (rt *Runtime) initBigIntBuiltin() {
 		return rt.newBigInt(bigIntAsIntN(bits, bi)), nil
 	})
 	rt.defMethod(cobj, "asUintN", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		bitsN, e := rt.toNumber(arg(args, 0))
+		bits, e := rt.toIndex(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
-		}
-		bits := int(bitsN)
-		if bits < 0 {
-			return mkundef(), rt.rangeError("Invalid bit count for BigInt.as*IntN")
 		}
 		bi, e := rt.toBigInt(arg(args, 1))
 		if e != nil {
