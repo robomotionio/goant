@@ -2152,6 +2152,13 @@ func (p *parser) parseClass() *Node {
 	cls := p.mk(NClass)
 	if isIdentLikeTok(p.next()) && !(p.tlen() == 7 && p.tokStr() == "extends") {
 		cls.Str = p.tokIdentStr()
+		// A class definition is strict code, so its name is a strict
+		// BindingIdentifier: not eval/arguments or a strict future-reserved word
+		// (`class eval {}`, `class package {}` are SyntaxErrors). `await` is handled
+		// separately below since it is contextual, not strict-reserved.
+		if isEvalOrArgumentsName(cls.Str) || isStrictReservedName(cls.Str) {
+			p.errorf("'%s' may not be used as a class name", cls.Str)
+		}
 		p.consume()
 	} else if p.next() == TokAwait && !p.inAsync && !p.inStaticBlock {
 		// A class body is strict, but `await` is not a strict-reserved word, so it
