@@ -191,7 +191,9 @@ func (c *compiler) compileForOf(n *Node) {
 	c.scopeDepth++
 	store, lexSlot := c.forInStore(n.Left)
 	if store == nil {
-		c.errorf("unsupported for-of target (slice)")
+		// The head's LeftHandSideExpression is not a simple assignment target
+		// (e.g. `for (this of [])`, `for (f() of [])`) — an early SyntaxError.
+		c.syntaxErrorf("Invalid left-hand side in for-loop")
 		c.scopeDepth--
 		return
 	}
@@ -280,7 +282,7 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	c.scopeDepth++
 	store, lexSlot := c.forInStore(n.Left)
 	if store == nil {
-		c.errorf("unsupported for-await-of target (slice)")
+		c.syntaxErrorf("Invalid left-hand side in for-loop")
 		c.scopeDepth--
 		return
 	}
