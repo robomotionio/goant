@@ -189,7 +189,7 @@ func (c *compiler) compileForOf(n *Node) {
 		return
 	}
 	c.scopeDepth++
-	store, lexSlot := c.forInStore(n.Left)
+	store, lexSlots := c.forInStore(n.Left)
 	if store == nil {
 		// The head's LeftHandSideExpression is not a simple assignment target
 		// (e.g. `for (this of [])`, `for (f() of [])`) — an early SyntaxError.
@@ -197,17 +197,12 @@ func (c *compiler) compileForOf(n *Node) {
 		c.scopeDepth--
 		return
 	}
-	// The let/const head binding is in its temporal dead zone while the iterable
-	// expression is evaluated; seed it with the hole, then detach it so the
+	// The let/const head binding(s) are in their temporal dead zone while the
+	// iterable expression is evaluated; seed with the hole, then detach so the
 	// per-iteration bindings use fresh cells (see compileForArray).
-	if lexSlot >= 0 {
-		c.emit(OpEmpty)
-		c.emitOpU16(OpPutLocal, uint16(lexSlot))
-	}
+	c.seedForHeadHoles(lexSlots)
 	c.compileExpr(n.Right)
-	if lexSlot >= 0 {
-		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
-	}
+	c.closeForHeadBindings(lexSlots)
 	c.emit(OpIterCall) // source -> iterator
 	c.emitByte(0)      // Size-2 opcode: unused inline operand
 	iterSlot := c.addLocal("*foi*", false)
@@ -256,9 +251,7 @@ func (c *compiler) compileForOf(n *Node) {
 
 	l.continueTarget = len(c.fn.code)
 	c.patchContinues(l)
-	if lexSlot >= 0 {
-		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
-	}
+	c.closeForHeadBindings(lexSlots)
 	c.emit(OpJmp)
 	c.emitU32(uint32(condStart))
 
@@ -298,14 +291,16 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	c.checkForHeadDecl(n.Left, n.Body)
 	c.resetCompletion()
 	c.scopeDepth++
-	store, lexSlot := c.forInStore(n.Left)
+	store, lexSlots := c.forInStore(n.Left)
 	if store == nil {
 		c.syntaxErrorf("Invalid left-hand side in for-loop")
 		c.scopeDepth--
 		return
 	}
-	// iter = GetAsyncIterator(source)
+	// iter = GetAsyncIterator(source); the head binding(s) are in TDZ during it.
+	c.seedForHeadHoles(lexSlots)
 	c.compileExpr(n.Right)
+	c.closeForHeadBindings(lexSlots)
 	c.emit(OpForAwaitOf) // source -> asyncIter
 	iterSlot := c.addLocal("*fai*", false)
 	c.emitOpU16(OpPutLocal, uint16(iterSlot))
@@ -334,9 +329,7 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 
 	l.continueTarget = len(c.fn.code)
 	c.patchContinues(l)
-	if lexSlot >= 0 {
-		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
-	}
+	c.closeForHeadBindings(lexSlots)
 	c.emit(OpJmp)
 	c.emitU32(uint32(condStart))
 
@@ -350,7 +343,7 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	c.resetCompletion()
 	c.scopeDepth++
-	store, lexSlot := c.forInStore(n.Left)
+	store, lexSlots := c.forInStore(n.Left)
 	if store == nil {
 		c.syntaxErrorf("Invalid left-hand side in for-loop")
 		c.scopeDepth--
@@ -360,10 +353,7 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	// A let/const for-head binding is in its temporal dead zone while the source
 	// expression is evaluated (the head creates a new lexical scope), so seed it
 	// with the EMPTY hole first — a closure in the RHS that reads it then throws.
-	if lexSlot >= 0 {
-		c.emit(OpEmpty)
-		c.emitOpU16(OpPutLocal, uint16(lexSlot))
-	}
+	c.seedForHeadHoles(lexSlots)
 
 	// Annex B.3.6: a `var` loop variable may carry an initializer in a for-in head
 	// (non-strict — the parser rejects it in strict mode). Evaluate it once, before
@@ -379,9 +369,7 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	// Detach the head binding that a closure in the RHS captured (in its dead
 	// zone) so the per-iteration assignments below use a fresh cell — the
 	// RHS-scope binding stays permanently uninitialized, so such a closure throws.
-	if lexSlot >= 0 {
-		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
-	}
+	c.closeForHeadBindings(lexSlots)
 	c.emit(produceOp) // source -> keys/values array
 	keysSlot := c.addLocal("*fik*", false)
 	c.emitOpU16(OpPutLocal, uint16(keysSlot))
@@ -413,9 +401,7 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	c.patchContinues(l)
 	// Per-iteration lexical binding: close any closure capture of the loop var
 	// before the next iteration reuses its slot.
-	if lexSlot >= 0 {
-		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
-	}
+	c.closeForHeadBindings(lexSlots)
 	c.emitOpU16(OpGetLocal, uint16(iSlot))
 	c.emit(OpInc)
 	c.emitOpU16(OpPutLocal, uint16(iSlot))
@@ -483,18 +469,52 @@ func (c *compiler) checkForHeadDecl(head, body *Node) {
 	}
 }
 
-func (c *compiler) forInStore(left *Node) (func(), int) {
+// seedForHeadHoles seeds each loop-head lexical binding with the EMPTY (TDZ)
+// hole: the head bindings are dead while the iterable/enumerated expression is
+// evaluated (a closure created there that reads one throws a ReferenceError).
+func (c *compiler) seedForHeadHoles(slots []int) {
+	for _, s := range slots {
+		c.emit(OpEmpty)
+		c.emitOpU16(OpPutLocal, uint16(s))
+	}
+}
+
+// closeForHeadBindings detaches the loop-head lexical bindings so each new
+// iteration (and the iterable evaluation) captures fresh cells.
+func (c *compiler) closeForHeadBindings(slots []int) {
+	for _, s := range slots {
+		c.emitOpU16(OpCloseUpval, uint16(s))
+	}
+}
+
+// forInStore returns a closure that stores the current element/key into the
+// loop head, and the lexical binding slots (if any) that need per-iteration TDZ
+// seeding and fresh-cell detachment. A nil slice means no lexical head bindings.
+func (c *compiler) forInStore(left *Node) (func(), []int) {
 	var name string
 	switch {
 	case left.Kind == NVar && len(left.Args) == 1 && left.Args[0].Left != nil:
 		binding := left.Args[0].Left
-		// Destructuring loop variable: for (var [k,v] of …).
+		// Destructuring loop variable: for (var/let/const [k,v] of …).
 		if binding.Kind == NArray || binding.Kind == NObject {
 			kind := left.VarKind
-			return func() { c.destructureTarget(binding, kind) }, -1
+			if kind == VarLet || kind == VarConst {
+				// Pre-declare the pattern's bound names as lexicals so they get the
+				// TDZ hole while the iterable is evaluated and a fresh per-iteration
+				// binding. destructureTarget reuses these slots (bindDeclName's
+				// lexicalAtCurrentDepth), storing into them rather than redeclaring.
+				var names []string
+				collectPatternNames(binding, &names)
+				var slots []int
+				for _, nm := range names {
+					slots = append(slots, c.declareLexical(nm, kind == VarConst))
+				}
+				return func() { c.destructureTarget(binding, kind) }, slots
+			}
+			return func() { c.destructureTarget(binding, kind) }, nil
 		}
 		if binding.Kind != NIdent {
-			return nil, -1
+			return nil, nil
 		}
 		name = binding.Str
 		// A `var` head binds globally only at true script top level; eval `var`
@@ -503,14 +523,14 @@ func (c *compiler) forInStore(left *Node) (func(), int) {
 		// through an unresolvable global assignment.
 		if !(left.VarKind == VarVar && c.isScript && !c.isEval) {
 			var slot int
-			lexSlot := -1
+			var lexSlots []int
 			if left.VarKind == VarLet || left.VarKind == VarConst {
 				slot = c.declareLexical(name, left.VarKind == VarConst)
-				lexSlot = slot
+				lexSlots = []int{slot}
 			} else {
 				slot = c.declareVar(name, false)
 			}
-			return func() { c.emitOpU16(OpPutLocal, uint16(slot)) }, lexSlot
+			return func() { c.emitOpU16(OpPutLocal, uint16(slot)) }, lexSlots
 		}
 	case left.Kind == NIdent:
 		name = left.Str
@@ -518,17 +538,17 @@ func (c *compiler) forInStore(left *Node) (func(), int) {
 		// Assignment target with no declaration: for ([a,b] of …), for ({x} of …),
 		// for (obj.p of …). The head is a destructuring/member assignment to
 		// existing references, evaluated fresh each iteration.
-		return func() { c.destructureTarget(left, varAssign) }, -1
+		return func() { c.destructureTarget(left, varAssign) }, nil
 	default:
-		return nil, -1
+		return nil, nil
 	}
 	if slot := c.resolveLocal(name); slot >= 0 {
-		return func() { c.emitOpU16(OpPutLocal, uint16(slot)) }, -1
+		return func() { c.emitOpU16(OpPutLocal, uint16(slot)) }, nil
 	}
 	if uv := c.resolveUpvalue(name); uv >= 0 {
-		return func() { c.emitOpU16(OpPutUpval, uint16(uv)) }, -1
+		return func() { c.emitOpU16(OpPutUpval, uint16(uv)) }, nil
 	}
-	return func() { c.emitGlobalPut(name) }, -1
+	return func() { c.emitGlobalPut(name) }, nil
 }
 
 func (c *compiler) compileBreak(n *Node) {
