@@ -193,6 +193,32 @@ func isLexicalDeclStmt(n *Node) bool {
 			n.VarKind == VarUsing || n.VarKind == VarAwaitUsing)
 }
 
+// isForbiddenIfBody reports whether a statement may not be the body of an
+// `if`/`else`: a lexical declaration, a class, or an async/generator/
+// async-generator declaration is always forbidden; a plain FunctionDeclaration
+// is allowed only in sloppy mode (Annex B labelled/if function declarations).
+func isForbiddenIfBody(n *Node, strict bool) bool {
+	if n == nil {
+		return false
+	}
+	if isLexicalDeclStmt(n) {
+		return true
+	}
+	switch n.Kind {
+	case NFunc:
+		if n.Flags&(fnArrow|fnFuncExpr) != 0 || n.Str == "" {
+			return false // a function expression statement
+		}
+		if n.Flags&(fnAsync|fnGenerator) != 0 {
+			return true
+		}
+		return strict
+	case NClass:
+		return n.Str != ""
+	}
+	return false
+}
+
 // isForbiddenLoopBody reports whether a statement may not be the body of a
 // for/for-in/for-of/while/do-while loop: a lexical declaration, or a
 // function/generator/async-function/class declaration (the loop body is a
@@ -2431,15 +2457,15 @@ func (p *parser) parseIf() *Node {
 	n.Cond = p.parseExpr()
 	p.expect(TokRParen)
 	n.Left = p.parseStmt()
-	if isLexicalDeclStmt(n.Left) {
-		p.errorf("Lexical declaration cannot appear in single-statement context")
+	if isForbiddenIfBody(n.Left, p.lx.strict) {
+		p.errorf("Declaration cannot appear in a single-statement context")
 		return n
 	}
 	if p.next() == TokElse {
 		p.consume()
 		n.Right = p.parseStmt()
-		if isLexicalDeclStmt(n.Right) {
-			p.errorf("Lexical declaration cannot appear in single-statement context")
+		if isForbiddenIfBody(n.Right, p.lx.strict) {
+			p.errorf("Declaration cannot appear in a single-statement context")
 			return n
 		}
 	}
