@@ -298,7 +298,7 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	c.scopeDepth++
 	store, lexSlot := c.forInStore(n.Left)
 	if store == nil {
-		c.errorf("unsupported for-in/of target (slice)")
+		c.syntaxErrorf("Invalid left-hand side in for-loop")
 		c.scopeDepth--
 		return
 	}

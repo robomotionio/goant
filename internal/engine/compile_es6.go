@@ -64,7 +64,7 @@ func (c *compiler) destructureTarget(pattern *Node, kind VarKind) {
 	case NEmpty:
 		c.emit(OpPop)
 	default:
-		c.errorf("unsupported destructuring target (slice)")
+		c.syntaxErrorf("Invalid destructuring assignment target")
 	}
 }
 
