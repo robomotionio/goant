@@ -195,7 +195,17 @@ func (c *compiler) compileForOf(n *Node) {
 		c.scopeDepth--
 		return
 	}
+	// The let/const head binding is in its temporal dead zone while the iterable
+	// expression is evaluated; seed it with the hole, then detach it so the
+	// per-iteration bindings use fresh cells (see compileForArray).
+	if lexSlot >= 0 {
+		c.emit(OpEmpty)
+		c.emitOpU16(OpPutLocal, uint16(lexSlot))
+	}
 	c.compileExpr(n.Right)
+	if lexSlot >= 0 {
+		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
+	}
 	c.emit(OpIterCall) // source -> iterator
 	c.emitByte(0)      // Size-2 opcode: unused inline operand
 	iterSlot := c.addLocal("*foi*", false)
@@ -346,6 +356,12 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	}
 
 	c.compileExpr(n.Right)
+	// Detach the head binding that a closure in the RHS captured (in its dead
+	// zone) so the per-iteration assignments below use a fresh cell — the
+	// RHS-scope binding stays permanently uninitialized, so such a closure throws.
+	if lexSlot >= 0 {
+		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
+	}
 	c.emit(produceOp) // source -> keys/values array
 	keysSlot := c.addLocal("*fik*", false)
 	c.emitOpU16(OpPutLocal, uint16(keysSlot))
