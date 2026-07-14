@@ -595,6 +595,11 @@ func (p *parser) checkArrowEarlyErrors(fn *Node) {
 	if fn.Flags&fnAsync != 0 && paramsReferenceName(fn.Args, "await") {
 		p.errorf("'await' is not allowed in the parameters of an async arrow function")
 	}
+	// In strict code (enclosing, or a "use strict" body directive) an arrow's
+	// simple parameter may not be `eval`/`arguments` or a reserved word.
+	if p.lx.strict || bodyHasUseStrict(fn.Body) {
+		p.checkStrictParams(fn)
+	}
 	// Arrow parameters come from a parenthesized cover grammar, so the rest and
 	// destructuring-pattern early errors are validated here rather than in parseFunc.
 	for i, param := range fn.Args {
