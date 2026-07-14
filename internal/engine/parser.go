@@ -907,6 +907,12 @@ func (p *parser) validateArrayPattern(n *Node) {
 		case NArray:
 			p.validateArrayPattern(e)
 		case NSpread, NRest:
+			// A rest element is a BindingRestElement / AssignmentRestElement: it may
+			// not carry a default initializer (`[...x = 1]` is an early SyntaxError).
+			if e.Right != nil && (e.Right.Kind == NAssign || e.Right.Kind == NAssignPat) {
+				p.errorf("`...` rest element may not have a default initializer")
+				return
+			}
 			p.validateArrayPattern(e.Right)
 		case NAssign, NAssignPat:
 			p.validateArrayPattern(e.Left)
