@@ -360,6 +360,34 @@ func pushArrowParamsFromExpr(fn, expr *Node) {
 
 // ---- member/call suffixes ----
 
+// nodeContainsArguments reports whether an `arguments` identifier reference
+// appears in an expression outside of any nested non-arrow function (which
+// would bind its own `arguments`). Used for the class-field-initializer early
+// error (a field initializer may not contain `arguments`).
+func nodeContainsArguments(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	if n.Kind == NIdent && n.Str == "arguments" {
+		return true
+	}
+	// A non-arrow function establishes its own `arguments` binding.
+	if n.Kind == NFunc && n.Flags&fnArrow == 0 {
+		return false
+	}
+	for _, c := range []*Node{n.Left, n.Right, n.Cond, n.Body, n.Init, n.Update, n.CatchParam, n.CatchBody, n.FinallyBody} {
+		if nodeContainsArguments(c) {
+			return true
+		}
+	}
+	for _, c := range n.Args {
+		if nodeContainsArguments(c) {
+			return true
+		}
+	}
+	return false
+}
+
 // isClassFieldMember reports whether a class member node is a field (not a
 // method, generator, or accessor): its value is an initializer expression
 // rather than a concise-method function.
@@ -1701,6 +1729,11 @@ func (p *parser) parseClass() *Node {
 					return cls
 				}
 			}
+		}
+		// A class field initializer may not reference `arguments`.
+		if isClassFieldMember(method) && nodeContainsArguments(method.Right) {
+			p.errorf("'arguments' is not allowed in a class field initializer")
+			return cls
 		}
 		cls.Args = append(cls.Args, method)
 	}
