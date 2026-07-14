@@ -617,6 +617,15 @@ func (p *parser) checkArrowEarlyErrors(fn *Node) {
 	if fn.Flags&fnAsync != 0 && paramsReferenceName(fn.Args, "await") {
 		p.errorf("'await' is not allowed in the parameters of an async arrow function")
 	}
+	// An arrow inherits the enclosing generator/async context for its parameter
+	// list, so a yield/await EXPRESSION there is an early error even when the
+	// arrow is nested in the body of a generator/async function:
+	// `function* g(){ (x = yield) => {} }`, `async f(){ (x = await 1) => {} }`.
+	awaitCtx := fn.Flags&fnAsync != 0 || p.inAsync
+	yieldCtx := p.inGenerator
+	if (awaitCtx || yieldCtx) && paramsContainYieldAwaitExpr(fn.Args, yieldCtx, awaitCtx) {
+		p.errorf("a yield or await expression is not allowed in arrow-function parameters")
+	}
 	// In strict code (enclosing, or a "use strict" body directive) an arrow's
 	// simple parameter may not be `eval`/`arguments` or a reserved word.
 	if p.lx.strict || bodyHasUseStrict(fn.Body) {

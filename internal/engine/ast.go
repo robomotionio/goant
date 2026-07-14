@@ -235,6 +235,56 @@ func hasNonSimpleParams(fn *Node) bool {
 // `name` (as a binding or a reference), not descending into a nested non-arrow
 // function; arrows inherit the enclosing context and are searched. Used to reject
 // `await` in the parameters of an async arrow function.
+// paramsContainYieldAwaitExpr reports whether any parameter node contains a
+// YieldExpression (when yield) or an AwaitExpression (when await). Like
+// paramsReferenceName it descends into a nested arrow's PARAMETERS but not its
+// body — `(x = () => await v) => {}` is fine because the await is in the inner
+// arrow's body — and stops at a nested non-arrow function (its own context).
+func paramsContainYieldAwaitExpr(params []*Node, yield, await bool) bool {
+	var walk func(n *Node) bool
+	walk = func(n *Node) bool {
+		if n == nil {
+			return false
+		}
+		switch n.Kind {
+		case NYield:
+			if yield {
+				return true
+			}
+		case NAwait:
+			if await {
+				return true
+			}
+		case NFunc:
+			if n.Flags&fnArrow == 0 {
+				return false
+			}
+			for _, a := range n.Args {
+				if walk(a) {
+					return true
+				}
+			}
+			return false
+		}
+		if walk(n.Left) || walk(n.Right) || walk(n.Cond) || walk(n.Body) ||
+			walk(n.Init) || walk(n.Update) {
+			return true
+		}
+		for _, a := range n.Args {
+			if walk(a) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, p := range params {
+		if walk(p) {
+			return true
+		}
+	}
+	return false
+}
+
 func paramsReferenceName(params []*Node, name string) bool {
 	var walk func(n *Node) bool
 	walk = func(n *Node) bool {
