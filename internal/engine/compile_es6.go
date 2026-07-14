@@ -86,8 +86,8 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 	// throw from next() already recorded it as done) before propagating.
 	catchHandler := c.emitJump(OpTryPush)
 	for _, elem := range pattern.Args {
-		c.emitIterStep(iterSlot, resSlot, doneSlot) // leaves the value (or undefined)
 		if elem.Kind == NEmpty {
+			c.emitIterStep(iterSlot, resSlot, doneSlot)
 			c.emit(OpPop) // hole: consume one step and discard
 			continue
 		}
@@ -95,6 +95,36 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 		if elem.Kind == NAssignPat || (elem.Kind == NAssign && elem.Op == TokAssign) {
 			target, defExpr = elem.Left, elem.Right
 		}
+		// AssignmentElement evaluates its target reference BEFORE stepping the
+		// iterator; for a member target that reference has observable side effects
+		// (`[ obj[key()] ] = iter` evaluates key() before next()), so pre-evaluate
+		// it, then step, apply the default, and store.
+		if kind == varAssign && target.Kind == NMember {
+			objSlot := c.tempLocal()
+			c.compileExpr(target.Left)
+			c.emitOpU16(OpPutLocal, uint16(objSlot))
+			keySlot := -1
+			if target.Flags&1 != 0 { // computed key
+				keySlot = c.tempLocal()
+				c.compileExpr(target.Right)
+				c.emitOpU16(OpPutLocal, uint16(keySlot))
+			}
+			c.emitIterStep(iterSlot, resSlot, doneSlot)
+			c.applyDefault(defExpr)
+			vSlot := c.tempLocal()
+			c.emitOpU16(OpPutLocal, uint16(vSlot))
+			c.emitOpU16(OpGetLocal, uint16(objSlot))
+			if keySlot >= 0 {
+				c.emitOpU16(OpGetLocal, uint16(keySlot))
+				c.emitOpU16(OpGetLocal, uint16(vSlot))
+				c.emit(OpPutElem)
+			} else {
+				c.emitOpU16(OpGetLocal, uint16(vSlot))
+				c.emitFieldOp(OpPutField, target.Right.Str)
+			}
+			continue
+		}
+		c.emitIterStep(iterSlot, resSlot, doneSlot) // leaves the value (or undefined)
 		nameDefaultTarget(target, defExpr)
 		c.applyDefault(defExpr)
 		c.destructureTarget(target, kind)
