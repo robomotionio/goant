@@ -215,6 +215,17 @@ func (p *parser) mkIdentFromTok() *Node {
 	return n
 }
 
+// privateNameAdjacent consumes the current `#` token and peeks the following
+// identifier, reporting whether it is immediately adjacent. A PrivateIdentifier
+// is a single token: no whitespace or line terminator may separate `#` from the
+// name (`# x` is an early SyntaxError).
+func (p *parser) privateNameAdjacent() bool {
+	hashEnd := p.toff() + p.tlen()
+	p.consume()
+	p.next()
+	return p.toff() == hashEnd
+}
+
 func (p *parser) mkPrivateIdentFromTok() *Node {
 	off := p.toff()
 	start := off
@@ -443,9 +454,7 @@ func (p *parser) parseMemberSuffix(left *Node, la Token) *Node {
 		mem := p.mk(NMember)
 		mem.Left = left
 		if p.tok() == TokHash {
-			p.consume()
-			p.next()
-			if !isPrivateIdentLikeTok(p.tok()) {
+			if !p.privateNameAdjacent() || !isPrivateIdentLikeTok(p.tok()) {
 				p.errorf("private field name expected")
 				return p.mk(NEmpty)
 			}
@@ -912,9 +921,7 @@ func (p *parser) parseRegex() *Node {
 }
 
 func (p *parser) parsePrivateName() *Node {
-	p.consume()
-	p.next()
-	if !isPrivateIdentLikeTok(p.tok()) {
+	if !p.privateNameAdjacent() || !isPrivateIdentLikeTok(p.tok()) {
 		p.errorf("private field name expected")
 		return p.mk(NEmpty)
 	}
@@ -1231,9 +1238,7 @@ func (p *parser) parseCall() *Node {
 				n = call
 				continue
 			} else if p.tok() == TokHash {
-				p.consume()
-				p.next()
-				if !isPrivateIdentLikeTok(p.tok()) {
+				if !p.privateNameAdjacent() || !isPrivateIdentLikeTok(p.tok()) {
 					p.errorf("private field name expected")
 					return p.mk(NEmpty)
 				}
@@ -1656,9 +1661,7 @@ func (p *parser) parseClass() *Node {
 			p.expect(TokRBracket)
 			flags |= fnComputed
 		} else if p.tok() == TokHash {
-			p.consume()
-			p.next()
-			if !isPrivateIdentLikeTok(p.tok()) {
+			if !p.privateNameAdjacent() || !isPrivateIdentLikeTok(p.tok()) {
 				p.errorf("private field name expected")
 				return p.mk(NEmpty)
 			}
