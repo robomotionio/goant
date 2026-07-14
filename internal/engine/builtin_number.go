@@ -176,6 +176,9 @@ func (rt *Runtime) initNumberBuiltin() {
 
 func (rt *Runtime) initBooleanBuiltin() {
 	proto := rt.objPtr(rt.booleanProto)
+	// Boolean.prototype is itself a Boolean wrapper whose [[BooleanData]] is false
+	// (so `Boolean.prototype.valueOf()` / ToBoolean coercion yield false).
+	proto.boxed = mkbool(false)
 	// thisBool resolves the receiver's boolean primitive: either a boolean value
 	// or the [[BooleanData]] of a Boolean wrapper object.
 	thisBool := func(this Value) (bool, bool) {

@@ -1268,6 +1268,14 @@ func (rt *Runtime) objectToStringTag(v Value) string {
 				builtin = "RegExp"
 			case o.brandID() == brandError:
 				builtin = "Error"
+			// A boxed String/Boolean wrapper (new String / new Boolean) tags by its
+			// [[Class]]. A fresh object's zero-value boxed decodes as the number 0, so
+			// only these two (whose tags differ from Number) are safe to key off boxed
+			// here; a Number wrapper is not distinguishable this way and is left as-is.
+			case o.boxed.Type() == TStr:
+				builtin = "String"
+			case o.boxed.Type() == TBool:
+				builtin = "Boolean"
 			case o.hasOwn("callee") && o.hasOwn("length"):
 				builtin = "Arguments"
 			}
