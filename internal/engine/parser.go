@@ -453,6 +453,10 @@ func (p *parser) parseBindingPattern() *Node {
 		p.errorf("Unexpected reserved word")
 		return p.mk(NEmpty)
 	}
+	// A BindingElement must be an identifier or an array/object binding pattern;
+	// anything else (a literal, `)`, an operator — e.g. `catch ("22")`) is an
+	// early SyntaxError rather than a silently-empty binding.
+	p.errorf("Unexpected token; expected a binding identifier or pattern")
 	p.consume()
 	return p.mk(NEmpty)
 }
@@ -2892,7 +2896,13 @@ func (p *parser) parseStmt() *Node {
 		return p.parseWith()
 	case TokFunc:
 		p.consume()
-		return p.parseFunc()
+		fn := p.parseFunc()
+		// A FunctionDeclaration requires a name (only a FunctionExpression may be
+		// anonymous), so `function () {}` at statement position is a SyntaxError.
+		if fn != nil && fn.Kind == NFunc && fn.Str == "" {
+			p.errorf("Function statements require a function name")
+		}
+		return fn
 	case TokClass:
 		classOff := uint32(p.toff())
 		p.consume()
@@ -2910,6 +2920,10 @@ func (p *parser) parseStmt() *Node {
 			fn := p.parseFunc()
 			fn.Flags |= fnAsync
 			fn.SrcOff = asyncOff
+			// An async FunctionDeclaration also requires a name.
+			if fn.Kind == NFunc && fn.Str == "" {
+				p.errorf("Function statements require a function name")
+			}
 			return fn
 		}
 		return p.parseExprStmt()
