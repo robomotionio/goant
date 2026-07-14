@@ -1459,6 +1459,12 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	reduce := func(this Value, args []Value, right bool) (Value, *ThrowError) {
 		cb := arg(args, 0)
 		l := length(this)
+		// IsCallable(callbackfn) is checked up front (before the empty-and-no-seed
+		// case), so a single-element reduce with no initial value still rejects a
+		// non-callable callback even though it is never invoked.
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("TypedArray.prototype.reduce callback is not a function")
+		}
 		acc := arg(args, 1)
 		hasAcc := len(args) > 1
 		idx := func(k int) int {
