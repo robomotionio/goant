@@ -652,14 +652,28 @@ func (rt *Runtime) initArrayBuiltin() {
 		}
 		return obj, nil
 	})
+	// CreateArrayIterator is called on ? ToObject(this), so null/undefined (and a
+	// throwing coercion) reject at call time rather than being swallowed later.
 	rt.defMethod(proto, "entries", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.newIndexIterator(this, iterEntries), nil
+		o, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newIndexIterator(o, iterEntries), nil
 	})
 	rt.defMethod(proto, "keys", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.newIndexIterator(this, iterKeys), nil
+		o, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newIndexIterator(o, iterKeys), nil
 	})
 	valuesFn := rt.newNativeFunc("values", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.newIndexIterator(this, iterValues), nil
+		o, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newIndexIterator(o, iterValues), nil
 	})
 	proto.defineOwn("values", valuesFn, attrWritable|attrConfigurable)
 	if rt.symIterator != 0 {
