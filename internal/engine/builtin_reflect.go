@@ -157,15 +157,18 @@ func (rt *Runtime) initReflectBuiltin() {
 		if e := needObj(arg(args, 0), "has"); e != nil {
 			return mkundef(), e
 		}
-		key := arg(args, 1)
-		if key.IsSymbol() {
-			return mkbool(rt.hasFieldSymbol(arg(args, 0), key.handle())), nil
-		}
-		name, e := rt.propKeyString(key)
+		pk, e := rt.toPropertyKey(arg(args, 1))
 		if e != nil {
 			return mkundef(), e
 		}
-		return mkbool(rt.hasProp(arg(args, 0), name)), nil
+		if o := rt.objPtr(arg(args, 0)); o != nil && o.proxy != nil {
+			has, e := rt.proxyHas(o.proxy, pk)
+			return mkbool(has), e
+		}
+		if pk.IsSymbol() {
+			return mkbool(rt.hasFieldSymbol(arg(args, 0), pk.handle())), nil
+		}
+		return mkbool(rt.hasProp(arg(args, 0), string(rt.strBytes(pk)))), nil
 	})
 	rt.defMethod(ro, "deleteProperty", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		target := arg(args, 0)
@@ -223,19 +226,14 @@ func (rt *Runtime) initReflectBuiltin() {
 		if o == nil {
 			return mkundef(), rt.typeError("Reflect.getOwnPropertyDescriptor called on non-object")
 		}
-		name, e := rt.propKeyString(arg(args, 1))
+		pk, e := rt.toPropertyKey(arg(args, 1)) // symbol keys allowed
 		if e != nil {
 			return mkundef(), e
 		}
-		if arg(args, 0).Type() == TTypedArray {
-			if idx, ok := canonicalIndex(name); ok {
-				if v, live := rt.taGet(o, int(idx)); live {
-					return rt.makeDataDescriptor(v, true, true, true), nil
-				}
-				return mkundef(), nil
-			}
+		if o.proxy != nil {
+			return rt.proxyGetOwnPropertyDescriptor(o.proxy, pk)
 		}
-		d := o.ownDescriptor(name)
+		d := rt.ownDescOf(o, pk) // covers array/typed/string-wrapper elements + length
 		if !d.exists {
 			return mkundef(), nil
 		}
@@ -246,12 +244,22 @@ func (rt *Runtime) initReflectBuiltin() {
 		if o == nil {
 			return mkundef(), rt.typeError("Reflect.isExtensible called on non-object")
 		}
+		if o.proxy != nil {
+			ext, e := rt.proxyIsExtensible(o.proxy)
+			return mkbool(ext), e
+		}
 		return mkbool(o.flags.extensible), nil
 	})
 	rt.defMethod(ro, "preventExtensions", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(arg(args, 0))
 		if o == nil {
 			return mkundef(), rt.typeError("Reflect.preventExtensions called on non-object")
+		}
+		if o.proxy != nil {
+			if e := rt.proxyPreventExtensions(o.proxy); e != nil {
+				return mkundef(), e
+			}
+			return mktrue(), nil
 		}
 		o.flags.extensible = false
 		return mktrue(), nil
@@ -260,6 +268,18 @@ func (rt *Runtime) initReflectBuiltin() {
 		o := rt.objPtr(arg(args, 0))
 		if o == nil {
 			return mkundef(), rt.typeError("Reflect.ownKeys called on non-object")
+		}
+		if o.proxy != nil {
+			keys, e := rt.proxyOwnKeys(o.proxy)
+			if e != nil {
+				return mkundef(), e
+			}
+			res := rt.newArray()
+			ra := rt.objPtr(res)
+			for _, k := range keys {
+				rt.arraySet(ra, ra.arrLen, k)
+			}
+			return res, nil
 		}
 		res := rt.newArray()
 		ra := rt.objPtr(res)
