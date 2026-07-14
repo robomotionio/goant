@@ -582,6 +582,44 @@ func (rt *Runtime) promiseResolveFn(C, rejectFn Value) (Value, bool) {
 	return r, true
 }
 
+// iterateCombinator drives iter with PerformPromiseAll/Race semantics: it calls
+// dispatch(value) for each element. An abrupt completion from IteratorStep /
+// IteratorComplete (the "done" getter) / IteratorValue (the "value" getter)
+// aborts WITHOUT closing the iterator (its [[Done]] is true or the step failed),
+// whereas an abrupt completion from dispatch closes it (the value was obtained,
+// so [[Done]] is false). Returns the first abrupt completion, or nil when the
+// iterator is exhausted.
+func (rt *Runtime) iterateCombinator(iter Value, dispatch func(v Value) *ThrowError) *ThrowError {
+	for {
+		nextFn, e := rt.getField(iter, "next")
+		if e != nil {
+			return e
+		}
+		r, e := rt.callValue(nextFn, iter, nil)
+		if e != nil {
+			return e // IteratorStep threw: no close
+		}
+		if !r.IsObjectType() {
+			return rt.typeError("iterator result is not an object")
+		}
+		d, e := rt.getField(r, "done") // IteratorComplete
+		if e != nil {
+			return e // no close
+		}
+		if rt.toBoolean(d) {
+			return nil // exhausted
+		}
+		v, e := rt.getField(r, "value") // IteratorValue
+		if e != nil {
+			return e // no close
+		}
+		if de := dispatch(v); de != nil {
+			rt.iteratorClose(iter) // abrupt while dispatching: close (errors swallowed)
+			return de
+		}
+	}
+}
+
 // invokeThen performs Invoke(this, "then", [onF, onR]) and returns its result —
 // used by catch/finally, which operate on any thenable receiver.
 func (rt *Runtime) invokeThen(this, onF, onR Value) (Value, *ThrowError) {
@@ -606,7 +644,9 @@ func (rt *Runtime) invokePromiseThen(p, onF, onR Value) *ThrowError {
 // promiseAll implements Promise.all / Promise.allSettled. The result promise is
 // built from the receiver C (NewPromiseCapability), so a Promise subclass gets a
 // subclass instance back; each element goes through C.resolve(...).then(...),
-// and every resolve/reject element function fulfills at most once.
+// and every resolve/reject element function fulfills at most once. The iterable
+// is walked lazily so the iterator is closed on any abrupt completion raised
+// while dispatching an element (PerformPromiseAll + IteratorClose).
 func (rt *Runtime) promiseAll(C, iterable Value, settled bool) (Value, *ThrowError) {
 	result, resolveFn, rejectFn, e := rt.newPromiseCapability(C)
 	if e != nil {
@@ -616,28 +656,33 @@ func (rt *Runtime) promiseAll(C, iterable Value, settled bool) (Value, *ThrowErr
 	if !ok {
 		return result, nil
 	}
-	vals, e := rt.iterableValues(iterable)
-	if e != nil {
-		rt.callValue(rejectFn, mkundef(), []Value{e.Value}) // IfAbruptRejectPromise
+	iter, ie := rt.getSyncIterator(iterable)
+	if ie != nil {
+		rt.callValue(rejectFn, mkundef(), []Value{ie.Value}) // IfAbruptRejectPromise (GetIterator)
 		return result, nil
 	}
 	results := rt.newArray()
 	ra := rt.objPtr(results)
-	remaining := len(vals) + 1
-	tryFinish := func() {
+	remaining := 1 // the extra count is retired after the iteration completes
+	tryFinish := func() *ThrowError {
 		remaining--
 		if remaining == 0 {
-			rt.callValue(resolveFn, mkundef(), []Value{results})
+			if _, e := rt.callValue(resolveFn, mkundef(), []Value{results}); e != nil {
+				return e
+			}
 		}
+		return nil
 	}
-	for i, v := range vals {
-		idx := i
-		rt.arraySet(ra, uint32(idx), mkundef())
+	idx := 0
+	perr := rt.iterateCombinator(iter, func(v Value) *ThrowError {
+		i := idx
+		idx++
+		rt.arraySet(ra, uint32(i), mkundef())
 		nextP, ce := rt.callValue(promiseResolve, C, []Value{v})
 		if ce != nil {
-			rt.callValue(rejectFn, mkundef(), []Value{ce.Value})
-			return result, nil
+			return ce // closes the iterator, then rejects below
 		}
+		remaining++
 		alreadyCalled := false
 		onF := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
 			if alreadyCalled {
@@ -649,12 +694,11 @@ func (rt *Runtime) promiseAll(C, iterable Value, settled bool) (Value, *ThrowErr
 				oo := rt.objPtr(o)
 				oo.defineOwn("status", rt.newString("fulfilled"), attrDefault)
 				oo.defineOwn("value", arg(a, 0), attrDefault)
-				rt.arraySet(ra, uint32(idx), o)
+				rt.arraySet(ra, uint32(i), o)
 			} else {
-				rt.arraySet(ra, uint32(idx), arg(a, 0))
+				rt.arraySet(ra, uint32(i), arg(a, 0))
 			}
-			tryFinish()
-			return mkundef(), nil
+			return mkundef(), tryFinish()
 		})
 		var onR Value
 		if settled {
@@ -667,19 +711,24 @@ func (rt *Runtime) promiseAll(C, iterable Value, settled bool) (Value, *ThrowErr
 				oo := rt.objPtr(o)
 				oo.defineOwn("status", rt.newString("rejected"), attrDefault)
 				oo.defineOwn("reason", arg(a, 0), attrDefault)
-				rt.arraySet(ra, uint32(idx), o)
-				tryFinish()
-				return mkundef(), nil
+				rt.arraySet(ra, uint32(i), o)
+				return mkundef(), tryFinish()
 			})
 		} else {
 			onR = rejectFn // the shared reject settles the result on the first rejection
 		}
 		if te := rt.invokePromiseThen(nextP, onF, onR); te != nil {
-			rt.callValue(rejectFn, mkundef(), []Value{te.Value})
-			return result, nil
+			return te // closes the iterator, then rejects below
 		}
+		return nil
+	})
+	if perr != nil {
+		rt.callValue(rejectFn, mkundef(), []Value{perr.Value})
+		return result, nil
 	}
-	tryFinish()
+	if fe := tryFinish(); fe != nil {
+		rt.callValue(rejectFn, mkundef(), []Value{fe.Value}) // IfAbruptRejectPromise
+	}
 	return result, nil
 }
 
@@ -820,7 +869,9 @@ func (rt *Runtime) promiseAllKeyed(C, obj Value, settled bool) (Value, *ThrowErr
 }
 
 // promiseRace implements Promise.race / Promise.any, building the result promise
-// from the receiver C (NewPromiseCapability) for subclass support.
+// from the receiver C (NewPromiseCapability) for subclass support. The iterable
+// is walked lazily and the iterator is closed on any abrupt completion raised
+// while dispatching an element.
 func (rt *Runtime) promiseRace(C, iterable Value, any bool) (Value, *ThrowError) {
 	result, resolveFn, rejectFn, e := rt.newPromiseCapability(C)
 	if e != nil {
@@ -830,38 +881,44 @@ func (rt *Runtime) promiseRace(C, iterable Value, any bool) (Value, *ThrowError)
 	if !ok {
 		return result, nil
 	}
-	vals, e := rt.iterableValues(iterable)
-	if e != nil {
-		rt.callValue(rejectFn, mkundef(), []Value{e.Value}) // IfAbruptRejectPromise
+	iter, ie := rt.getSyncIterator(iterable)
+	if ie != nil {
+		rt.callValue(rejectFn, mkundef(), []Value{ie.Value}) // IfAbruptRejectPromise (GetIterator)
 		return result, nil
 	}
-	remaining := len(vals)
 	errs := rt.newArray()
 	ea := rt.objPtr(errs)
-	for i, v := range vals {
-		idx := i
+	remaining := 1 // for `any`: retired after the iteration completes
+	rejectAggregate := func() *ThrowError {
+		agg := rt.makeError(rt.errors.aggProto, "AggregateError", "All promises were rejected")
+		if eo := rt.objPtr(agg); eo != nil {
+			eo.defineOwn("errors", errs, attrWritable|attrConfigurable)
+		}
+		_, e := rt.callValue(rejectFn, mkundef(), []Value{agg})
+		return e
+	}
+	idx := 0
+	perr := rt.iterateCombinator(iter, func(v Value) *ThrowError {
+		i := idx
+		idx++
 		nextP, ce := rt.callValue(promiseResolve, C, []Value{v})
 		if ce != nil {
-			rt.callValue(rejectFn, mkundef(), []Value{ce.Value})
-			return result, nil
+			return ce // closes the iterator, then rejects below
 		}
 		var onF, onR Value
 		if any {
 			onF = resolveFn // the shared resolve settles on the first fulfillment
+			remaining++
 			alreadyCalled := false
 			onR = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
 				if alreadyCalled {
 					return mkundef(), nil
 				}
 				alreadyCalled = true
-				rt.arraySet(ea, uint32(idx), arg(a, 0))
+				rt.arraySet(ea, uint32(i), arg(a, 0))
 				remaining--
 				if remaining == 0 {
-					agg := rt.makeError(rt.errors.aggProto, "AggregateError", "All promises were rejected")
-					if eo := rt.objPtr(agg); eo != nil {
-						eo.defineOwn("errors", errs, attrWritable|attrConfigurable)
-					}
-					rt.callValue(rejectFn, mkundef(), []Value{agg})
+					return mkundef(), rejectAggregate()
 				}
 				return mkundef(), nil
 			})
@@ -870,13 +927,19 @@ func (rt *Runtime) promiseRace(C, iterable Value, any bool) (Value, *ThrowError)
 			onF, onR = resolveFn, rejectFn
 		}
 		if te := rt.invokePromiseThen(nextP, onF, onR); te != nil {
-			rt.callValue(rejectFn, mkundef(), []Value{te.Value})
-			return result, nil
+			return te // closes the iterator, then rejects below
 		}
+		return nil
+	})
+	if perr != nil {
+		rt.callValue(rejectFn, mkundef(), []Value{perr.Value})
+		return result, nil
 	}
-	if any && len(vals) == 0 {
-		agg := rt.makeError(rt.errors.aggProto, "AggregateError", "All promises were rejected")
-		rt.callValue(rejectFn, mkundef(), []Value{agg})
+	if any {
+		remaining--
+		if remaining == 0 {
+			rejectAggregate() // no elements, or all synchronously rejected
+		}
 	}
 	return result, nil
 }
