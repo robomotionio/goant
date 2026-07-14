@@ -637,6 +637,16 @@ func (p *parser) parsePrimary() *Node {
 		n := p.mkIdentFromTok()
 		p.consume()
 		return n
+	case TokLet, TokStatic:
+		// `let` / `static` are contextual: valid identifier references in sloppy
+		// mode only (reserved in strict mode).
+		if p.lx.strict {
+			p.unexpected()
+			return p.mk(NEmpty)
+		}
+		n := p.mkIdentFromTok()
+		p.consume()
+		return n
 	case TokLParen:
 		return p.parseParen()
 	case TokLBracket:
@@ -2492,7 +2502,10 @@ func (p *parser) parseFor() *Node {
 		p.noIn = true
 		initNode = p.parseVarDecl(VarUsing, true)
 		p.noIn = false
-	} else if initNode == nil && (p.tok() == TokVar || p.tok() == TokLet || p.tok() == TokConst) {
+	} else if initNode == nil && (p.tok() == TokVar || p.tok() == TokConst ||
+		(p.tok() == TokLet && p.la() != TokIn)) {
+		// `for (let in …)` treats `let` as an identifier reference (sloppy mode), not
+		// a lexical declaration — the lookahead after `let` is `in`.
 		kind := VarVar
 		if p.tok() == TokLet {
 			kind = VarLet
