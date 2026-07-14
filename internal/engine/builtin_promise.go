@@ -406,7 +406,7 @@ func (rt *Runtime) initPromiseBuiltin() {
 					return mkundef(), e
 				}
 				thunk := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) { return value, nil })
-				return rt.invokeThen(p, thunk, mkundef())
+				return rt.invokeThen1(p, thunk)
 			})
 			catchFinally = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
 				reason := arg(a, 0)
@@ -421,7 +421,7 @@ func (rt *Runtime) initPromiseBuiltin() {
 				thrower := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
 					return mkundef(), &ThrowError{Value: reason, rt: rt}
 				})
-				return rt.invokeThen(p, thrower, mkundef())
+				return rt.invokeThen1(p, thrower)
 			})
 		}
 		return rt.invokeThen(this, thenFinally, catchFinally)
@@ -628,6 +628,17 @@ func (rt *Runtime) invokeThen(this, onF, onR Value) (Value, *ThrowError) {
 		return mkundef(), e
 	}
 	return rt.callValue(thenFn, this, []Value{onF, onR})
+}
+
+// invokeThen1 performs Invoke(this, "then", « onF ») with a single argument, as
+// the finally then/catch closures do (they must not pass a second undefined,
+// which is observable via arguments.length).
+func (rt *Runtime) invokeThen1(this, onF Value) (Value, *ThrowError) {
+	thenFn, e := rt.getField(this, "then")
+	if e != nil {
+		return mkundef(), e
+	}
+	return rt.callValue(thenFn, this, []Value{onF})
 }
 
 // invokePromiseThen performs Invoke(p, "then", [onF, onR]) observably (used per
