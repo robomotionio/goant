@@ -30,8 +30,27 @@ func (rt *Runtime) initJSONBuiltin() {
 				}
 			}
 		}
-		// space
-		switch sp := arg(args, 2); {
+		// space: a Number/String wrapper object is unwrapped to its primitive
+		// (ToNumber/ToString) before the Number/String gap rules apply.
+		sp := arg(args, 2)
+		if sp.IsObjectType() {
+			if o := rt.objPtr(sp); o != nil {
+				if o.getSlot(slotPrimitive).Type() == TNum {
+					n, e := rt.toNumber(sp)
+					if e != nil {
+						return mkundef(), e
+					}
+					sp = mknum(n)
+				} else if o.boxed.Type() == TStr {
+					s, e := rt.toStringValue(sp)
+					if e != nil {
+						return mkundef(), e
+					}
+					sp = s
+				}
+			}
+		}
+		switch {
 		case sp.Type() == TNum:
 			n := int(sp.Number())
 			if n > 10 {
@@ -163,8 +182,8 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 	if e != nil {
 		return "", false, e
 	}
-	// toJSON
-	if v.IsObjectType() {
+	// toJSON: looked up for Objects and (per SerializeJSONProperty) BigInt values.
+	if v.IsObjectType() || v.Type() == TBigInt {
 		if tj, _ := rt.getField(v, "toJSON"); rt.isCallable(tj) {
 			nv, terr := rt.callValue(tj, v, []Value{rt.newString(key)})
 			if terr != nil {
@@ -181,7 +200,35 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 		v = nv
 	}
 
+	// Unwrap a Number/String/Boolean/BigInt wrapper object to its primitive
+	// ([[NumberData]]/[[StringData]]/[[BooleanData]]/[[BigIntData]]) before the
+	// type switch (SerializeJSONProperty step 4).
+	if v.IsObjectType() {
+		if o := rt.objPtr(v); o != nil {
+			switch prim := o.getSlot(slotPrimitive); {
+			case prim.Type() == TNum:
+				n, e := rt.toNumber(v)
+				if e != nil {
+					return "", false, e
+				}
+				v = mknum(n)
+			case prim.Type() == TBigInt:
+				v = prim
+			case o.boxed.Type() == TStr:
+				s, e := rt.toStringValue(v)
+				if e != nil {
+					return "", false, e
+				}
+				v = s
+			case o.boxed.Type() == TBool:
+				v = o.boxed
+			}
+		}
+	}
+
 	switch v.Type() {
+	case TBigInt:
+		return "", false, rt.typeError("Do not know how to serialize a BigInt")
 	case TNull:
 		return "null", true, nil
 	case TBool:

@@ -31,14 +31,31 @@ func (rt *Runtime) initErrorBuiltin() {
 		if o == nil {
 			return mkundef(), rt.typeError("Error.prototype.toString called on non-object")
 		}
+		// Get(O,"name")/Get(O,"message") and their ToString conversions are all
+		// observable and must propagate abrupt completions (a throwing accessor or
+		// a Symbol value must surface, not be swallowed).
+		nv, e := rt.getField(this, "name")
+		if e != nil {
+			return mkundef(), e
+		}
 		name := "Error"
-		if nv, e := rt.getField(this, "name"); e == nil && !nv.IsUndefined() {
-			s, _ := rt.toStringValue(nv)
+		if !nv.IsUndefined() {
+			s, e := rt.toStringValue(nv)
+			if e != nil {
+				return mkundef(), e
+			}
 			name = string(rt.strBytes(s))
 		}
+		mv, e := rt.getField(this, "message")
+		if e != nil {
+			return mkundef(), e
+		}
 		msg := ""
-		if mv, e := rt.getField(this, "message"); e == nil && !mv.IsUndefined() {
-			s, _ := rt.toStringValue(mv)
+		if !mv.IsUndefined() {
+			s, e := rt.toStringValue(mv)
+			if e != nil {
+				return mkundef(), e
+			}
 			msg = string(rt.strBytes(s))
 		}
 		if msg == "" {
