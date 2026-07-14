@@ -336,9 +336,30 @@ func (c *compiler) resolveClassBinding(name string) bool {
 	return false
 }
 
+// inDerivedCtor reports whether the innermost enclosing non-arrow function is a
+// derived class constructor (arrows are transparent, inheriting the super
+// binding lexically), which is the only place a SuperCall is allowed.
+func (c *compiler) inDerivedCtor() bool {
+	for e := c; e != nil; e = e.enclosing {
+		if e.fn == nil || e.fn.isArrow {
+			continue
+		}
+		return e.fn.isDerivedCtor
+	}
+	return false
+}
+
 // compileSuperCall compiles `super(...)` in a derived constructor: it invokes
 // the parent constructor with the current `this`.
 func (c *compiler) compileSuperCall(n *Node) {
+	// A SuperCall is only legal inside a derived class constructor (arrows are
+	// transparent to super, so a super() nested in an arrow of the constructor is
+	// fine); in any other method or function it is an early SyntaxError, even
+	// though *superctor* is visible there as an upvalue.
+	if !c.inDerivedCtor() {
+		c.syntaxErrorf("'super' keyword unexpected here")
+		return
+	}
 	// super(...) constructs the parent with the derived class's new.target and
 	// binds the resulting object as `this` (so subclassing an exotic native like
 	// Function/Array/Error yields the native object rather than an ordinary one).
