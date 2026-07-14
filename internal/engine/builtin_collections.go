@@ -591,21 +591,25 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		if e != nil {
 			return mkundef(), e
 		}
+		// Result = this's elements not in other (in this's order), then other's
+		// elements not in this (in other's order) — a clone of this with each of
+		// other's keys toggled.
 		sm := map[string]bool{}
 		for _, v := range rt.setElements(s) {
 			sm[rt.canonicalKey(v)] = true
 		}
 		om := map[string]bool{}
-		var out []Value
 		for _, v := range other {
-			ck := rt.canonicalKey(v)
-			om[ck] = true
-			if !sm[ck] {
+			om[rt.canonicalKey(v)] = true
+		}
+		var out []Value
+		for _, v := range rt.setElements(s) {
+			if !om[rt.canonicalKey(v)] {
 				out = append(out, v)
 			}
 		}
-		for _, v := range rt.setElements(s) {
-			if !om[rt.canonicalKey(v)] {
+		for _, v := range other {
+			if !sm[rt.canonicalKey(v)] {
 				out = append(out, v)
 			}
 		}
