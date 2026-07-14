@@ -822,16 +822,25 @@ func (p *parser) parsePrimary() *Node {
 		p.consume()
 		n := p.mk(NTypeof)
 		n.Right = p.parseUnary()
+		if p.rejectExpAfterUnary() {
+			return p.mk(NEmpty)
+		}
 		return n
 	case TokVoid:
 		p.consume()
 		n := p.mk(NVoid)
 		n.Right = p.parseUnary()
+		if p.rejectExpAfterUnary() {
+			return p.mk(NEmpty)
+		}
 		return n
 	case TokDelete:
 		p.consume()
 		n := p.mk(NDelete)
 		n.Right = p.parseUnary()
+		if p.rejectExpAfterUnary() {
+			return p.mk(NEmpty)
+		}
 		if p.lx.strict && n.Right != nil && n.Right.Kind == NIdent {
 			p.errorf("cannot delete bindings in strict mode")
 			return p.mk(NEmpty)
@@ -1682,6 +1691,17 @@ func (p *parser) parsePostfix() *Node {
 	return n
 }
 
+// rejectExpAfterUnary reports (and records an error) when a UnaryExpression is
+// immediately followed by `**`: the base of an ExponentiationExpression may not
+// be an un-parenthesized unary expression (`-x ** y`, `typeof x ** y`).
+func (p *parser) rejectExpAfterUnary() bool {
+	if p.next() == TokExp {
+		p.errorf("Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence")
+		return true
+	}
+	return false
+}
+
 func (p *parser) parseUnary() *Node {
 	la := p.next()
 	if la == TokNot || la == TokTilda || la == TokUPlus || la == TokUMinus ||
@@ -1697,8 +1717,7 @@ func (p *parser) parseUnary() *Node {
 			n.Op = la
 		}
 		n.Right = p.parseUnary()
-		if p.next() == TokExp {
-			p.errorf("Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence")
+		if p.rejectExpAfterUnary() {
 			return p.mk(NEmpty)
 		}
 		return n
