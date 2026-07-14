@@ -1665,8 +1665,53 @@ func (p *parser) parseClass() *Node {
 		cls.Args = append(cls.Args, method)
 	}
 	p.expect(TokRBrace)
+	// A class body's private names must be unique, with one exception: a single
+	// getter/setter pair sharing a name (both static or both non-static).
+	if !p.validatePrivateNames(cls) {
+		return cls
+	}
 	cls.SrcEnd = uint32(p.toff() + p.tlen())
 	return cls
+}
+
+// validatePrivateNames enforces the "no duplicate PrivateBoundIdentifiers"
+// early error over a class body, allowing one get/set accessor pair per name.
+func (p *parser) validatePrivateNames(cls *Node) bool {
+	type privEntry struct {
+		get, set, other int
+		getSt, setSt    bool
+	}
+	priv := map[string]*privEntry{}
+	for _, m := range cls.Args {
+		if m == nil || m.Kind != NMethod || !isPrivateMemberProp(m.Left) {
+			continue
+		}
+		e := priv[m.Left.Str]
+		if e == nil {
+			e = &privEntry{}
+			priv[m.Left.Str] = e
+		}
+		static := m.Flags&fnStatic != 0
+		switch {
+		case m.Flags&fnGetter != 0:
+			e.get++
+			e.getSt = static
+		case m.Flags&fnSetter != 0:
+			e.set++
+			e.setSt = static
+		default:
+			e.other++
+		}
+	}
+	for name, e := range priv {
+		total := e.get + e.set + e.other
+		pair := e.other == 0 && e.get == 1 && e.set == 1 && e.getSt == e.setSt
+		if total > 1 && !pair {
+			p.errorf("Duplicate private name " + name)
+			return false
+		}
+	}
+	return true
 }
 
 // ---- var declarations ----
