@@ -29,12 +29,19 @@ func (rt *Runtime) initFunctionBuiltin() {
 		return mkundef(), nil
 	}
 
-	// Poison-pill accessor: accessing strict caller/callee/arguments throws.
+	// Function.prototype has its own length (0) and name ("") — non-writable,
+	// non-enumerable, configurable — and they must appear in that order (length
+	// immediately before name) among its own property names.
+	proto.defineOwn("length", mknum(0), attrConfigurable)
+	proto.defineOwn("name", rt.internString(""), attrConfigurable)
+
+	// Poison-pill accessor: accessing strict caller/callee/arguments throws. The
+	// caller/arguments accessors on Function.prototype are configurable (%ThrowTypeError%).
 	rt.poison = rt.newNativeFunc("", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return mkundef(), rt.typeError("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions")
 	})
-	proto.defineAccessor("caller", rt.poison, rt.poison, true, true, 0)
-	proto.defineAccessor("arguments", rt.poison, rt.poison, true, true, 0)
+	proto.defineAccessor("caller", rt.poison, rt.poison, true, true, attrConfigurable)
+	proto.defineAccessor("arguments", rt.poison, rt.poison, true, true, attrConfigurable)
 
 	rt.defMethod(proto, "call", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if !rt.isCallable(this) {
