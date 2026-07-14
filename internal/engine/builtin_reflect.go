@@ -65,6 +65,9 @@ func (rt *Runtime) initReflectBuiltin() {
 		if o == nil {
 			return mkundef(), rt.typeError("Reflect.getPrototypeOf called on non-object")
 		}
+		if o.proxy != nil {
+			return rt.proxyGetPrototypeOf(o.proxy)
+		}
 		if o.proto.IsNull() || o.proto == 0 {
 			return mknull(), nil
 		}
@@ -77,10 +80,17 @@ func (rt *Runtime) initReflectBuiltin() {
 		}
 		p := arg(args, 1)
 		if !p.IsObjectType() && !p.IsNull() {
-			return mkfalse(), nil
+			return mkundef(), rt.typeError("Reflect.setPrototypeOf proto must be an object or null")
 		}
-		o.proto = p
-		return mktrue(), nil
+		if o.proxy != nil {
+			if e := rt.proxySetPrototypeOf(o.proxy, p); e != nil {
+				return mkundef(), e
+			}
+			return mktrue(), nil
+		}
+		// Returns whether [[SetPrototypeOf]] succeeded (false on cycle / non-
+		// extensible / immutable prototype), rather than throwing.
+		return mkbool(rt.ordinarySetProto(o, p)), nil
 	})
 	rt.defMethod(ro, "defineProperty", 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if e := needObj(arg(args, 0), "defineProperty"); e != nil {
