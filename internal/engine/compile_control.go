@@ -213,12 +213,12 @@ func (c *compiler) compileForOf(n *Node) {
 	iterSlot := c.addLocal("*foi*", false)
 	c.emitOpU16(OpPutLocal, uint16(iterSlot))
 	resSlot := c.addLocal("*for*", false)
-	// needsClose gates IteratorClose: it is set for every abrupt completion
-	// (break past the loop, `return`, throw, a labelled continue that exits) but
-	// cleared on normal exhaustion (done === true), which must NOT call return().
+	// needsClose gates IteratorClose. It is cleared while the iterator is being
+	// stepped — a throw from next(), a done/value getter, etc. must NOT close the
+	// iterator (only an abrupt completion of the binding or body does) — and set
+	// once a step has fully succeeded, so break/return/throw/labelled-jump out of
+	// the body close, while normal exhaustion (done === true) does not.
 	closeSlot := c.addLocal("*foc*", false)
-	c.emit(OpTrue)
-	c.emitOpU16(OpPutLocal, uint16(closeSlot))
 
 	// A try-FINALLY wraps the loop so every abrupt completion routes through the
 	// finally via the interpreter's unwind machinery (doReturn / doJump / throw
@@ -230,6 +230,10 @@ func (c *compiler) compileForOf(n *Node) {
 
 	l := c.pushLoop(c.consumeLabel(), false)
 	condStart := len(c.fn.code)
+	// needsClose = false: stepping the iterator (next(), the done check, reading
+	// value) is not covered — those throwing propagates without a close.
+	c.emit(OpFalse)
+	c.emitOpU16(OpPutLocal, uint16(closeSlot))
 	// result = iter.next()
 	c.emitOpU16(OpGetLocal, uint16(iterSlot))
 	c.emitFieldOp(OpGetField2, "next") // [iter, next]
@@ -242,7 +246,10 @@ func (c *compiler) compileForOf(n *Node) {
 	exhausted := c.emitJump(OpJmpTrue)
 	// v = result.value
 	c.emitOpU16(OpGetLocal, uint16(resSlot))
-	c.emitFieldOp(OpGetField, "value")
+	c.emitFieldOp(OpGetField, "value") // [value]
+	// The step succeeded: the binding and body now run under close protection.
+	c.emit(OpTrue)
+	c.emitOpU16(OpPutLocal, uint16(closeSlot)) // [value] (net-neutral)
 	store()
 
 	c.compileStmt(n.Body)
@@ -255,11 +262,9 @@ func (c *compiler) compileForOf(n *Node) {
 	c.emit(OpJmp)
 	c.emitU32(uint32(condStart))
 
-	// Normal exhaustion (done === true): clear needsClose, then fall through to
-	// the shared teardown that a plain break also lands on.
+	// Normal exhaustion (done === true): needsClose is already false from the top
+	// of the iteration, so the shared teardown below skips the close.
 	c.patchJump(exhausted)
-	c.emit(OpFalse)
-	c.emitOpU16(OpPutLocal, uint16(closeSlot))
 
 	// A plain break targeting this loop lands here (needsClose still set): pop
 	// the finally handler and fall into the finally, which closes the iterator.
