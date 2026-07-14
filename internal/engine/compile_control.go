@@ -426,11 +426,13 @@ func forInVarInitializer(left *Node) *Node {
 }
 
 // checkForHeadDecl enforces the early errors of a for/for-in/for-of head that
-// is a lexical (let/const) declaration: its BoundNames must be distinct, may
-// not include "let", and may not also be var-declared anywhere in the loop body.
+// is a lexical (let/const/using/await-using) declaration: its BoundNames must be
+// distinct, may not include "let", and may not also be var-declared anywhere in
+// the loop body.
 func (c *compiler) checkForHeadDecl(head, body *Node) {
 	if head == nil || head.Kind != NVar ||
-		(head.VarKind != VarLet && head.VarKind != VarConst) {
+		(head.VarKind != VarLet && head.VarKind != VarConst &&
+			head.VarKind != VarUsing && head.VarKind != VarAwaitUsing) {
 		return
 	}
 	var names []string
