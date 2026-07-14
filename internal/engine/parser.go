@@ -2126,9 +2126,15 @@ func (p *parser) parseFunc() *Node {
 		p.errorf("Illegal 'use strict' directive in function with non-simple parameter list")
 	}
 	// A sloppy-enclosed function whose body opens with "use strict" is itself
-	// strict, so its (simple) parameters must satisfy the strict restrictions.
+	// strict, so its (simple) parameters — and its own name — must satisfy the
+	// strict restrictions (BindingIdentifier may not be eval/arguments or a
+	// strict future-reserved word). The name was parsed in the enclosing
+	// (sloppy) context, so re-check it here.
 	if !p.lx.strict && bodyHasUseStrict(fn.Body) {
 		p.checkStrictParams(fn)
+		if fn.Str != "" && (isEvalOrArgumentsName(fn.Str) || isStrictReservedName(fn.Str)) {
+			p.errorf("'%s' may not be used as a function name in strict mode", fn.Str)
+		}
 	}
 	if fn.Flags&fnArrow == 0 && (referencesArguments(fn.Body) || paramsReferenceArguments(fn.Args)) {
 		// `arguments` is available in parameter default expressions too (they are
