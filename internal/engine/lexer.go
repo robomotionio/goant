@@ -949,7 +949,9 @@ func (l *lexer) parseOperator(off int) bool {
 			set(TokNullishAssign, 3)
 		case m2('?'):
 			set(TokNullish, 2)
-		case m2('.'):
+		case m2('.') && !(rem >= 3 && buf[2] >= '0' && buf[2] <= '9'):
+			// `?.` is the optional-chaining punctuator only when not followed by a
+			// decimal digit; `x?.3:0` is the conditional `x ? .3 : 0`.
 			set(TokOptionalChain, 2)
 		default:
 			set(TokQ, 1)
