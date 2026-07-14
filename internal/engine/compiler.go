@@ -578,6 +578,17 @@ func (c *compiler) compileExpr(n *Node) {
 			c.emit(OpUndef)
 		}
 	case NRegexp:
+		// A regular expression literal is an early error: validate the pattern at
+		// compile time so an invalid one is a (parse-phase) SyntaxError rather than
+		// a deferred runtime throw. The literal still creates a fresh RegExp on each
+		// evaluation via OpRegexp.
+		if _, e := c.rt.newRegExp(n.Str, n.Aux); e != nil {
+			msg := "invalid regular expression: /" + n.Str + "/" + n.Aux
+			if mv, _ := c.rt.getField(e.Value, "message"); mv.IsString() {
+				msg = string(c.rt.strBytes(mv))
+			}
+			c.syntaxErrorf("%s", msg)
+		}
 		c.emitConst(c.rt.internString(n.Str))
 		c.emitConst(c.rt.internString(n.Aux))
 		c.emit(OpRegexp)
