@@ -254,21 +254,23 @@ func (c *compiler) resolveUpvalue(name string) int {
 	}
 	if slot := c.enclosing.resolveLocal(name); slot >= 0 {
 		c.enclosing.locals[slot].captured = true
-		return c.addUpvalue(slot, true, c.enclosing.locals[slot].isConst)
+		lv := c.enclosing.locals[slot]
+		return c.addUpvalue(slot, true, lv.isConst, lv.selfName)
 	}
 	if uv := c.enclosing.resolveUpvalue(name); uv >= 0 {
-		return c.addUpvalue(uv, false, c.enclosing.upvalues[uv].isConst)
+		u := c.enclosing.upvalues[uv]
+		return c.addUpvalue(uv, false, u.isConst, u.selfName)
 	}
 	return -1
 }
 
-func (c *compiler) addUpvalue(index int, isLocal, isConst bool) int {
+func (c *compiler) addUpvalue(index int, isLocal, isConst, selfName bool) int {
 	for i, u := range c.upvalues {
 		if u.index == index && u.isLocal == isLocal {
 			return i
 		}
 	}
-	c.upvalues = append(c.upvalues, upvalDesc{index: index, isLocal: isLocal, isConst: isConst})
+	c.upvalues = append(c.upvalues, upvalDesc{index: index, isLocal: isLocal, isConst: isConst, selfName: selfName})
 	return len(c.upvalues) - 1
 }
 
@@ -1062,8 +1064,9 @@ func (c *compiler) compileAssign(n *Node) {
 		}
 		// A named function expression's self-reference is immutable: assigning to it
 		// throws a TypeError in strict mode and is a silent no-op otherwise (the
-		// evaluated value stays on the stack either way).
-		if slot >= 0 && c.locals[slot].selfName {
+		// evaluated value stays on the stack either way). This holds when the
+		// reference is captured by a nested function too (a selfName upvalue).
+		if (slot >= 0 && c.locals[slot].selfName) || (uv >= 0 && c.upvalues[uv].selfName) {
 			if c.fn.isStrict {
 				c.emitConstAssignError()
 			}
@@ -1134,8 +1137,9 @@ func (c *compiler) compileAssign(n *Node) {
 	}
 	// A named function expression's self-reference is immutable: assigning to it
 	// throws a TypeError in strict mode and is a silent no-op otherwise (the value
-	// stays on the stack, since assignment is an expression).
-	if slot >= 0 && c.locals[slot].selfName {
+	// stays on the stack, since assignment is an expression). This also holds when
+	// a nested function captures the reference (a selfName upvalue).
+	if (slot >= 0 && c.locals[slot].selfName) || (uv >= 0 && c.upvalues[uv].selfName) {
 		if c.fn.isStrict {
 			c.emitConstAssignError()
 		}

@@ -8,9 +8,10 @@ package engine
 // from the enclosing frame's local slot (isLocal) or the enclosing closure's
 // upvalue array (!isLocal).
 type upvalDesc struct {
-	index   int
-	isLocal bool
-	isConst bool // captures a const binding — assigning through it throws a TypeError
+	index    int
+	isLocal  bool
+	isConst  bool // captures a const binding — assigning through it throws a TypeError
+	selfName bool // captures a named-function-expression self-reference (immutable)
 }
 
 type svFunc struct {
