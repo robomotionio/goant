@@ -1766,6 +1766,26 @@ func (p *parser) parseParenExpr() *Node {
 
 // ---- functions & classes ----
 
+// checkStrictParams enforces the strict-mode FormalParameters early errors on a
+// simple (identifier) parameter list: names must be unique and none may be
+// `eval`, `arguments`, or a strict future-reserved word. Non-simple lists are
+// handled separately (a strict directive with non-simple params is itself an
+// error), so only NIdent parameters are inspected here.
+func (p *parser) checkStrictParams(fn *Node) {
+	seen := map[string]bool{}
+	for _, param := range fn.Args {
+		if param.Kind == NIdent {
+			if seen[param.Str] {
+				p.errorf("Duplicate parameter name not allowed in this context")
+			}
+			seen[param.Str] = true
+			if isEvalOrArgumentsName(param.Str) || isStrictReservedName(param.Str) {
+				p.errorf("Unexpected strict-mode reserved parameter name '%s'", param.Str)
+			}
+		}
+	}
+}
+
 func (p *parser) parseFunc() *Node {
 	fn := p.mk(NFunc)
 	// This function's async-ness (set by the caller via pendingAsync). Its body
@@ -1830,20 +1850,11 @@ func (p *parser) parseFunc() *Node {
 	p.expect(TokRParen)
 	// In strict code, parameter names must be unique and not reserved/eval/
 	// arguments (checked here because the enclosing strictness is already known
-	// for a preceding directive).
+	// for a preceding directive). If the enclosing code is sloppy, the function's
+	// own "use strict" body directive can still make it strict — re-checked below,
+	// once the body has been parsed.
 	if p.lx.strict {
-		seen := map[string]bool{}
-		for _, param := range fn.Args {
-			if param.Kind == NIdent {
-				if seen[param.Str] {
-					p.errorf("Duplicate parameter name not allowed in this context")
-				}
-				seen[param.Str] = true
-				if isEvalOrArgumentsName(param.Str) || isStrictReservedName(param.Str) {
-					p.errorf("Unexpected strict-mode reserved parameter name '%s'", param.Str)
-				}
-			}
-		}
+		p.checkStrictParams(fn)
 	}
 	p.inAsync = isAsync         // the body establishes the await context
 	p.inGenerator = isGenerator // and the yield context
@@ -1858,6 +1869,11 @@ func (p *parser) parseFunc() *Node {
 	// may not carry an explicit "use strict" directive (ES2016 §14.1.2).
 	if bodyHasUseStrict(fn.Body) && hasNonSimpleParams(fn) {
 		p.errorf("Illegal 'use strict' directive in function with non-simple parameter list")
+	}
+	// A sloppy-enclosed function whose body opens with "use strict" is itself
+	// strict, so its (simple) parameters must satisfy the strict restrictions.
+	if !p.lx.strict && bodyHasUseStrict(fn.Body) {
+		p.checkStrictParams(fn)
 	}
 	if fn.Flags&fnArrow == 0 && referencesArguments(fn.Body) {
 		fn.Flags |= fnUsesArgs
