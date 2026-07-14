@@ -93,6 +93,10 @@ func (p *parser) la() Token        { return p.lx.lookahead() }
 func (p *parser) toff() int        { return p.lx.st.toff }
 func (p *parser) tlen() int        { return p.lx.st.tlen }
 func (p *parser) hadNewline() bool { return p.lx.st.hadNewline }
+
+// escKeyword reports whether the current token is an escaped reserved word
+// (lexed as TokErr): invalid as a keyword/reference but a valid IdentifierName.
+func (p *parser) escKeyword() bool { return p.lx.st.tok == TokErr && p.lx.st.escKeyword }
 func (p *parser) tval() Value      { return p.lx.st.tval }
 func (p *parser) code() string     { return p.lx.code }
 
@@ -545,7 +549,10 @@ func isPrivateMemberProp(prop *Node) bool {
 }
 
 func (p *parser) parseDotPropertyName() *Node {
-	if !isPrivateIdentLikeTok(p.tok()) {
+	// A property name is an IdentifierName: any identifier-like or keyword token,
+	// including an escaped reserved word (`o.if` → property "if"), which the
+	// lexer surfaces as TokErr flagged escKeyword.
+	if !isPrivateIdentLikeTok(p.tok()) && !p.escKeyword() {
 		p.unexpected()
 		return nil
 	}

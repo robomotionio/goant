@@ -76,6 +76,11 @@ type lexState struct {
 	tok        Token
 	consumed   bool
 	hadNewline bool
+	// escKeyword marks a TokErr produced because an identifier with a unicode
+	// escape spells a reserved word (`if`). Such a token is invalid as a
+	// keyword / identifier reference, but IS a valid IdentifierName, so
+	// property-name and property-key parsing accept it.
+	escKeyword bool
 }
 
 type lexer struct {
@@ -381,6 +386,10 @@ slowLoop:
 	if hasEscapes {
 		decoded := decodeIdentEscapes(buf[:i])
 		if parseKeyword(decoded) != TokIdentifier {
+			// An escaped identifier that spells a reserved word is not usable as
+			// a keyword or identifier reference (TokErr), but is a valid
+			// IdentifierName — the parser accepts it as a property name/key.
+			l.st.escKeyword = true
 			return TokErr, i
 		}
 		return TokIdentifier, i
@@ -1103,6 +1112,7 @@ func (l *lexer) nextRaw() Token {
 	l.st.toff, l.st.hadNewline = l.skipToNext(l.st.pos)
 	l.st.pos = l.st.toff
 	l.st.tlen = 0
+	l.st.escKeyword = false
 
 	if l.st.toff >= len(l.code) {
 		l.st.tok = TokEOF
