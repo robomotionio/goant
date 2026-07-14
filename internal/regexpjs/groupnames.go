@@ -4,7 +4,33 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 )
+
+// isValidGroupName reports whether name is a RegExpIdentifierName: an
+// IdentifierStart followed by IdentifierParts. ID_Start is approximated by
+// letters + Nl, ID_Continue by letters + Nl + Nd + Mn + Mc + Pc; `$`, `_`, and
+// ZWJ/ZWNJ are always allowed. Emoji, spaces and lone surrogates are rejected.
+func isValidGroupName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, c := range name {
+		start := c == '$' || c == '_' || unicode.IsLetter(c) || unicode.Is(unicode.Nl, c)
+		if i == 0 {
+			if !start {
+				return false
+			}
+			continue
+		}
+		cont := start || c == 0x200C || c == 0x200D || unicode.IsDigit(c) ||
+			unicode.Is(unicode.Mn, c) || unicode.Is(unicode.Mc, c) || unicode.Is(unicode.Pc, c)
+		if !cont {
+			return false
+		}
+	}
+	return true
+}
 
 // translateGroupNames rewrites every named capture group `(?<name>…)` and named
 // backreference `\k<name>` to a safe internal name (`__gN`) that regexp2 accepts,
@@ -42,6 +68,9 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 			name, end, err := decodeGroupName(rs, i+3)
 			if err != nil {
 				return "", nil, nil, err
+			}
+			if !isValidGroupName(name) {
+				return "", nil, nil, fmt.Errorf("invalid capture group name")
 			}
 			in := "__g" + strconv.Itoa(counter)
 			counter++
@@ -130,6 +159,13 @@ func decodeGroupName(rs []rune, start int) (string, int, error) {
 			cp, next, ok := decodeUnicodeEscape(rs, i+2)
 			if !ok {
 				return "", 0, fmt.Errorf("invalid \\u escape in group name")
+			}
+			// Combine a UTF-16 surrogate pair 𐀀 into its code point.
+			if cp >= 0xD800 && cp <= 0xDBFF && next+1 < len(rs) && rs[next] == '\\' && rs[next+1] == 'u' {
+				if lo, next2, ok2 := decodeUnicodeEscape(rs, next+2); ok2 && lo >= 0xDC00 && lo <= 0xDFFF {
+					cp = 0x10000 + (cp-0xD800)*0x400 + (lo - 0xDC00)
+					next = next2
+				}
 			}
 			b.WriteRune(cp)
 			i = next
