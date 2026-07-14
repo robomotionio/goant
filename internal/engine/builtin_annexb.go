@@ -142,7 +142,8 @@ func (rt *Runtime) initAnnexBObject() {
 		}
 		if o := rt.objPtr(this); o != nil {
 			if o.proxy != nil {
-				return mkundef(), rt.proxySetPrototypeOf(o.proxy, p)
+				_, e := rt.proxySetPrototypeOf(o.proxy, p)
+				return mkundef(), e // __proto__ setter is a silent no-op on failure
 			}
 			if !rt.ordinarySetProto(o, p) {
 				return mkundef(), rt.typeError("Cannot set the prototype (non-extensible, immutable, or cyclic)")

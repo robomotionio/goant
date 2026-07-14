@@ -432,8 +432,12 @@ func (rt *Runtime) initObjectBuiltin() {
 		if o := rt.objPtr(obj); o != nil {
 			p := arg(args, 1)
 			if o.proxy != nil {
-				if e := rt.proxySetPrototypeOf(o.proxy, p); e != nil {
+				ok, e := rt.proxySetPrototypeOf(o.proxy, p)
+				if e != nil {
 					return mkundef(), e
+				}
+				if !ok {
+					return mkundef(), rt.typeError("Object.setPrototypeOf: proxy [[SetPrototypeOf]] returned false")
 				}
 			} else if p.IsObjectType() || p.IsNull() {
 				if !rt.ordinarySetProto(o, p) {

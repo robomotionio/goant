@@ -208,10 +208,11 @@ func (rt *Runtime) initReflectBuiltin() {
 			return mkundef(), rt.typeError("Reflect.setPrototypeOf proto must be an object or null")
 		}
 		if o.proxy != nil {
-			if e := rt.proxySetPrototypeOf(o.proxy, p); e != nil {
+			ok, e := rt.proxySetPrototypeOf(o.proxy, p)
+			if e != nil {
 				return mkundef(), e
 			}
-			return mktrue(), nil
+			return mkbool(ok), nil
 		}
 		// Returns whether [[SetPrototypeOf]] succeeded (false on cycle / non-
 		// extensible / immutable prototype), rather than throwing.

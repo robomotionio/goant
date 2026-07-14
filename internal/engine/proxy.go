@@ -505,32 +505,35 @@ func (rt *Runtime) proxyDefineProperty(p *proxyState, key, desc Value) *ThrowErr
 	return rt.objectDefinePropertyKey(p.target, rt.toPropertyKeyValue(key), desc)
 }
 
-func (rt *Runtime) proxySetPrototypeOf(p *proxyState, proto Value) *ThrowError {
+func (rt *Runtime) proxySetPrototypeOf(p *proxyState, proto Value) (bool, *ThrowError) {
 	trap, e := p.trap(rt, "setPrototypeOf")
 	if e != nil {
-		return e
+		return false, e
 	}
 	if rt.isCallable(trap) {
 		r, e := rt.callValue(trap, p.handler, []Value{p.target, proto})
 		if e != nil {
-			return e
+			return false, e
+		}
+		if !rt.toBoolean(r) {
+			return false, nil // trap reported failure; [[SetPrototypeOf]] returns false
 		}
 		// Invariant: a non-extensible target's prototype cannot be changed.
-		if rt.toBoolean(r) && !rt.targetExtensible(p.target) {
+		if !rt.targetExtensible(p.target) {
 			actual := mknull()
 			if to := rt.objPtr(p.target); to != nil {
 				actual = to.proto
 			}
 			if !rt.sameValue(proto, actual) {
-				return rt.typeError("'setPrototypeOf' on proxy: trap returned truish for setting a new prototype on the non-extensible proxy target")
+				return false, rt.typeError("'setPrototypeOf' on proxy: trap returned truish for setting a new prototype on the non-extensible proxy target")
 			}
 		}
-		return nil
+		return true, nil
 	}
 	if to := rt.objPtr(p.target); to != nil && (proto.IsObjectType() || proto.IsNull()) {
 		to.proto = proto
 	}
-	return nil
+	return true, nil
 }
 
 func (rt *Runtime) proxyIsExtensible(p *proxyState) (bool, *ThrowError) {
