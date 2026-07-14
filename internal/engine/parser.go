@@ -1178,11 +1178,12 @@ func (p *parser) validatePatternTarget(n *Node) {
 	case n.Kind == NObject:
 		p.validateObjectPattern(n)
 	case n.Kind == NIdent:
-		// A leaf AssignmentTarget inside a destructuring assignment pattern may not
-		// be `eval`/`arguments` in strict mode (same restriction as a simple
-		// assignment target).
-		if p.isStrictRestrictedAssignTarget(n) {
-			p.errorf("cannot modify eval or arguments in strict mode")
+		// A leaf AssignmentTarget inside a destructuring assignment pattern must be
+		// a valid IdentifierReference: in strict mode it may not be `eval`/
+		// `arguments` nor a strict future-reserved word (`let`, `static`,
+		// `implements`, … — escaped or not, since n.Str is the decoded name).
+		if p.lx.strict && p.strictForbiddenBinding(n.Str) {
+			p.errorf("Invalid assignment target: '%s' is reserved in strict mode", n.Str)
 		}
 	}
 }
