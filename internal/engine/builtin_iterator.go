@@ -565,6 +565,105 @@ func (rt *Runtime) initIteratorHelpers() {
 		}
 		return rt.wrapIterator(it), nil
 	})
+	rt.defMethod(cobj, "concat", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// Eagerly validate every argument (in order): each must be an Object with
+		// a callable %Symbol.iterator% method. The method is fetched now but the
+		// inner iterators are opened lazily, one segment at a time.
+		type openIter struct{ iterable, method Value }
+		iterables := make([]openIter, 0, len(args))
+		for _, item := range args {
+			if !item.IsObjectType() {
+				return mkundef(), rt.typeError("Iterator.concat argument is not an object")
+			}
+			m, e := rt.getElement(item, rt.symIterator) // GetMethod(item, @@iterator)
+			if e != nil {
+				return mkundef(), e
+			}
+			if m.IsNullish() || !rt.isCallable(m) {
+				return mkundef(), rt.typeError("Iterator.concat argument is not iterable")
+			}
+			iterables = append(iterables, openIter{item, m})
+		}
+		idx := 0
+		done := false
+		running := false // guards against re-entrant next/return (generator "executing")
+		var inner, innerNext Value // current inner iterator + its next (0 when none open)
+		next := func() (Value, bool, *ThrowError) {
+			for !done {
+				if innerNext != 0 {
+					v, d, e := rt.iterStepValue(inner, innerNext)
+					if e != nil {
+						done = true
+						return mkundef(), false, e
+					}
+					if !d {
+						return v, false, nil
+					}
+					inner, innerNext = 0, 0 // segment exhausted (already closed by IteratorStep)
+				}
+				if idx >= len(iterables) {
+					done = true
+					return mkundef(), true, nil
+				}
+				it := iterables[idx]
+				idx++
+				iter, e := rt.callValue(it.method, it.iterable, nil) // Call(method, iterable)
+				if e != nil {
+					done = true
+					return mkundef(), false, e
+				}
+				if !iter.IsObjectType() {
+					done = true
+					return mkundef(), false, rt.typeError("Iterator.concat: [Symbol.iterator]() returned a non-object")
+				}
+				nx, e := rt.getField(iter, "next") // GetIteratorDirect: read next once
+				if e != nil {
+					done = true
+					return mkundef(), false, e
+				}
+				inner, innerNext = iter, nx
+			}
+			return mkundef(), true, nil
+		}
+		proto := rt.iteratorProto
+		if rt.iterHelperProto != 0 {
+			proto = rt.iterHelperProto
+		}
+		hv := rt.newObject(proto)
+		ho := rt.objPtr(hv)
+		rt.defMethod(ho, "next", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
+			if running {
+				return mkundef(), rt.typeError("Iterator.concat generator is already running")
+			}
+			running = true
+			val, d, e := next()
+			running = false
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.genResult(val, d), nil
+		})
+		rt.defMethod(ho, "return", 0, func(rt *Runtime, _ Value, args []Value) (Value, *ThrowError) {
+			if running {
+				return mkundef(), rt.typeError("Iterator.concat generator is already running")
+			}
+			// Forward Return to the currently-open inner iterator only; before the
+			// first segment starts or after exhaustion there is nothing to close.
+			if !done {
+				done = true
+				if inner != 0 {
+					running = true
+					e := rt.iteratorCloseE(inner)
+					running = false
+					if e != nil {
+						return mkundef(), e
+					}
+				}
+			}
+			return rt.genResult(arg(args, 0), true), nil
+		})
+		return hv, nil
+	})
 	if rt.symToStringTag != 0 {
 		proto.defineOwnSymbol(rt.symToStringTag.handle(), rt.newString("Iterator"), attrConfigurable)
 	}
