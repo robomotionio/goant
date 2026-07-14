@@ -81,6 +81,10 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 	c.emit(OpFalse)
 	c.emitOpU16(OpPutLocal, uint16(doneSlot))
 
+	// Protect the element extraction: an abrupt completion (a throwing target,
+	// default initializer, or value getter) must close the iterator (unless a
+	// throw from next() already recorded it as done) before propagating.
+	catchHandler := c.emitJump(OpTryPush)
 	for _, elem := range pattern.Args {
 		c.emitIterStep(iterSlot, resSlot, doneSlot) // leaves the value (or undefined)
 		if elem.Kind == NEmpty {
@@ -95,7 +99,22 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 		c.applyDefault(defExpr)
 		c.destructureTarget(target, kind)
 	}
-	// if !done: IteratorClose(iter) (the pattern didn't consume everything).
+	c.emit(OpTryPop)
+	// Normal completion: close the iterator if the pattern didn't exhaust it.
+	c.emitCloseIfNotDone(iterSlot, doneSlot)
+	end := c.emitJump(OpJmp)
+	// Abrupt completion: close (unless already done) and re-throw the caught value.
+	c.patchJump(catchHandler)
+	c.emit(OpCatch)
+	c.emitU32(0)
+	c.emitCloseIfNotDone(iterSlot, doneSlot)
+	c.emit(OpThrow)
+	c.patchJump(end)
+}
+
+// emitCloseIfNotDone emits `if !done: IteratorClose(iter)` — the iterator is
+// closed only when it has not already reported (or been marked) done.
+func (c *compiler) emitCloseIfNotDone(iterSlot, doneSlot int) {
 	c.emitOpU16(OpGetLocal, uint16(doneSlot))
 	skip := c.emitJump(OpJmpTrue)
 	c.emitOpU16(OpGetLocal, uint16(iterSlot))
@@ -109,6 +128,11 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 func (c *compiler) emitIterStep(iterSlot, resSlot, doneSlot int) {
 	c.emitOpU16(OpGetLocal, uint16(doneSlot))
 	alreadyDone := c.emitJump(OpJmpTrue) // done -> push undefined
+	// Optimistically mark the iterator done before calling next(): a throw from
+	// next() itself records the iterator as done (spec IteratorStep), so an
+	// enclosing IteratorClose is correctly skipped. Reset to r.done on success.
+	c.emit(OpTrue)
+	c.emitOpU16(OpPutLocal, uint16(doneSlot))
 	// r = iter.next(); done = r.done
 	c.emitOpU16(OpGetLocal, uint16(iterSlot))
 	c.emitFieldOp(OpGetField2, "next")
