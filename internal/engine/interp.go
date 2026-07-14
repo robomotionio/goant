@@ -325,7 +325,7 @@ restart:
 					thrown = e
 					goto unwind
 				}
-				if has {
+				if has && !rt.isUnscopable(withStack[k], name) {
 					if e := rt.setField(withStack[k], name, val); e != nil {
 						thrown = e
 						goto unwind
