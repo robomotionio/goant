@@ -526,7 +526,10 @@ restart:
 			flags := code[ip+1]
 			accFn := pop()
 			key := pop()
-			rt.defineMethodComputed(peek(), key, accFn, flags)
+			if e := rt.defineMethodComputed(peek(), key, accFn, flags); e != nil {
+				thrown = e
+				goto unwind
+			}
 			ip += 2
 
 		case OpGetField:

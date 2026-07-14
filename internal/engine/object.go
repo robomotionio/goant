@@ -725,10 +725,10 @@ func (rt *Runtime) setInferredNameFromKey(fn, key Value) {
 	o.defineOwn("name", rt.newString(name), attrConfigurable)
 }
 
-func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
+func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) *ThrowError {
 	o := rt.objPtr(target)
 	if o == nil {
-		return
+		return nil
 	}
 	enumerable := flags&4 != 0 // bit 4: object-literal accessor (enumerable)
 	flags &= 3
@@ -736,16 +736,21 @@ func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
 	if enumerable {
 		accAttrs |= attrEnumerable
 	}
-	k := rt.toPropertyKeyValue(key)
+	// ToPropertyKey(key) is observable and may throw (a computed key whose value
+	// cannot be converted to a property key).
+	k, e := rt.toPropertyKey(key)
+	if e != nil {
+		return e
+	}
 	if k.IsSymbol() {
 		sym := k.handle()
 		if flags == 3 { // enumerable own data property (CreateDataProperty)
 			o.defineOwnSymbol(sym, accFn, attrWritable|attrEnumerable|attrConfigurable)
-			return
+			return nil
 		}
 		if flags == 0 {
 			o.defineOwnSymbol(sym, accFn, attrWritable|attrConfigurable)
-			return
+			return nil
 		}
 		g, s := mkundef(), mkundef()
 		hg, hs := false, false
@@ -759,21 +764,21 @@ func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
 			s, hs = accFn, true
 		}
 		o.defineAccessorSymbol(sym, g, s, hg, hs, accAttrs)
-		return
+		return nil
 	}
 	name, e := rt.propKeyString(k)
 	if e != nil {
-		return
+		return e
 	}
 	if flags == 3 { // enumerable own data property (CreateDataProperty), bypassing
 		// any inherited setter such as Object.prototype's __proto__.
 		o.defineOwn(name, accFn, attrWritable|attrEnumerable|attrConfigurable)
-		return
+		return nil
 	}
 	if flags == 0 {
 		rt.setField(target, name, accFn)
 		o.setAttrsOwn(name, attrWritable|attrConfigurable)
-		return
+		return nil
 	}
 	g, s := mkundef(), mkundef()
 	hg, hs := false, false
@@ -787,6 +792,7 @@ func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) {
 		s, hs = accFn, true
 	}
 	o.defineAccessor(name, g, s, hg, hs, accAttrs)
+	return nil
 }
 
 // ownDescriptorSym is ownDescriptor for a symbol-keyed property.
