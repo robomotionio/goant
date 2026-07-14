@@ -9,6 +9,7 @@ package engine
 
 import (
 	"math"
+	"strconv"
 	"time"
 )
 
@@ -487,6 +488,7 @@ func parseDate(s string) float64 {
 	formats := []string{
 		"2006-01-02T15:04:05.000Z07:00",
 		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04Z07:00",
 		"2006-01-02T15:04:05",
 		"2006-01-02T15:04",
 		"2006-01-02",
@@ -496,10 +498,42 @@ func parseDate(s string) float64 {
 		"Jan 02 2006",
 		"January 2, 2006",
 	}
+	// Extended-year ISO 8601 (±YYYYYY-MM-DD…): Go's time.Parse has no 6-digit
+	// signed-year layout, so pull the year off, parse the remainder with a
+	// placeholder year, and re-apply the real (possibly negative) year.
+	if len(s) >= 7 && (s[0] == '+' || s[0] == '-') && isSixDigits(s[1:7]) && (len(s) == 7 || s[7] == '-') {
+		yr, _ := strconv.Atoi(s[1:7])
+		if s[0] == '-' {
+			if yr == 0 {
+				return math.NaN() // "-000000" (minus-zero extended year) is invalid
+			}
+			yr = -yr
+		}
+		for _, f := range formats {
+			if t, err := time.Parse(f, "2000"+s[7:]); err == nil {
+				u := time.Date(yr, t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+				return float64(u.UTC().UnixMilli())
+			}
+		}
+		return math.NaN()
+	}
 	for _, f := range formats {
 		if t, err := time.Parse(f, s); err == nil {
 			return float64(t.UTC().UnixMilli())
 		}
 	}
 	return math.NaN()
+}
+
+// isSixDigits reports whether s is exactly six ASCII digits.
+func isSixDigits(s string) bool {
+	if len(s) != 6 {
+		return false
+	}
+	for i := 0; i < 6; i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
