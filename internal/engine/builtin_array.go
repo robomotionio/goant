@@ -160,6 +160,250 @@ func (rt *Runtime) sortValues(vs []Value, cmp Value) *ThrowError {
 // arrayFromCtor creates the result for Array.of/from: when called as a static on
 // a subclass constructor (`this`), it constructs via that constructor; otherwise
 // a plain Array. Lets `class C extends Array {}` inherit species-correct statics.
+// arrayFromAsync implements Array.fromAsync(asyncItems, mapfn, thisArg): an async
+// function that Awaits each element — from an async iterator, a sync iterator
+// (wrapped), or an array-like — before adding it, returning a promise of the
+// resulting array. All work is driven through promise continuations since a
+// native cannot suspend on await.
+func (rt *Runtime) arrayFromAsync(C, asyncItems, mapfn, thisArg Value) Value {
+	resultP, resolveCap, rejectCap, _ := rt.newPromiseCapability(rt.promiseCtor)
+	resolve := func(v Value) { rt.callValue(resolveCap, mkundef(), []Value{v}) }
+	reject := func(v Value) { rt.callValue(rejectCap, mkundef(), []Value{v}) }
+
+	mapping := false
+	if !mapfn.IsUndefined() {
+		if !rt.isCallable(mapfn) {
+			reject(rt.typeError("Array.fromAsync mapper is not a function").Value)
+			return resultP
+		}
+		mapping = true
+	}
+
+	// await runs onF(value) once `value` fulfills and onR(reason) if it rejects,
+	// implementing the Await of the async function body via PromiseResolve/then.
+	await := func(value Value, onF, onR func(Value)) {
+		p := rt.resolvedPromise(value)
+		fF := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) { onF(arg(a, 0)); return mkundef(), nil })
+		fR := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) { onR(arg(a, 0)); return mkundef(), nil })
+		rt.promiseThen(fF, fR, rt.objPtr(p))
+	}
+
+	// Resolve the iterator: @@asyncIterator, else @@iterator wrapped as async.
+	var iter Value
+	hasIter := false
+	if !asyncItems.IsNullish() {
+		asyncM := mkundef()
+		if rt.symAsyncIterator != 0 {
+			m, e := rt.getElement(asyncItems, rt.symAsyncIterator)
+			if e != nil {
+				reject(e.Value)
+				return resultP
+			}
+			asyncM = m
+		}
+		if !asyncM.IsNullish() {
+			if !rt.isCallable(asyncM) {
+				reject(rt.typeError("[Symbol.asyncIterator] is not a function").Value)
+				return resultP
+			}
+			it, e := rt.callValue(asyncM, asyncItems, nil)
+			if e != nil {
+				reject(e.Value)
+				return resultP
+			}
+			if !it.IsObjectType() {
+				reject(rt.typeError("[Symbol.asyncIterator]() returned a non-object").Value)
+				return resultP
+			}
+			iter, hasIter = it, true
+		} else {
+			syncM := mkundef()
+			if rt.symIterator != 0 {
+				m, e := rt.getElement(asyncItems, rt.symIterator)
+				if e != nil {
+					reject(e.Value)
+					return resultP
+				}
+				syncM = m
+			}
+			if !syncM.IsNullish() {
+				if !rt.isCallable(syncM) {
+					reject(rt.typeError("[Symbol.iterator] is not a function").Value)
+					return resultP
+				}
+				syncIt, e := rt.callValue(syncM, asyncItems, nil)
+				if e != nil {
+					reject(e.Value)
+					return resultP
+				}
+				if !syncIt.IsObjectType() {
+					reject(rt.typeError("[Symbol.iterator]() returned a non-object").Value)
+					return resultP
+				}
+				iter, hasIter = rt.createAsyncFromSyncIterator(syncIt), true
+			}
+		}
+	}
+
+	if hasIter {
+		nextMethod, e := rt.getField(iter, "next")
+		if e != nil {
+			reject(e.Value)
+			return resultP
+		}
+		var A Value
+		if rt.isCallable(C) {
+			a, e := rt.construct(C, nil)
+			if e != nil {
+				reject(e.Value)
+				return resultP
+			}
+			A = a
+		} else {
+			A = rt.newArray()
+		}
+		// closeReject performs AsyncIteratorClose(iter, throw) then rejects with the
+		// original reason (the iterator's return result/error is discarded).
+		closeReject := func(reason Value) {
+			rf, e := rt.getField(iter, "return")
+			if e != nil || !rt.isCallable(rf) {
+				reject(reason)
+				return
+			}
+			rres, ce := rt.callValue(rf, iter, nil)
+			if ce != nil {
+				reject(reason)
+				return
+			}
+			await(rres, func(_ Value) { reject(reason) }, func(_ Value) { reject(reason) })
+		}
+		var step func(k int)
+		step = func(k int) {
+			nextResult, e := rt.callValue(nextMethod, iter, nil)
+			if e != nil {
+				reject(e.Value)
+				return
+			}
+			await(nextResult, func(res Value) {
+				if !res.IsObjectType() {
+					reject(rt.typeError("iterator result is not an object").Value)
+					return
+				}
+				doneV, e := rt.getField(res, "done")
+				if e != nil {
+					reject(e.Value)
+					return
+				}
+				if rt.toBoolean(doneV) {
+					if ok, se := rt.setFieldR(A, "length", mknum(float64(k))); se != nil {
+						reject(se.Value)
+					} else if !ok {
+						reject(rt.typeError("Array.fromAsync: cannot set length").Value)
+					} else {
+						resolve(A)
+					}
+					return
+				}
+				val, e := rt.getField(res, "value")
+				if e != nil {
+					reject(e.Value)
+					return
+				}
+				add := func(mapped Value) {
+					if e := rt.createDataProperty(A, mknum(float64(k)), mapped); e != nil {
+						closeReject(e.Value)
+						return
+					}
+					step(k + 1)
+				}
+				if mapping {
+					mv, e := rt.callValue(mapfn, thisArg, []Value{val, mknum(float64(k))})
+					if e != nil {
+						closeReject(e.Value)
+						return
+					}
+					await(mv, add, closeReject)
+				} else {
+					add(val)
+				}
+			}, reject)
+		}
+		step(0)
+		return resultP
+	}
+
+	// Array-like path: ToObject, then Await each element in [0, len).
+	arrayLike := asyncItems
+	if !arrayLike.IsObjectType() {
+		o, e := rt.toObjectValue(arrayLike)
+		if e != nil {
+			reject(e.Value)
+			return resultP
+		}
+		arrayLike = o
+	}
+	n, e := rt.lengthOf(arrayLike)
+	if e != nil {
+		reject(e.Value)
+		return resultP
+	}
+	var A Value
+	if rt.isCallable(C) {
+		a, e := rt.construct(C, []Value{mknum(float64(n))})
+		if e != nil {
+			reject(e.Value)
+			return resultP
+		}
+		A = a
+	} else {
+		a, e := rt.arrayCreate(n) // ArrayCreate(len): RangeError when len > 2^32-1
+		if e != nil {
+			reject(e.Value)
+			return resultP
+		}
+		A = a
+	}
+	var stepAL func(k int)
+	stepAL = func(k int) {
+		if k >= n {
+			if ok, se := rt.setFieldR(A, "length", mknum(float64(n))); se != nil {
+				reject(se.Value)
+			} else if !ok {
+				reject(rt.typeError("Array.fromAsync: cannot set length").Value)
+			} else {
+				resolve(A)
+			}
+			return
+		}
+		kValue, e := rt.getElement(arrayLike, mknum(float64(k)))
+		if e != nil {
+			reject(e.Value)
+			return
+		}
+		await(kValue, func(awaited Value) {
+			add := func(mapped Value) {
+				if e := rt.createDataProperty(A, mknum(float64(k)), mapped); e != nil {
+					reject(e.Value)
+					return
+				}
+				stepAL(k + 1)
+			}
+			if mapping {
+				mv, e := rt.callValue(mapfn, thisArg, []Value{awaited, mknum(float64(k))})
+				if e != nil {
+					reject(e.Value)
+					return
+				}
+				await(mv, add, reject)
+			} else {
+				add(awaited)
+			}
+		}, reject)
+	}
+	stepAL(0)
+	return resultP
+}
+
 func (rt *Runtime) arrayFromCtor(this Value, length int) (Value, *ThrowError) {
 	if rt.isCallable(this) {
 		v, e := rt.construct(this, []Value{mknum(float64(length))})
@@ -1733,6 +1977,9 @@ func (rt *Runtime) initArrayBuiltin() {
 		}
 		rt.setField(res, "length", mknum(float64(n)))
 		return res, nil
+	})
+	rt.defMethod(cobj, "fromAsync", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.arrayFromAsync(this, arg(args, 0), arg(args, 1), arg(args, 2)), nil
 	})
 	// Array.prototype[Symbol.unscopables] (with-statement exclusion list).
 	if rt.symUnscopables != 0 {

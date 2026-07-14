@@ -178,7 +178,23 @@ func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) Value {
 			}
 			doneV, _ := rt.getField(res, "done")
 			val, _ := rt.getField(res, "value")
-			return rt.resolvedPromise(rt.genResult(val, rt.toBoolean(doneV))), nil
+			done := rt.toBoolean(doneV)
+			// AsyncFromSyncIteratorContinuation: Await the sync value (so a thenable
+			// value resolves) before re-wrapping it in an IteratorResult carrying the
+			// sync `done` flag. For next(), a rejecting value closes the sync iterator
+			// (closeOnRejection); for return() it does not.
+			valP := rt.resolvedPromise(val)
+			unwrap := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+				return rt.genResult(arg(a, 0), done), nil
+			})
+			onRej := mkundef()
+			if method == "next" && !done {
+				onRej = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+					rt.iteratorClose(syncIt) // close on rejection; swallow the close outcome
+					return mkundef(), &ThrowError{Value: arg(a, 0), rt: rt}
+				})
+			}
+			return rt.promiseThen(unwrap, onRej, rt.objPtr(valP)), nil
 		}
 	}
 	rt.defMethod(o, "next", 1, step("next"))
