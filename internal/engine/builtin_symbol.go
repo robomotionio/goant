@@ -125,6 +125,9 @@ func (rt *Runtime) initSymbolBuiltin() {
 	})
 	rt.defMethod(cobj, "keyFor", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		target := arg(args, 0)
+		if !target.IsSymbol() {
+			return mkundef(), rt.typeError("Symbol.keyFor requires a symbol argument")
+		}
 		for k, sym := range rt.symbolRegistry {
 			if sym == target {
 				return rt.internString(k), nil
