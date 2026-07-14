@@ -745,7 +745,23 @@ func (c *compiler) compileCatchBody(n *Node) {
 func (c *compiler) compileFinallyBlock(body *Node) {
 	finallyJump := c.emitJump(OpFinally)
 	c.unwindPush(unwFinallyBody)
+	// A finally that completes normally does not contribute its own completion
+	// value: `try Block Finally` yields Block's value (step 3, "let F be B"), and
+	// `try Block Catch Finally` yields the Block/Catch value. Preserve the
+	// completion value across the finally body so the finally's statements don't
+	// clobber it (script/eval completion only). An abrupt finally is resumed via
+	// OpFinallyRet with its own value, so the restore is harmless there.
+	saveSlot := -1
+	if c.isScript {
+		saveSlot = c.addLocal("*fincmp*", false)
+		c.emitOpU16(OpGetLocal, uint16(c.completionSlot))
+		c.emitOpU16(OpPutLocal, uint16(saveSlot))
+	}
 	c.compileStmt(body)
+	if saveSlot >= 0 {
+		c.emitOpU16(OpGetLocal, uint16(saveSlot))
+		c.emitOpU16(OpPutLocal, uint16(c.completionSlot))
+	}
 	c.unwindPop()
 	c.emit(OpFinallyRet)
 	c.patchJump(finallyJump)
