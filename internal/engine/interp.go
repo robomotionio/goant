@@ -20,6 +20,10 @@ type ThrowError struct {
 	Value   Value
 	rt      *Runtime
 	control bool
+	// rejected marks a [[DefineOwnProperty]]/[[Set]] rejection: DefinePropertyOrThrow
+	// contexts throw it (it is a valid TypeError), but Reflect.defineProperty /
+	// proxy invariant checks treat it as a boolean false instead of throwing.
+	rejected bool
 }
 
 func (e *ThrowError) Error() string {
@@ -1631,6 +1635,14 @@ func (rt *Runtime) typeError(msg string) *ThrowError {
 
 func (rt *Runtime) rangeError(msg string) *ThrowError {
 	return &ThrowError{Value: rt.makeError(rt.errors.rangeProto, "RangeError", msg), rt: rt}
+}
+
+// rejectDefine is a [[DefineOwnProperty]] rejection (a TypeError that
+// DefinePropertyOrThrow throws, but Reflect.defineProperty reports as false).
+func (rt *Runtime) rejectDefine(msg string) *ThrowError {
+	e := rt.typeError(msg)
+	e.rejected = true
+	return e
 }
 
 func (rt *Runtime) referenceError(msg string) *ThrowError {

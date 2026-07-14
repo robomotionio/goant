@@ -107,6 +107,9 @@ func (rt *Runtime) setDataOnReceiver(receiver, pk, val Value) (bool, *ThrowError
 			do.defineOwn("configurable", mktrue(), attrDefault)
 		}
 		if e := rt.objectDefinePropertyKey(receiver, pk, desc); e != nil {
+			if e.rejected {
+				return false, nil
+			}
 			return false, e
 		}
 		return true, nil
@@ -219,7 +222,14 @@ func (rt *Runtime) initReflectBuiltin() {
 		if e := needObj(arg(args, 0), "defineProperty"); e != nil {
 			return mkundef(), e
 		}
-		return mkbool(rt.objectDefinePropertyKey(arg(args, 0), arg(args, 1), arg(args, 2)) == nil), nil
+		e := rt.objectDefinePropertyKey(arg(args, 0), arg(args, 1), arg(args, 2))
+		if e == nil {
+			return mktrue(), nil
+		}
+		if e.rejected { // a rejected define is a boolean false, not a thrown error
+			return mkfalse(), nil
+		}
+		return mkundef(), e
 	})
 	rt.defMethod(ro, "getOwnPropertyDescriptor", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(arg(args, 0))

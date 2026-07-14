@@ -471,7 +471,9 @@ func (rt *Runtime) proxyDefineProperty(p *proxyState, key, desc Value) *ThrowErr
 			return e
 		}
 		if !rt.toBoolean(r) {
-			return nil
+			// A false trap result rejects: DefinePropertyOrThrow (Object.defineProperty)
+			// throws, Reflect.defineProperty returns false.
+			return rt.rejectDefine("'defineProperty' on proxy: trap returned falsish")
 		}
 		// [[DefineOwnProperty]] invariants (10.5.6).
 		td, texists := rt.targetOwnDesc(p.target, key)

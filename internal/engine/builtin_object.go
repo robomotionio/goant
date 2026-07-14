@@ -747,7 +747,7 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 			if idx, integral := integerIndex(fidx); integral {
 				return rt.taDefineIndex(o, idx, descVal)
 			}
-			return rt.typeError("Cannot define property: invalid typed array index")
+			return rt.rejectDefine("Cannot define property: invalid typed array index")
 		}
 	}
 	sym := key.IsSymbol()
@@ -768,7 +768,7 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	// A new property cannot be defined on a non-extensible object; a
 	// non-configurable existing property cannot be redefined.
 	if !existing.exists && !o.flags.extensible {
-		return rt.typeError("Cannot define property, object is not extensible")
+		return rt.rejectDefine("Cannot define property, object is not extensible")
 	}
 	get := func(k string) (Value, bool) {
 		if rt.hasProp(descVal, k) {
@@ -806,25 +806,25 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 		descIsData := hasVal || hasW
 		switch {
 		case hasC && rt.toBoolean(cV):
-			return rt.typeError("Cannot redefine property")
+			return rt.rejectDefine("Cannot redefine property")
 		case hasE && rt.toBoolean(eV) != existing.enumerable:
-			return rt.typeError("Cannot redefine property")
+			return rt.rejectDefine("Cannot redefine property")
 		case descIsAccessor && !existing.isAccessor, descIsData && existing.isAccessor:
-			return rt.typeError("Cannot redefine property") // no data<->accessor conversion
+			return rt.rejectDefine("Cannot redefine property") // no data<->accessor conversion
 		case existing.isAccessor:
 			if hasGet && !rt.sameValue(getV, existing.getter) {
-				return rt.typeError("Cannot redefine property")
+				return rt.rejectDefine("Cannot redefine property")
 			}
 			if hasSet && !rt.sameValue(setV, existing.setter) {
-				return rt.typeError("Cannot redefine property")
+				return rt.rejectDefine("Cannot redefine property")
 			}
 		case !existing.writable:
 			// Non-writable data: writable may not go true, value may not change.
 			if hasW && rt.toBoolean(wV) {
-				return rt.typeError("Cannot redefine property")
+				return rt.rejectDefine("Cannot redefine property")
 			}
 			if hasVal && !rt.sameValue(valV, existing.value) {
-				return rt.typeError("Cannot redefine property")
+				return rt.rejectDefine("Cannot redefine property")
 			}
 		}
 	}
@@ -915,11 +915,11 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 					if nl, e := rt.toNumber(val); e != nil {
 						return e
 					} else if uint32(nl) != o.arrLen || float64(uint32(nl)) != nl {
-						return rt.typeError("Cannot redefine property: length")
+						return rt.rejectDefine("Cannot redefine property: length")
 					}
 				}
 				if hasW && writable {
-					return rt.typeError("Cannot redefine property: length")
+					return rt.rejectDefine("Cannot redefine property: length")
 				}
 				return nil
 			}
@@ -930,7 +930,7 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 				}
 				if !ok {
 					// A non-configurable element blocked the requested shrink.
-					return rt.typeError("Cannot redefine property: length")
+					return rt.rejectDefine("Cannot redefine property: length")
 				}
 			}
 			if hasW && !writable {
