@@ -1457,6 +1457,10 @@ func (p *parser) parseObject() *Node {
 
 func (p *parser) parseCall() *Node {
 	n := p.parsePrimary()
+	// A TemplateLiteral may not appear in the tail of an OptionalChain
+	// (`a?.b`x``): parenthesizing (`(a?.b)`x``) starts a fresh parseCall, so the
+	// flag correctly resets there.
+	sawOptional := false
 	for {
 		la := p.next()
 		switch la {
@@ -1487,6 +1491,7 @@ func (p *parser) parseCall() *Node {
 				return n
 			}
 		case TokOptionalChain:
+			sawOptional = true
 			p.consume()
 			opt := p.mk(NOptional)
 			opt.Left = n
@@ -1525,6 +1530,10 @@ func (p *parser) parseCall() *Node {
 			}
 			n = opt
 		case TokTemplate:
+			if sawOptional {
+				p.errorf("Tagged template literals may not be used in an optional chain")
+				return p.mk(NEmpty)
+			}
 			tagged := p.mk(NTaggedTemplate)
 			tagged.Left = n
 			tagged.Right = p.parsePrimary()
