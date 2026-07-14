@@ -1355,8 +1355,11 @@ func (p *parser) parseObject() *Node {
 		} else {
 			// Shorthand `{ id }` / `{ id = default }`: id is an IdentifierReference,
 			// so it may not be a reserved word (even one written with escapes, since
-			// prop.Left.Str is the decoded StringValue).
-			if prop.Left.Kind == NIdent && isReservedWordTok(parseKeyword(prop.Left.Str)) {
+			// prop.Left.Str is the decoded StringValue). `enum` and `extends` are
+			// reserved but have no dedicated token — they lex as identifiers — so
+			// they are checked by name.
+			if prop.Left.Kind == NIdent && (isReservedWordTok(parseKeyword(prop.Left.Str)) ||
+				prop.Left.Str == "enum" || prop.Left.Str == "extends") {
 				p.errorf("Unexpected reserved word")
 				return n
 			}
