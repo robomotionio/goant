@@ -724,6 +724,83 @@ func (rt *Runtime) initIteratorHelpers() {
 		}
 		return rt.newZipIterator(iters, nexts, mode, padding, finish), nil
 	})
+	rt.defMethod(cobj, "zipKeyed", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		iterablesArg := arg(args, 0)
+		if !iterablesArg.IsObjectType() {
+			return mkundef(), rt.typeError("Iterator.zipKeyed called on a non-object")
+		}
+		mode, paddingOption, e := rt.zipParseOptions(arg(args, 1))
+		if e != nil {
+			return mkundef(), e
+		}
+		// Gather (key, iterator) for each own enumerable property, in key order.
+		allKeys, e := rt.objectOwnKeys(iterablesArg)
+		if e != nil {
+			return mkundef(), e
+		}
+		var keys, iters, nexts []Value
+		for _, key := range allKeys {
+			en, exists, de := rt.ownKeyEnumerable(iterablesArg, key)
+			if de != nil {
+				rt.closeIterList(iters, -1)
+				return mkundef(), de
+			}
+			if !exists || !en {
+				continue
+			}
+			value, ge := rt.getElement(iterablesArg, key) // Get(iterables, key)
+			if ge != nil {
+				rt.closeIterList(iters, -1)
+				return mkundef(), ge
+			}
+			if value.IsUndefined() {
+				continue // an undefined property value contributes no key to the zip
+			}
+			it, fe := rt.getIteratorFlattenable(value)
+			if fe != nil {
+				rt.closeIterList(iters, -1)
+				return mkundef(), fe
+			}
+			nx, ne := rt.getField(it, "next")
+			if ne != nil {
+				rt.closeIterList(iters, -1)
+				return mkundef(), ne
+			}
+			keys = append(keys, key)
+			iters = append(iters, it)
+			nexts = append(nexts, nx)
+		}
+		// Longest-mode padding is read by key from the padding object (Get), not
+		// drained from an iterator.
+		padding := make([]Value, len(iters))
+		for i := range padding {
+			padding[i] = mkundef()
+		}
+		if mode == "longest" && !paddingOption.IsUndefined() {
+			for i, key := range keys {
+				pv, pe := rt.getElement(paddingOption, key)
+				if pe != nil {
+					rt.closeIterList(iters, -1)
+					return mkundef(), pe
+				}
+				padding[i] = pv
+			}
+		}
+		finish := func(results []Value) Value {
+			obj := rt.newObject(mknull())
+			oo := rt.objPtr(obj)
+			for i, key := range keys {
+				if key.IsSymbol() {
+					oo.defineOwnSymbol(key.handle(), results[i], attrDefault)
+				} else {
+					name, _ := rt.propKeyString(key)
+					oo.defineOwn(name, results[i], attrDefault)
+				}
+			}
+			return obj
+		}
+		return rt.newZipIterator(iters, nexts, mode, padding, finish), nil
+	})
 	if rt.symToStringTag != 0 {
 		proto.defineOwnSymbol(rt.symToStringTag.handle(), rt.newString("Iterator"), attrConfigurable)
 	}

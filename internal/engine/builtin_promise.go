@@ -761,6 +761,22 @@ func (rt *Runtime) objectOwnKeys(obj Value) ([]Value, *ThrowError) {
 		return rt.proxyOwnKeys(o.proxy)
 	}
 	var keys []Value
+	// Integer-indexed elements of an array/typed array precede the ordinary
+	// string keys in [[OwnPropertyKeys]] order (they live in fast element
+	// storage, not the shape).
+	switch obj.Type() {
+	case TArr:
+		for i := uint32(0); i < o.arrLen; i++ {
+			if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
+				keys = append(keys, rt.newString(numberToString(float64(i))))
+			}
+		}
+		keys = append(keys, rt.newString("length"))
+	case TTypedArray:
+		for i, l := 0, rt.taLength(o); i < l; i++ {
+			keys = append(keys, rt.newString(numberToString(float64(i))))
+		}
+	}
 	for _, k := range o.ownKeys() {
 		keys = append(keys, rt.newString(k))
 	}
