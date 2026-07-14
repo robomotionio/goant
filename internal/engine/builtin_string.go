@@ -153,7 +153,38 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return mknum(float64(utf16LastIndexOf(b, sub))), nil
+		// ToNumber(position) is observable and must run (and may throw); NaN means
+		// search the whole string, otherwise clamp ToInteger(position) to [0, len].
+		numPos, e := rt.toNumber(arg(args, 1))
+		if e != nil {
+			return mkundef(), e
+		}
+		n := utf16Len(b)
+		start := n
+		if !math.IsNaN(numPos) {
+			switch {
+			case numPos < 0:
+				start = 0
+			case numPos < float64(n):
+				start = int(math.Trunc(numPos))
+			default:
+				start = n
+			}
+		}
+		if len(sub) == 0 {
+			return mknum(float64(start)), nil
+		}
+		// The result is the greatest match index k ≤ start.
+		result := -1
+		for from := 0; ; {
+			idx := utf16IndexOf(b, sub, from)
+			if idx < 0 || idx > start {
+				break
+			}
+			result = idx
+			from = idx + 1
+		}
+		return mknum(float64(result)), nil
 	})
 	rt.defMethod(proto, "includes", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
