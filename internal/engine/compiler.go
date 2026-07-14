@@ -538,7 +538,16 @@ func (c *compiler) compileExpr(n *Node) {
 	case NNull:
 		c.emit(OpNull)
 	case NUndef:
-		c.emit(OpUndef)
+		// `undefined` is not reserved: a binding named `undefined` (e.g. a
+		// parameter or `var undefined`) shadows the global, so a reference must
+		// resolve to it. With no such binding it is the undefined literal.
+		if slot := c.resolveLocal("undefined"); slot >= 0 {
+			c.emitOpU16(OpGetLocal, uint16(slot))
+		} else if uv := c.resolveUpvalue("undefined"); uv >= 0 {
+			c.emitOpU16(OpGetUpval, uint16(uv))
+		} else {
+			c.emit(OpUndef)
+		}
 	case NRegexp:
 		c.emitConst(c.rt.internString(n.Str))
 		c.emitConst(c.rt.internString(n.Aux))

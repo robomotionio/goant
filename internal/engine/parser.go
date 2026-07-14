@@ -315,7 +315,10 @@ func (p *parser) parseBindingPattern() *Node {
 	if p.tok() == TokLBrace {
 		return p.parseObject()
 	}
-	if isIdentLikeTok(p.tok()) {
+	if isIdentLikeTok(p.tok()) || p.tok() == TokUndef {
+		// `undefined` is not a reserved word, so it is a valid BindingIdentifier
+		// (it shadows the global `undefined` inside the binding's scope). The lexer
+		// tokenizes it as TokUndef; recover the name from the raw source.
 		id := p.mkIdentFromTok()
 		p.strictCheckBindingIdent(id.Str)
 		p.consume()
@@ -342,6 +345,12 @@ func pushArrowParamsFromExpr(fn, expr *Node) {
 	if expr.Kind == NSpread {
 		rest := &Node{Kind: NRest, Right: expr.Right, SrcOff: expr.SrcOff}
 		fn.Args = append(fn.Args, rest)
+		return
+	}
+	if expr.Kind == NUndef {
+		// `(undefined) => …` — `undefined` names the parameter (it is not reserved),
+		// so recover it as an identifier binding rather than the undefined literal.
+		fn.Args = append(fn.Args, &Node{Kind: NIdent, Str: "undefined", SrcOff: expr.SrcOff, SrcEnd: expr.SrcEnd})
 		return
 	}
 	fn.Args = append(fn.Args, expr)
@@ -1319,10 +1328,11 @@ func (p *parser) parseAssign() *Node {
 		fn.SrcOff = left.SrcOff
 		if left.Kind == NIdent {
 			fn.Args = append(fn.Args, left)
+		} else if left.Kind == NUndef && left.Flags&fnParen == 0 {
+			// `undefined => …` — a single unparenthesized `undefined` parameter.
+			fn.Args = append(fn.Args, &Node{Kind: NIdent, Str: "undefined", SrcOff: left.SrcOff, SrcEnd: left.SrcEnd})
 		} else if left.Flags&fnParen != 0 {
-			if left.Kind != NUndef {
-				pushArrowParamsFromExpr(fn, left)
-			}
+			pushArrowParamsFromExpr(fn, left)
 		} else {
 			p.errorf("Malformed arrow function parameter list")
 			return p.mk(NEmpty)
