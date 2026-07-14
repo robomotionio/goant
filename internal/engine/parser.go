@@ -201,7 +201,7 @@ func isForbiddenIfBody(n *Node, strict bool) bool {
 	if n == nil {
 		return false
 	}
-	if isLexicalDeclStmt(n) {
+	if isLexicalDeclStmt(n) || isLabelledFunction(n) {
 		return true
 	}
 	switch n.Kind {
@@ -219,15 +219,31 @@ func isForbiddenIfBody(n *Node, strict bool) bool {
 	return false
 }
 
+// isLabelledFunction reports whether n is a (possibly multiply) labelled
+// FunctionDeclaration — `L: function f(){}`, `L1: L2: function f(){}`. Such a
+// statement is permitted at StatementList level (Annex B.3.1) but is an early
+// error as the sole body of an `if`/`else` or an iteration statement, in both
+// strict and sloppy mode.
+func isLabelledFunction(n *Node) bool {
+	labelled := false
+	for n != nil && n.Kind == NLabel {
+		labelled = true
+		n = n.Body
+	}
+	return labelled && n != nil && n.Kind == NFunc &&
+		n.Flags&(fnArrow|fnFuncExpr) == 0 && n.Str != ""
+}
+
 // isForbiddenLoopBody reports whether a statement may not be the body of a
-// for/for-in/for-of/while/do-while loop: a lexical declaration, or a
+// for/for-in/for-of/while/do-while loop: a lexical declaration, a
 // function/generator/async-function/class declaration (the loop body is a
-// Statement, which excludes all Declarations — no Annex B exception here).
+// Statement, which excludes all Declarations — no Annex B exception here), or a
+// labelled function declaration (IsLabelledFunction).
 func isForbiddenLoopBody(n *Node) bool {
 	if n == nil {
 		return false
 	}
-	if isLexicalDeclStmt(n) {
+	if isLexicalDeclStmt(n) || isLabelledFunction(n) {
 		return true
 	}
 	switch n.Kind {

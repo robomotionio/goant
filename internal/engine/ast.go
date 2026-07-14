@@ -312,6 +312,44 @@ func programIsStrict(program *Node) bool {
 // collectVarFuncNames gathers `var` and function-declaration names hoisted to
 // the enclosing function/script scope (recursing through blocks and control
 // structures, but NOT into nested functions).
+// collectBodyVarNames collects the VarDeclaredNames of a statement — the names
+// introduced by `var` declarations anywhere within it, not descending into a
+// nested function (a separate var scope). Block-level function and class
+// declarations are lexical, not var-scoped, so they are excluded; this is used
+// to detect a for-head lexical name that a body `var` would shadow.
+func collectBodyVarNames(n *Node, out map[string]bool) {
+	if n == nil {
+		return
+	}
+	switch n.Kind {
+	case NVar:
+		if n.VarKind == VarVar {
+			for _, d := range n.Args {
+				if d != nil {
+					collectBindingNames(d.Left, out)
+				}
+			}
+		}
+	case NBlock, NCase, NProgram, NSwitch:
+		for _, s := range n.Args {
+			collectBodyVarNames(s, out)
+		}
+	case NIf:
+		collectBodyVarNames(n.Left, out)
+		collectBodyVarNames(n.Right, out)
+	case NWhile, NDoWhile, NWith, NLabel:
+		collectBodyVarNames(n.Body, out)
+	case NFor, NForIn, NForOf:
+		collectBodyVarNames(n.Init, out)
+		collectBodyVarNames(n.Left, out)
+		collectBodyVarNames(n.Body, out)
+	case NTry:
+		collectBodyVarNames(n.Body, out)
+		collectBodyVarNames(n.CatchBody, out)
+		collectBodyVarNames(n.FinallyBody, out)
+	}
+}
+
 func collectVarFuncNames(stmts []*Node, out map[string]bool) {
 	for _, n := range stmts {
 		collectVarFuncNamesNode(n, out)

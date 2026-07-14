@@ -90,6 +90,7 @@ func (c *compiler) compileDoWhile(n *Node) {
 }
 
 func (c *compiler) compileFor(n *Node) {
+	c.checkForHeadDecl(n.Init, n.Body)
 	c.scopeDepth++
 	// Initializer (a declaration or expression statement).
 	lexSlot := -1
@@ -144,12 +145,16 @@ func (c *compiler) compileFor(n *Node) {
 
 // compileForIn lowers `for (v in obj)` to iteration over the enumerable-keys
 // array produced by FOR_IN.
-func (c *compiler) compileForIn(n *Node) { c.compileForArray(n, OpForIn) }
+func (c *compiler) compileForIn(n *Node) {
+	c.checkForHeadDecl(n.Left, n.Body)
+	c.compileForArray(n, OpForIn)
+}
 
 // compileForOf lowers `for (v of iter)` to a lazy loop over a live iterator:
 // each step calls iter.next() and, on an abrupt `break`, closes the iterator via
 // its return() (IteratorClose). Normal exhaustion does not close (already done).
 func (c *compiler) compileForOf(n *Node) {
+	c.checkForHeadDecl(n.Left, n.Body)
 	// `for (using x of iter)` disposes each element at the end of its iteration.
 	// Rewrite to `for (const $tmp of iter) { using x = $tmp; body }` so the body's
 	// using-block drives the per-iteration disposal.
@@ -244,6 +249,7 @@ func (c *compiler) compileForOf(n *Node) {
 // each iter.next() result (GetAsyncIterator + repeated await). Only valid inside
 // an async function/generator (OpAwait suspends the coroutine).
 func (c *compiler) compileForAwaitOf(n *Node) {
+	c.checkForHeadDecl(n.Left, n.Body)
 	c.scopeDepth++
 	store, lexSlot := c.forInStore(n.Left)
 	if store == nil {
@@ -375,6 +381,42 @@ func forInVarInitializer(left *Node) *Node {
 		}
 	}
 	return nil
+}
+
+// checkForHeadDecl enforces the early errors of a for/for-in/for-of head that
+// is a lexical (let/const) declaration: its BoundNames must be distinct, may
+// not include "let", and may not also be var-declared anywhere in the loop body.
+func (c *compiler) checkForHeadDecl(head, body *Node) {
+	if head == nil || head.Kind != NVar ||
+		(head.VarKind != VarLet && head.VarKind != VarConst) {
+		return
+	}
+	var names []string
+	for _, d := range head.Args {
+		if d != nil {
+			collectPatternNames(d.Left, &names)
+		}
+	}
+	seen := map[string]bool{}
+	for _, nm := range names {
+		if nm == "let" {
+			c.syntaxErrorf("let is disallowed as a lexically bound name")
+			return
+		}
+		if seen[nm] {
+			c.syntaxErrorf("Identifier '%s' has already been declared", nm)
+			return
+		}
+		seen[nm] = true
+	}
+	bodyVars := map[string]bool{}
+	collectBodyVarNames(body, bodyVars)
+	for _, nm := range names {
+		if bodyVars[nm] {
+			c.syntaxErrorf("Identifier '%s' has already been declared", nm)
+			return
+		}
+	}
 }
 
 func (c *compiler) forInStore(left *Node) (func(), int) {
