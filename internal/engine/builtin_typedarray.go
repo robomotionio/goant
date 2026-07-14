@@ -589,6 +589,71 @@ func (rt *Runtime) initTypedArrays() {
 	})
 	rt.objPtr(taCtor).defineOwn("prototype", taProto, 0)
 	tp.defineOwn("constructor", taCtor, attrWritable|attrConfigurable)
+	tco := rt.objPtr(taCtor)
+	// %TypedArray%.from / of are defined once on the abstract constructor; each
+	// per-kind constructor inherits them (their `this` is the constructor used to
+	// build the result via TypedArrayCreate).
+	rt.defMethod(tco, "from", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !rt.isConstructorValue(this) {
+			return mkundef(), rt.typeError("TypedArray.from called on a non-constructor")
+		}
+		mapFn := arg(args, 1)
+		if !mapFn.IsUndefined() && !rt.isCallable(mapFn) {
+			return mkundef(), rt.typeError("TypedArray.from mapfn is not callable")
+		}
+		thisArg := arg(args, 2)
+		src := arg(args, 0)
+		var items []Value
+		if rt.isIterable(src) {
+			it, e := rt.iterableValues(src)
+			if e != nil {
+				return mkundef(), e
+			}
+			items = it
+		} else {
+			n, e := rt.lengthOf(src)
+			if e != nil {
+				return mkundef(), e
+			}
+			items = make([]Value, n)
+			for i := 0; i < n; i++ {
+				if items[i], e = rt.getElement(src, mknum(float64(i))); e != nil {
+					return mkundef(), e
+				}
+			}
+		}
+		arrV, e := rt.typedArrayCreate(this, len(items))
+		if e != nil {
+			return mkundef(), e
+		}
+		for i, it := range items {
+			v := it
+			if rt.isCallable(mapFn) {
+				if v, e = rt.callValue(mapFn, thisArg, []Value{it, mknum(float64(i))}); e != nil {
+					return mkundef(), e
+				}
+			}
+			if e := rt.setElement(arrV, mknum(float64(i)), v); e != nil {
+				return mkundef(), e
+			}
+		}
+		return arrV, nil
+	})
+	rt.defMethod(tco, "of", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !rt.isConstructorValue(this) {
+			return mkundef(), rt.typeError("TypedArray.of called on a non-constructor")
+		}
+		arrV, e := rt.typedArrayCreate(this, len(args))
+		if e != nil {
+			return mkundef(), e
+		}
+		for i, it := range args {
+			if e := rt.setElement(arrV, mknum(float64(i)), it); e != nil {
+				return mkundef(), e
+			}
+		}
+		return arrV, nil
+	})
 
 	rt.typedArrayProtos = make([]Value, len(taKinds))
 	rt.typedArrayCtors = make([]Value, len(taKinds))
@@ -610,66 +675,6 @@ func (rt *Runtime) initTypedArrays() {
 		cobj.defineOwn("BYTES_PER_ELEMENT", mknum(float64(info.size)), 0)
 		rt.objPtr(proto).defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 		rt.objPtr(proto).defineOwn("BYTES_PER_ELEMENT", mknum(float64(info.size)), 0)
-		// from / of statics.
-		rt.defMethod(cobj, "from", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			// `this` is the constructor to build the result with (TypedArrayCreate).
-			if !rt.isConstructorValue(this) {
-				return mkundef(), rt.typeError("TypedArray.from called on a non-constructor")
-			}
-			mapFn := arg(args, 1)
-			if !mapFn.IsUndefined() && !rt.isCallable(mapFn) {
-				return mkundef(), rt.typeError("TypedArray.from mapfn is not callable")
-			}
-			thisArg := arg(args, 2)
-			src := arg(args, 0)
-			var items []Value
-			if rt.isIterable(src) {
-				it, e := rt.iterableValues(src)
-				if e != nil {
-					return mkundef(), e
-				}
-				items = it
-			} else {
-				n, e := rt.lengthOf(src)
-				if e != nil {
-					return mkundef(), e
-				}
-				items = make([]Value, n)
-				for i := 0; i < n; i++ {
-					if items[i], e = rt.getElement(src, mknum(float64(i))); e != nil {
-						return mkundef(), e
-					}
-				}
-			}
-			arrV, e := rt.typedArrayCreate(this, len(items))
-			if e != nil {
-				return mkundef(), e
-			}
-			for i, it := range items {
-				v := it
-				if rt.isCallable(mapFn) {
-					if v, e = rt.callValue(mapFn, thisArg, []Value{it, mknum(float64(i))}); e != nil {
-						return mkundef(), e
-					}
-				}
-				if e := rt.setElement(arrV, mknum(float64(i)), v); e != nil {
-					return mkundef(), e
-				}
-			}
-			return arrV, nil
-		})
-		rt.defMethod(cobj, "of", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			arrV, e := rt.typedArrayCreate(this, len(args))
-			if e != nil {
-				return mkundef(), e
-			}
-			for i, it := range args {
-				if e := rt.setElement(arrV, mknum(float64(i)), it); e != nil {
-					return mkundef(), e
-				}
-			}
-			return arrV, nil
-		})
 		if info.name == "Uint8Array" {
 			rt.defUint8ArrayBase64Hex(cobj, rt.objPtr(proto), kind)
 		}
