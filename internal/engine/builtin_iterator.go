@@ -411,7 +411,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		idx, done := 0, false
 		var innerNext Value // the current inner iterator's next method (0 when none)
 		var inner Value
-		return rt.newIteratorObjectE(this, &done, func() (Value, bool, *ThrowError) {
+		helper := rt.newIteratorObjectE(this, &done, func() (Value, bool, *ThrowError) {
 			for !done {
 				if innerNext != 0 {
 					iv, id, ie := rt.iterStepValue(inner, innerNext)
@@ -451,7 +451,27 @@ func (rt *Runtime) initIteratorHelpers() {
 				}
 			}
 			return mkundef(), true, nil
-		}), nil
+		})
+		// flatMap's Return must also close the currently-open inner (mapper-result)
+		// iterator, not just the source (IteratorCloseAll over « inner, source »).
+		ho := rt.objPtr(helper)
+		rt.defMethod(ho, "return", 0, func(rt *Runtime, _ Value, args []Value) (Value, *ThrowError) {
+			if !done {
+				done = true
+				var pending *ThrowError
+				if innerNext != 0 {
+					pending = rt.iteratorCloseE(inner)
+				}
+				if ce := rt.iteratorCloseE(this); ce != nil && pending == nil {
+					pending = ce
+				}
+				if pending != nil {
+					return mkundef(), pending
+				}
+			}
+			return rt.genResult(arg(args, 0), true), nil
+		})
+		return helper, nil
 	})
 	rt.defMethod(proto, "reduce", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "reduce")
