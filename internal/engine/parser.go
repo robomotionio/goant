@@ -2760,6 +2760,20 @@ func (p *parser) parseExportStmt() *Node {
 
 // ---- statements ----
 
+// usingBeginsDeclaration reports whether a leading `using` token begins a
+// UsingDeclaration: it must be directly followed (no line terminator) by a
+// BindingIdentifier. `using [`, `using {`, `using` + newline, `using =`, and
+// `using.x` make `using` a plain identifier (an ExpressionStatement), so
+// `using [x] = y` is a member assignment and `using [] = null` a subscript error.
+func (p *parser) usingBeginsDeclaration() bool {
+	if p.lookaheadCrossesLineTerminator() {
+		return false
+	}
+	la := p.la()
+	return la == TokIdentifier || isContextualIdentTok(la) ||
+		la == TokYield || la == TokAwait || la == TokLet || la == TokStatic
+}
+
 // parseSubStmt parses the body of a loop or if branch: a single-Statement
 // context in which a Declaration is not a valid production. The one-shot flag is
 // consumed at the top of parseStmt.
@@ -2773,7 +2787,7 @@ func (p *parser) parseStmt() *Node {
 	p.singleStmt = false
 	p.next()
 
-	if p.tok() == TokUsing {
+	if p.tok() == TokUsing && p.usingBeginsDeclaration() {
 		p.consume()
 		n := p.parseVarDecl(VarUsing, false)
 		p.semicolon()
@@ -3015,6 +3029,12 @@ func (p *parser) parseFor() *Node {
 		p.consume()
 		n := p.mk(NForIn)
 		n.Left = initNode
+		// A `using` / `await using` declaration is valid only as a for-of head, not
+		// for-in (`for (using x in obj)` is a SyntaxError).
+		if initNode != nil && initNode.Kind == NVar &&
+			(initNode.VarKind == VarUsing || initNode.VarKind == VarAwaitUsing) {
+			p.errorf("'using' declaration is not allowed in a for-in loop")
+		}
 		p.validatePatternTarget(initNode)
 		n.Right = p.parseExpr()
 		p.expect(TokRParen)
