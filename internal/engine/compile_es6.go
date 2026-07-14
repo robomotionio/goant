@@ -66,10 +66,13 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 	c.emit(OpFalse)
 	c.emitOpU16(OpPutLocal, uint16(doneSlot))
 
-	// Protect the element extraction: an abrupt completion (a throwing target,
-	// default initializer, or value getter) must close the iterator (unless a
-	// throw from next() already recorded it as done) before propagating.
-	catchHandler := c.emitJump(OpTryPush)
+	// Protect the element extraction with a try-FINALLY: any abrupt completion —
+	// a throwing target/default/value getter, or a `return` unwinding through a
+	// `yield` in a default initializer — must close the iterator (unless it is
+	// already done) before propagating. A finally (not a catch) is needed so a
+	// return, not only a throw, routes through the close.
+	tryJump := c.emitJump(OpTryPushFinally)
+	c.unwindPush(unwTryFinally)
 	for _, elem := range pattern.Args {
 		if elem.Kind == NEmpty {
 			c.emitIterStep(iterSlot, resSlot, doneSlot)
@@ -142,16 +145,18 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 		c.destructureTarget(target, kind)
 	}
 	c.emit(OpTryPop)
-	// Normal completion: close the iterator if the pattern didn't exhaust it.
+	c.unwindPop()
+	// The finally — entered on normal fall-through and, via the unwind machinery,
+	// on throw/return/labelled-jump out of a default's yield. Close the iterator
+	// if the pattern did not exhaust it, then resume the pending completion. When
+	// that completion is a throw, OpIterClose suppresses any error from the close.
+	c.patchJump(tryJump)
+	finallyJump := c.emitJump(OpFinally)
+	c.unwindPush(unwFinallyBody)
 	c.emitCloseIfNotDone(iterSlot, doneSlot)
-	end := c.emitJump(OpJmp)
-	// Abrupt completion: close (unless already done) and re-throw the caught value.
-	c.patchJump(catchHandler)
-	c.emit(OpCatch)
-	c.emitU32(0)
-	c.emitCloseIfNotDone(iterSlot, doneSlot)
-	c.emit(OpThrow)
-	c.patchJump(end)
+	c.unwindPop()
+	c.emit(OpFinallyRet)
+	c.patchJump(finallyJump)
 }
 
 // emitCloseIfNotDone emits `if !done: IteratorClose(iter)` — the iterator is
