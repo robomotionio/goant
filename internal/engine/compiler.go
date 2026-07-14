@@ -169,6 +169,7 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval bo
 		}
 	}
 
+	c.checkBlockDeclConflicts(prog.Args, false)
 	c.hoistLexicals(prog.Args)
 	c.hoistFunctions(prog.Args, false)
 	c.compileStmts(prog.Args)
@@ -327,6 +328,7 @@ func (c *compiler) compileStmt(n *Node) {
 			return
 		}
 		c.scopeDepth++
+		c.checkBlockDeclConflicts(n.Args, true)
 		c.hoistLexicals(n.Args)
 		c.hoistFunctions(n.Args, true)
 		c.compileStmts(n.Args)

@@ -97,6 +97,89 @@ func (c *compiler) compileIfBranch(n *Node) {
 	c.compileStmt(n)
 }
 
+// checkBlockDeclConflicts enforces the early errors on the combined declared
+// names of a StatementList. `blockScope` distinguishes a genuine Block or switch
+// CaseBlock — where every FunctionDeclaration is a lexical binding — from a
+// Script or function-body top level, where FunctionDeclarations are var-scoped
+// and only let/const/class contribute lexical names.
+//
+// The rules (matching V8):
+//   - lexically-declared names must be pairwise distinct;
+//   - a lexical name may not also be var-declared; and
+//   - a lexical name may not also be declared by a sloppy plain FunctionDeclaration.
+//
+// In a block, sloppy plain FunctionDeclarations are exempt from the first and
+// third rules among themselves (Annex B.3.3): two `function f(){}` may coexist
+// and may shadow a var, so they are tracked apart from `lexical`. Async and
+// generator declarations never receive that relaxation, and in strict mode a
+// plain FunctionDeclaration is an ordinary lexical binding.
+func (c *compiler) checkBlockDeclConflicts(list []*Node, blockScope bool) {
+	lexical := map[string]bool{} // let/const/class + (block-scope) async/gen/strict fns
+	plainFn := map[string]bool{} // sloppy plain FunctionDeclaration names (block scope)
+	varNames := map[string]bool{}
+
+	fail := func(name string) {
+		c.syntaxErrorf("Identifier '%s' has already been declared", name)
+	}
+	addLexical := func(name string) {
+		if lexical[name] {
+			fail(name)
+		}
+		lexical[name] = true
+	}
+
+	for _, stmt := range list {
+		if c.err != nil {
+			return
+		}
+		if stmt == nil {
+			continue
+		}
+		switch stmt.Kind {
+		case NVar:
+			var names []string
+			for _, decl := range stmt.Args {
+				collectPatternNames(decl.Left, &names)
+			}
+			if stmt.VarKind == VarLet || stmt.VarKind == VarConst {
+				for _, nm := range names {
+					addLexical(nm)
+				}
+			} else {
+				for _, nm := range names {
+					varNames[nm] = true
+				}
+			}
+		case NClass:
+			if stmt.Str != "" {
+				addLexical(stmt.Str)
+			}
+		case NFunc:
+			if stmt.Str == "" || stmt.Flags&(fnArrow|fnFuncExpr) != 0 {
+				continue
+			}
+			switch {
+			case !blockScope:
+				// Script / function body: FunctionDeclarations are var-scoped.
+				varNames[stmt.Str] = true
+			case stmt.Flags&(fnAsync|fnGenerator) != 0 || c.fn.isStrict:
+				addLexical(stmt.Str)
+			default:
+				plainFn[stmt.Str] = true
+			}
+		}
+	}
+	if c.err != nil {
+		return
+	}
+	for nm := range lexical {
+		if varNames[nm] || plainFn[nm] {
+			fail(nm)
+			return
+		}
+	}
+}
+
 // hoistLexicals pre-declares the let/const bindings of a statement list at the
 // current scope, initializing each to an EMPTY hole. Running before function
 // hoisting lets nested functions capture the binding, and a read before the
@@ -521,6 +604,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 				c.addLocal(name, false)
 			}
 		}
+		c.checkBlockDeclConflicts(n.Body.Args, false)
 		c.hoistLexicals(n.Body.Args)
 		c.hoistFunctions(n.Body.Args, false)
 		// A base class constructor initializes its instance fields on `this`

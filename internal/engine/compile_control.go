@@ -518,6 +518,7 @@ func (c *compiler) compileSwitch(n *Node) {
 	for _, cas := range n.Args {
 		caseStmts = append(caseStmts, cas.Args...)
 	}
+	c.checkBlockDeclConflicts(caseStmts, true)
 	c.hoistLexicals(caseStmts)
 
 	l := c.pushLoop("", true)
