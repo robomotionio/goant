@@ -48,7 +48,9 @@ func (rt *Runtime) newIteratorObjectE(source Value, done *bool, next func() (Val
 	rt.defMethod(o, "return", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if !*done {
 			*done = true
-			rt.iteratorClose(source)
+			if e := rt.iteratorCloseE(source); e != nil {
+				return mkundef(), e
+			}
 		}
 		return rt.genResult(arg(args, 0), true), nil
 	})
@@ -275,7 +277,9 @@ func (rt *Runtime) initIteratorHelpers() {
 			}
 			if remaining <= 0 {
 				done = true
-				rt.iteratorClose(this)
+				if ce := rt.iteratorCloseE(this); ce != nil {
+					return mkundef(), false, ce
+				}
 				return mkundef(), true, nil
 			}
 			remaining--
@@ -442,7 +446,9 @@ func (rt *Runtime) initIteratorHelpers() {
 				return mkundef(), ce
 			}
 			if rt.toBoolean(r) {
-				rt.iteratorClose(this)
+				if ce := rt.iteratorCloseE(this); ce != nil {
+					return mkundef(), ce
+				}
 				return mktrue(), nil
 			}
 		}
@@ -468,7 +474,9 @@ func (rt *Runtime) initIteratorHelpers() {
 				return mkundef(), ce
 			}
 			if !rt.toBoolean(r) {
-				rt.iteratorClose(this)
+				if ce := rt.iteratorCloseE(this); ce != nil {
+					return mkundef(), ce
+				}
 				return mkfalse(), nil
 			}
 		}
@@ -494,7 +502,9 @@ func (rt *Runtime) initIteratorHelpers() {
 				return mkundef(), ce
 			}
 			if rt.toBoolean(r) {
-				rt.iteratorClose(this)
+				if ce := rt.iteratorCloseE(this); ce != nil {
+					return mkundef(), ce
+				}
 				return v, nil
 			}
 		}

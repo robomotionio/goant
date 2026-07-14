@@ -39,6 +39,28 @@ func (rt *Runtime) iteratorClose(iter Value) {
 	}
 }
 
+// iteratorCloseE closes an iterator for a NORMAL completion, propagating an
+// abrupt completion from Get(return)/the return call (used by the Iterator
+// helpers where the pending completion is not itself a throw, e.g. take
+// exhaustion, some/find/every early exit, and a helper's own `return`).
+func (rt *Runtime) iteratorCloseE(iter Value) *ThrowError {
+	if !iter.IsObjectType() {
+		return nil
+	}
+	rf, e := rt.getField(iter, "return")
+	if e != nil {
+		return e
+	}
+	if rf.IsNullish() {
+		return nil
+	}
+	if !rt.isCallable(rf) {
+		return rt.typeError("'return' is not a function")
+	}
+	_, e = rt.callValue(rf, iter, nil)
+	return e
+}
+
 // iterateWithClose drives source's iterator, calling fn per value. If fn returns
 // an error or stop=true, the iterator is closed (return()) before returning —
 // this is the spec pattern for operations that may abort mid-iteration
