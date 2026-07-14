@@ -401,9 +401,6 @@ func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
 		}
 		return nil, false
 	}
-	if name == "Unified_Ideograph" {
-		return mergeTables(unicode.Properties["Unified_Ideograph"], supplementaryUnifiedIdeograph), true
-	}
 	switch name {
 	case "ASCII":
 		return &unicode.RangeTable{R16: []unicode.Range16{{0x00, 0x7F, 1}}}, true
@@ -412,17 +409,24 @@ func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
 	case "Assigned":
 		return unicode.Categories["L"], true // approximation, unused by the corpus
 	}
+	// A lone \p{name} is valid only for a General_Category value or an
+	// ECMAScript-permitted binary property (Go's unicode.Properties also holds
+	// Other_*/Hyphen/… which ES rejects, and a bare script name is not a valid
+	// lone property).
 	if rt, ok := lookupCategory(name); ok {
 		return rt, true
 	}
-	if rt, ok := unicode.Properties[name]; ok {
-		return rt, true
-	}
-	if rt, ok := emojiProperties[name]; ok {
-		return rt, true
-	}
-	if rt, ok := unicode.Scripts[name]; ok {
-		return rt, true
+	if canon, ok := esBinaryProperties[name]; ok {
+		if canon == "Unified_Ideograph" {
+			return mergeTables(unicode.Properties["Unified_Ideograph"], supplementaryUnifiedIdeograph), true
+		}
+		if rt, ok := emojiProperties[canon]; ok {
+			return rt, true
+		}
+		if rt, ok := unicode.Properties[canon]; ok {
+			return rt, true
+		}
+		return nil, false // valid ES property Go's stdlib (Unicode 15.0) lacks
 	}
 	return nil, false
 }
