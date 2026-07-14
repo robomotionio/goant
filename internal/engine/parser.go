@@ -1908,6 +1908,16 @@ func (p *parser) parseParenExpr() *Node {
 	for p.next() == TokComma {
 		p.consume()
 		if p.next() == TokRParen && p.la() == TokArrow {
+			// A trailing comma is permitted in an arrow parameter list, but not
+			// after a rest element: `(...a,) => {}` / `(a, ...b,) => {}` are early
+			// SyntaxErrors (BindingRestElement may not be followed by a comma).
+			last := left
+			for last != nil && last.Kind == NSequence {
+				last = last.Right
+			}
+			if last != nil && last.Kind == NSpread {
+				p.errorf("Rest parameter may not be followed by a trailing comma")
+			}
 			break
 		}
 		n := p.mk(NSequence)
