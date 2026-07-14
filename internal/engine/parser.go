@@ -1464,6 +1464,14 @@ func (p *parser) parseObject() *Node {
 				p.errorf("'await' cannot be used as an identifier here")
 				return n
 			}
+			// A strict future-reserved word (`let`, `static`, `package`, …) is not a
+			// valid IdentifierReference in strict mode. (`eval`/`arguments` ARE valid
+			// references — only assignment to them is restricted — so they are fine
+			// as a shorthand value.)
+			if prop.Left.Kind == NIdent && p.lx.strict && isStrictReservedName(prop.Left.Str) {
+				p.errorf("Unexpected strict-mode reserved word")
+				return n
+			}
 			prop.Right = mkIdent(prop.Left.Str)
 			if p.next() == TokAssign {
 				p.consume()
