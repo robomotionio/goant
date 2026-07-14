@@ -322,6 +322,23 @@ func (c *compiler) buildSpreadArray(elems []*Node) {
 	c.emitOpU16(OpGetLocal, uint16(tSlot))
 }
 
+// superHomeBinding returns the captured binding whose value is the home object's
+// [[Prototype]] for a `super` reference: the parent constructor (*superctor*) in
+// a static context, otherwise the parent prototype (*superproto*). It looks
+// through enclosing arrows to the nearest method/block boundary.
+func (c *compiler) superHomeBinding() string {
+	for e := c; e != nil; e = e.enclosing {
+		if e.fn == nil || e.fn.isArrow {
+			continue
+		}
+		if e.staticSuper {
+			return "*superctor*"
+		}
+		break
+	}
+	return "*superproto*"
+}
+
 // resolveClassBinding emits a load of a captured class binding (*superctor* /
 // *superproto* / *this*), returning false if it's not in scope.
 func (c *compiler) resolveClassBinding(name string) bool {
@@ -389,7 +406,7 @@ func (c *compiler) compileSuperMethodCall(n *Node) {
 	member := n.Left
 	// Spread args: emit [method, this, argsArray] for APPLY.
 	if hasSpread(n.Args) {
-		if !c.resolveClassBinding("*superproto*") {
+		if !c.resolveClassBinding(c.superHomeBinding()) {
 			c.syntaxErrorf("'super' keyword unexpected here")
 			return
 		}
@@ -412,7 +429,7 @@ func (c *compiler) compileSuperMethodCall(n *Node) {
 		c.emit(OpUndef)
 	}
 	// method = *superproto*.name
-	if !c.resolveClassBinding("*superproto*") {
+	if !c.resolveClassBinding(c.superHomeBinding()) {
 		c.syntaxErrorf("'super' keyword unexpected here")
 		return
 	}
@@ -712,6 +729,7 @@ func (c *compiler) compileClass(n *Node) {
 			body := &Node{Kind: NBlock, Args: m.Args}
 			blockFn := &Node{Kind: NFunc, Body: body, Flags: fnClassBody}
 			c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // this
+			c.pendingStaticSuper = true               // a static block's home is the constructor
 			c.compileFunc(blockFn)                    // func
 			c.emit(OpCallMethod)                      // [this, func] -> result
 			c.emitU16(0)
@@ -730,8 +748,10 @@ func (c *compiler) compileClass(n *Node) {
 			continue
 		}
 		target := protoSlot
+		c.pendingStaticSuper = false
 		if m.Flags&fnStatic != 0 {
 			target = ctorSlot
+			c.pendingStaticSuper = true // a static method's home is the constructor
 		}
 		if m.Flags&fnComputed != 0 {
 			if m.Flags&(fnGetter|fnSetter) != 0 {

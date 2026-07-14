@@ -63,6 +63,13 @@ type compiler struct {
 	pendingClassFields  []*Node
 	pendingClassDerived bool
 
+	// staticSuper marks a static method / static block / static field initializer:
+	// its home object is the constructor, so `super.x` reads from the parent
+	// constructor (*superctor*) rather than the parent prototype (*superproto*).
+	// pendingStaticSuper hands the flag from compileClass to the child compiler.
+	staticSuper        bool
+	pendingStaticSuper bool
+
 	// classPrivateEnvs is a stack of private-name sets (each including the leading
 	// '#') for the class bodies currently being compiled by this compiler — a
 	// stack because a nested class expression is compiled on the same compiler as

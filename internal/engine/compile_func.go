@@ -265,8 +265,10 @@ func (c *compiler) compileFunc(n *Node) {
 	child.classFields = c.pendingClassFields
 	child.classDerived = c.pendingClassDerived
 	child.fn.isDerivedCtor = child.classDerived && child.fn.isClassCtor
+	child.staticSuper = c.pendingStaticSuper
 	c.pendingClassFields = nil
 	c.pendingClassDerived = false
+	c.pendingStaticSuper = false
 	child.compileFunctionBody(n)
 	if child.err != nil {
 		if c.err == nil {

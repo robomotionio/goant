@@ -122,7 +122,7 @@ func (c *compiler) compileSuperMember(n *Node) {
 	if !c.resolveClassBinding("*this*") { // receiver
 		c.emit(OpUndef)
 	}
-	if !c.resolveClassBinding("*superproto*") { // base
+	if !c.resolveClassBinding(c.superHomeBinding()) { // base
 		c.syntaxErrorf("'super' keyword unexpected here")
 		return
 	}
