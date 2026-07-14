@@ -556,6 +556,16 @@ func (p *parser) parseMemberSuffix(left *Node, la Token) *Node {
 	return nil
 }
 
+// checkArrowEarlyErrors enforces the arrow-specific early errors that are not
+// caught while compiling the body: an arrow with a non-simple parameter list
+// (rest / default / destructuring) may not carry an explicit "use strict"
+// directive (ES2016 §14.1.2 / §14.2.1), just like an ordinary function.
+func (p *parser) checkArrowEarlyErrors(fn *Node) {
+	if bodyHasUseStrict(fn.Body) && hasNonSimpleParams(fn) {
+		p.errorf("Illegal 'use strict' directive in function with non-simple parameter list")
+	}
+}
+
 // parseArrowBody parses a concise-body arrow tail. An async arrow establishes
 // an await context for its body; a plain arrow inherits the surrounding one
 // (an arrow has no Await binding of its own — ArrowFunction[?Await]).
@@ -608,6 +618,7 @@ func (p *parser) tryParseAsyncArrow() *Node {
 			fn.Flags = fnArrow | fnAsync
 			pushArrowParamsFromExpr(fn, expr)
 			fn.Body = p.parseArrowBody(true)
+			p.checkArrowEarlyErrors(fn)
 			fn.SrcOff = asyncOff
 			fn.SrcEnd = nodeSrcEnd(p, fn.Body)
 			return fn
@@ -1681,6 +1692,7 @@ func (p *parser) parseAssign() *Node {
 			return p.mk(NEmpty)
 		}
 		fn.Body = p.parseArrowBody(false)
+		p.checkArrowEarlyErrors(fn)
 		fn.SrcEnd = nodeSrcEnd(p, fn.Body)
 		return fn
 	}
