@@ -350,11 +350,17 @@ func (st *jsonStringifier) stringifyObject(v Value, indent string) (string, bool
 	var keys []string
 	if st.hasPropertyList {
 		keys = st.propertyList
+	} else if o.proxy != nil {
+		// A proxy routes EnumerableOwnPropertyNames through its ownKeys +
+		// getOwnPropertyDescriptor traps; a revoked proxy throws (propagate it
+		// rather than serializing as an empty object).
+		ek, e := rt.enumerableOwnKeysE(v)
+		if e != nil {
+			return "", false, e
+		}
+		keys = ek
 	} else {
 		keys = o.ownKeysEnumerable()
-		if o.proxy != nil {
-			keys = rt.enumerableOwnKeys(v)
-		}
 	}
 	for _, k := range keys {
 		s, ok, e := st.str(k, v, newIndent)
