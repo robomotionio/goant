@@ -299,7 +299,13 @@ func (c *compiler) compileIdentStore(name string) {
 	switch {
 	case c.resolveUpvalue(name) >= 0:
 		uv := c.resolveUpvalue(name)
-		// TDZ probe for a captured let/const (harmless for a var cell, never a hole).
+		// Assigning to a const captured from an enclosing scope throws a TypeError.
+		if c.upvalues[uv].isConst {
+			c.emit(OpPop)
+			c.emitConstAssignError()
+			return
+		}
+		// TDZ probe for a captured let (harmless for a var cell, never a hole).
 		c.emitOpU16(OpGetUpval, uint16(uv))
 		c.emit(OpPop)
 		c.emitOpU16(OpPutUpval, uint16(uv))

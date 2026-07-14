@@ -10,6 +10,7 @@ package engine
 type upvalDesc struct {
 	index   int
 	isLocal bool
+	isConst bool // captures a const binding — assigning through it throws a TypeError
 }
 
 type svFunc struct {

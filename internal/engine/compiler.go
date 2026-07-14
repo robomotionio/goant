@@ -254,21 +254,21 @@ func (c *compiler) resolveUpvalue(name string) int {
 	}
 	if slot := c.enclosing.resolveLocal(name); slot >= 0 {
 		c.enclosing.locals[slot].captured = true
-		return c.addUpvalue(slot, true)
+		return c.addUpvalue(slot, true, c.enclosing.locals[slot].isConst)
 	}
 	if uv := c.enclosing.resolveUpvalue(name); uv >= 0 {
-		return c.addUpvalue(uv, false)
+		return c.addUpvalue(uv, false, c.enclosing.upvalues[uv].isConst)
 	}
 	return -1
 }
 
-func (c *compiler) addUpvalue(index int, isLocal bool) int {
+func (c *compiler) addUpvalue(index int, isLocal, isConst bool) int {
 	for i, u := range c.upvalues {
 		if u.index == index && u.isLocal == isLocal {
 			return i
 		}
 	}
-	c.upvalues = append(c.upvalues, upvalDesc{index: index, isLocal: isLocal})
+	c.upvalues = append(c.upvalues, upvalDesc{index: index, isLocal: isLocal, isConst: isConst})
 	return len(c.upvalues) - 1
 }
 
@@ -1103,8 +1103,13 @@ func (c *compiler) compileAssign(n *Node) {
 		c.emit(op)
 	}
 
-	// Assignment to a const binding always throws a TypeError.
+	// Assignment to a const binding always throws a TypeError — whether it is a
+	// local or a const captured from an enclosing scope.
 	if slot >= 0 && c.locals[slot].isConst {
+		c.emitConstAssignError()
+		return
+	}
+	if uv >= 0 && c.upvalues[uv].isConst {
 		c.emitConstAssignError()
 		return
 	}
