@@ -113,6 +113,11 @@ func (rt *Runtime) makePromise() (Value, *object) {
 func (rt *Runtime) newPromiseCapability(C Value) (promise, resolve, reject Value, err *ThrowError) {
 	resolve, reject = mkundef(), mkundef()
 	executor := rt.newNativeFunc("", 2, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+		// GetCapabilitiesExecutor: once either slot is populated, a further
+		// invocation that would overwrite it is a TypeError.
+		if !resolve.IsUndefined() || !reject.IsUndefined() {
+			return mkundef(), rt.typeError("Promise executor has already supplied resolve/reject functions")
+		}
 		resolve, reject = arg(a, 0), arg(a, 1)
 		return mkundef(), nil
 	})
@@ -371,45 +376,55 @@ func (rt *Runtime) initPromiseBuiltin() {
 		return rt.promiseThenSpecies(this, o, arg(args, 0), arg(args, 1))
 	})
 	rt.defMethod(po, "catch", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(this)
-		if o == nil || o.promise == nil {
-			return mkundef(), rt.typeError("Promise.prototype.catch called on incompatible receiver")
-		}
-		return rt.promiseThen(mkundef(), arg(args, 0), o), nil
+		// Promise.prototype.catch(onRejected) is Invoke(this, "then",
+		// «undefined, onRejected»); it works on any thenable, not only native
+		// promises.
+		return rt.invokeThen(this, mkundef(), arg(args, 0))
 	})
 	rt.defMethod(po, "finally", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(this)
-		if o == nil || o.promise == nil {
-			return mkundef(), rt.typeError("Promise.prototype.finally called on incompatible receiver")
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Promise.prototype.finally called on a non-object")
 		}
-		cb := arg(args, 0)
-		if !rt.isCallable(cb) {
-			return rt.promiseThen(cb, cb, o), nil
+		// C is SpeciesConstructor(this, %Promise%); onFinally's result is turned
+		// into a promise via C.resolve and awaited before the value/reason passes
+		// through (ES2018 Promise.prototype.finally).
+		C, e := rt.speciesConstructor(this, rt.promiseCtor)
+		if e != nil {
+			return mkundef(), e
 		}
-		// onFinally's result is wrapped in a promise and awaited before the value
-		// (or reason) is passed through, so a rejected promise from onFinally
-		// changes the outcome (ES2018 Promise.prototype.finally).
-		onF := rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			v := arg(args, 0)
-			result, e := rt.callValue(cb, mkundef(), nil)
-			if e != nil {
-				return mkundef(), e
-			}
-			thunk := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) { return v, nil })
-			return rt.promiseThen(thunk, mkundef(), rt.objPtr(rt.resolvedPromise(result))), nil
-		})
-		onR := rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			reason := arg(args, 0)
-			result, e := rt.callValue(cb, mkundef(), nil)
-			if e != nil {
-				return mkundef(), e
-			}
-			thrower := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
-				return mkundef(), &ThrowError{Value: reason, rt: rt}
+		onFinally := arg(args, 0)
+		thenFinally, catchFinally := onFinally, onFinally
+		if rt.isCallable(onFinally) {
+			thenFinally = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+				value := arg(a, 0)
+				result, e := rt.callValue(onFinally, mkundef(), nil)
+				if e != nil {
+					return mkundef(), e
+				}
+				p, e := rt.promiseResolve(C, result)
+				if e != nil {
+					return mkundef(), e
+				}
+				thunk := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) { return value, nil })
+				return rt.invokeThen(p, thunk, mkundef())
 			})
-			return rt.promiseThen(thrower, mkundef(), rt.objPtr(rt.resolvedPromise(result))), nil
-		})
-		return rt.promiseThen(onF, onR, o), nil
+			catchFinally = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+				reason := arg(a, 0)
+				result, e := rt.callValue(onFinally, mkundef(), nil)
+				if e != nil {
+					return mkundef(), e
+				}
+				p, e := rt.promiseResolve(C, result)
+				if e != nil {
+					return mkundef(), e
+				}
+				thrower := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
+					return mkundef(), &ThrowError{Value: reason, rt: rt}
+				})
+				return rt.invokeThen(p, thrower, mkundef())
+			})
+		}
+		return rt.invokeThen(this, thenFinally, catchFinally)
 	})
 
 	ctor := rt.newNativeFunc("Promise", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -456,24 +471,23 @@ func (rt *Runtime) initPromiseBuiltin() {
 
 	rt.defMethod(cobj, "resolve", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		// Promise.resolve(x): C is the this value and must be an Object.
+		// PromiseResolve returns x unchanged only when x is a promise whose own
+		// "constructor" is C, so a reassigned constructor forces a fresh promise.
 		if !this.IsObjectType() {
 			return mkundef(), rt.typeError("Promise.resolve called on a non-object")
-		}
-		if this == rt.promiseCtor {
-			return rt.resolvedPromise(arg(args, 0)), nil
 		}
 		return rt.promiseResolve(this, arg(args, 0))
 	})
 	rt.defMethod(cobj, "withResolvers", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		p, o := rt.makePromise()
-		resolve := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-			rt.resolvePromise(p, o, arg(a, 0))
-			return mkundef(), nil
-		})
-		reject := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-			rt.rejectPromise(o, arg(a, 0))
-			return mkundef(), nil
-		})
+		// C is the this value; the promise/resolve/reject come from
+		// NewPromiseCapability(C) so a subclass drives the result.
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Promise.withResolvers called on a non-object")
+		}
+		p, resolve, reject, e := rt.newPromiseCapability(this)
+		if e != nil {
+			return mkundef(), e
+		}
 		res := rt.newPlainObject()
 		ro := rt.objPtr(res)
 		ro.defineOwn("promise", p, attrDefault)
@@ -523,19 +537,26 @@ func (rt *Runtime) initPromiseBuiltin() {
 		return rt.promiseRace(this, arg(args, 0), true)
 	})
 	rt.defMethod(cobj, "try", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		// Promise.try(fn, ...args): run fn synchronously, resolve with its result
-		// or reject with a thrown error (ES2025).
+		// Promise.try(fn, ...args): build a capability from C = this, run fn
+		// synchronously, then resolve with its result or reject with a thrown
+		// error (ES2025).
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Promise.try called on a non-object")
+		}
 		cb := arg(args, 0)
 		var extra []Value
 		if len(args) > 1 {
 			extra = args[1:]
 		}
-		p, o := rt.makePromise()
-		res, e := rt.callValue(cb, mkundef(), extra)
+		p, resolve, reject, e := rt.newPromiseCapability(this)
 		if e != nil {
-			rt.rejectPromise(o, e.Value)
+			return mkundef(), e
+		}
+		res, ce := rt.callValue(cb, mkundef(), extra)
+		if ce != nil {
+			rt.callValue(reject, mkundef(), []Value{ce.Value})
 		} else {
-			rt.resolvePromise(p, o, res)
+			rt.callValue(resolve, mkundef(), []Value{res})
 		}
 		return p, nil
 	})
@@ -559,6 +580,16 @@ func (rt *Runtime) promiseResolveFn(C, rejectFn Value) (Value, bool) {
 		return mkundef(), false
 	}
 	return r, true
+}
+
+// invokeThen performs Invoke(this, "then", [onF, onR]) and returns its result —
+// used by catch/finally, which operate on any thenable receiver.
+func (rt *Runtime) invokeThen(this, onF, onR Value) (Value, *ThrowError) {
+	thenFn, e := rt.getField(this, "then")
+	if e != nil {
+		return mkundef(), e
+	}
+	return rt.callValue(thenFn, this, []Value{onF, onR})
 }
 
 // invokePromiseThen performs Invoke(p, "then", [onF, onR]) observably (used per
