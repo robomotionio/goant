@@ -119,12 +119,18 @@ func (rt *Runtime) initErrorBuiltin() {
 			}
 			eo.defineOwn("message", s, attrWritable|attrConfigurable)
 		}
-		if opts := arg(args, 2); opts.IsObjectType() && rt.hasProp(opts, "cause") {
-			cause, e := rt.getField(opts, "cause")
+		if opts := arg(args, 2); opts.IsObjectType() {
+			hc, e := rt.hasPropE(opts, "cause") // HasProperty is observable (proxy trap may throw)
 			if e != nil {
 				return mkundef(), e
 			}
-			eo.defineOwn("cause", cause, attrWritable|attrConfigurable)
+			if hc {
+				cause, e := rt.getField(opts, "cause")
+				if e != nil {
+					return mkundef(), e
+				}
+				eo.defineOwn("cause", cause, attrWritable|attrConfigurable)
+			}
 		}
 		return errObj, nil
 	})
@@ -213,12 +219,18 @@ func (rt *Runtime) makeErrorCtor(name string, proto, _parentCtor Value) Value {
 			rt.objPtr(errObj).defineOwn("message", s, attrWritable|attrConfigurable)
 		}
 		// ES2022 error cause: an options object with an own "cause" property.
-		if opts := arg(args, 1); opts.IsObjectType() && rt.hasProp(opts, "cause") {
-			cause, e := rt.getField(opts, "cause")
+		if opts := arg(args, 1); opts.IsObjectType() {
+			hc, e := rt.hasPropE(opts, "cause") // HasProperty is observable (proxy trap may throw)
 			if e != nil {
 				return mkundef(), e
 			}
-			rt.objPtr(errObj).defineOwn("cause", cause, attrWritable|attrConfigurable)
+			if hc {
+				cause, e := rt.getField(opts, "cause")
+				if e != nil {
+					return mkundef(), e
+				}
+				rt.objPtr(errObj).defineOwn("cause", cause, attrWritable|attrConfigurable)
+			}
 		}
 		return errObj, nil
 	})
