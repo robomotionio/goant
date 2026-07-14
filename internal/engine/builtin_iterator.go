@@ -664,10 +664,295 @@ func (rt *Runtime) initIteratorHelpers() {
 		})
 		return hv, nil
 	})
+	rt.defMethod(cobj, "zip", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		iterablesArg := arg(args, 0)
+		if !iterablesArg.IsObjectType() {
+			return mkundef(), rt.typeError("Iterator.zip called on a non-object")
+		}
+		mode, paddingOption, e := rt.zipParseOptions(arg(args, 1))
+		if e != nil {
+			return mkundef(), e
+		}
+		// Gather the sub-iterators by iterating `iterables` and flattening each.
+		inputIter, e := rt.getSyncIterator(iterablesArg)
+		if e != nil {
+			return mkundef(), e
+		}
+		inputNext, e := rt.getField(inputIter, "next")
+		if e != nil {
+			return mkundef(), e
+		}
+		var iters, nexts []Value
+		for {
+			v, d, se := rt.iterStepValue(inputIter, inputNext)
+			if se != nil {
+				rt.closeIterList(iters, -1)
+				return mkundef(), se
+			}
+			if d {
+				break
+			}
+			it, fe := rt.getIteratorFlattenable(v)
+			if fe != nil {
+				// IfAbruptCloseIterators(iter, « inputIterator » + iters): reverse
+				// order closes the gathered iters first, then the input iterator.
+				rt.closeIterList(iters, -1)
+				rt.iteratorCloseE(inputIter)
+				return mkundef(), fe
+			}
+			nx, ne := rt.getField(it, "next")
+			if ne != nil {
+				rt.closeIterList(iters, -1)
+				rt.iteratorCloseE(inputIter)
+				return mkundef(), ne
+			}
+			iters = append(iters, it)
+			nexts = append(nexts, nx)
+		}
+		padding, pe := rt.zipResolvePadding(mode, paddingOption, len(iters))
+		if pe != nil {
+			rt.closeIterList(iters, -1) // close the gathered iterators; pe (a throw) wins
+			return mkundef(), pe
+		}
+		finish := func(results []Value) Value {
+			arr := rt.newArray()
+			ao := rt.objPtr(arr)
+			for i, v := range results {
+				rt.arraySet(ao, uint32(i), v)
+			}
+			return arr
+		}
+		return rt.newZipIterator(iters, nexts, mode, padding, finish), nil
+	})
 	if rt.symToStringTag != 0 {
 		proto.defineOwnSymbol(rt.symToStringTag.handle(), rt.newString("Iterator"), attrConfigurable)
 	}
 	rt.defGlobal("Iterator", ctor)
+}
+
+// zipParseOptions reads the { mode, padding } options object for Iterator.zip /
+// zipKeyed. options may be undefined (GetOptionsObject); mode defaults to
+// "shortest" and must be one of shortest/longest/strict; padding is only read in
+// longest mode and, if present, must be an Object.
+func (rt *Runtime) zipParseOptions(optionsArg Value) (mode string, paddingOption Value, err *ThrowError) {
+	if optionsArg.IsUndefined() {
+		return "shortest", mkundef(), nil
+	}
+	if !optionsArg.IsObjectType() {
+		return "", mkundef(), rt.typeError("Iterator.zip options is not an object")
+	}
+	mv, e := rt.getField(optionsArg, "mode")
+	if e != nil {
+		return "", mkundef(), e
+	}
+	mode = "shortest"
+	if !mv.IsUndefined() {
+		if !mv.IsString() {
+			return "", mkundef(), rt.typeError("Iterator.zip mode is invalid")
+		}
+		s := string(rt.strBytes(mv))
+		if s != "shortest" && s != "longest" && s != "strict" {
+			return "", mkundef(), rt.typeError("Iterator.zip mode is invalid")
+		}
+		mode = s
+	}
+	if mode == "longest" {
+		pv, pe := rt.getField(optionsArg, "padding")
+		if pe != nil {
+			return "", mkundef(), pe
+		}
+		if !pv.IsUndefined() && !pv.IsObjectType() {
+			return "", mkundef(), rt.typeError("Iterator.zip padding is not an object")
+		}
+		paddingOption = pv
+	}
+	return mode, paddingOption, nil
+}
+
+// zipResolvePadding produces the per-index padding List for longest mode: all
+// undefined when no padding object was given, otherwise drained from the padding
+// iterable (missing entries → undefined), which is then closed. Non-longest modes
+// need no padding.
+func (rt *Runtime) zipResolvePadding(mode string, paddingOption Value, iterCount int) ([]Value, *ThrowError) {
+	padding := make([]Value, iterCount)
+	for i := range padding {
+		padding[i] = mkundef()
+	}
+	if mode != "longest" || paddingOption.IsUndefined() {
+		return padding, nil
+	}
+	pit, e := rt.getSyncIterator(paddingOption)
+	if e != nil {
+		return nil, e
+	}
+	pnext, e := rt.getField(pit, "next")
+	if e != nil {
+		return nil, e
+	}
+	for i := 0; i < iterCount; i++ {
+		v, d, se := rt.iterStepValue(pit, pnext)
+		if se != nil {
+			return nil, se
+		}
+		if d {
+			return padding, nil // remaining stay undefined; iterator already exhausted
+		}
+		padding[i] = v
+	}
+	// Not exhausted: close it. A close error (normal completion) propagates.
+	if ce := rt.iteratorCloseE(pit); ce != nil {
+		return nil, ce
+	}
+	return padding, nil
+}
+
+// closeIterList closes each iterator in the list (skipping index skip and any
+// that error), swallowing close errors — used to unwind partially-gathered
+// iterators after an abrupt completion whose original error must win.
+func (rt *Runtime) closeIterList(iters []Value, skip int) {
+	for i := len(iters) - 1; i >= 0; i-- {
+		if i == skip {
+			continue
+		}
+		rt.iteratorCloseE(iters[i])
+	}
+}
+
+// newZipIterator builds the lazy iterator-helper that drives IteratorZip over the
+// gathered sub-iterators under the given mode/padding, formatting each round with
+// finish (an array for zip, a keyed object for zipKeyed).
+func (rt *Runtime) newZipIterator(iters, nexts []Value, mode string, padding []Value, finish func([]Value) Value) Value {
+	iterCount := len(iters)
+	open := make([]bool, iterCount)
+	for i := range open {
+		open[i] = true
+	}
+	openCount := iterCount
+	isNull := make([]bool, iterCount) // longest: exhausted → yields padding[i]
+	done := false
+	running := false
+	yielded := false // true once a value has been yielded (suspended-yield vs -start)
+
+	// closeRemaining closes every still-open iterator except `skip`, in reverse
+	// (IteratorCloseAll). A close error is adopted only while the pending
+	// completion is normal (nil); once the completion is a throw, later close
+	// errors are ignored (IteratorClose returns the incoming throw unchanged).
+	closeRemaining := func(skip int, pending *ThrowError) *ThrowError {
+		for i := iterCount - 1; i >= 0; i-- {
+			if i == skip || !open[i] {
+				continue
+			}
+			open[i] = false
+			if ce := rt.iteratorCloseE(iters[i]); ce != nil && pending == nil {
+				pending = ce
+			}
+		}
+		return pending
+	}
+
+	next := func() (Value, bool, *ThrowError) {
+		if done {
+			return mkundef(), true, nil
+		}
+		results := make([]Value, iterCount)
+		for i := 0; i < iterCount; i++ {
+			if isNull[i] {
+				results[i] = padding[i]
+				continue
+			}
+			v, d, e := rt.iterStepValue(iters[i], nexts[i])
+			if e != nil {
+				done = true
+				open[i] = false
+				return mkundef(), false, closeRemaining(-1, e) // step throw wins; close errors ignored
+			}
+			if !d {
+				results[i] = v
+				continue
+			}
+			// iters[i] is exhausted.
+			open[i] = false
+			openCount--
+			switch mode {
+			case "shortest":
+				done = true
+				if ce := closeRemaining(-1, nil); ce != nil {
+					return mkundef(), false, ce
+				}
+				return mkundef(), true, nil
+			case "strict":
+				done = true
+				if i != 0 {
+					mismatch := rt.typeError("Iterator.zip: strict mode requires equal-length iterators")
+					return mkundef(), false, closeRemaining(-1, mismatch)
+				}
+				// iters[0] finished first: every other iterator must finish now too.
+				for k := 1; k < iterCount; k++ {
+					_, d2, e2 := rt.iterStepValue(iters[k], nexts[k])
+					if e2 != nil {
+						open[k] = false
+						return mkundef(), false, closeRemaining(-1, e2)
+					}
+					if !d2 {
+						mismatch := rt.typeError("Iterator.zip: strict mode requires equal-length iterators")
+						return mkundef(), false, closeRemaining(-1, mismatch)
+					}
+					open[k] = false
+				}
+				return mkundef(), true, nil
+			default: // longest
+				isNull[i] = true
+				results[i] = padding[i]
+			}
+		}
+		if openCount == 0 {
+			done = true
+			return mkundef(), true, nil
+		}
+		yielded = true
+		return finish(results), false, nil
+	}
+
+	proto := rt.iteratorProto
+	if rt.iterHelperProto != 0 {
+		proto = rt.iterHelperProto
+	}
+	hv := rt.newObject(proto)
+	ho := rt.objPtr(hv)
+	rt.defMethod(ho, "next", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
+		if running {
+			return mkundef(), rt.typeError("Iterator.zip generator is already running")
+		}
+		running = true
+		val, d, e := next()
+		running = false
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.genResult(val, d), nil
+	})
+	rt.defMethod(ho, "return", 0, func(rt *Runtime, _ Value, args []Value) (Value, *ThrowError) {
+		if running {
+			return mkundef(), rt.typeError("Iterator.zip generator is already running")
+		}
+		// A return from suspended-start moves straight to "completed", so a
+		// re-entrant next/return during the close observes a done generator. A
+		// return from suspended-yield resumes the body ("executing"), so a
+		// re-entrant call during the close is a TypeError (running guard).
+		if !done {
+			done = true
+			if yielded {
+				running = true
+			}
+			ce := closeRemaining(-1, nil)
+			running = false
+			if ce != nil {
+				return mkundef(), ce
+			}
+		}
+		return rt.genResult(arg(args, 0), true), nil
+	})
+	return hv
 }
 
 // wrapIterator wraps a raw iterator (an object with a next method) so it
