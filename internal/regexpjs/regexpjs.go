@@ -20,10 +20,10 @@ type Regexp struct {
 	Source string
 	Flags  string
 
-	Global     bool
-	IgnoreCase bool
-	Multiline  bool
-	DotAll     bool
+	Global      bool
+	IgnoreCase  bool
+	Multiline   bool
+	DotAll      bool
 	Unicode     bool
 	UnicodeSets bool
 	Sticky      bool
@@ -31,6 +31,11 @@ type Regexp struct {
 	// groupNames maps the safe internal capture-group name regexp2 sees back to
 	// the original ECMAScript name (nil when the pattern has no named groups).
 	groupNames map[string]string
+	// groupKinds lists the capture groups in ECMAScript definition order (true =
+	// named). It is used to reorder regexp2's results, which number all unnamed
+	// groups before all named ones, back into left-to-right order. nil when the
+	// pattern has no named groups (no reordering needed).
+	groupKinds []bool
 }
 
 // Group is one capture group in a match (Index is a rune offset; -1 = unmatched).
@@ -132,10 +137,10 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	}
 	// Rename named groups / backreferences to regexp2-safe internal names (ES
 	// allows names regexp2's \w+ grammar rejects, and duplicate names).
-	if gs, gm, gerr := translateGroupNames(src); gerr != nil {
+	if gs, gm, gk, gerr := translateGroupNames(src); gerr != nil {
 		return nil, fmt.Errorf("invalid regular expression: %v", gerr)
 	} else {
-		src, r.groupNames = gs, gm
+		src, r.groupNames, r.groupKinds = gs, gm, gk
 	}
 	// Under the u/v flag, translate ES Unicode property escapes (\p{…}) into
 	// explicit code-point classes regexp2 can compile.
@@ -191,8 +196,7 @@ func (r *Regexp) Exec(input []rune, start int) (*Match, error) {
 		return nil, nil
 	}
 	groups := m.Groups()
-	out := &Match{Index: m.Index, Groups: make([]Group, len(groups))}
-	for i, g := range groups {
+	convert := func(g regexp2.Group) Group {
 		name := g.Name
 		if orig, ok := r.groupNames[name]; ok {
 			name = orig // map the internal name back to the ECMAScript name
@@ -203,7 +207,33 @@ func (r *Regexp) Exec(input []rune, start int) (*Match, error) {
 			gg.Length = g.Length
 			gg.Value = g.String()
 		}
-		out.Groups[i] = gg
+		return gg
+	}
+	out := &Match{Index: m.Index, Groups: make([]Group, len(groups))}
+	// regexp2 numbers every unnamed group before every named group; when the
+	// pattern mixes the two, reorder them into ECMAScript left-to-right order.
+	if r.groupKinds != nil && len(r.groupKinds)+1 == len(groups) {
+		unnamedCount := 0
+		for _, named := range r.groupKinds {
+			if !named {
+				unnamedCount++
+			}
+		}
+		out.Groups[0] = convert(groups[0])
+		unnamedPtr, namedPtr := 1, unnamedCount+1
+		for es, named := range r.groupKinds {
+			src := unnamedPtr
+			if named {
+				src, namedPtr = namedPtr, namedPtr+1
+			} else {
+				unnamedPtr++
+			}
+			out.Groups[es+1] = convert(groups[src])
+		}
+		return out, nil
+	}
+	for i, g := range groups {
+		out.Groups[i] = convert(g)
 	}
 	return out, nil
 }

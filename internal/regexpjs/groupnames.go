@@ -14,11 +14,12 @@ import (
 // group names, none of which regexp2's `\w+` name grammar allows; and it permits
 // duplicate names across disjoint alternatives, which unique internal names make
 // compilable.
-func translateGroupNames(src string) (string, map[string]string, error) {
+func translateGroupNames(src string) (string, map[string]string, []bool, error) {
 	rs := []rune(src)
 	var out strings.Builder
 	names := map[string]string{}   // decoded original name -> internal name
 	reverse := map[string]string{} // internal name -> decoded original name
+	var kinds []bool               // per capture group, in definition order: true=named
 	inClass := false
 	counter := 0
 
@@ -46,11 +47,11 @@ func translateGroupNames(src string) (string, map[string]string, error) {
 			if !inClass && i+1 < len(rs) && rs[i+1] == 'k' && i+2 < len(rs) && rs[i+2] == '<' {
 				name, end, err := decodeGroupName(rs, i+3)
 				if err != nil {
-					return "", nil, err
+					return "", nil, nil, err
 				}
 				in, ok := nextInternal(name, false)
 				if !ok {
-					return "", nil, fmt.Errorf("invalid named backreference to <%s>", name)
+					return "", nil, nil, fmt.Errorf("invalid named backreference to <%s>", name)
 				}
 				out.WriteString("\\k<")
 				out.WriteString(in)
@@ -75,26 +76,36 @@ func translateGroupNames(src string) (string, map[string]string, error) {
 			out.WriteRune(c)
 			continue
 		}
-		// A named group definition (?<name>…), but not a lookbehind (?<= / (?<!.
-		if !inClass && c == '(' && i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
-			!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
-			name, end, err := decodeGroupName(rs, i+3)
-			if err != nil {
-				return "", nil, err
+		if !inClass && c == '(' {
+			// A named group definition (?<name>…), but not a lookbehind (?<= / (?<!.
+			if i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
+				!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
+				name, end, err := decodeGroupName(rs, i+3)
+				if err != nil {
+					return "", nil, nil, err
+				}
+				in, _ := nextInternal(name, true)
+				kinds = append(kinds, true)
+				out.WriteString("(?<")
+				out.WriteString(in)
+				out.WriteByte('>')
+				i = end
+				continue
 			}
-			in, _ := nextInternal(name, true)
-			out.WriteString("(?<")
-			out.WriteString(in)
-			out.WriteByte('>')
-			i = end
+			// A plain capturing group `(` (anything but `(?…`) contributes an
+			// unnamed capture, which regexp2 numbers before the named ones.
+			if !(i+1 < len(rs) && rs[i+1] == '?') {
+				kinds = append(kinds, false)
+			}
+			out.WriteRune(c)
 			continue
 		}
 		out.WriteRune(c)
 	}
 	if counter == 0 {
-		return src, nil, nil // no named groups; leave the source untouched
+		return src, nil, nil, nil // no named groups; leave the source untouched
 	}
-	return out.String(), reverse, nil
+	return out.String(), reverse, kinds, nil
 }
 
 // decodeGroupName reads a group name starting at rs[start] up to the closing '>',
