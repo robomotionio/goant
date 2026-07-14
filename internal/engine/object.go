@@ -567,6 +567,37 @@ func (rt *Runtime) hasProp(obj Value, key string) bool {
 	return false
 }
 
+// hasPropE is hasProp that propagates a Proxy trap's abrupt completion (the
+// [[HasProperty]] invariant TypeErrors), used where the spec's HasProperty must
+// be observable — e.g. a `with` statement's binding resolution.
+func (rt *Runtime) hasPropE(obj Value, key string) (bool, *ThrowError) {
+	idx, isIdx := canonicalIndex(key)
+	cur := obj
+	if !obj.IsObjectType() && obj.Type() != TTypedArray && !obj.IsNullish() {
+		if isIdx && obj.Type() == TStr && int(idx) < utf16Len(rt.strBytes(obj)) {
+			return true, nil
+		}
+		cur = rt.primitiveProto(obj)
+	}
+	for depth := 0; depth < maxProtoChainDepth; depth++ {
+		o := rt.objPtr(cur)
+		if o == nil {
+			break
+		}
+		if o.proxy != nil {
+			return rt.proxyHas(o.proxy, rt.internString(key))
+		}
+		if isIdx && rt.hasOwnIndex(cur, o, idx) {
+			return true, nil
+		}
+		if s := o.shape.lookupInterned(key); s >= 0 {
+			return true, nil
+		}
+		cur = o.proto
+	}
+	return false, nil
+}
+
 // hasOwnPropertyOf implements HasOwnProperty(O, key): [[GetOwnProperty]] on the
 // object only (no prototype walk), routing through a Proxy's trap.
 func (rt *Runtime) hasOwnPropertyOf(obj Value, key string) (bool, *ThrowError) {

@@ -266,7 +266,7 @@ func (rt *Runtime) proxyHas(p *proxyState, key Value) (bool, *ThrowError) {
 		return rt.hasFieldSymbol(p.target, key.handle()), nil
 	}
 	name, _ := rt.propKeyString(key)
-	return rt.hasProp(p.target, name), nil
+	return rt.hasPropE(p.target, name)
 }
 
 func (rt *Runtime) proxyDelete(p *proxyState, key Value) (bool, *ThrowError) {

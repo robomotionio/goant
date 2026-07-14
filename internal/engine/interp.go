@@ -294,7 +294,12 @@ restart:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			found := false
 			for k := len(withStack) - 1; k >= 0; k-- {
-				if rt.hasProp(withStack[k], name) && !rt.isUnscopable(withStack[k], name) {
+				has, e := rt.hasPropE(withStack[k], name)
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				if has && !rt.isUnscopable(withStack[k], name) {
 					v, e := rt.getField(withStack[k], name)
 					if e != nil {
 						thrown = e
@@ -315,7 +320,12 @@ restart:
 			val := pop()
 			stored := false
 			for k := len(withStack) - 1; k >= 0; k-- {
-				if rt.hasProp(withStack[k], name) {
+				has, e := rt.hasPropE(withStack[k], name)
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				if has {
 					if e := rt.setField(withStack[k], name, val); e != nil {
 						thrown = e
 						goto unwind
