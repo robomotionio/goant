@@ -358,6 +358,12 @@ func pushArrowParamsFromExpr(fn, expr *Node) {
 
 // ---- member/call suffixes ----
 
+// isPrivateMemberProp reports whether an NMember's property node names a private
+// identifier (goant stores `.#x` as an NIdent whose text keeps the leading '#').
+func isPrivateMemberProp(prop *Node) bool {
+	return prop != nil && prop.Kind == NIdent && len(prop.Str) > 0 && prop.Str[0] == '#'
+}
+
 func (p *parser) parseDotPropertyName() *Node {
 	if !isPrivateIdentLikeTok(p.tok()) {
 		p.unexpected()
@@ -565,6 +571,12 @@ func (p *parser) parsePrimary() *Node {
 		n.Right = p.parseUnary()
 		if p.lx.strict && n.Right != nil && n.Right.Kind == NIdent {
 			p.errorf("cannot delete bindings in strict mode")
+			return p.mk(NEmpty)
+		}
+		// A `delete` operand (possibly parenthesized) that is a member access whose
+		// property is a private identifier is an early SyntaxError.
+		if op := n.Right; op != nil && op.Kind == NMember && isPrivateMemberProp(op.Right) {
+			p.errorf("Private fields can not be deleted")
 			return p.mk(NEmpty)
 		}
 		return n
