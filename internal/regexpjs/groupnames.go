@@ -16,47 +16,68 @@ import (
 // compilable.
 func translateGroupNames(src string) (string, map[string]string, []bool, error) {
 	rs := []rune(src)
-	var out strings.Builder
 	names := map[string]string{}   // decoded original name -> internal name
 	reverse := map[string]string{} // internal name -> decoded original name
-	var kinds []bool               // per capture group, in definition order: true=named
+
+	// Pass 1: collect every named-group definition, so that backreferences —
+	// which may appear before their group (forward references are legal) — resolve.
 	inClass := false
 	counter := 0
-
-	// nextInternal assigns/reuses an internal name for a decoded original name.
-	// Duplicate original names each get a distinct internal name (same original in
-	// the reverse map) so regexp2 sees unique names.
-	nextInternal := func(orig string, isDef bool) (string, bool) {
-		if !isDef {
-			if in, ok := names[orig]; ok {
-				return in, true
-			}
-			return "", false // reference to an undefined group name
-		}
-		in := "__g" + strconv.Itoa(counter)
-		counter++
-		names[orig] = in
-		reverse[in] = orig
-		return in, true
-	}
-
 	for i := 0; i < len(rs); i++ {
 		c := rs[i]
 		if c == '\\' {
-			// A named backreference \k<name>.
+			i++ // skip the escaped rune
+			continue
+		}
+		if c == '[' {
+			inClass = true
+			continue
+		}
+		if c == ']' {
+			inClass = false
+			continue
+		}
+		if !inClass && c == '(' && i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
+			!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
+			name, end, err := decodeGroupName(rs, i+3)
+			if err != nil {
+				return "", nil, nil, err
+			}
+			in := "__g" + strconv.Itoa(counter)
+			counter++
+			names[name] = in
+			reverse[in] = name
+			i = end
+		}
+	}
+	if counter == 0 {
+		return src, nil, nil, nil // no named groups; leave the source untouched
+	}
+
+	// Pass 2: rewrite definitions and defined backreferences to the internal
+	// names; a \k<name> with no matching definition is left untouched (a
+	// non-Unicode Annex-B literal, or a Unicode-mode error regexp2 will report).
+	var out strings.Builder
+	var kinds []bool // per capture group, in definition order: true=named
+	inClass = false
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' {
 			if !inClass && i+1 < len(rs) && rs[i+1] == 'k' && i+2 < len(rs) && rs[i+2] == '<' {
 				name, end, err := decodeGroupName(rs, i+3)
 				if err != nil {
 					return "", nil, nil, err
 				}
-				in, ok := nextInternal(name, false)
-				if !ok {
-					return "", nil, nil, fmt.Errorf("invalid named backreference to <%s>", name)
+				if in, ok := names[name]; ok {
+					out.WriteString("\\k<")
+					out.WriteString(in)
+					out.WriteByte('>')
+					i = end
+					continue
 				}
+				// Undefined reference: emit \k< and let the name flow through.
 				out.WriteString("\\k<")
-				out.WriteString(in)
-				out.WriteByte('>')
-				i = end
+				i += 2
 				continue
 			}
 			out.WriteRune(c)
@@ -77,23 +98,16 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 			continue
 		}
 		if !inClass && c == '(' {
-			// A named group definition (?<name>…), but not a lookbehind (?<= / (?<!.
 			if i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
 				!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
-				name, end, err := decodeGroupName(rs, i+3)
-				if err != nil {
-					return "", nil, nil, err
-				}
-				in, _ := nextInternal(name, true)
+				name, end, _ := decodeGroupName(rs, i+3)
 				kinds = append(kinds, true)
 				out.WriteString("(?<")
-				out.WriteString(in)
+				out.WriteString(names[name])
 				out.WriteByte('>')
 				i = end
 				continue
 			}
-			// A plain capturing group `(` (anything but `(?…`) contributes an
-			// unnamed capture, which regexp2 numbers before the named ones.
 			if !(i+1 < len(rs) && rs[i+1] == '?') {
 				kinds = append(kinds, false)
 			}
@@ -101,9 +115,6 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 			continue
 		}
 		out.WriteRune(c)
-	}
-	if counter == 0 {
-		return src, nil, nil, nil // no named groups; leave the source untouched
 	}
 	return out.String(), reverse, kinds, nil
 }
