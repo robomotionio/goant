@@ -31,6 +31,125 @@ func (rt *Runtime) initIteratorProto() {
 }
 
 // sliceIterator returns an iterator object over a fixed slice of values.
+// newIteratorObjectE builds a lazy iterator whose next step may throw (used by
+// the Iterator helper methods, whose callbacks can raise).
+func (rt *Runtime) newIteratorObjectE(next func() (Value, bool, *ThrowError)) Value {
+	v := rt.newObject(rt.iteratorHelperProtoOr(rt.iteratorProto))
+	o := rt.objPtr(v)
+	rt.defMethod(o, "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		val, done, e := next()
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.genResult(val, done), nil
+	})
+	return v
+}
+
+// iteratorHelperProtoOr returns %IteratorHelperPrototype% if available, else the
+// given fallback. (goant reuses %Iterator.prototype% for helper results.)
+func (rt *Runtime) iteratorHelperProtoOr(fallback Value) Value { return fallback }
+
+// iterStepValue calls a source iterator's next method and returns (value, done),
+// throwing if the result is not an object.
+func (rt *Runtime) iterStepValue(iter, nextMethod Value) (Value, bool, *ThrowError) {
+	res, e := rt.callValue(nextMethod, iter, nil)
+	if e != nil {
+		return mkundef(), false, e
+	}
+	if !res.IsObjectType() {
+		return mkundef(), false, rt.typeError("iterator result is not an object")
+	}
+	doneV, e := rt.getField(res, "done")
+	if e != nil {
+		return mkundef(), false, e
+	}
+	if rt.toBoolean(doneV) {
+		return mkundef(), true, nil
+	}
+	val, e := rt.getField(res, "value")
+	if e != nil {
+		return mkundef(), false, e
+	}
+	return val, false, nil
+}
+
+// iterHelperCallback validates the receiver (an Object) and a callback (must be
+// callable — else the source iterator is closed and a TypeError thrown), then
+// performs GetIteratorDirect, returning the source's next method and the callback.
+func (rt *Runtime) iterHelperCallback(this, cb Value, name string) (Value, Value, *ThrowError) {
+	if !this.IsObjectType() {
+		return mkundef(), mkundef(), rt.typeError("Iterator.prototype." + name + " called on a non-object")
+	}
+	if !rt.isCallable(cb) {
+		rt.iteratorClose(this)
+		return mkundef(), mkundef(), rt.typeError("Iterator.prototype." + name + " callback is not a function")
+	}
+	next, e := rt.getField(this, "next")
+	if e != nil {
+		return mkundef(), mkundef(), e
+	}
+	return next, cb, nil
+}
+
+// iterHelperLimit validates the receiver and a numeric limit for take/drop:
+// GetIteratorDirect, then ToNumber(limit) (closing the source on an abrupt
+// completion), rejecting NaN and negatives with a RangeError (closing first).
+// +∞ maps to an unbounded limit.
+func (rt *Runtime) iterHelperLimit(this, limitArg Value) (Value, int, *ThrowError) {
+	if !this.IsObjectType() {
+		return mkundef(), 0, rt.typeError("Iterator.prototype method called on a non-object")
+	}
+	next, e := rt.getField(this, "next")
+	if e != nil {
+		return mkundef(), 0, e
+	}
+	num, e := rt.toNumber(limitArg)
+	if e != nil {
+		rt.iteratorClose(this)
+		return mkundef(), 0, e
+	}
+	if num != num { // NaN
+		rt.iteratorClose(this)
+		return mkundef(), 0, rt.rangeError("limit must not be NaN")
+	}
+	if num < 0 {
+		rt.iteratorClose(this)
+		return mkundef(), 0, rt.rangeError("limit must not be negative")
+	}
+	limit := int(^uint(0) >> 1) // +∞ (or huge) → effectively unbounded
+	if num < float64(limit) {
+		limit = int(num)
+	}
+	return next, limit, nil
+}
+
+// getIteratorFlattenable implements GetIteratorFlattenable(obj, reject-primitives)
+// for flatMap: obj must be an Object; if it has a callable @@iterator, call it,
+// otherwise use obj itself as the iterator.
+func (rt *Runtime) getIteratorFlattenable(obj Value) (Value, *ThrowError) {
+	if !obj.IsObjectType() {
+		return mkundef(), rt.typeError("flatMap callback did not return an object")
+	}
+	if rt.symIterator != 0 {
+		m, e := rt.getElement(obj, rt.symIterator)
+		if e != nil {
+			return mkundef(), e
+		}
+		if rt.isCallable(m) {
+			it, e := rt.callValue(m, obj, nil)
+			if e != nil {
+				return mkundef(), e
+			}
+			if !it.IsObjectType() {
+				return mkundef(), rt.typeError("[Symbol.iterator]() returned a non-object")
+			}
+			return it, nil
+		}
+	}
+	return obj, nil
+}
+
 func (rt *Runtime) sliceIterator(vs []Value) Value {
 	i := 0
 	return rt.newIteratorObject(func() (Value, bool) {
@@ -62,91 +181,161 @@ func (rt *Runtime) initIteratorHelpers() {
 		}
 		return res, nil
 	})
+	// The transforming helpers (map/filter/take/drop/flatMap) are lazy: they
+	// validate their argument up front (closing the source iterator on failure),
+	// read the source's `next` once (GetIteratorDirect), and pull one value per
+	// step. A callback that throws closes the source.
 	rt.defMethod(proto, "map", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := drain(this)
+		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "map")
 		if e != nil {
 			return mkundef(), e
 		}
-		cb := arg(args, 0)
-		out := make([]Value, len(vs))
-		for i, v := range vs {
-			r, e := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(i))})
-			if e != nil {
-				return mkundef(), e
+		idx, done := 0, false
+		return rt.newIteratorObjectE(func() (Value, bool, *ThrowError) {
+			if done {
+				return mkundef(), true, nil
 			}
-			out[i] = r
-		}
-		return rt.sliceIterator(out), nil
+			v, d, e := rt.iterStepValue(this, next)
+			if e != nil || d {
+				done = true
+				return mkundef(), d, e
+			}
+			r, ce := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(idx))})
+			idx++
+			if ce != nil {
+				done = true
+				rt.iteratorClose(this)
+				return mkundef(), false, ce
+			}
+			return r, false, nil
+		}), nil
 	})
 	rt.defMethod(proto, "filter", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := drain(this)
+		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "filter")
 		if e != nil {
 			return mkundef(), e
 		}
-		cb := arg(args, 0)
-		var out []Value
-		for i, v := range vs {
-			r, e := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(i))})
-			if e != nil {
-				return mkundef(), e
+		idx, done := 0, false
+		return rt.newIteratorObjectE(func() (Value, bool, *ThrowError) {
+			for !done {
+				v, d, e := rt.iterStepValue(this, next)
+				if e != nil || d {
+					done = true
+					return mkundef(), d, e
+				}
+				r, ce := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(idx))})
+				idx++
+				if ce != nil {
+					done = true
+					rt.iteratorClose(this)
+					return mkundef(), false, ce
+				}
+				if rt.toBoolean(r) {
+					return v, false, nil
+				}
 			}
-			if rt.toBoolean(r) {
-				out = append(out, v)
-			}
-		}
-		return rt.sliceIterator(out), nil
+			return mkundef(), true, nil
+		}), nil
 	})
 	rt.defMethod(proto, "take", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := drain(this)
+		next, limit, e := rt.iterHelperLimit(this, arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		n := int(argNum(rt, args, 0))
-		if n < 0 {
-			n = 0
-		}
-		if n > len(vs) {
-			n = len(vs)
-		}
-		return rt.sliceIterator(vs[:n]), nil
+		remaining, done := limit, false
+		return rt.newIteratorObjectE(func() (Value, bool, *ThrowError) {
+			if done {
+				return mkundef(), true, nil
+			}
+			if remaining <= 0 {
+				done = true
+				rt.iteratorClose(this)
+				return mkundef(), true, nil
+			}
+			remaining--
+			v, d, e := rt.iterStepValue(this, next)
+			if e != nil || d {
+				done = true
+				return mkundef(), d, e
+			}
+			return v, false, nil
+		}), nil
 	})
 	rt.defMethod(proto, "drop", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := drain(this)
+		next, limit, e := rt.iterHelperLimit(this, arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		n := int(argNum(rt, args, 0))
-		if n < 0 {
-			n = 0
-		}
-		if n > len(vs) {
-			n = len(vs)
-		}
-		return rt.sliceIterator(vs[n:]), nil
+		toDrop, done := limit, false
+		return rt.newIteratorObjectE(func() (Value, bool, *ThrowError) {
+			if done {
+				return mkundef(), true, nil
+			}
+			for toDrop > 0 {
+				toDrop--
+				_, d, e := rt.iterStepValue(this, next)
+				if e != nil || d {
+					done = true
+					return mkundef(), d, e
+				}
+			}
+			v, d, e := rt.iterStepValue(this, next)
+			if e != nil || d {
+				done = true
+				return mkundef(), d, e
+			}
+			return v, false, nil
+		}), nil
 	})
 	rt.defMethod(proto, "flatMap", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := drain(this)
+		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "flatMap")
 		if e != nil {
 			return mkundef(), e
 		}
-		cb := arg(args, 0)
-		var out []Value
-		for i, v := range vs {
-			r, e := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(i))})
-			if e != nil {
-				return mkundef(), e
-			}
-			if rt.isIterable(r) {
-				sub, e := rt.iterableValues(r)
-				if e != nil {
-					return mkundef(), e
+		idx, done := 0, false
+		var innerNext Value // the current inner iterator's next method (0 when none)
+		var inner Value
+		return rt.newIteratorObjectE(func() (Value, bool, *ThrowError) {
+			for !done {
+				if innerNext != 0 {
+					iv, id, ie := rt.iterStepValue(inner, innerNext)
+					if ie != nil {
+						done = true
+						rt.iteratorClose(this)
+						return mkundef(), false, ie
+					}
+					if !id {
+						return iv, false, nil
+					}
+					innerNext = 0
 				}
-				out = append(out, sub...)
-			} else {
-				out = append(out, r)
+				v, d, e := rt.iterStepValue(this, next)
+				if e != nil || d {
+					done = true
+					return mkundef(), d, e
+				}
+				r, ce := rt.callValue(cb, mkundef(), []Value{v, mknum(float64(idx))})
+				idx++
+				if ce != nil {
+					done = true
+					rt.iteratorClose(this)
+					return mkundef(), false, ce
+				}
+				it, ie := rt.getIteratorFlattenable(r)
+				if ie != nil {
+					done = true
+					rt.iteratorClose(this)
+					return mkundef(), false, ie
+				}
+				inner = it
+				innerNext, ie = rt.getField(it, "next")
+				if ie != nil {
+					done = true
+					return mkundef(), false, ie
+				}
 			}
-		}
-		return rt.sliceIterator(out), nil
+			return mkundef(), true, nil
+		}), nil
 	})
 	rt.defMethod(proto, "reduce", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		vs, e := drain(this)
