@@ -504,6 +504,18 @@ func (rt *Runtime) initPromiseBuiltin() {
 	rt.defMethod(cobj, "allSettled", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.promiseAll(this, arg(args, 0), true)
 	})
+	rt.defMethod(cobj, "allKeyed", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Promise.allKeyed called on a non-object")
+		}
+		return rt.promiseAllKeyed(this, arg(args, 0), false)
+	})
+	rt.defMethod(cobj, "allSettledKeyed", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Promise.allSettledKeyed called on a non-object")
+		}
+		return rt.promiseAllKeyed(this, arg(args, 0), true)
+	})
 	rt.defMethod(cobj, "race", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.promiseRace(this, arg(args, 0), false)
 	})
@@ -637,6 +649,142 @@ func (rt *Runtime) promiseAll(C, iterable Value, settled bool) (Value, *ThrowErr
 		}
 	}
 	tryFinish()
+	return result, nil
+}
+
+// objectOwnKeys returns obj's own property keys (strings then symbols) as a
+// slice of key Values, dispatching the ownKeys trap for a Proxy. It is the
+// [[OwnPropertyKeys]] source for the keyed Promise combinators.
+func (rt *Runtime) objectOwnKeys(obj Value) ([]Value, *ThrowError) {
+	o := rt.objPtr(obj)
+	if o == nil {
+		return nil, nil
+	}
+	if o.proxy != nil {
+		return rt.proxyOwnKeys(o.proxy)
+	}
+	var keys []Value
+	for _, k := range o.ownKeys() {
+		keys = append(keys, rt.newString(k))
+	}
+	for _, off := range o.ownSymbolKeys() {
+		keys = append(keys, mkval(TSymbol, uint64(off)))
+	}
+	return keys, nil
+}
+
+// promiseAllKeyed implements Promise.allKeyed / Promise.allSettledKeyed: like
+// Promise.all/allSettled but iterating the input object's own enumerable keys
+// (strings and symbols, in [[OwnPropertyKeys]] order) and fulfilling with a
+// null-prototype object mapping each key to its resolved value (or, for the
+// settled form, to a { status, value|reason } record).
+func (rt *Runtime) promiseAllKeyed(C, obj Value, settled bool) (Value, *ThrowError) {
+	result, resolveFn, rejectFn, e := rt.newPromiseCapability(C)
+	if e != nil {
+		return mkundef(), e
+	}
+	promiseResolve, ok := rt.promiseResolveFn(C, rejectFn)
+	if !ok {
+		return result, nil
+	}
+	if !obj.IsObjectLike() {
+		rt.callValue(rejectFn, mkundef(), []Value{rt.typeError("Promise.allKeyed called on a non-object").Value})
+		return result, nil
+	}
+	keys, ke := rt.objectOwnKeys(obj)
+	if ke != nil {
+		rt.callValue(rejectFn, mkundef(), []Value{ke.Value}) // IfAbruptRejectPromise
+		return result, nil
+	}
+	resObj := rt.newObject(mknull())
+	ro := rt.objPtr(resObj)
+	setResult := func(key, v Value) {
+		if key.IsSymbol() {
+			ro.defineOwnSymbol(key.handle(), v, attrDefault)
+			return
+		}
+		name, _ := rt.propKeyString(key)
+		ro.defineOwn(name, v, attrDefault)
+	}
+	remaining := 1
+	// tryFinish decrements the pending count and, on reaching zero, resolves the
+	// capability with the accumulated result object. Calling the capability's
+	// resolve is `? Call` in the spec, so a throw propagates: the synchronous
+	// final call rejects the capability, and a call from an element function
+	// surfaces as that reaction's rejection.
+	tryFinish := func() *ThrowError {
+		remaining--
+		if remaining == 0 {
+			if _, e := rt.callValue(resolveFn, mkundef(), []Value{resObj}); e != nil {
+				return e
+			}
+		}
+		return nil
+	}
+	for _, key := range keys {
+		en, exists, de := rt.ownKeyEnumerable(obj, key)
+		if de != nil {
+			rt.callValue(rejectFn, mkundef(), []Value{de.Value})
+			return result, nil
+		}
+		if !exists || !en {
+			continue
+		}
+		val, ge := rt.getElement(obj, key)
+		if ge != nil {
+			rt.callValue(rejectFn, mkundef(), []Value{ge.Value})
+			return result, nil
+		}
+		k := key
+		setResult(k, mkundef()) // establish key order before settlement
+		remaining++
+		nextP, ce := rt.callValue(promiseResolve, C, []Value{val})
+		if ce != nil {
+			rt.callValue(rejectFn, mkundef(), []Value{ce.Value})
+			return result, nil
+		}
+		alreadyCalled := false
+		onF := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			if alreadyCalled {
+				return mkundef(), nil
+			}
+			alreadyCalled = true
+			if settled {
+				rec := rt.newPlainObject()
+				recO := rt.objPtr(rec)
+				recO.defineOwn("status", rt.newString("fulfilled"), attrDefault)
+				recO.defineOwn("value", arg(a, 0), attrDefault)
+				setResult(k, rec)
+			} else {
+				setResult(k, arg(a, 0))
+			}
+			return mkundef(), tryFinish()
+		})
+		var onR Value
+		if settled {
+			onR = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+				if alreadyCalled {
+					return mkundef(), nil
+				}
+				alreadyCalled = true
+				rec := rt.newPlainObject()
+				recO := rt.objPtr(rec)
+				recO.defineOwn("status", rt.newString("rejected"), attrDefault)
+				recO.defineOwn("reason", arg(a, 0), attrDefault)
+				setResult(k, rec)
+				return mkundef(), tryFinish()
+			})
+		} else {
+			onR = rejectFn // first rejection settles the result promise
+		}
+		if te := rt.invokePromiseThen(nextP, onF, onR); te != nil {
+			rt.callValue(rejectFn, mkundef(), []Value{te.Value})
+			return result, nil
+		}
+	}
+	if fe := tryFinish(); fe != nil {
+		rt.callValue(rejectFn, mkundef(), []Value{fe.Value}) // IfAbruptRejectPromise
+	}
 	return result, nil
 }
 
