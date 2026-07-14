@@ -85,13 +85,28 @@ func (rt *Runtime) initMath() {
 		return rt.mathReduce(args, math.Inf(1), false)
 	}), attrWritable|attrConfigurable)
 	mo.defineOwn("hypot", rt.newNativeFunc("hypot", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		sum := 0.0
+		// Coerce every argument (in order, for side effects) before deciding: any
+		// ±Infinity yields +Infinity even if another argument is NaN.
+		anyInf, anyNaN, sum := false, false, 0.0
 		for _, a := range args {
 			x, e := rt.toNumber(a)
 			if e != nil {
 				return mkundef(), e
 			}
-			sum += x * x
+			switch {
+			case math.IsInf(x, 0):
+				anyInf = true
+			case math.IsNaN(x):
+				anyNaN = true
+			default:
+				sum += x * x
+			}
+		}
+		if anyInf {
+			return mknum(math.Inf(1)), nil
+		}
+		if anyNaN {
+			return mknum(math.NaN()), nil
 		}
 		return mknum(math.Sqrt(sum)), nil
 	}), attrWritable|attrConfigurable)
@@ -106,12 +121,18 @@ func (rt *Runtime) initMath() {
 }
 
 func (rt *Runtime) mathReduce(args []Value, init float64, wantMax bool) (Value, *ThrowError) {
-	acc := init
-	for _, a := range args {
+	// ToNumber every argument first (in order) so all coercion side effects run,
+	// even when an earlier argument already coerced to NaN.
+	nums := make([]float64, len(args))
+	for i, a := range args {
 		x, e := rt.toNumber(a)
 		if e != nil {
 			return mkundef(), e
 		}
+		nums[i] = x
+	}
+	acc := init
+	for _, x := range nums {
 		if math.IsNaN(x) {
 			return mknum(math.NaN()), nil
 		}
@@ -152,7 +173,13 @@ func jsRound(x float64) float64 {
 	if x >= -0.5 && x < 0 {
 		return math.Copysign(0, -1) // rounds to -0
 	}
-	return math.Floor(x + 0.5)
+	// Round half toward +Infinity without the precision loss of Floor(x + 0.5),
+	// which rounds 0.49999999999999994 up to 1 instead of 0.
+	r := math.Floor(x)
+	if x-r >= 0.5 {
+		r += 1
+	}
+	return r
 }
 
 func jsSign(x float64) float64 {
