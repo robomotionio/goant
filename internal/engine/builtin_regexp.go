@@ -1305,10 +1305,15 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 		}
 		var replacement string
 		if functional {
-			callArgs := make([]Value, 0, nCaptures+3)
+			callArgs := make([]Value, 0, nCaptures+4)
 			callArgs = append(callArgs, matchedV)
 			callArgs = append(callArgs, caps...)
 			callArgs = append(callArgs, mknum(float64(position)), sV)
+			// When the match has named captures, the groups object is passed as the
+			// final argument to the replacer function.
+			if gv, _ := rt.getField(result, "groups"); !gv.IsUndefined() {
+				callArgs = append(callArgs, gv)
+			}
 			rv, e := rt.callValue(repl, mkundef(), callArgs)
 			if e != nil {
 				return mkundef(), e
