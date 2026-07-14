@@ -10,9 +10,15 @@ func (rt *Runtime) initObjectBuiltin() {
 	proto := rt.objPtr(rt.objectProto)
 
 	rt.defMethod(proto, "hasOwnProperty", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		obj, e0 := rt.toObjectValue(this)
-		if e0 != nil {
-			return mkundef(), e0
+		// ToPropertyKey(V) is performed BEFORE ToObject(this) — and it may yield a
+		// Symbol (via the key's Symbol.toPrimitive), which must not be ToString'd.
+		pk, e := rt.toPropertyKey(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		obj, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
 		}
 		o := rt.objPtr(obj)
 		if o == nil {
@@ -20,16 +26,16 @@ func (rt *Runtime) initObjectBuiltin() {
 		}
 		// HasOwnProperty -> [[GetOwnProperty]] routes through the proxy trap.
 		if o.proxy != nil {
-			d, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, rt.toPropertyKeyValue(arg(args, 0)))
+			d, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, rt.toPropertyKeyValue(pk))
 			if e != nil {
 				return mkundef(), e
 			}
 			return mkbool(!d.IsUndefined()), nil
 		}
-		if key := arg(args, 0); key.IsSymbol() {
-			return mkbool(o.shape.lookupSymbol(key.handle()) >= 0), nil
+		if pk.IsSymbol() {
+			return mkbool(o.shape.lookupSymbol(pk.handle()) >= 0), nil
 		}
-		name, e := rt.propKeyString(arg(args, 0))
+		name, e := rt.propKeyString(pk)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -40,7 +46,7 @@ func (rt *Runtime) initObjectBuiltin() {
 		if idx, ok := canonicalIndex(name); ok && rt.hasOwnIndex(obj, o, idx) {
 			return mktrue(), nil
 		}
-		if this.Type() == TArr && name == "length" {
+		if obj.Type() == TArr && name == "length" {
 			return mktrue(), nil
 		}
 		return mkbool(o.hasOwn(name)), nil
@@ -65,14 +71,10 @@ func (rt *Runtime) initObjectBuiltin() {
 	})
 
 	rt.defMethod(proto, "propertyIsEnumerable", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		key := arg(args, 0)
-		isSym := key.IsSymbol()
-		var name string
-		if !isSym {
-			var e *ThrowError
-			if name, e = rt.propKeyString(key); e != nil {
-				return mkundef(), e
-			}
+		// ToPropertyKey(V) (before ToObject(this)) may yield a Symbol.
+		pk, e := rt.toPropertyKey(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
 		}
 		obj, e := rt.toObjectValue(this)
 		if e != nil {
@@ -82,9 +84,13 @@ func (rt *Runtime) initObjectBuiltin() {
 		if o == nil {
 			return mkfalse(), nil
 		}
-		if isSym {
-			d := o.ownDescriptorSym(key.handle())
+		if pk.IsSymbol() {
+			d := o.ownDescriptorSym(pk.handle())
 			return mkbool(d.exists && d.enumerable), nil
+		}
+		name, e := rt.propKeyString(pk)
+		if e != nil {
+			return mkundef(), e
 		}
 		if d := o.ownDescriptor(name); d.exists {
 			return mkbool(d.enumerable), nil
@@ -248,11 +254,14 @@ func (rt *Runtime) initObjectBuiltin() {
 		if o == nil {
 			return mkfalse(), nil
 		}
-		key := arg(args, 1)
-		if key.IsSymbol() {
-			return mkbool(o.shape.lookupSymbol(key.handle()) >= 0), nil
+		pk, e := rt.toPropertyKey(arg(args, 1)) // may yield a Symbol
+		if e != nil {
+			return mkundef(), e
 		}
-		name, e := rt.propKeyString(key)
+		if pk.IsSymbol() {
+			return mkbool(o.shape.lookupSymbol(pk.handle()) >= 0), nil
+		}
+		name, e := rt.propKeyString(pk)
 		if e != nil {
 			return mkundef(), e
 		}
