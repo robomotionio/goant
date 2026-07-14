@@ -36,6 +36,7 @@ func (rt *Runtime) initWeakRefBuiltin() {
 			return mkundef(), rt.typeError("WeakRef: target must be an object or symbol")
 		}
 		o.boxed = target
+		o.proto = rt.newTargetProto(proto)
 		return this, nil
 	})
 	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
@@ -126,6 +127,7 @@ func (rt *Runtime) initFinalizationRegistryBuiltin() {
 			return mkundef(), rt.typeError("FinalizationRegistry: cleanup callback must be callable")
 		}
 		o.boxed = arg(args, 0)
+		o.proto = rt.newTargetProto(proto)
 		if rt.finRegistries == nil {
 			rt.finRegistries = map[*object][]finCell{}
 		}
@@ -275,6 +277,7 @@ func (rt *Runtime) initWeakMapBuiltin() {
 			return mkundef(), rt.typeError("Constructor WeakMap requires 'new'")
 		}
 		o.coll = &collection{index: map[string]int{}, weak: true}
+		o.proto = rt.newTargetProto(proto)
 		if it := arg(args, 0); !it.IsNullish() {
 			setFn, e := rt.getField(this, "set")
 			if e != nil {
@@ -354,6 +357,7 @@ func (rt *Runtime) initWeakSetBuiltin() {
 			return mkundef(), rt.typeError("Constructor WeakSet requires 'new'")
 		}
 		o.coll = &collection{index: map[string]int{}, isSet: true, weak: true}
+		o.proto = rt.newTargetProto(proto)
 		if it := arg(args, 0); !it.IsNullish() {
 			addFn, e := rt.getField(this, "add")
 			if e != nil {

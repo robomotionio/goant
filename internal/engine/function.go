@@ -146,41 +146,24 @@ func (rt *Runtime) isConstructorValue(v Value) bool {
 // Reflect.construct(C, args, newTarget) / subclasses inherit correctly),
 // otherwise the given intrinsic fallback.
 func (rt *Runtime) newTargetProto(fallback Value) Value {
-	nt := rt.pendingNewTarget
-	if nt.IsUndefined() {
+	if rt.pendingNewTarget.IsUndefined() {
 		return fallback
 	}
-	// Reuse the prototype constructWithTarget already resolved for this
-	// construction (avoids a second observable [[Get]] of "prototype").
-	if rt.pendingNewTargetProto != 0 && rt.pendingNewTargetProto.IsObjectType() {
+	// constructWithTarget already performed the single observable [[Get]] of
+	// new.target.prototype and cached it; an object result is the instance's
+	// prototype, anything else falls back to the intrinsic default.
+	if rt.pendingNewTargetProto.IsObjectType() {
 		return rt.pendingNewTargetProto
-	}
-	if p, e := rt.getField(nt, "prototype"); e == nil && p.IsObjectType() {
-		return p
 	}
 	return fallback
 }
 
-// newTargetProtoE is newTargetProto with abrupt-completion propagation: a
-// throwing "prototype" getter on new.target surfaces as a thrown error rather
-// than silently falling back (GetPrototypeFromConstructor's ? Get(nt,
-// "prototype")).
+// newTargetProtoE mirrors newTargetProto. The abrupt from a throwing "prototype"
+// getter is raised once by constructWithTarget before the constructor body runs,
+// so by here the cached value is authoritative and this never throws; the error
+// return is kept so call sites read as GetPrototypeFromConstructor's ? Get.
 func (rt *Runtime) newTargetProtoE(fallback Value) (Value, *ThrowError) {
-	nt := rt.pendingNewTarget
-	if nt.IsUndefined() {
-		return fallback, nil
-	}
-	if rt.pendingNewTargetProto != 0 && rt.pendingNewTargetProto.IsObjectType() {
-		return rt.pendingNewTargetProto, nil
-	}
-	p, e := rt.getField(nt, "prototype")
-	if e != nil {
-		return mkundef(), e
-	}
-	if p.IsObjectType() {
-		return p, nil
-	}
-	return fallback, nil
+	return rt.newTargetProto(fallback), nil
 }
 
 // constructing reports whether the current native builtin was invoked via
@@ -244,8 +227,15 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 	if !rt.isConstructorValue(newTarget) {
 		return mkundef(), rt.typeError("new.target is not a constructor")
 	}
+	// GetPrototypeFromConstructor: a single observable ? Get(newTarget,
+	// "prototype"); a throwing getter propagates and aborts construction (the
+	// constructor body never runs).
+	p, e := rt.getField(newTarget, "prototype")
+	if e != nil {
+		return mkundef(), e
+	}
 	proto := mknull()
-	if p, e := rt.getField(newTarget, "prototype"); e == nil && p.IsObjectType() {
+	if p.IsObjectType() {
 		proto = p
 	}
 	thisObj := rt.newObject(proto)
