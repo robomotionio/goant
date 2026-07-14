@@ -742,6 +742,13 @@ func (p *parser) parsePrimary() *Node {
 			return p.mk(NEmpty)
 		}
 		n := p.mkIdentFromTok()
+		// A strict future-reserved word (implements/interface/package/private/
+		// protected/public — let/static/yield have their own tokens) may not be an
+		// IdentifierReference in strict mode.
+		if p.lx.strict && isStrictReservedName(n.Str) {
+			p.errorf("'%s' is reserved in strict mode", n.Str)
+			return p.mk(NEmpty)
+		}
 		p.consume()
 		return n
 	case TokLet, TokStatic:
