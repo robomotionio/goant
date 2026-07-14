@@ -366,7 +366,11 @@ func timeClip(ms float64) float64 {
 	if math.IsNaN(ms) || math.Abs(ms) > 8.64e15 {
 		return math.NaN()
 	}
-	return math.Trunc(ms)
+	// TimeClip returns ToInteger(time) + (+0), which converts -0 to +0.
+	if r := math.Trunc(ms); r != 0 {
+		return r
+	}
+	return 0
 }
 
 func (rt *Runtime) dateMs(this Value) (Value, *ThrowError) {

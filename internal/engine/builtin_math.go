@@ -7,7 +7,7 @@ package engine
 import "math"
 
 func (rt *Runtime) initMath() {
-	m := rt.newObject(mknull())
+	m := rt.newObject(rt.objectProto) // [[Prototype]] is %Object.prototype%
 	mo := rt.objPtr(m)
 
 	constant := func(name string, v float64) {
