@@ -502,9 +502,8 @@ func (rt *Runtime) initStringBuiltin() {
 			for utf16Len(padB) < need {
 				padB = append(padB, filler...)
 			}
-			// Truncate the pad to exactly `need` UTF-16 units.
-			ps, pe := utf16RangeToByteRange(padB, 0, need)
-			padB = padB[ps:pe]
+			// Truncate the pad to exactly `need` UTF-16 units (may bisect a surrogate).
+			padB = utf16TruncateUnits(padB, need)
 			if atStart {
 				return rt.newStringBytes(append(append([]byte{}, padB...), b...)), nil
 			}
@@ -763,6 +762,27 @@ func clampIndex(i, n int) int {
 
 // utf16IndexOf returns the UTF-16 index of sub in b at or after `from` (-1 if
 // absent). Implemented via byte search then offset conversion.
+// utf16TruncateUnits returns the first n UTF-16 code units of b (WTF-8). If the
+// boundary at n falls inside a surrogate pair (an astral code point), the pair
+// is split and only its lone high surrogate is emitted — String padding truncates
+// the filler to an exact UTF-16 length, which can bisect a surrogate pair.
+func utf16TruncateUnits(b []byte, n int) []byte {
+	out := make([]byte, 0, len(b))
+	pos, i := 0, 0
+	for i < len(b) && pos < n {
+		slen, units, cp := wtf8Decode(b, i)
+		if pos+units <= n {
+			out = append(out, b[i:i+slen]...)
+			pos += units
+			i += slen
+			continue
+		}
+		out = wtf8Encode(out, 0xD800+((cp-0x10000)>>10)) // lone high surrogate
+		pos++
+	}
+	return out
+}
+
 func utf16IndexOf(b, sub []byte, from int) int {
 	if len(sub) == 0 {
 		return from
