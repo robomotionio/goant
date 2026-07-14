@@ -388,6 +388,22 @@ func nodeContainsArguments(n *Node) bool {
 	return false
 }
 
+// classFieldASI terminates a field definition: it consumes a following `;`, or
+// verifies that automatic semicolon insertion applies (a line terminator
+// precedes the next token, or it is `}` / end of input). A field followed on the
+// same line by another member without a separator is an early SyntaxError.
+func (p *parser) classFieldASI() bool {
+	if p.next() == TokSemicolon {
+		p.consume()
+		return true
+	}
+	if p.hadNewline() || p.tok() == TokRBrace || p.tok() == TokEOF {
+		return true
+	}
+	p.errorf("Unexpected token in class body; a field definition must be followed by ';'")
+	return false
+}
+
 // isClassFieldMember reports whether a class member node is a field (not a
 // method, generator, or accessor): its value is an initializer expression
 // rather than a concise-method function.
@@ -1699,13 +1715,13 @@ func (p *parser) parseClass() *Node {
 		} else if p.tok() == TokAssign {
 			p.consume()
 			method.Right = p.parseAssign()
-			if p.next() == TokSemicolon {
-				p.consume()
+			if !p.classFieldASI() {
+				return cls
 			}
 		} else {
 			method.Right = p.mk(NUndef)
-			if p.tok() == TokSemicolon {
-				p.consume()
+			if !p.classFieldASI() {
+				return cls
 			}
 		}
 		// Class member name early errors (non-computed, non-private names):
