@@ -334,6 +334,30 @@ func (rt *Runtime) rejectedPromise(reason Value) Value {
 	return p
 }
 
+// promiseResolve implements the PromiseResolve(C, x) abstract operation: if x is
+// already a promise whose "constructor" is C it is returned as-is; otherwise a
+// fresh capability is built with `new C(executor)` and resolved with x, so a
+// subclass's constructor drives the result.
+func (rt *Runtime) promiseResolve(C, x Value) (Value, *ThrowError) {
+	if rt.isPromise(x) {
+		xctor, e := rt.getField(x, "constructor")
+		if e != nil {
+			return mkundef(), e
+		}
+		if xctor == C {
+			return x, nil
+		}
+	}
+	cap, resolve, _, e := rt.newPromiseCapability(C)
+	if e != nil {
+		return mkundef(), e
+	}
+	if _, e := rt.callValue(resolve, mkundef(), []Value{x}); e != nil {
+		return mkundef(), e
+	}
+	return cap, nil
+}
+
 func (rt *Runtime) initPromiseBuiltin() {
 	proto := rt.newObject(rt.objectProto)
 	rt.promiseProto = proto
@@ -431,7 +455,14 @@ func (rt *Runtime) initPromiseBuiltin() {
 	}
 
 	rt.defMethod(cobj, "resolve", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.resolvedPromise(arg(args, 0)), nil
+		// Promise.resolve(x): C is the this value and must be an Object.
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Promise.resolve called on a non-object")
+		}
+		if this == rt.promiseCtor {
+			return rt.resolvedPromise(arg(args, 0)), nil
+		}
+		return rt.promiseResolve(this, arg(args, 0))
 	})
 	rt.defMethod(cobj, "withResolvers", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		p, o := rt.makePromise()
@@ -451,7 +482,21 @@ func (rt *Runtime) initPromiseBuiltin() {
 		return res, nil
 	})
 	rt.defMethod(cobj, "reject", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.rejectedPromise(arg(args, 0)), nil
+		// Promise.reject(r): build a capability from C = this and call its reject.
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Promise.reject called on a non-object")
+		}
+		if this == rt.promiseCtor {
+			return rt.rejectedPromise(arg(args, 0)), nil
+		}
+		cap, _, reject, e := rt.newPromiseCapability(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		if _, e := rt.callValue(reject, mkundef(), []Value{arg(args, 0)}); e != nil {
+			return mkundef(), e
+		}
+		return cap, nil
 	})
 	rt.defMethod(cobj, "all", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.promiseAll(this, arg(args, 0), false)
