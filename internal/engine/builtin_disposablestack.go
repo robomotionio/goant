@@ -8,6 +8,7 @@ const (
 	dispKindDefer = 0 // onDispose()            — no receiver, no argument
 	dispKindAdopt = 1 // onDispose(value)       — no receiver, value argument
 	dispKindUse   = 2 // value[@@dispose]()     — value receiver, no argument
+	dispKindNull  = 3 // a null/undefined async resource — no method, forces one Await(undefined)
 )
 
 // Brands distinguishing the two stacks: a sync method must reject an async stack
@@ -127,6 +128,11 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 		}
 		value := arg(args, 0)
 		if value.IsNullish() {
+			// A sync stack ignores a nullish resource; an async stack records a
+			// method-less resource so disposeAsync performs one Await(undefined).
+			if async {
+				rt.pushDisposer(entries, dispKindNull, mkundef(), mkundef())
+			}
 			return value, nil
 		}
 		m, e := rt.getDisposeMethod(value, async)
@@ -260,17 +266,44 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 func (rt *Runtime) disposeStackAsync(entries Value) Value {
 	recs := rt.drainRecords(entries)
 	result, ro := rt.makePromise()
+	// DisposeResources: needsAwait tracks whether a null/undefined async resource
+	// was seen; hasAwaited whether any disposer result was actually awaited. If
+	// needsAwait and nothing awaited, one Await(undefined) still runs.
+	needsAwait, hasAwaited := false, false
+	var finish func(completion Value)
+	finish = func(completion Value) {
+		if needsAwait && !hasAwaited {
+			needsAwait = false
+			p := rt.resolvedPromise(mkundef())
+			done := rt.newNativeFunc("", 1, func(rt *Runtime, this Value, a []Value) (Value, *ThrowError) {
+				finish(completion)
+				return mkundef(), nil
+			})
+			rt.promiseThen(done, done, rt.objPtr(p))
+			return
+		}
+		if completion.IsUndefined() {
+			rt.resolvePromise(result, ro, mkundef())
+		} else {
+			rt.rejectPromise(ro, completion)
+		}
+	}
 	var step func(i int, completion Value)
 	step = func(i int, completion Value) {
 		for i >= 0 {
 			rec := recs[i]
 			i--
+			if r := rt.objPtr(rec); r != nil && r.arrLen >= 1 && int(r.arr[0].Number()) == dispKindNull {
+				needsAwait = true
+				continue
+			}
 			res, e := rt.callDisposerValue(rec)
 			if e != nil {
 				completion = rt.suppressDisposalError(e.Value, completion)
 				continue
 			}
 			if rt.isPromise(res) {
+				hasAwaited = true
 				idx, comp := i, completion
 				onF := rt.newNativeFunc("", 1, func(rt *Runtime, this Value, a []Value) (Value, *ThrowError) {
 					step(idx, comp)
@@ -284,11 +317,7 @@ func (rt *Runtime) disposeStackAsync(entries Value) Value {
 				return
 			}
 		}
-		if completion.IsUndefined() {
-			rt.resolvePromise(result, ro, mkundef())
-		} else {
-			rt.rejectPromise(ro, completion)
-		}
+		finish(completion)
 	}
 	step(len(recs)-1, mkundef())
 	return result
