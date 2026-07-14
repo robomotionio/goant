@@ -2087,6 +2087,12 @@ func (p *parser) parseClass() *Node {
 	if p.next() == TokIdentifier && p.tlen() == 7 && p.tokStr() == "extends" {
 		p.consume()
 		cls.Left = p.parseAssign()
+		// ClassHeritage is `extends LeftHandSideExpression`: an unparenthesized
+		// arrow (`class extends () => {}`) or a bare assignment is not one.
+		if h := cls.Left; h != nil && h.Flags&fnParen == 0 &&
+			((h.Kind == NFunc && h.Flags&fnArrow != 0) || h.Kind == NAssign) {
+			p.errorf("Invalid class heritage: expected a left-hand-side expression")
+		}
 	}
 	p.expect(TokLBrace)
 	sawCtor := false
