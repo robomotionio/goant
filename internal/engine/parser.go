@@ -2839,7 +2839,7 @@ func (p *parser) parseFor() *Node {
 		p.consume()
 		n := p.mk(NForIn)
 		n.Left = initNode
-		p.validateArrayPattern(initNode)
+		p.validatePatternTarget(initNode)
 		n.Right = p.parseExpr()
 		p.expect(TokRParen)
 		n.Body = p.parseStmt()
@@ -2866,7 +2866,7 @@ func (p *parser) parseFor() *Node {
 		}
 		n := p.mk(kind)
 		n.Left = initNode
-		p.validateArrayPattern(initNode)
+		p.validatePatternTarget(initNode)
 		// A for-of head declaration may never carry an initializer.
 		if initNode != nil && initNode.Kind == NVar && varDeclHasInitializer(initNode) {
 			p.errorf("a for-of loop variable declaration may not have an initializer")
