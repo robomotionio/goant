@@ -354,6 +354,10 @@ func (p *parser) parseBindingPattern() *Node {
 		// `undefined` is not a reserved word, so it is a valid BindingIdentifier
 		// (it shadows the global `undefined` inside the binding's scope). The lexer
 		// tokenizes it as TokUndef; recover the name from the raw source.
+		if p.tokIsEscapedReservedWord() {
+			p.errorf("Keyword must not contain escaped characters")
+			return p.mk(NEmpty)
+		}
 		id := p.mkIdentFromTok()
 		p.strictCheckBindingIdent(id.Str)
 		p.consume()
@@ -626,6 +630,10 @@ func (p *parser) parsePrimary() *Node {
 		p.consume()
 		return n
 	case TokIdentifier, TokAs, TokFrom, TokOf, TokUsing, TokWindow:
+		if p.tokIsEscapedReservedWord() {
+			p.errorf("Keyword must not contain escaped characters")
+			return p.mk(NEmpty)
+		}
 		n := p.mkIdentFromTok()
 		p.consume()
 		return n
@@ -1004,6 +1012,28 @@ func isReservedWordTok(t Token) bool {
 		return true
 	}
 	return false
+}
+
+// tokIsEscapedReservedWord reports whether the current TokIdentifier is a
+// reserved word written with a Unicode escape (e.g. `break` → "break").
+// Such a token is a valid property name but not a valid identifier reference or
+// binding identifier.
+func (p *parser) tokIsEscapedReservedWord() bool {
+	if p.tok() != TokIdentifier {
+		return false
+	}
+	raw := p.tokStr()
+	hasEsc := false
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == '\\' {
+			hasEsc = true
+			break
+		}
+	}
+	if !hasEsc {
+		return false
+	}
+	return isReservedWordTok(parseKeyword(p.tokIdentStr()))
 }
 
 // validatePatternTarget dispatches to the array/object pattern validator for a
@@ -1920,6 +1950,10 @@ func (p *parser) parseVarDecl(kind VarKind, allowUninitConst bool) *Node {
 		default:
 			if isReservedWordTok(p.tok()) {
 				p.errorf("Unexpected reserved word")
+				return v
+			}
+			if p.tokIsEscapedReservedWord() {
+				p.errorf("Keyword must not contain escaped characters")
 				return v
 			}
 			decl.Left = p.mkIdentFromTok()
