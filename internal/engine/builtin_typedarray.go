@@ -873,7 +873,9 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 		if o.abuf == nil { // the species constructor may have detached the source
 			return mkundef(), rt.typeError("The source ArrayBuffer was detached during slice")
 		}
-		copy(nb.abuf, o.abuf[first:final])
+		// first+newLen (not final): when start exceeds end, newLen is 0 and final
+		// may be < first, which would make o.abuf[first:final] panic.
+		copy(nb.abuf, o.abuf[first:first+newLen])
 		return nbV, nil
 	})
 	po.defineAccessor("maxByteLength", rt.newNativeFunc("get maxByteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
