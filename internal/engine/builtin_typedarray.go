@@ -1183,6 +1183,11 @@ func (rt *Runtime) initDataViewBuiltin() {
 			if o == nil || o.dv == nil {
 				return mkundef(), rt.typeError("DataView.prototype.set" + t.name + " on incompatible receiver")
 			}
+			// SetViewValue step 3: reject an immutable viewed buffer before coercing
+			// the byteOffset and value arguments.
+			if rt.abIsImmutable(rt.objPtr(o.dv.buf)) {
+				return mkundef(), rt.typeError("Cannot set a value on an immutable ArrayBuffer")
+			}
 			idx, e := rt.toIndex(arg(args, 0))
 			if e != nil {
 				return mkundef(), e
@@ -1235,6 +1240,9 @@ func (rt *Runtime) initDataViewBuiltin() {
 			o := rt.objPtr(this)
 			if o == nil || o.dv == nil {
 				return mkundef(), rt.typeError("DataView.prototype.set" + bt.name + " on incompatible receiver")
+			}
+			if rt.abIsImmutable(rt.objPtr(o.dv.buf)) {
+				return mkundef(), rt.typeError("Cannot set a value on an immutable ArrayBuffer")
 			}
 			idx, e := rt.toIndex(arg(args, 0))
 			if e != nil {
