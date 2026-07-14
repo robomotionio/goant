@@ -388,6 +388,9 @@ func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
 		val := strings.TrimSpace(name[eq+1:])
 		switch prop {
 		case "Script", "sc", "Script_Extensions", "scx":
+			if full, ok := scriptAliases[val]; ok {
+				val = full // ISO 15924 alias (e.g. "Grek") -> Go's full script name
+			}
 			if rt, ok := unicode.Scripts[val]; ok {
 				return rt, true
 			}
