@@ -163,19 +163,18 @@ func (rt *Runtime) initErrorBuiltin() {
 			errObj = rt.newObject(aggProto)
 		}
 		eo := rt.objPtr(errObj)
-		eo.setSlot(slotBrand, mknum(brandError)) // [[ErrorData]]
-		errsArr := rt.newArray()
-		if it := arg(args, 0); !it.IsNullish() {
-			vals, e := rt.iterableValues(it)
-			if e != nil {
-				return mkundef(), e
-			}
-			ea := rt.objPtr(errsArr)
-			for _, v := range vals {
-				rt.arraySet(ea, ea.arrLen, v)
-			}
+		// OrdinaryCreateFromConstructor (step 2): resolve the prototype from
+		// new.target, surfacing a throwing "prototype" getter before any argument
+		// side effects and falling back to %AggregateError.prototype%.
+		pr, e := rt.newTargetProtoE(aggProto)
+		if e != nil {
+			return mkundef(), e
 		}
-		eo.defineOwn("errors", errsArr, attrWritable|attrConfigurable)
+		eo.proto = pr
+		eo.setSlot(slotBrand, mknum(brandError)) // [[ErrorData]]
+		// The spec order is message (step 3), then InstallErrorCause (step 4),
+		// then IterableToList(errors) (step 5) — message is coerced before the
+		// errors iterable is opened.
 		if msg := arg(args, 1); !msg.IsUndefined() {
 			s, e := rt.toStringValue(msg)
 			if e != nil {
@@ -196,9 +195,22 @@ func (rt *Runtime) initErrorBuiltin() {
 				eo.defineOwn("cause", cause, attrWritable|attrConfigurable)
 			}
 		}
+		// errors is always iterated (IterableToList → GetIterator); a nullish or
+		// non-iterable value throws a TypeError.
+		vals, e := rt.iterableValues(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		errsArr := rt.newArray()
+		ea := rt.objPtr(errsArr)
+		for _, v := range vals {
+			rt.arraySet(ea, ea.arrLen, v)
+		}
+		eo.defineOwn("errors", errsArr, attrWritable|attrConfigurable)
 		return errObj, nil
 	})
 	rt.objPtr(aggCtor).defineOwn("prototype", aggProto, 0)
+	rt.objPtr(aggCtor).proto = base // Object.getPrototypeOf(AggregateError) === Error
 	apo.defineOwn("constructor", aggCtor, attrWritable|attrConfigurable)
 	rt.errors.aggProto = aggProto
 	rt.defGlobal("AggregateError", aggCtor)
@@ -212,14 +224,17 @@ func (rt *Runtime) initErrorBuiltin() {
 	supCtor := rt.newNativeFunc("SuppressedError", 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		errObj := this
 		if !this.IsObjectType() {
-			errObj = rt.newObject(rt.newTargetProto(supProto))
-		} else if p := rt.newTargetProto(supProto); p != supProto {
-			rt.objPtr(errObj).proto = p
+			errObj = rt.newObject(supProto)
 		}
 		eo := rt.objPtr(errObj)
+		pr, e := rt.newTargetProtoE(supProto)
+		if e != nil {
+			return mkundef(), e
+		}
+		eo.proto = pr
 		eo.setSlot(slotBrand, mknum(brandError)) // [[ErrorData]]
-		eo.defineOwn("error", arg(args, 0), attrWritable|attrConfigurable)
-		eo.defineOwn("suppressed", arg(args, 1), attrWritable|attrConfigurable)
+		// Spec order: message (step 3) is coerced before "error" (step 4) and
+		// "suppressed" (step 5) are installed.
 		if msg := arg(args, 2); !msg.IsUndefined() {
 			s, e := rt.toStringValue(msg)
 			if e != nil {
@@ -227,9 +242,12 @@ func (rt *Runtime) initErrorBuiltin() {
 			}
 			eo.defineOwn("message", s, attrWritable|attrConfigurable)
 		}
+		eo.defineOwn("error", arg(args, 0), attrWritable|attrConfigurable)
+		eo.defineOwn("suppressed", arg(args, 1), attrWritable|attrConfigurable)
 		return errObj, nil
 	})
 	rt.objPtr(supCtor).defineOwn("prototype", supProto, 0)
+	rt.objPtr(supCtor).proto = base // Object.getPrototypeOf(SuppressedError) === Error
 	spo.defineOwn("constructor", supCtor, attrWritable|attrConfigurable)
 	rt.errors.suppressedProto = supProto
 	rt.defGlobal("SuppressedError", supCtor)
