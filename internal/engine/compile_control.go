@@ -497,7 +497,11 @@ func (c *compiler) forInStore(left *Node) (func(), int) {
 			return nil, -1
 		}
 		name = binding.Str
-		if !(left.VarKind == VarVar && c.isScript) {
+		// A `var` head binds globally only at true script top level; eval `var`
+		// bindings stay frame-local (matching compileVarDecl's asGlobal), so
+		// `eval("for (var a in obj) …")` in strict code does not route the store
+		// through an unresolvable global assignment.
+		if !(left.VarKind == VarVar && c.isScript && !c.isEval) {
 			var slot int
 			lexSlot := -1
 			if left.VarKind == VarLet || left.VarKind == VarConst {
