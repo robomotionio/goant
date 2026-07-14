@@ -66,6 +66,10 @@ func (rt *Runtime) thisStringBytes(this Value) ([]byte, *ThrowError) {
 
 func (rt *Runtime) initStringBuiltin() {
 	proto := rt.objPtr(rt.stringProto)
+	// String.prototype is itself a String wrapper whose [[StringData]] is "" (so
+	// String.prototype.valueOf() is "" and Object.prototype.toString tags it
+	// "[object String]").
+	proto.boxed = rt.newString("")
 
 	strThis := func(this Value) (Value, *ThrowError) {
 		if this.IsString() {
@@ -640,6 +644,10 @@ func (rt *Runtime) initStringBuiltin() {
 			n, e := rt.toNumber(a)
 			if e != nil {
 				return mkundef(), e
+			}
+			// Each argument must be a code point: a non-negative integer ≤ 0x10FFFF.
+			if math.IsNaN(n) || n != math.Trunc(n) || n < 0 || n > 0x10FFFF {
+				return mkundef(), rt.rangeError("Invalid code point " + numberToString(n))
 			}
 			out = wtf8Encode(out, uint32(n))
 		}
