@@ -97,6 +97,53 @@ func (c *compiler) compileIfBranch(n *Node) {
 	c.compileStmt(n)
 }
 
+// checkParamLexicalConflict enforces the early error that a lexical declaration
+// (let/const/class) at the top level of a function body may not redeclare a
+// parameter name (BoundNames of FormalParameters ∩ LexicallyDeclaredNames of the
+// body must be empty). A body `var` of the same name is allowed. Body-level
+// function declarations are var-scoped here, so they do not participate.
+func (c *compiler) checkParamLexicalConflict(n *Node) {
+	if n.Body == nil || n.Body.Kind != NBlock || len(n.Args) == 0 {
+		return
+	}
+	paramNames := map[string]bool{}
+	for _, param := range n.Args {
+		switch param.Kind {
+		case NAssignPat:
+			collectBindingNames(param.Left, paramNames)
+		case NRest:
+			collectBindingNames(param.Right, paramNames)
+		default:
+			collectBindingNames(param, paramNames)
+		}
+	}
+	if len(paramNames) == 0 {
+		return
+	}
+	for _, stmt := range n.Body.Args {
+		if stmt == nil {
+			continue
+		}
+		var names []string
+		switch {
+		case stmt.Kind == NVar && (stmt.VarKind == VarLet || stmt.VarKind == VarConst):
+			for _, d := range stmt.Args {
+				if d != nil {
+					collectPatternNames(d.Left, &names)
+				}
+			}
+		case stmt.Kind == NClass && stmt.Str != "":
+			names = append(names, stmt.Str)
+		}
+		for _, nm := range names {
+			if paramNames[nm] {
+				c.syntaxErrorf("Identifier '%s' has already been declared", nm)
+				return
+			}
+		}
+	}
+}
+
 // checkBlockDeclConflicts enforces the early errors on the combined declared
 // names of a StatementList. `blockScope` distinguishes a genuine Block or switch
 // CaseBlock — where every FunctionDeclaration is a lexical binding — from a
@@ -605,6 +652,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 			}
 		}
 		c.checkBlockDeclConflicts(n.Body.Args, false)
+		c.checkParamLexicalConflict(n)
 		c.hoistLexicals(n.Body.Args)
 		c.hoistFunctions(n.Body.Args, false)
 		// A base class constructor initializes its instance fields on `this`
