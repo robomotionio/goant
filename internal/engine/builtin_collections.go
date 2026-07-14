@@ -173,6 +173,9 @@ func (rt *Runtime) initMapBuiltin() {
 			return mkundef(), e
 		}
 		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Map.prototype.forEach callback is not a function")
+		}
 		for i := 0; i < len(m.keys); i++ {
 			if m.keys[i].IsEmpty() {
 				continue
@@ -183,7 +186,7 @@ func (rt *Runtime) initMapBuiltin() {
 		}
 		return mkundef(), nil
 	})
-	po.defineAccessor("size", rt.newNativeFunc("size", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	po.defineAccessor("size", rt.newNativeFunc("get size", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		m, e := rt.collOf(this, false)
 		if e != nil {
 			return mkundef(), e
@@ -330,6 +333,9 @@ func (rt *Runtime) initSetBuiltin() {
 			return mkundef(), e
 		}
 		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Set.prototype.forEach callback is not a function")
+		}
 		for i := 0; i < len(s.keys); i++ {
 			if s.keys[i].IsEmpty() {
 				continue
@@ -340,7 +346,7 @@ func (rt *Runtime) initSetBuiltin() {
 		}
 		return mkundef(), nil
 	})
-	po.defineAccessor("size", rt.newNativeFunc("size", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	po.defineAccessor("size", rt.newNativeFunc("get size", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		s, e := rt.collOf(this, true)
 		if e != nil {
 			return mkundef(), e
