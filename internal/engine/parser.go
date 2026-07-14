@@ -2966,7 +2966,12 @@ func (p *parser) parseWith() *Node {
 }
 
 func (p *parser) parseExprStmt() *Node {
-	if p.tok() == TokIdentifier || isContextualIdentTok(p.tok()) {
+	// `yield`/`await` are valid label identifiers where they are not reserved (a
+	// generator/strict context for yield, an async context for await).
+	labelTok := p.tok() == TokIdentifier || isContextualIdentTok(p.tok()) ||
+		(p.tok() == TokYield && !p.inGenerator && !p.lx.strict) ||
+		(p.tok() == TokAwait && !p.inAsync)
+	if labelTok {
 		if p.la() == TokColon {
 			label := p.mk(NLabel)
 			label.Str = p.tokIdentStr()
