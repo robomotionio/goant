@@ -184,11 +184,14 @@ func (rt *Runtime) initBigIntBuiltin() {
 		}
 		radix := 10
 		if r := arg(args, 0); !r.IsUndefined() {
-			n, e := rt.toNumber(r)
+			rf, e := rt.toIntegerOrInfinity(r)
 			if e != nil {
 				return mkundef(), e
 			}
-			radix = int(n)
+			if rf < 2 || rf > 36 {
+				return mkundef(), rt.rangeError("toString() radix must be an integer between 2 and 36")
+			}
+			radix = int(rf)
 		}
 		return rt.newString(bigIntToString(b, radix)), nil
 	})
