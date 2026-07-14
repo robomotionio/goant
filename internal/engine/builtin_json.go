@@ -20,13 +20,45 @@ func (rt *Runtime) initJSONBuiltin() {
 		if rt.isCallable(replacer) {
 			st.replacerFn = replacer
 		} else if replacer.Type() == TArr {
-			ro := rt.objPtr(replacer)
-			st.allow = map[string]bool{}
-			for i := uint32(0); i < ro.arrLen; i++ {
-				k, _ := rt.getElement(replacer, mknum(float64(i)))
-				if k.IsString() || k.Type() == TNum {
-					s, _ := rt.toStringValue(k)
-					st.allow[string(rt.strBytes(s))] = true
+			// PropertyList: for each element, keep a String, ToString(a Number), or
+			// ToString(a String/Number wrapper object); de-duplicated, order-preserved.
+			st.hasPropertyList = true
+			seen := map[string]bool{}
+			n, e := rt.lengthOf(replacer)
+			if e != nil {
+				return mkundef(), e
+			}
+			for i := 0; i < n; i++ {
+				k, e := rt.getElement(replacer, mknum(float64(i)))
+				if e != nil {
+					return mkundef(), e
+				}
+				var item Value
+				have := false
+				switch {
+				case k.IsString():
+					item, have = k, true
+				case k.Type() == TNum:
+					s, e := rt.toStringValue(k)
+					if e != nil {
+						return mkundef(), e
+					}
+					item, have = s, true
+				case k.IsObjectType():
+					if o := rt.objPtr(k); o != nil && (o.getSlot(slotPrimitive).Type() == TNum || o.boxed.Type() == TStr) {
+						s, e := rt.toStringValue(k)
+						if e != nil {
+							return mkundef(), e
+						}
+						item, have = s, true
+					}
+				}
+				if have {
+					ks := string(rt.strBytes(item))
+					if !seen[ks] {
+						seen[ks] = true
+						st.propertyList = append(st.propertyList, ks)
+					}
 				}
 			}
 		}
@@ -158,10 +190,14 @@ func (rt *Runtime) initJSONBuiltin() {
 type jsonStringifier struct {
 	rt         *Runtime
 	replacerFn Value
-	allow      map[string]bool
-	gap        string
-	indent     string
-	stack      []Value // objects/arrays currently being serialized (cycle detection)
+	// propertyList is the ordered, de-duplicated PropertyList from an array
+	// replacer (nil when no array replacer). When non-nil, an object serializes
+	// exactly these keys in this order (a present-but-empty list yields "{}").
+	propertyList    []string
+	hasPropertyList bool
+	gap             string
+	indent          string
+	stack           []Value // objects/arrays currently being serialized (cycle detection)
 }
 
 // enterCycle pushes v onto the serialization stack, returning a TypeError if v
@@ -307,16 +343,20 @@ func (st *jsonStringifier) stringifyObject(v Value, indent string) (string, bool
 	o := rt.objPtr(v)
 	newIndent := indent + st.gap
 	var parts []string
-	// EnumerableOwnPropertyNames: for a proxy this routes through its ownKeys +
+	// With an array replacer, serialize exactly the PropertyList keys in order
+	// (str skips any that are absent on the object). Otherwise use
+	// EnumerableOwnPropertyNames — for a proxy, via its ownKeys +
 	// getOwnPropertyDescriptor traps.
-	keys := o.ownKeysEnumerable()
-	if o.proxy != nil {
-		keys = rt.enumerableOwnKeys(v)
+	var keys []string
+	if st.hasPropertyList {
+		keys = st.propertyList
+	} else {
+		keys = o.ownKeysEnumerable()
+		if o.proxy != nil {
+			keys = rt.enumerableOwnKeys(v)
+		}
 	}
 	for _, k := range keys {
-		if st.allow != nil && !st.allow[k] {
-			continue
-		}
 		s, ok, e := st.str(k, v, newIndent)
 		if e != nil {
 			return "", false, e
