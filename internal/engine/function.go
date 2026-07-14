@@ -158,12 +158,22 @@ func (rt *Runtime) newTargetProto(fallback Value) Value {
 	return fallback
 }
 
-// newTargetProtoE mirrors newTargetProto. The abrupt from a throwing "prototype"
-// getter is raised once by constructWithTarget before the constructor body runs,
-// so by here the cached value is authoritative and this never throws; the error
-// return is kept so call sites read as GetPrototypeFromConstructor's ? Get.
+// newTargetProtoE is GetPrototypeFromConstructor at the constructor's own
+// OrdinaryCreateFromConstructor step: it surfaces the abrupt cached from the
+// single ? Get(newTarget, "prototype") (a throwing getter is observed exactly
+// once, in spec order after earlier argument checks), otherwise returns the
+// resolved prototype or the intrinsic fallback.
 func (rt *Runtime) newTargetProtoE(fallback Value) (Value, *ThrowError) {
-	return rt.newTargetProto(fallback), nil
+	if rt.pendingNewTarget.IsUndefined() {
+		return fallback, nil
+	}
+	if rt.pendingNewTargetProtoErr != nil {
+		return mkundef(), rt.pendingNewTargetProtoErr
+	}
+	if rt.pendingNewTargetProto.IsObjectType() {
+		return rt.pendingNewTargetProto, nil
+	}
+	return fallback, nil
 }
 
 // constructing reports whether the current native builtin was invoked via
@@ -227,26 +237,24 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 	if !rt.isConstructorValue(newTarget) {
 		return mkundef(), rt.typeError("new.target is not a constructor")
 	}
-	// GetPrototypeFromConstructor: a single observable ? Get(newTarget,
-	// "prototype"); a throwing getter propagates and aborts construction (the
-	// constructor body never runs).
-	p, e := rt.getField(newTarget, "prototype")
-	if e != nil {
-		return mkundef(), e
-	}
+	// GetPrototypeFromConstructor performs a single observable ? Get(newTarget,
+	// "prototype"). We read it once here to pre-create `this`, caching both the
+	// value and any abrupt; a native constructor surfaces the abrupt when it
+	// calls newTargetProtoE at its own OrdinaryCreateFromConstructor step, so a
+	// throwing getter is observed exactly once and in spec order (after any
+	// earlier argument validation).
+	p, perr := rt.getField(newTarget, "prototype")
 	proto := mknull()
-	if p.IsObjectType() {
+	if perr == nil && p.IsObjectType() {
 		proto = p
 	}
 	thisObj := rt.newObject(proto)
 	rt.pendingNewTarget = newTarget
-	// Cache the resolved prototype so a native ctor's newTargetProto reuses it
-	// rather than re-reading newTarget.prototype (a second observable [[Get]]).
-	savedNTProto := rt.pendingNewTargetProto
-	rt.pendingNewTargetProto = proto
+	savedNTProto, savedNTErr := rt.pendingNewTargetProto, rt.pendingNewTargetProtoErr
+	rt.pendingNewTargetProto, rt.pendingNewTargetProtoErr = proto, perr
 	ret, e := rt.callValue(fnVal, thisObj, args)
 	rt.pendingNewTarget = mkundef()
-	rt.pendingNewTargetProto = savedNTProto
+	rt.pendingNewTargetProto, rt.pendingNewTargetProtoErr = savedNTProto, savedNTErr
 	if e != nil {
 		return mkundef(), e
 	}
