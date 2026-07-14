@@ -479,6 +479,69 @@ func (rt *Runtime) proxyGetOwnPropertyDescriptor(p *proxyState, key Value) (Valu
 	return rt.descriptorToObject(d), nil
 }
 
+// descIsCompatible implements IsCompatiblePropertyDescriptor for an existing
+// (non-undefined) target property `cur`: it reports whether the descriptor
+// object descVal describes a change the target's current property permits. A
+// configurable current property allows anything; a non-configurable one forbids
+// becoming configurable, flipping enumerable, changing kind (data↔accessor),
+// re-widening a non-writable data value/flag, or swapping accessor get/set.
+func (rt *Runtime) descIsCompatible(descVal Value, cur ownDesc) bool {
+	if cur.configable {
+		return true
+	}
+	hasConfig := rt.hasProp(descVal, "configurable")
+	hasEnum := rt.hasProp(descVal, "enumerable")
+	hasWritable := rt.hasProp(descVal, "writable")
+	hasValue := rt.hasProp(descVal, "value")
+	hasGet := rt.hasProp(descVal, "get")
+	hasSet := rt.hasProp(descVal, "set")
+
+	if hasConfig {
+		if c, _ := rt.getField(descVal, "configurable"); rt.toBoolean(c) {
+			return false // cannot make a non-configurable property configurable
+		}
+	}
+	if hasEnum {
+		if e, _ := rt.getField(descVal, "enumerable"); rt.toBoolean(e) != cur.enumerable {
+			return false
+		}
+	}
+	descIsAccessor := hasGet || hasSet
+	descIsData := hasValue || hasWritable
+	if !descIsAccessor && !descIsData {
+		return true // generic descriptor: only config/enum, already validated
+	}
+	if cur.isAccessor != descIsAccessor {
+		return false // cannot change between data and accessor
+	}
+	if !cur.isAccessor {
+		if !cur.writable {
+			if hasWritable {
+				if w, _ := rt.getField(descVal, "writable"); rt.toBoolean(w) {
+					return false // cannot re-widen a non-writable data property
+				}
+			}
+			if hasValue {
+				if v, _ := rt.getField(descVal, "value"); !rt.sameValue(v, cur.value) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if hasSet {
+		if s, _ := rt.getField(descVal, "set"); !rt.sameValue(s, cur.setter) {
+			return false
+		}
+	}
+	if hasGet {
+		if g, _ := rt.getField(descVal, "get"); !rt.sameValue(g, cur.getter) {
+			return false
+		}
+	}
+	return true
+}
+
 func (rt *Runtime) proxyDefineProperty(p *proxyState, key, desc Value) *ThrowError {
 	trap, e := p.trap(rt, "defineProperty")
 	if e != nil {
@@ -509,10 +572,29 @@ func (rt *Runtime) proxyDefineProperty(p *proxyState, key, desc Value) *ThrowErr
 			if settingConfigFalse {
 				return rt.typeError("'defineProperty' on proxy: trap returned truish for defining a non-configurable property that does not exist on the proxy target")
 			}
-		} else if settingConfigFalse && td.configable {
-			return rt.typeError("'defineProperty' on proxy: trap returned truish for defining a non-configurable property that is configurable on the proxy target")
+		} else {
+			// IsCompatiblePropertyDescriptor(extensible, Desc, targetDesc): the trap
+			// must not claim a change the target's existing property forbids.
+			if !rt.descIsCompatible(desc, td) {
+				return rt.typeError("'defineProperty' on proxy: trap returned truish for defining an incompatible property on the proxy target")
+			}
+			if settingConfigFalse && td.configable {
+				return rt.typeError("'defineProperty' on proxy: trap returned truish for defining a non-configurable property that is configurable on the proxy target")
+			}
+			// A non-configurable, writable data property on the target cannot be
+			// reported as becoming non-writable.
+			if !td.isAccessor && !td.configable && td.writable && rt.hasProp(desc, "writable") {
+				if w, _ := rt.getField(desc, "writable"); !rt.toBoolean(w) {
+					return rt.typeError("'defineProperty' on proxy: trap returned truish for making a writable, non-configurable target property non-writable")
+				}
+			}
 		}
 		return nil
+	}
+	// Missing trap: forward to the target's own [[DefineOwnProperty]] (a proxy
+	// target routes through its own trap).
+	if to := rt.objPtr(p.target); to != nil && to.proxy != nil {
+		return rt.proxyDefineProperty(to.proxy, key, desc)
 	}
 	return rt.objectDefinePropertyKey(p.target, rt.toPropertyKeyValue(key), desc)
 }
