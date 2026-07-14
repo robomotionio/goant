@@ -465,7 +465,14 @@ restart:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			val := pop()
 			if o := rt.objPtr(peek()); o != nil {
-				o.defineOwn(name, val, attrDefault)
+				if len(name) > 0 && name[0] == '#' {
+					if !o.definePrivateField(name, val) {
+						thrown = rt.typeError("Cannot initialize private field " + name + " twice on the same object")
+						goto unwind
+					}
+				} else {
+					o.defineOwn(name, val, attrDefault)
+				}
 			}
 			ip += 5
 		case OpDefineMethod:
@@ -474,6 +481,20 @@ restart:
 			enumerable := flags&4 != 0 // bit 4: object-literal accessor (enumerable)
 			flags &= 3
 			accFn := pop()
+			if len(name) > 0 && name[0] == '#' {
+				if o := rt.objPtr(peek()); o != nil {
+					switch flags {
+					case 1:
+						o.definePrivateAccessor(name, accFn, true)
+					case 2:
+						o.definePrivateAccessor(name, accFn, false)
+					default:
+						o.definePrivateMethod(name, accFn)
+					}
+				}
+				ip += 6
+				break
+			}
 			if o := rt.objPtr(peek()); o != nil {
 				switch flags {
 				case 0: // data method: non-enumerable, writable, configurable
@@ -510,7 +531,14 @@ restart:
 
 		case OpGetField:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
-			v, e := rt.getField(pop(), name)
+			obj := pop()
+			var v Value
+			var e *ThrowError
+			if len(name) > 0 && name[0] == '#' {
+				v, e = rt.getPrivate(obj, name)
+			} else {
+				v, e = rt.getField(obj, name)
+			}
 			if e != nil {
 				thrown = e
 				goto unwind
@@ -521,7 +549,13 @@ restart:
 			// obj -> obj val (keeps the receiver for a following method call)
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			obj := peek()
-			v, e := rt.getField(obj, name)
+			var v Value
+			var e *ThrowError
+			if len(name) > 0 && name[0] == '#' {
+				v, e = rt.getPrivate(obj, name)
+			} else {
+				v, e = rt.getField(obj, name)
+			}
 			if e != nil {
 				thrown = e
 				goto unwind
@@ -532,6 +566,14 @@ restart:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			val := pop()
 			obj := pop()
+			if len(name) > 0 && name[0] == '#' {
+				if e := rt.setPrivate(obj, name, val); e != nil {
+					thrown = e
+					goto unwind
+				}
+				ip += 7
+				break
+			}
 			ok, e := rt.setFieldR(obj, name, val)
 			if e != nil {
 				thrown = e

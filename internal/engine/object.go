@@ -63,6 +63,12 @@ type object struct {
 	// internal slots (ant extra_slots sidecar).
 	extra []extraSlot
 
+	// priv holds the object's private class elements (fields, methods,
+	// accessors). They live outside the shape/property system so they never
+	// appear in reflection (getOwnPropertyNames, hasOwnProperty, for-in, …) and
+	// cannot collide with an ordinary "#x" string property.
+	priv []privElem
+
 	// native is set for built-in functions implemented in Go (ant cfunc).
 	native nativeFunc
 

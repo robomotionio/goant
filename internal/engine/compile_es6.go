@@ -453,11 +453,30 @@ func isInstanceFieldMember(m *Node) bool {
 	return true
 }
 
-// emitInstanceFieldInit initializes a class's instance fields on `this`, in
-// source order: each field's initializer is evaluated with `this` bound to the
-// new instance and the result defined as an own enumerable data property
-// (DefineField — not [[Set]], so inherited setters are ignored). Called at
-// base-ctor entry and right after super() in a derived ctor.
+// isInstancePrivateMethod reports whether m is a non-static private method or
+// accessor. These are installed per-instance in the object's private
+// environment (unlike public methods, which live on the prototype).
+func isInstancePrivateMethod(m *Node) bool {
+	if m == nil || m.Kind != NMethod || m.Flags&fnStatic != 0 || !isPrivateMemberProp(m.Left) {
+		return false
+	}
+	if m.Flags&(fnGetter|fnSetter) != 0 {
+		return true
+	}
+	return m.Right != nil && m.Right.Kind == NFunc && m.Right.Flags&fnMethod != 0
+}
+
+// isInstanceMember reports whether m is installed per-instance (a field or a
+// private method/accessor) rather than on the prototype.
+func isInstanceMember(m *Node) bool {
+	return isInstanceFieldMember(m) || isInstancePrivateMethod(m)
+}
+
+// emitInstanceFieldInit initializes a class's instance elements on `this`: first
+// all private methods/accessors are added to the instance's private
+// environment, then each field's initializer is evaluated with `this` bound to
+// the new instance and defined (DefineField — not [[Set]]). Called at base-ctor
+// entry and right after super() in a derived ctor.
 func (c *compiler) emitInstanceFieldInit() {
 	loadThis := func() {
 		if slot := c.resolveLocal("*this*"); slot >= 0 {
@@ -468,7 +487,36 @@ func (c *compiler) emitInstanceFieldInit() {
 			c.emit(OpUndef)
 		}
 	}
+	// Pass 1: install private methods/accessors before any field initializer runs
+	// (so a field initializer may call them).
 	for _, m := range c.classFields {
+		if !isInstancePrivateMethod(m) {
+			continue
+		}
+		flags := byte(0)
+		prefix := ""
+		if m.Flags&fnGetter != 0 {
+			flags, prefix = 1, "get "
+		} else if m.Flags&fnSetter != 0 {
+			flags, prefix = 2, "set "
+		}
+		if m.Right.Str == "" {
+			m.Right.Str = prefix + m.Left.Str
+			m.Right.Flags |= fnInferredName
+		}
+		loadThis()
+		c.compileFunc(m.Right)
+		idx := c.constant(c.rt.internString(m.Left.Str))
+		c.emit(OpDefineMethod)
+		c.emitU32(uint32(idx))
+		c.emitByte(flags)
+		c.emit(OpPop)
+	}
+	// Pass 2: initialize fields in source order.
+	for _, m := range c.classFields {
+		if isInstancePrivateMethod(m) {
+			continue
+		}
 		if m.Flags&fnComputed != 0 {
 			// [this] [key] [value] — computed key (evaluated per-instance; a v1
 			// simplification of the once-at-definition rule).
@@ -621,7 +669,7 @@ func (c *compiler) compileClass(n *Node) {
 	// defined on the prototype.
 	var instanceFields []*Node
 	for _, m := range n.Args {
-		if isInstanceFieldMember(m) {
+		if isInstanceMember(m) {
 			instanceFields = append(instanceFields, m)
 		}
 	}
@@ -673,9 +721,9 @@ func (c *compiler) compileClass(n *Node) {
 		if m.Kind != NMethod {
 			continue
 		}
-		// Instance fields are initialized per-instance by the constructor, not
-		// defined here on the prototype.
-		if isInstanceFieldMember(m) {
+		// Instance fields and private methods/accessors are installed per-instance
+		// by the constructor, not defined here on the prototype.
+		if isInstanceMember(m) {
 			continue
 		}
 		if m.Left != nil && m.Left.Kind == NIdent && m.Left.Str == "constructor" && m.Flags&fnStatic == 0 {

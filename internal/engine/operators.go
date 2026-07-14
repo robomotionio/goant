@@ -152,6 +152,13 @@ func (rt *Runtime) forInKeys(obj Value) Value {
 
 // jsIn implements the `in` operator: key in obj.
 func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
+	// Private brand check `#x in obj`: the compiler emits the private name as a
+	// string key. A non-object receiver simply lacks the brand (no TypeError).
+	if key.IsString() {
+		if b := rt.strBytes(key); len(b) > 0 && b[0] == '#' {
+			return rt.hasPrivate(obj, string(b)), nil
+		}
+	}
 	if !obj.IsObjectType() && obj.Type() != TTypedArray {
 		return false, rt.typeError("cannot use 'in' operator on a non-object")
 	}
