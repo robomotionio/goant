@@ -80,6 +80,11 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 				}
 				return o.slotGet(uint32(slot)), nil
 			}
+			// An Array in the prototype chain contributes its exotic "length" (which
+			// is not a shape slot) — e.g. reading .length on Object.create([1,2,3]).
+			if name == "length" && cur.Type() == TArr {
+				return mknum(float64(o.arrLen)), nil
+			}
 			cur = o.proto
 		}
 		return mkundef(), nil
