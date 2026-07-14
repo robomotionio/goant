@@ -590,6 +590,10 @@ func (rt *Runtime) initTypedArrays() {
 	rt.objPtr(taCtor).defineOwn("prototype", taProto, 0)
 	tp.defineOwn("constructor", taCtor, attrWritable|attrConfigurable)
 	tco := rt.objPtr(taCtor)
+	// %TypedArray% has a [[Construct]] method (IsConstructor is true; it just
+	// throws when invoked), which %TypedArray%.from / of require of their `this`.
+	// It is not a global, so markNativeConstructors does not reach it.
+	tco.flags.isConstructor = true
 	// %TypedArray%.from / of are defined once on the abstract constructor; each
 	// per-kind constructor inherits them (their `this` is the constructor used to
 	// build the result via TypedArrayCreate).
@@ -604,12 +608,36 @@ func (rt *Runtime) initTypedArrays() {
 		thisArg := arg(args, 2)
 		src := arg(args, 0)
 		var items []Value
-		if rt.isIterable(src) {
-			it, e := rt.iterableValues(src)
+		// GetMethod(source, @@iterator): a throwing accessor propagates, and a
+		// present-but-not-callable value is a TypeError.
+		hasIter := false
+		var usingIter Value
+		if !src.IsNullish() && rt.symIterator != 0 {
+			m, e := rt.getElement(src, rt.symIterator)
 			if e != nil {
 				return mkundef(), e
 			}
-			items = it
+			if !m.IsNullish() {
+				if !rt.isCallable(m) {
+					return mkundef(), rt.typeError("TypedArray.from: @@iterator is not callable")
+				}
+				usingIter, hasIter = m, true
+			}
+		}
+		if hasIter {
+			it, e := rt.callValue(usingIter, src, nil)
+			if e != nil {
+				return mkundef(), e
+			}
+			if !it.IsObjectType() {
+				return mkundef(), rt.typeError("TypedArray.from: [Symbol.iterator]() returned a non-object")
+			}
+			if e := rt.iterateIteratorWithClose(it, func(v Value) (bool, *ThrowError) {
+				items = append(items, v)
+				return false, nil
+			}); e != nil {
+				return mkundef(), e
+			}
 		} else {
 			n, e := rt.lengthOf(src)
 			if e != nil {
