@@ -69,69 +69,105 @@ func (rt *Runtime) initDateBuiltin() {
 		return mknum(0), nil
 	})
 
-	// Component setters recompute the ms value.
-	setter := func(name string, apply func(t time.Time, v int) time.Time) {
+	// pick returns the i-th coerced component value (as an int) if it was
+	// supplied, otherwise the current field value cur.
+	pick := func(v []float64, i, cur int) int {
+		if i < len(v) {
+			return int(v[i])
+		}
+		return cur
+	}
+	// setter builds a Date.prototype component setter of the given .length. All of
+	// its supplied arguments (and the first even when absent → undefined) are
+	// ToNumber'd in order, exactly once, propagating an abrupt completion — before
+	// the date's validity is consulted. A non-finite component makes the result
+	// NaN; for setFullYear/setUTCFullYear an invalid Date is first reset to +0.
+	setter := func(name string, length int, nanToZero bool, apply func(t time.Time, v []float64) time.Time) {
 		s := func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			cur, e := rt.dateMs(this)
 			if e != nil {
 				return mkundef(), e
 			}
 			ms := cur.Number()
-			t := msToTime(ms)
-			if math.IsNaN(ms) {
-				t = msToTime(0)
+			count := min(len(args), length)
+			if count < 1 {
+				count = 1 // the first argument is always read (undefined → NaN)
 			}
-			v := rt.intArg(args, 0)
-			t = apply(t, v)
-			newMs := timeClip(float64(t.UnixMilli()))
+			v := make([]float64, count)
+			bad := false
+			for i := 0; i < count; i++ {
+				a := mkundef()
+				if i < len(args) {
+					a = args[i]
+				}
+				x, e := rt.toNumber(a)
+				if e != nil {
+					return mkundef(), e
+				}
+				v[i] = x
+				if math.IsNaN(x) || math.IsInf(x, 0) {
+					bad = true
+				}
+			}
+			base := ms
+			if math.IsNaN(ms) {
+				if !nanToZero {
+					rt.setDateMs(this, math.NaN())
+					return mknum(math.NaN()), nil
+				}
+				base = 0
+			}
+			if bad {
+				rt.setDateMs(this, math.NaN())
+				return mknum(math.NaN()), nil
+			}
+			newMs := timeClip(float64(apply(msToTime(base), v).UnixMilli()))
 			rt.setDateMs(this, newMs)
 			return mknum(newMs), nil
 		}
-		rt.defMethod(proto, name, 1, s)
+		rt.defMethod(proto, name, length, s)
 	}
-	setter("setFullYear", func(t time.Time, v int) time.Time {
-		return time.Date(v, t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
-	})
-	setter("setMonth", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), time.Month(v+1), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
-	})
-	setter("setDate", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), t.Month(), v, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
-	})
-	setter("setHours", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), v, t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
-	})
-	setter("setMinutes", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), v, t.Second(), t.Nanosecond(), time.UTC)
-	})
-	setter("setSeconds", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), v, t.Nanosecond(), time.UTC)
-	})
-	setter("setMilliseconds", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), v*1e6, time.UTC)
-	})
-	// UTC setters (local == UTC here, so they share the same implementations).
-	setter("setUTCFullYear", func(t time.Time, v int) time.Time {
-		return time.Date(v, t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
-	})
-	setter("setUTCMonth", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), time.Month(v+1), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
-	})
-	setter("setUTCDate", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), t.Month(), v, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
-	})
-	setter("setUTCHours", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), v, t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
-	})
-	setter("setUTCMinutes", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), v, t.Second(), t.Nanosecond(), time.UTC)
-	})
-	setter("setUTCSeconds", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), v, t.Nanosecond(), time.UTC)
-	})
-	setter("setUTCMilliseconds", func(t time.Time, v int) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), v*1e6, time.UTC)
-	})
+	setFullYear := func(t time.Time, v []float64) time.Time {
+		return time.Date(pick(v, 0, t.Year()), time.Month(pick(v, 1, int(t.Month())-1)+1), pick(v, 2, t.Day()),
+			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+	}
+	setMonth := func(t time.Time, v []float64) time.Time {
+		return time.Date(t.Year(), time.Month(pick(v, 0, int(t.Month())-1)+1), pick(v, 1, t.Day()),
+			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+	}
+	setDate := func(t time.Time, v []float64) time.Time {
+		return time.Date(t.Year(), t.Month(), pick(v, 0, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+	}
+	setHours := func(t time.Time, v []float64) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), pick(v, 0, t.Hour()), pick(v, 1, t.Minute()),
+			pick(v, 2, t.Second()), pick(v, 3, t.Nanosecond()/1e6)*1e6, time.UTC)
+	}
+	setMinutes := func(t time.Time, v []float64) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), pick(v, 0, t.Minute()),
+			pick(v, 1, t.Second()), pick(v, 2, t.Nanosecond()/1e6)*1e6, time.UTC)
+	}
+	setSeconds := func(t time.Time, v []float64) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(),
+			pick(v, 0, t.Second()), pick(v, 1, t.Nanosecond()/1e6)*1e6, time.UTC)
+	}
+	setMillis := func(t time.Time, v []float64) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), pick(v, 0, t.Nanosecond()/1e6)*1e6, time.UTC)
+	}
+	setter("setFullYear", 3, true, setFullYear)
+	setter("setMonth", 2, false, setMonth)
+	setter("setDate", 1, false, setDate)
+	setter("setHours", 4, false, setHours)
+	setter("setMinutes", 3, false, setMinutes)
+	setter("setSeconds", 2, false, setSeconds)
+	setter("setMilliseconds", 1, false, setMillis)
+	// UTC setters share the implementations (local == UTC here).
+	setter("setUTCFullYear", 3, true, setFullYear)
+	setter("setUTCMonth", 2, false, setMonth)
+	setter("setUTCDate", 1, false, setDate)
+	setter("setUTCHours", 4, false, setHours)
+	setter("setUTCMinutes", 3, false, setMinutes)
+	setter("setUTCSeconds", 2, false, setSeconds)
+	setter("setUTCMilliseconds", 1, false, setMillis)
 
 	// String conversions.
 	rt.defMethod(proto, "toISOString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
