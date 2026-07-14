@@ -569,11 +569,14 @@ func simpleParamName(p *Node) (string, bool) {
 // compileNew compiles a `new F(args)` constructor call.
 func (c *compiler) compileNew(n *Node) {
 	c.compileExpr(n.Left) // constructor
+	if hasSpread(n.Args) {
+		// `new C(...args)`: build the argument list array and construct from it.
+		c.buildSpreadArray(n.Args) // [ctor, argsArray]
+		c.emit(OpNewApply)
+		c.emitU16(0)
+		return
+	}
 	for _, arg := range n.Args {
-		if arg.Kind == NSpread {
-			c.errorf("spread arguments in new not yet supported (slice)")
-			return
-		}
 		c.compileExpr(arg)
 	}
 	c.emit(OpNew)

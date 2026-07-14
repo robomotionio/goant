@@ -1277,6 +1277,26 @@ restart:
 			}
 			push(ret)
 			ip += 3
+		case OpNewApply:
+			// constructor argsArray -> result (`new C(...spread)`).
+			argsArr := pop()
+			ctorVal := pop()
+			var callArgs []Value
+			if ao := rt.objPtr(argsArr); ao != nil {
+				callArgs = make([]Value, ao.arrLen)
+				for i := uint32(0); i < ao.arrLen; i++ {
+					if int(i) < len(ao.arr) {
+						callArgs[i] = ao.arr[i]
+					}
+				}
+			}
+			ret, e := rt.construct(ctorVal, callArgs)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(ret)
+			ip += 3
 		case OpSpread:
 			// arr iterable -> (appends iterable's values to arr)
 			iterable := pop()
