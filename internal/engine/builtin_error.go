@@ -200,7 +200,7 @@ func (rt *Runtime) initErrorBuiltin() {
 }
 
 // makeErrorCtor builds an error constructor wired to the given prototype.
-func (rt *Runtime) makeErrorCtor(name string, proto, _parentCtor Value) Value {
+func (rt *Runtime) makeErrorCtor(name string, proto, parentCtor Value) Value {
 	ctor := rt.newNativeFunc(name, 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		// Works as both `Error(msg)` and `new Error(msg)`: this is the new
 		// object under construct(); otherwise allocate one.
@@ -236,6 +236,12 @@ func (rt *Runtime) makeErrorCtor(name string, proto, _parentCtor Value) Value {
 	})
 	co := rt.objPtr(ctor)
 	co.defineOwn("prototype", proto, 0)
+	// A NativeError constructor's [[Prototype]] is the %Error% constructor
+	// (Object.getPrototypeOf(TypeError) === Error). The base Error constructor
+	// (parentCtor is null) keeps the default %Function.prototype%.
+	if parentCtor.IsObjectType() {
+		co.proto = parentCtor
+	}
 	rt.objPtr(proto).defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 	return ctor
 }
