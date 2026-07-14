@@ -63,10 +63,13 @@ type compiler struct {
 	pendingClassFields  []*Node
 	pendingClassDerived bool
 
-	// classPrivateNames is the set of private names (including the leading '#')
-	// declared directly in the class body currently being compiled. A private
-	// reference must resolve to one of these in this or an enclosing compiler.
-	classPrivateNames map[string]bool
+	// classPrivateEnvs is a stack of private-name sets (each including the leading
+	// '#') for the class bodies currently being compiled by this compiler — a
+	// stack because a nested class expression is compiled on the same compiler as
+	// its enclosing class, and both environments stay in scope. A private
+	// reference must resolve to a name in some level here or in an enclosing
+	// compiler.
+	classPrivateEnvs []map[string]bool
 
 	// pendingLabel is a label awaiting the loop/statement it prefixes.
 	pendingLabel string
@@ -705,7 +708,7 @@ func (c *compiler) compileBinary(n *Node) {
 	if n.Op == TokIn && n.Left != nil && n.Left.Kind == NIdent &&
 		len(n.Left.Str) > 0 && n.Left.Str[0] == '#' {
 		if !c.privateNameDeclared(n.Left.Str) {
-			c.errorf("Private field '" + n.Left.Str + "' must be declared in an enclosing class")
+			c.syntaxErrorf("Private field '" + n.Left.Str + "' must be declared in an enclosing class")
 			return
 		}
 		c.emitConst(c.rt.internString(n.Left.Str))

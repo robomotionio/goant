@@ -221,7 +221,9 @@ func (p *parser) mkPrivateIdentFromTok() *Node {
 	if off > 0 {
 		start = off - 1
 	}
-	n := &Node{Kind: NIdent, Str: p.code()[start : off+p.tlen()], SrcOff: uint32(start), SrcEnd: uint32(off + p.tlen())}
+	// The private name's identity is its StringValue: decode any \u escapes in the
+	// identifier part so `#a` and `#a` name the same private field.
+	n := &Node{Kind: NIdent, Str: "#" + p.tokIdentStr(), SrcOff: uint32(start), SrcEnd: uint32(off + p.tlen())}
 	return n
 }
 

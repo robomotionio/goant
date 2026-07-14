@@ -495,10 +495,18 @@ func collectClassPrivateNames(n *Node) map[string]bool {
 }
 
 // privateNameDeclared reports whether a private name is declared in the class
-// body currently being compiled or in any enclosing one.
+// body currently being compiled or in any enclosing one. An eval body compiles
+// without the enclosing class's private environment, yet a direct eval may
+// legitimately reference an enclosing private name, so the check is skipped
+// there (the reference is resolved at runtime instead).
 func (c *compiler) privateNameDeclared(name string) bool {
 	for e := c; e != nil; e = e.enclosing {
-		if e.classPrivateNames[name] {
+		for _, env := range e.classPrivateEnvs {
+			if env[name] {
+				return true
+			}
+		}
+		if e.isEval {
 			return true
 		}
 	}
@@ -509,11 +517,12 @@ func (c *compiler) compileClass(n *Node) {
 	ctorSlot := c.tempLocal()
 	protoSlot := c.tempLocal()
 
-	// Establish this class's private environment for the member/body compilation
-	// below (but not the heritage, compiled first). Restored on exit so sibling
-	// and enclosing code cannot see these private names.
-	savedPriv := c.classPrivateNames
-	defer func() { c.classPrivateNames = savedPriv }()
+	// This class's private environment is pushed after the heritage is compiled
+	// (below) and popped on exit, so the heritage, siblings, and enclosing code
+	// cannot see these private names — while a nested class expression keeps the
+	// enclosing environment visible beneath its own on the same compiler's stack.
+	privDepth := len(c.classPrivateEnvs)
+	defer func() { c.classPrivateEnvs = c.classPrivateEnvs[:privDepth] }()
 
 	// A named class has an inner, immutable binding of its own name scoped to the
 	// class body: methods close over it, and it is unaffected by reassignment of
@@ -584,7 +593,7 @@ func (c *compiler) compileClass(n *Node) {
 
 	// The private environment is now in scope for the constructor, members, field
 	// initializers, and static blocks (the heritage above was compiled without it).
-	c.classPrivateNames = collectClassPrivateNames(n)
+	c.classPrivateEnvs = append(c.classPrivateEnvs, collectClassPrivateNames(n))
 
 	// Collect instance fields and hand them to the constructor so it initializes
 	// them per-instance (base: at entry; derived: after super()). They are NOT

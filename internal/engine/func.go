@@ -94,7 +94,7 @@ func (c *compiler) emitGlobalPut(name string) {
 // (GET_FIELD / GET_FIELD2 / PUT_FIELD, all size 7).
 func (c *compiler) emitFieldOp(op Opcode, name string) {
 	if len(name) > 0 && name[0] == '#' && !c.privateNameDeclared(name) {
-		c.errorf("Private field '" + name + "' must be declared in an enclosing class")
+		c.syntaxErrorf("Private field '" + name + "' must be declared in an enclosing class")
 		return
 	}
 	idx := c.constant(c.rt.internString(name))
