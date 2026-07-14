@@ -1363,6 +1363,16 @@ func (p *parser) parseObject() *Node {
 				p.errorf("Unexpected reserved word")
 				return n
 			}
+			// `yield`/`await` may not be a shorthand IdentifierReference inside a
+			// generator / async body (where they are always keywords).
+			if prop.Left.Kind == NIdent && p.inGenerator && prop.Left.Str == "yield" {
+				p.errorf("'yield' cannot be used as an identifier here")
+				return n
+			}
+			if prop.Left.Kind == NIdent && p.inAsync && prop.Left.Str == "await" {
+				p.errorf("'await' cannot be used as an identifier here")
+				return n
+			}
 			prop.Right = mkIdent(prop.Left.Str)
 			if p.next() == TokAssign {
 				p.consume()
