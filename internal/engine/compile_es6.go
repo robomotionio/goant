@@ -542,7 +542,9 @@ func (c *compiler) emitInstanceFieldInit() {
 			if m.Right == nil {
 				c.emit(OpUndef)
 			} else {
+				c.inFieldInit = true
 				c.compileExpr(m.Right)
+				c.inFieldInit = false
 			}
 			c.emit(OpPutElem)
 			continue
@@ -557,7 +559,9 @@ func (c *compiler) emitInstanceFieldInit() {
 			c.emit(OpUndef)
 		} else {
 			nameAnonExpr(m.Right, name) // NamedEvaluation for `field = () => {}`
+			c.inFieldInit = true
 			c.compileExpr(m.Right)
+			c.inFieldInit = false
 		}
 		c.emitDefineField(name)
 		c.emit(OpPop)

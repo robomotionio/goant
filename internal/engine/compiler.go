@@ -54,6 +54,11 @@ type compiler struct {
 	// globals must resolve dynamically against the with-object chain.
 	withDepth int
 
+	// inFieldInit is set while compiling an instance field initializer, whose
+	// evaluation context has new.target === undefined even though the code is
+	// emitted inline in the constructor (which does have a new.target).
+	inFieldInit bool
+
 	// classFields holds a class constructor's instance-field member nodes so the
 	// ctor initializes them per-instance (base class: at body entry; derived:
 	// right after super()). pendingClassFields/pendingClassDerived hand them from
@@ -576,6 +581,12 @@ func (c *compiler) compileExpr(n *Node) {
 	case NGlobalThis:
 		c.emit(OpGlobal)
 	case NNewTarget:
+		// Inside an instance field initializer new.target is always undefined,
+		// even though the code runs inline in the constructor.
+		if c.inFieldInit {
+			c.emit(OpUndef)
+			break
+		}
 		// An arrow resolves new.target as the enclosing function's *newtarget*
 		// binding (lexical); a non-arrow reads its own frame's new.target.
 		if slot := c.resolveLocal("*newtarget*"); slot >= 0 {

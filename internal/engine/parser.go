@@ -2010,7 +2010,12 @@ func (p *parser) parseClass() *Node {
 			method.Right.SrcOff = methodSrcOff
 		} else if p.tok() == TokAssign {
 			p.consume()
+			// A field initializer is evaluated in a function-like context where
+			// `new.target` is meaningful (it evaluates to undefined).
+			savedNT := p.newTargetOK
+			p.newTargetOK = true
 			method.Right = p.parseAssign()
+			p.newTargetOK = savedNT
 			if !p.classFieldASI() {
 				return cls
 			}
