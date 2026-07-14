@@ -4,7 +4,10 @@ package engine
 // Go's math package; the JS-specific edge cases (round-half-up, sign, trunc,
 // clz32, imul, fround, hypot) are implemented to spec.
 
-import "math"
+import (
+	"math"
+	"math/big"
+)
 
 func (rt *Runtime) initMath() {
 	m := rt.newObject(rt.objectProto) // [[Prototype]] is %Object.prototype%
@@ -110,6 +113,58 @@ func (rt *Runtime) initMath() {
 			return mknum(math.NaN()), nil
 		}
 		return mknum(math.Sqrt(sum)), nil
+	}), attrWritable|attrConfigurable)
+
+	// Math.sumPrecise(items) — correctly-rounded sum of an iterable of Numbers
+	// (the Math.sumPrecise proposal). Every element must already be a Number (no
+	// coercion); the finite terms are summed exactly with a wide big.Float so the
+	// single final rounding to float64 is correctly rounded (ties to even). The
+	// ±0/±∞/NaN result follows the proposal's state machine.
+	mo.defineOwn("sumPrecise", rt.newNativeFunc("sumPrecise", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		source := mkundef()
+		if len(args) > 0 {
+			source = args[0]
+		}
+		sawNaN, sawPosInf, sawNegInf, finite := false, false, false, false
+		// 4096 bits dwarfs a double's full dynamic range (~2098 bits from the
+		// largest to the smallest magnitude), so every partial sum is exact and
+		// only Float64 rounds.
+		acc := new(big.Float).SetPrec(4096).SetMode(big.ToNearestEven)
+		e := rt.iterateWithClose(source, func(v Value) (bool, *ThrowError) {
+			if !v.IsNumber() {
+				return false, rt.typeError("Math.sumPrecise: all values must be numbers")
+			}
+			x := v.Number()
+			switch {
+			case math.IsNaN(x):
+				sawNaN = true
+			case math.IsInf(x, 1):
+				sawPosInf = true
+			case math.IsInf(x, -1):
+				sawNegInf = true
+			case x == 0 && math.Signbit(x):
+				// -0 does not transition the state out of minus-zero.
+			default:
+				finite = true
+				acc.Add(acc, new(big.Float).SetFloat64(x))
+			}
+			return false, nil
+		})
+		if e != nil {
+			return mkundef(), e
+		}
+		switch {
+		case sawNaN || (sawPosInf && sawNegInf):
+			return mknum(math.NaN()), nil
+		case sawPosInf:
+			return mknum(math.Inf(1)), nil
+		case sawNegInf:
+			return mknum(math.Inf(-1)), nil
+		case !finite:
+			return mknum(math.Copysign(0, -1)), nil
+		}
+		out, _ := acc.Float64()
+		return mknum(out), nil
 	}), attrWritable|attrConfigurable)
 
 	// Math.random — deterministic-free PRNG (xorshift; not for crypto).
