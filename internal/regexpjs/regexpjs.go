@@ -27,6 +27,10 @@ type Regexp struct {
 	Unicode     bool
 	UnicodeSets bool
 	Sticky      bool
+
+	// groupNames maps the safe internal capture-group name regexp2 sees back to
+	// the original ECMAScript name (nil when the pattern has no named groups).
+	groupNames map[string]string
 }
 
 // Group is one capture group in a match (Index is a rune offset; -1 = unmatched).
@@ -126,6 +130,13 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if !r.Unicode {
 		src = translateAnnexBEscapes(src)
 	}
+	// Rename named groups / backreferences to regexp2-safe internal names (ES
+	// allows names regexp2's \w+ grammar rejects, and duplicate names).
+	if gs, gm, gerr := translateGroupNames(src); gerr != nil {
+		return nil, fmt.Errorf("invalid regular expression: %v", gerr)
+	} else {
+		src, r.groupNames = gs, gm
+	}
 	// Under the u/v flag, translate ES Unicode property escapes (\p{…}) into
 	// explicit code-point classes regexp2 can compile.
 	if r.UnicodeSets {
@@ -182,7 +193,11 @@ func (r *Regexp) Exec(input []rune, start int) (*Match, error) {
 	groups := m.Groups()
 	out := &Match{Index: m.Index, Groups: make([]Group, len(groups))}
 	for i, g := range groups {
-		gg := Group{Index: -1, Name: g.Name}
+		name := g.Name
+		if orig, ok := r.groupNames[name]; ok {
+			name = orig // map the internal name back to the ECMAScript name
+		}
+		gg := Group{Index: -1, Name: name}
 		if len(g.Captures) > 0 {
 			gg.Index = g.Index
 			gg.Length = g.Length
