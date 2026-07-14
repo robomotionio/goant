@@ -718,6 +718,7 @@ func (c *compiler) compileIdentLoad(n *Node) {
 // compileWith compiles a `with (obj) stmt`: unqualified names inside resolve
 // dynamically against obj (then the global) via WITH_GET_VAR/WITH_PUT_VAR.
 func (c *compiler) compileWith(n *Node) {
+	c.resetCompletion()
 	c.compileExpr(n.Left)
 	c.emit(OpEnterWith)
 	c.withDepth++

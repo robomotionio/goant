@@ -706,6 +706,7 @@ func (c *compiler) compileFinallyBlock(body *Node) {
 }
 
 func (c *compiler) compileTry(n *Node) {
+	c.resetCompletion()
 	c.tryDepth++
 	defer func() { c.tryDepth-- }()
 
