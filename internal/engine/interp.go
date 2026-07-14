@@ -239,27 +239,46 @@ restart:
 			push(it)
 			ip += 2 // Size 2 (unused inline operand byte)
 		case OpIterClose:
-			// IteratorClose (7.4.8) for a normal completion: call iter.return();
-			// a throw from GetMethod/return() propagates, and a non-Object return()
-			// result is a TypeError. (For a well-behaved return() this is identical
-			// to the old swallow behavior, so the abrupt-completion callers that
-			// emit this op after a caught throw are unaffected in the common case.)
+			// IteratorClose (7.4.8). GetMethod(iterator, "return"): undefined/null
+			// leaves the iterator unclosed; a present-but-non-callable `return` is a
+			// TypeError. Otherwise call return() and require an Object result.
+			//
+			// When the pending completion is itself a throw (the for-of finally sets
+			// comp = compThrow before closing), any error raised while closing is
+			// SUPPRESSED so the original exception wins (spec steps 6-7): return()
+			// is still invoked for its side effects, but its abrupt result — a
+			// non-callable method, a throw, or a non-Object result — does not
+			// override the in-flight throw.
 			iter := pop()
+			suppress := comp.kind == compThrow
 			if iter.IsObjectType() {
 				rf, e := rt.getField(iter, "return")
-				if e != nil {
-					thrown = e
-					goto unwind
-				}
-				if rt.isCallable(rf) {
-					res, e := rt.callValue(rf, iter, nil)
-					if e != nil {
+				switch {
+				case e != nil:
+					if !suppress {
 						thrown = e
 						goto unwind
 					}
-					if !res.IsObjectType() {
-						thrown = rt.typeError("iterator close: return() did not return an object")
+				case rf.IsNullish():
+					// no return method: nothing to close
+				case !rt.isCallable(rf):
+					if !suppress {
+						thrown = rt.typeError("iterator 'return' property is not a function")
 						goto unwind
+					}
+				default:
+					res, e := rt.callValue(rf, iter, nil)
+					switch {
+					case e != nil:
+						if !suppress {
+							thrown = e
+							goto unwind
+						}
+					case !res.IsObjectType():
+						if !suppress {
+							thrown = rt.typeError("iterator close: return() did not return an object")
+							goto unwind
+						}
 					}
 				}
 			}
