@@ -47,6 +47,11 @@ type parser struct {
 	// new.target is meaningful); an arrow inherits the enclosing value, so
 	// `new.target` at the top level or in a top-level arrow is a SyntaxError.
 	newTargetOK bool
+	// inStaticBlock reserves `await` as an identifier in a class static block's
+	// direct scope (a static block is not async, but await is still forbidden
+	// there). Unlike inAsync it is CLEARED when entering a nested function or
+	// arrow, whose own async-ness then governs await.
+	inStaticBlock bool
 }
 
 // Parse tokenizes and parses src into an AST (N_PROGRAM root node).
@@ -178,8 +183,8 @@ func (p *parser) strictCheckBindingIdent(s string) {
 		p.errorf("'yield' cannot be used as a binding identifier in a generator")
 		return
 	}
-	if p.inAsync && s == "await" {
-		p.errorf("'await' cannot be used as a binding identifier in an async function")
+	if (p.inAsync || p.inStaticBlock) && s == "await" {
+		p.errorf("'await' cannot be used as a binding identifier here")
 		return
 	}
 	if p.lx.strict && p.strictForbiddenBinding(s) {
@@ -595,6 +600,11 @@ func (p *parser) parseArrowBody(isAsync bool) *Node {
 		p.inAsync = true
 		defer func() { p.inAsync = saved }()
 	}
+	// A nested arrow escapes an enclosing class static block's await restriction;
+	// its own async-ness (above) governs await instead.
+	savedSB := p.inStaticBlock
+	p.inStaticBlock = false
+	defer func() { p.inStaticBlock = savedSB }()
 	p.funcDepth++ // return is legal inside an arrow body
 	defer func() { p.funcDepth-- }()
 	if p.next() == TokLBrace {
@@ -793,8 +803,14 @@ func (p *parser) parsePrimary() *Node {
 		p.errorf("A yield expression is only allowed at the top of an assignment expression")
 		return p.mk(NEmpty)
 	case TokAwait:
-		// Outside an async function, `await` is a plain identifier.
+		// Outside an async function, `await` is a plain identifier — except in a
+		// class static block's direct scope, where it is reserved (but is not the
+		// await operator, since a static block is not async).
 		if !p.inAsync {
+			if p.inStaticBlock {
+				p.errorf("'await' is not allowed in a class static block")
+				return p.mk(NEmpty)
+			}
 			n := p.mkIdentFromTok()
 			p.consume()
 			return n
@@ -1923,9 +1939,11 @@ func (p *parser) parseFunc() *Node {
 	p.pendingGenerator = false
 	savedAsync := p.inAsync
 	savedGen := p.inGenerator
-	p.inAsync = false     // parameters
-	p.inGenerator = false // parameters
-	defer func() { p.inAsync = savedAsync; p.inGenerator = savedGen }()
+	savedSB := p.inStaticBlock
+	p.inAsync = false      // parameters
+	p.inGenerator = false  // parameters
+	p.inStaticBlock = false // a nested function has its own await context
+	defer func() { p.inAsync = savedAsync; p.inGenerator = savedGen; p.inStaticBlock = savedSB }()
 	if p.next() == TokMul {
 		p.consume()
 		isGenerator = true
@@ -2053,20 +2071,20 @@ func (p *parser) parseClass() *Node {
 				// expression are early errors, checked once the block is parsed.
 				savedStrict, savedNT := p.lx.strict, p.newTargetOK
 				savedAsync, savedGen := p.inAsync, p.inGenerator
+				savedSB := p.inStaticBlock
 				p.lx.strict = true
 				p.newTargetOK = true
-				p.inAsync = true
+				p.inAsync = false
 				p.inGenerator = false
+				p.inStaticBlock = true
 				block := p.parseBlock(false)
 				p.lx.strict, p.newTargetOK = savedStrict, savedNT
 				p.inAsync, p.inGenerator = savedAsync, savedGen
+				p.inStaticBlock = savedSB
 				block.Kind = NStaticBlock
 				block.Flags = fnStatic | fnClassBody
 				if nodeContainsArguments(block) {
 					p.errorf("'arguments' is not allowed in a class static block")
-				}
-				if paramsContainYieldAwait([]*Node{block}, false, true) {
-					p.errorf("'await' is not allowed in a class static block")
 				}
 				cls.Args = append(cls.Args, block)
 				continue
