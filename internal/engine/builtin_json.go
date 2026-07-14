@@ -19,7 +19,7 @@ func (rt *Runtime) initJSONBuiltin() {
 		replacer := arg(args, 1)
 		if rt.isCallable(replacer) {
 			st.replacerFn = replacer
-		} else if replacer.Type() == TArr {
+		} else if rt.isArrayValue(replacer) {
 			// PropertyList: for each element, keep a String, ToString(a Number), or
 			// ToString(a String/Number wrapper object); de-duplicated, order-preserved.
 			st.hasPropertyList = true
