@@ -83,6 +83,24 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 			// Rest element (always last): drain the remaining values into a fresh
 			// array — arr[arr.length] = value until the iterator is done — then
 			// assign it. Draining leaves the iterator done, so no close follows.
+			restTarget := elem.Right
+			// AssignmentRestElement evaluates its DestructuringAssignmentTarget
+			// reference BEFORE iterating (step 1a). For an assignment to a member
+			// (`[...obj[key()]] = it`), pre-evaluate the object and computed key so
+			// their side effects — including a `yield` in the key — happen before
+			// next() is called; a `return` unwinding through that yield then closes
+			// the not-yet-drained iterator.
+			memberObjSlot, memberKeySlot := -1, -1
+			if kind == varAssign && restTarget != nil && restTarget.Kind == NMember {
+				memberObjSlot = c.tempLocal()
+				c.compileExpr(restTarget.Left)
+				c.emitOpU16(OpPutLocal, uint16(memberObjSlot))
+				if restTarget.Flags&1 != 0 { // computed key
+					memberKeySlot = c.tempLocal()
+					c.compileExpr(restTarget.Right)
+					c.emitOpU16(OpPutLocal, uint16(memberKeySlot))
+				}
+			}
 			restSlot := c.tempLocal()
 			c.emit(OpArray)
 			c.emitU16(0)
@@ -102,8 +120,21 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 			c.emitU32(uint32(loopStart))
 			c.patchJump(restDone)
 			c.emit(OpPop) // discard the trailing undefined
-			c.emitOpU16(OpGetLocal, uint16(restSlot))
-			c.destructureTarget(elem.Right, kind)
+			if memberObjSlot >= 0 {
+				// Store the drained array into the pre-evaluated member reference.
+				c.emitOpU16(OpGetLocal, uint16(memberObjSlot))
+				if memberKeySlot >= 0 {
+					c.emitOpU16(OpGetLocal, uint16(memberKeySlot))
+					c.emitOpU16(OpGetLocal, uint16(restSlot))
+					c.emit(OpPutElem)
+				} else {
+					c.emitOpU16(OpGetLocal, uint16(restSlot))
+					c.emitFieldOp(OpPutField, restTarget.Right.Str)
+				}
+			} else {
+				c.emitOpU16(OpGetLocal, uint16(restSlot))
+				c.destructureTarget(restTarget, kind)
+			}
 			continue
 		}
 		target, defExpr := elem, (*Node)(nil)
