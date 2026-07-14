@@ -191,11 +191,15 @@ func (rt *Runtime) getIteratorFlattenable(obj Value) (Value, *ThrowError) {
 		return mkundef(), rt.typeError("flatMap callback did not return an object")
 	}
 	if rt.symIterator != 0 {
-		m, e := rt.getElement(obj, rt.symIterator)
+		m, e := rt.getElement(obj, rt.symIterator) // GetMethod(obj, @@iterator)
 		if e != nil {
 			return mkundef(), e
 		}
-		if rt.isCallable(m) {
+		if !m.IsNullish() {
+			// A present but non-callable @@iterator is a TypeError, not a fallback.
+			if !rt.isCallable(m) {
+				return mkundef(), rt.typeError("[Symbol.iterator] is not a function")
+			}
 			it, e := rt.callValue(m, obj, nil)
 			if e != nil {
 				return mkundef(), e
@@ -206,6 +210,7 @@ func (rt *Runtime) getIteratorFlattenable(obj Value) (Value, *ThrowError) {
 			return it, nil
 		}
 	}
+	// No (or nullish) @@iterator: obj is itself the iterator (GetIteratorDirect).
 	return obj, nil
 }
 
@@ -226,7 +231,31 @@ func (rt *Runtime) sliceIterator(vs []Value) Value {
 // every/find). Values are materialized eagerly.
 func (rt *Runtime) initIteratorHelpers() {
 	proto := rt.objPtr(rt.iteratorProto)
-	drain := func(this Value) ([]Value, *ThrowError) { return rt.iterableValues(this) }
+	// drain materializes an iterator via GetIteratorDirect (read "next" on the
+	// receiver and step it) rather than @@iterator: the reducer-style helpers
+	// (toArray/forEach/reduce/some/every/find) operate on `this` as the iterator
+	// itself, which need not be iterable.
+	drain := func(this Value) ([]Value, *ThrowError) {
+		if !this.IsObjectType() {
+			return nil, rt.typeError("Iterator.prototype method called on a non-object")
+		}
+		next, e := rt.getField(this, "next")
+		if e != nil {
+			return nil, e
+		}
+		var out []Value
+		for {
+			v, d, se := rt.iterStepValue(this, next)
+			if se != nil {
+				return nil, se
+			}
+			if d {
+				break
+			}
+			out = append(out, v)
+		}
+		return out, nil
+	}
 
 	// %IteratorHelperPrototype%: the [[Prototype]] of a map/filter/take/drop/
 	// flatMap result, tagged "Iterator Helper".
