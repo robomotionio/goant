@@ -829,6 +829,19 @@ restart:
 			pop()
 			push(mkundef())
 			ip++
+		case OpImport:
+			// Dynamic import(specifier, options). The specifier is coerced to a
+			// string; import() never throws synchronously — a bad specifier or an
+			// (as yet) unsupported module load rejects the returned promise instead.
+			pop() // options / import attributes (unused pending a module loader)
+			specifier := pop()
+			if spec, e := rt.toStringValue(specifier); e != nil {
+				push(rt.rejectedPromise(e.Value))
+			} else {
+				_ = spec
+				push(rt.rejectedPromise(rt.typeError("dynamic module import is not supported").Value))
+			}
+			ip++
 		case OpDelete:
 			key := pop()
 			obj := pop()

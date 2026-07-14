@@ -659,6 +659,16 @@ func (c *compiler) compileExpr(n *Node) {
 	case NAwait:
 		c.compileExpr(n.Right)
 		c.emit(OpAwait)
+	case NImport:
+		// Dynamic import(): evaluate the specifier (and optional options/attributes
+		// argument), then OpImport produces the module-request promise.
+		c.compileExpr(n.Right)
+		if n.Left != nil {
+			c.compileExpr(n.Left)
+		} else {
+			c.emit(OpUndef)
+		}
+		c.emit(OpImport)
 	default:
 		c.errorf("unsupported expression kind %v (slice)", n.Kind)
 	}
