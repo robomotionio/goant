@@ -478,9 +478,42 @@ func (c *compiler) emitInstanceFieldInit() {
 	}
 }
 
+// collectClassPrivateNames returns the set of private names (with leading '#')
+// declared directly in a class body.
+func collectClassPrivateNames(n *Node) map[string]bool {
+	var names map[string]bool
+	for _, m := range n.Args {
+		if m == nil || m.Kind != NMethod || !isPrivateMemberProp(m.Left) {
+			continue
+		}
+		if names == nil {
+			names = map[string]bool{}
+		}
+		names[m.Left.Str] = true
+	}
+	return names
+}
+
+// privateNameDeclared reports whether a private name is declared in the class
+// body currently being compiled or in any enclosing one.
+func (c *compiler) privateNameDeclared(name string) bool {
+	for e := c; e != nil; e = e.enclosing {
+		if e.classPrivateNames[name] {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *compiler) compileClass(n *Node) {
 	ctorSlot := c.tempLocal()
 	protoSlot := c.tempLocal()
+
+	// Establish this class's private environment for the member/body compilation
+	// below (but not the heritage, compiled first). Restored on exit so sibling
+	// and enclosing code cannot see these private names.
+	savedPriv := c.classPrivateNames
+	defer func() { c.classPrivateNames = savedPriv }()
 
 	// A named class has an inner, immutable binding of its own name scoped to the
 	// class body: methods close over it, and it is unaffected by reassignment of
@@ -548,6 +581,10 @@ func (c *compiler) compileClass(n *Node) {
 		c.patchJump(doneP)
 		c.emitOpU16(OpPutLocal, uint16(superProtoSlot))
 	}
+
+	// The private environment is now in scope for the constructor, members, field
+	// initializers, and static blocks (the heritage above was compiled without it).
+	c.classPrivateNames = collectClassPrivateNames(n)
 
 	// Collect instance fields and hand them to the constructor so it initializes
 	// them per-instance (base: at entry; derived: after super()). They are NOT
