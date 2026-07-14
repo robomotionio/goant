@@ -24,25 +24,10 @@ func (c *compiler) destructureTarget(pattern *Node, kind VarKind) {
 	case NIdent:
 		c.bindDeclName(pattern.Str, kind)
 	case NArray:
-		// A pattern with a rest element consumes the whole iterator (done at the
-		// end, nothing to close), so materializing is fine; otherwise drive the
-		// iterator lazily and close it when not exhausted (7.4.6 / destructuring
-		// iterator-closing).
-		hasRest := false
-		for _, e := range pattern.Args {
-			if e != nil && (e.Kind == NRest || e.Kind == NSpread) {
-				hasRest = true
-				break
-			}
-		}
-		if hasRest {
-			src := c.tempLocal()
-			c.emit(OpForOf)
-			c.emitOpU16(OpPutLocal, uint16(src))
-			c.destructureArray(pattern, src, kind)
-		} else {
-			c.destructureArrayIter(pattern, kind)
-		}
+		// Drive the iterator lazily (one next() per element, a rest element draining
+		// the remainder into a fresh array) and close it on an abrupt or trailing
+		// completion when it isn't already exhausted (7.4.6 iterator-closing).
+		c.destructureArrayIter(pattern, kind)
 	case NObject:
 		src := c.tempLocal()
 		c.emitOpU16(OpPutLocal, uint16(src))
@@ -89,6 +74,33 @@ func (c *compiler) destructureArrayIter(pattern *Node, kind VarKind) {
 		if elem.Kind == NEmpty {
 			c.emitIterStep(iterSlot, resSlot, doneSlot)
 			c.emit(OpPop) // hole: consume one step and discard
+			continue
+		}
+		if elem.Kind == NRest || elem.Kind == NSpread {
+			// Rest element (always last): drain the remaining values into a fresh
+			// array — arr[arr.length] = value until the iterator is done — then
+			// assign it. Draining leaves the iterator done, so no close follows.
+			restSlot := c.tempLocal()
+			c.emit(OpArray)
+			c.emitU16(0)
+			c.emitOpU16(OpPutLocal, uint16(restSlot))
+			vSlot := c.tempLocal()
+			loopStart := len(c.fn.code)
+			c.emitIterStep(iterSlot, resSlot, doneSlot) // [value | undefined]
+			c.emitOpU16(OpGetLocal, uint16(doneSlot))
+			restDone := c.emitJump(OpJmpTrue) // done: [undefined] left on the stack
+			c.emitOpU16(OpPutLocal, uint16(vSlot))
+			c.emitOpU16(OpGetLocal, uint16(restSlot))
+			c.emitOpU16(OpGetLocal, uint16(restSlot))
+			c.emit(OpGetLength)
+			c.emitOpU16(OpGetLocal, uint16(vSlot))
+			c.emit(OpPutElem)
+			c.emit(OpJmp)
+			c.emitU32(uint32(loopStart))
+			c.patchJump(restDone)
+			c.emit(OpPop) // discard the trailing undefined
+			c.emitOpU16(OpGetLocal, uint16(restSlot))
+			c.destructureTarget(elem.Right, kind)
 			continue
 		}
 		target, defExpr := elem, (*Node)(nil)
