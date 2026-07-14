@@ -474,6 +474,7 @@ func (p *jsonParser) skipWS() {
 // an object/array (composite) exposes none.
 type jsonSrc struct {
 	text      string              // source substring for this value
+	val       Value               // the value as parsed (context.source is exposed only while holder[key] still SameValue-equals this)
 	composite bool                // an object or array (no context.source)
 	props     map[string]*jsonSrc // object entries by key
 	elems     []*jsonSrc          // array element records, by index
@@ -490,7 +491,7 @@ func (p *jsonParser) parse() (Value, *jsonSrc, error) {
 		if err != nil {
 			return mkundef(), nil, err
 		}
-		return v, &jsonSrc{text: p.src[start:p.pos]}, nil
+		return v, &jsonSrc{text: p.src[start:p.pos], val: v}, nil
 	}
 	c := p.src[p.pos]
 	switch {
@@ -786,7 +787,7 @@ func (rt *Runtime) jsonRevive(holder Value, key string, reviver Value, src *json
 	// present only for a primitive value that came straight from the parse (a
 	// composite value, or one created/replaced during revival, has none).
 	ctx := rt.newPlainObject()
-	if src != nil && !src.composite && !(val.IsObjectType() || val.Type() == TArr) {
+	if src != nil && !src.composite && rt.sameValue(src.val, val) {
 		rt.objPtr(ctx).defineOwn("source", rt.newString(src.text), attrDefault)
 	}
 	return rt.callValue(reviver, holder, []Value{rt.newString(key), val, ctx})
