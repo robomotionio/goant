@@ -226,13 +226,18 @@ func (rt *Runtime) ordinaryHasInstance(c, o Value) (bool, *ThrowError) {
 	if !protoV.IsObjectType() {
 		return false, rt.typeError("prototype is not an object")
 	}
-	target := rt.objPtr(protoV)
-	for cur := rt.objPtr(o); cur != nil; {
-		if !cur.proto.IsObjectType() {
-			break
+	// Walk O's prototype chain via [[GetPrototypeOf]] so a Proxy in the chain
+	// fires its trap (and its invariants) rather than exposing the raw target.
+	cur := o
+	for depth := 0; depth < maxProtoChainDepth; depth++ {
+		next, e := rt.getPrototypeOfValue(cur)
+		if e != nil {
+			return false, e
 		}
-		next := rt.objPtr(cur.proto)
-		if next == target {
+		if next.IsNull() {
+			return false, nil
+		}
+		if rt.sameValue(next, protoV) {
 			return true, nil
 		}
 		cur = next
