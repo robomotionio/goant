@@ -10,16 +10,24 @@ const (
 	dispKindUse   = 2 // value[@@dispose]()     — value receiver, no argument
 )
 
+// Brands distinguishing the two stacks: a sync method must reject an async stack
+// (and vice versa), since RequireInternalSlot checks the specific internal slot.
+const (
+	brandDisposableStack      = 1003
+	brandAsyncDisposableStack = 1004
+)
+
 // stackState returns a DisposableStack's records array, or an error if `this`
-// is not a (live) stack. disposed reports the disposed flag.
-func (rt *Runtime) stackState(this Value) (o *object, entries Value, disposed bool, err *ThrowError) {
+// is not a (live) stack of the expected brand. disposed reports the disposed
+// flag.
+func (rt *Runtime) stackState(this Value, brand int) (o *object, entries Value, disposed bool, err *ThrowError) {
 	o = rt.objPtr(this)
-	if o == nil {
-		return nil, mkundef(), false, rt.typeError("not a DisposableStack")
+	if o == nil || o.brandID() != brand {
+		return nil, mkundef(), false, rt.typeError("receiver does not have the required internal slot")
 	}
 	entries = o.getSlot(slotEntries)
 	if entries == 0 || !entries.IsObjectType() {
-		return nil, mkundef(), false, rt.typeError("not a DisposableStack")
+		return nil, mkundef(), false, rt.typeError("receiver does not have the required internal slot")
 	}
 	return o, entries, rt.toBoolean(o.getSlot(slotData)), nil
 }
@@ -81,6 +89,11 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 	po := rt.objPtr(proto)
 	rt.setStringTag(proto, name)
 
+	brand := brandDisposableStack
+	if async {
+		brand = brandAsyncDisposableStack
+	}
+
 	ctor := rt.newNativeFunc(name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if !rt.constructing() {
 			return mkundef(), rt.typeError("Constructor " + name + " requires 'new'")
@@ -89,6 +102,12 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 		if o == nil {
 			return mkundef(), rt.typeError("Constructor " + name + " requires 'new'")
 		}
+		pr, e := rt.newTargetProtoE(proto)
+		if e != nil {
+			return mkundef(), e
+		}
+		o.proto = pr
+		o.setSlot(slotBrand, mknum(float64(brand)))
 		o.setSlot(slotEntries, rt.newArray())
 		o.setSlot(slotData, mkbool(false))
 		return this, nil
@@ -98,7 +117,7 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 
 	// use(value): register value's own [@@dispose]/[@@asyncDispose]; returns value.
 	rt.defMethod(po, "use", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o, entries, disposed, e := rt.stackState(this)
+		o, entries, disposed, e := rt.stackState(this, brand)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -120,7 +139,7 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 
 	// adopt(value, onDispose): register onDispose(value); returns value.
 	rt.defMethod(po, "adopt", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		_, entries, disposed, e := rt.stackState(this)
+		_, entries, disposed, e := rt.stackState(this, brand)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -138,7 +157,7 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 
 	// defer(onDispose): register onDispose(); returns undefined.
 	rt.defMethod(po, "defer", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		_, entries, disposed, e := rt.stackState(this)
+		_, entries, disposed, e := rt.stackState(this, brand)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -155,7 +174,7 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 
 	// move(): transfer resources to a new stack; the old stack is emptied+disposed.
 	rt.defMethod(po, "move", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o, entries, disposed, e := rt.stackState(this)
+		o, entries, disposed, e := rt.stackState(this, brand)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -164,6 +183,7 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 		}
 		ns := rt.newObject(proto)
 		no := rt.objPtr(ns)
+		no.setSlot(slotBrand, mknum(float64(brand)))
 		no.setSlot(slotEntries, entries)
 		no.setSlot(slotData, mkbool(false))
 		o.setSlot(slotEntries, rt.newArray())
@@ -171,11 +191,11 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 		return ns, nil
 	})
 
-	// disposed getter.
+	// disposed getter (RequireInternalSlot: the receiver must be this brand).
 	getter := rt.newNativeFunc("get disposed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil {
-			return mkundef(), rt.typeError("not a " + name)
+		if o == nil || o.brandID() != brand {
+			return mkundef(), rt.typeError("receiver does not have the required internal slot")
 		}
 		return mkbool(rt.toBoolean(o.getSlot(slotData))), nil
 	})
@@ -183,7 +203,7 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 
 	if async {
 		disposeAsync := func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			o, entries, disposed, e := rt.stackState(this)
+			o, entries, disposed, e := rt.stackState(this, brand)
 			if e != nil {
 				return rt.rejectedPromise(e.Value), nil
 			}
@@ -193,13 +213,16 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 			o.setSlot(slotData, mkbool(true))
 			return rt.disposeStackAsync(entries), nil
 		}
-		rt.defMethod(po, "disposeAsync", 0, disposeAsync)
+		disposeAsyncFn := rt.newNativeFunc("disposeAsync", 0, disposeAsync)
+		po.defineOwn("disposeAsync", disposeAsyncFn, attrWritable|attrConfigurable)
 		if rt.symAsyncDispose != 0 {
-			po.defineOwnSymbol(rt.symAsyncDispose.handle(), rt.newNativeFunc("[Symbol.asyncDispose]", 0, disposeAsync), attrWritable|attrConfigurable)
+			// %AsyncDisposableStack.prototype%[@@asyncDispose] is the same function
+			// object as disposeAsync.
+			po.defineOwnSymbol(rt.symAsyncDispose.handle(), disposeAsyncFn, attrWritable|attrConfigurable)
 		}
 	} else {
 		dispose := func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			o, entries, disposed, e := rt.stackState(this)
+			o, entries, disposed, e := rt.stackState(this, brand)
 			if e != nil {
 				return mkundef(), e
 			}
@@ -219,9 +242,12 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 			}
 			return mkundef(), nil
 		}
-		rt.defMethod(po, "dispose", 0, dispose)
+		disposeFn := rt.newNativeFunc("dispose", 0, dispose)
+		po.defineOwn("dispose", disposeFn, attrWritable|attrConfigurable)
 		if rt.symDispose != 0 {
-			po.defineOwnSymbol(rt.symDispose.handle(), rt.newNativeFunc("[Symbol.dispose]", 0, dispose), attrWritable|attrConfigurable)
+			// %DisposableStack.prototype%[@@dispose] is the same function object as
+			// dispose.
+			po.defineOwnSymbol(rt.symDispose.handle(), disposeFn, attrWritable|attrConfigurable)
 		}
 	}
 
