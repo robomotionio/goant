@@ -312,15 +312,16 @@ func (rt *Runtime) initStringBuiltin() {
 		return rt.newString(jsToLowerCase(b)), nil
 	})
 	// isWellFormed / toWellFormed (ES2024): a string is well-formed iff it has no
-	// lone surrogates. goant stores strings as WTF-8, so a well-formed string is
-	// exactly a valid-UTF-8 one; toWellFormed replaces each lone surrogate with
-	// U+FFFD.
+	// UNPAIRED surrogate code units. goant stores strings as WTF-8, but a surrogate
+	// pair formed by concatenation ("\uD83D"+"\uDCA9") is stored as two lone-surrogate
+	// encodings, so utf8.Valid is not sufficient — the units must be paired.
+	// toWellFormed replaces each unpaired surrogate with U+FFFD.
 	rt.defMethod(proto, "isWellFormed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		return mkbool(utf8.Valid(b)), nil
+		return mkbool(wtf8WellFormed(b)), nil
 	})
 	rt.defMethod(proto, "toWellFormed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
@@ -762,6 +763,34 @@ func clampIndex(i, n int) int {
 
 // utf16IndexOf returns the UTF-16 index of sub in b at or after `from` (-1 if
 // absent). Implemented via byte search then offset conversion.
+// wtf8WellFormed reports whether the WTF-8 bytes b contain no unpaired UTF-16
+// surrogate: every high surrogate is immediately followed by a low surrogate and
+// there is no lone low surrogate. A concatenation-formed pair (stored as two
+// lone-surrogate encodings) counts as well-formed.
+func wtf8WellFormed(b []byte) bool {
+	i := 0
+	for i < len(b) {
+		slen, _, cp := wtf8Decode(b, i)
+		switch {
+		case cp >= 0xD800 && cp <= 0xDBFF: // high surrogate: require a following low
+			ni := i + slen
+			if ni >= len(b) {
+				return false
+			}
+			nslen, _, ncp := wtf8Decode(b, ni)
+			if ncp < 0xDC00 || ncp > 0xDFFF {
+				return false
+			}
+			i = ni + nslen
+		case cp >= 0xDC00 && cp <= 0xDFFF: // lone low surrogate
+			return false
+		default:
+			i += slen
+		}
+	}
+	return true
+}
+
 // utf16TruncateUnits returns the first n UTF-16 code units of b (WTF-8). If the
 // boundary at n falls inside a surrogate pair (an astral code point), the pair
 // is split and only its lone high surrogate is emitted — String padding truncates
