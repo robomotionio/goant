@@ -24,9 +24,12 @@ const (
 )
 
 // genMsg travels coroutine -> driver: a yielded value, or terminal completion.
+// await distinguishes an `await` suspension from a `yield` (the async-generator
+// driver awaits the former and re-yields the latter).
 type genMsg struct {
 	value Value
 	done  bool
+	await bool
 	err   *ThrowError
 }
 
@@ -49,6 +52,21 @@ type genState struct {
 	started   bool
 	completed bool
 	genDepth  int
+
+	// asyncReqs is the async-generator request queue (AsyncGeneratorRequest
+	// records): next/return/throw calls are serviced one at a time, since an
+	// internal `await` returns control to the microtask queue mid-step.
+	asyncReqs   []asyncGenReq
+	asyncActive bool
+}
+
+// asyncGenReq is one pending async-generator next/return/throw call and the
+// promise that settles it.
+type asyncGenReq struct {
+	kind genResumeKind
+	val  Value
+	p    Value
+	po   *object
 }
 
 // newGenState allocates a fresh (unstarted) coroutine state.
@@ -117,9 +135,9 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 // suspend is invoked from the interpreter (OpYield/OpAwait) to hand `value` to
 // the driver and block until resumed. It returns the resume value or, for a
 // throw/return injection, signals the interpreter to unwind.
-func (rt *Runtime) suspend(value Value) (resumed Value, inject *genResume) {
+func (rt *Runtime) suspend(value Value, isAwait bool) (resumed Value, inject *genResume) {
 	g := rt.curGen
-	g.fromGen <- genMsg{value: value, done: false}
+	g.fromGen <- genMsg{value: value, await: isAwait, done: false}
 	r := <-g.toGen
 	if r.kind == genNext {
 		return r.val, nil
@@ -208,6 +226,65 @@ func (rt *Runtime) initGeneratorBuiltin() {
 	if rt.symToStringTag != 0 {
 		po.defineOwnSymbol(rt.symToStringTag.handle(), rt.newString("Generator"), attrConfigurable)
 	}
+}
+
+// ---- async generators ----
+
+// asyncGenDrain services the front async-generator request when the coroutine
+// is idle (one request at a time; an internal `await` returns to the microtask
+// queue mid-step).
+func (rt *Runtime) asyncGenDrain(g *genState) {
+	if g.asyncActive || len(g.asyncReqs) == 0 {
+		return
+	}
+	g.asyncActive = true
+	req := g.asyncReqs[0]
+	rt.asyncGenStep(g, req.kind, req.val)
+}
+
+// asyncGenStep resumes the coroutine: on a completion it settles the front
+// request; on an `await`/`yield` it awaits the operand, then resumes the body
+// (await) or delivers the awaited value to the consumer (yield).
+func (rt *Runtime) asyncGenStep(g *genState, kind genResumeKind, val Value) {
+	m := rt.genDrive(g, kind, val)
+	req := g.asyncReqs[0]
+	if m.err != nil {
+		rt.rejectPromise(req.po, m.err.Value)
+		rt.asyncGenFinishReq(g)
+		return
+	}
+	if m.done {
+		rt.resolvePromise(req.p, req.po, rt.genResult(m.value, true))
+		rt.asyncGenFinishReq(g)
+		return
+	}
+	// Both `await x` and `yield x` first Await(x); await rejection resumes the
+	// body with a throw at the suspension point.
+	resume := m.await
+	awaited := rt.resolvedPromise(m.value)
+	onF := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+		if resume {
+			rt.asyncGenStep(g, genNext, arg(a, 0))
+		} else {
+			rt.resolvePromise(req.p, req.po, rt.genResult(arg(a, 0), false))
+			rt.asyncGenFinishReq(g)
+		}
+		return mkundef(), nil
+	})
+	onR := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+		rt.asyncGenStep(g, genThrow, arg(a, 0))
+		return mkundef(), nil
+	})
+	rt.promiseThen(onF, onR, rt.objPtr(awaited))
+}
+
+// asyncGenFinishReq dequeues the settled request and services the next.
+func (rt *Runtime) asyncGenFinishReq(g *genState) {
+	if len(g.asyncReqs) > 0 {
+		g.asyncReqs = g.asyncReqs[1:]
+	}
+	g.asyncActive = false
+	rt.asyncGenDrain(g)
 }
 
 // ---- async functions ----

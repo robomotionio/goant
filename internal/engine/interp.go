@@ -931,7 +931,15 @@ restart:
 			// outer generator is resumed (next/throw/return) to inner.next / throw /
 			// return, and re-yielding each produced value. Leaves the delegate's
 			// final value on the stack.
-			inner, e := rt.getSyncIterator(pop())
+			// In an async generator `yield* x` delegates to x's async iterator
+			// (falling back to a wrapped sync iterator) and awaits each inner result.
+			var inner Value
+			var e *ThrowError
+			if fn.isAsync {
+				inner, e = rt.getAsyncIterator(pop())
+			} else {
+				inner, e = rt.getSyncIterator(pop())
+			}
 			if e != nil {
 				thrown = e
 				goto unwind
@@ -973,6 +981,25 @@ restart:
 					thrown = re
 					goto unwind
 				}
+				if fn.isAsync {
+					// Await the inner iterator result (it is a promise). A throw/return
+					// injected during the await propagates out of the delegation.
+					ares, ainj := rt.suspend(result, true)
+					if ainj != nil {
+						if ainj.kind == genThrow {
+							thrown = &ThrowError{Value: ainj.val, rt: rt}
+							goto unwind
+						}
+						if fip, ok := doReturn(ainj.val); ok {
+							ip = fip
+							ipSet = true
+							break yieldStar
+						}
+						closeAll()
+						return ainj.val, nil
+					}
+					result = ares
+				}
 				if !result.IsObjectType() {
 					thrown = rt.typeError("iterator result is not an object")
 					goto unwind
@@ -993,7 +1020,7 @@ restart:
 					push(value)
 					break
 				}
-				resumed, inject := rt.suspend(value)
+				resumed, inject := rt.suspend(value, false)
 				sent, kind = resumed, genNext
 				if inject != nil {
 					sent, kind = inject.val, inject.kind
@@ -1005,8 +1032,9 @@ restart:
 		case OpYield, OpAwait:
 			// Suspend this coroutine, handing the operand to its driver and
 			// blocking until resumed. A throw/return injection unwinds instead of
-			// producing a resume value.
-			resumed, inject := rt.suspend(pop())
+			// producing a resume value. The await flag lets an async-generator
+			// driver await the operand rather than re-yielding it.
+			resumed, inject := rt.suspend(pop(), op == OpAwait)
 			if inject != nil {
 				switch inject.kind {
 				case genThrow:

@@ -224,11 +224,10 @@ func (rt *Runtime) initAsyncIterator() {
 			if o == nil || o.gen == nil {
 				return rt.rejectedPromise(rt.makeError(rt.errors.typeProto, "TypeError", "not an async generator")), nil
 			}
-			m := rt.genDrive(o.gen, kind, arg(args, 0))
-			if m.err != nil {
-				return rt.rejectedPromise(m.err.Value), nil
-			}
-			return rt.resolvedPromise(rt.genResult(m.value, m.done)), nil
+			p, po := rt.makePromise()
+			o.gen.asyncReqs = append(o.gen.asyncReqs, asyncGenReq{kind: kind, val: arg(args, 0), p: p, po: po})
+			rt.asyncGenDrain(o.gen)
+			return p, nil
 		}
 	}
 	rt.defMethod(ao, "next", 1, drive(genNext))
