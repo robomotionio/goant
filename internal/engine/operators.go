@@ -197,6 +197,42 @@ func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
 	return rt.hasProp(obj, name), nil
 }
 
+// ordinaryHasInstance implements OrdinaryHasInstance(C, O): a non-callable C is
+// false; a bound function chases its [[BoundTargetFunction]]; otherwise O's
+// prototype chain is searched for C.prototype (a non-object C.prototype throws).
+func (rt *Runtime) ordinaryHasInstance(c, o Value) (bool, *ThrowError) {
+	if !rt.isCallable(c) {
+		return false, nil
+	}
+	if co := rt.objPtr(c); co != nil {
+		if bt := co.getSlot(slotTargetFunc); bt.IsObjectType() {
+			return rt.jsInstanceof(o, bt)
+		}
+	}
+	if !o.IsObjectLike() {
+		return false, nil
+	}
+	protoV, e := rt.getField(c, "prototype")
+	if e != nil {
+		return false, e
+	}
+	if !protoV.IsObjectType() {
+		return false, rt.typeError("prototype is not an object")
+	}
+	target := rt.objPtr(protoV)
+	for cur := rt.objPtr(o); cur != nil; {
+		if !cur.proto.IsObjectType() {
+			break
+		}
+		next := rt.objPtr(cur.proto)
+		if next == target {
+			return true, nil
+		}
+		cur = next
+	}
+	return false, nil
+}
+
 // jsInstanceof implements the `instanceof` operator via the ordinary
 // [[HasInstance]] on a callable's .prototype (Symbol.hasInstance lands in
 // Phase 5).

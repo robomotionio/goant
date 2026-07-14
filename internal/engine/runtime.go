@@ -203,6 +203,7 @@ func New() *Runtime {
 	// Symbol + %IteratorPrototype% must precede any builtin that installs a
 	// [Symbol.iterator] method (Array/String/Collections).
 	rt.initSymbolBuiltin()
+	rt.installFunctionHasInstance() // needs %Symbol.hasInstance% (registered above)
 	rt.initIteratorProto()
 	// %AsyncFunction.prototype% / %GeneratorFunction.prototype% (proto chain +
 	// Symbol.toStringTag) for async/generator function objects.

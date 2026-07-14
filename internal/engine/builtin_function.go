@@ -5,6 +5,22 @@ import "strings"
 // Function constructor + Function.prototype (ant builtin_function): call, apply,
 // bind, toString. Function.prototype is itself callable (returns undefined).
 
+// installFunctionHasInstance defines Function.prototype[@@hasInstance] once the
+// well-known symbols exist (OrdinaryHasInstance; non-writable/enumerable/config).
+func (rt *Runtime) installFunctionHasInstance() {
+	if rt.symHasInstance == 0 {
+		return
+	}
+	fn := rt.newNativeFunc("[Symbol.hasInstance]", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		ok, e := rt.ordinaryHasInstance(this, arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		return mkbool(ok), nil
+	})
+	rt.objPtr(rt.functionProto).defineOwnSymbol(rt.symHasInstance.handle(), fn, 0)
+}
+
 func (rt *Runtime) initFunctionBuiltin() {
 	proto := rt.objPtr(rt.functionProto)
 	// Function.prototype is a callable no-op (ant behavior).
@@ -66,10 +82,12 @@ func (rt *Runtime) initFunctionBuiltin() {
 			return rt.callValue(target, boundThis, full)
 		})
 		// A bound function's [[Prototype]] is the target's [[Prototype]] (19.2.3.2),
-		// and it has [[Construct]] iff the target does.
+		// and it has [[Construct]] iff the target does. [[BoundTargetFunction]] lets
+		// @@hasInstance chase the target.
 		if to := rt.objPtr(target); to != nil {
 			rt.objPtr(bound).proto = to.proto
 		}
+		rt.objPtr(bound).setSlot(slotTargetFunc, target)
 		rt.objPtr(bound).flags.isConstructor = rt.isConstructorValue(target)
 		// Spec order: SetFunctionLength first (HasOwnProperty then Get "length"),
 		// then SetFunctionName (Get "name"). Both Gets are observable via a trap.
