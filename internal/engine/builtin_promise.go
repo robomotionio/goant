@@ -487,13 +487,46 @@ func (rt *Runtime) initPromiseBuiltin() {
 	rt.defGlobal("Promise", ctor)
 }
 
+// promiseResolveFn reads the receiver's own "resolve" (Get(C, "resolve"), which
+// must be callable) — used by the combinators to turn each element into a
+// promise via C.resolve, so a subclass's overridden resolve is honored. On
+// failure it rejects the result promise and returns ok=false.
+func (rt *Runtime) promiseResolveFn(C, rejectFn Value) (Value, bool) {
+	r, e := rt.getField(C, "resolve")
+	if e != nil {
+		rt.callValue(rejectFn, mkundef(), []Value{e.Value})
+		return mkundef(), false
+	}
+	if !rt.isCallable(r) {
+		rt.callValue(rejectFn, mkundef(), []Value{rt.typeError("Promise.resolve is not a function").Value})
+		return mkundef(), false
+	}
+	return r, true
+}
+
+// invokePromiseThen performs Invoke(p, "then", [onF, onR]) observably (used per
+// element by the combinators so a thenable's `then` is read and called).
+func (rt *Runtime) invokePromiseThen(p, onF, onR Value) *ThrowError {
+	thenFn, e := rt.getField(p, "then")
+	if e != nil {
+		return e
+	}
+	_, e = rt.callValue(thenFn, p, []Value{onF, onR})
+	return e
+}
+
 // promiseAll implements Promise.all / Promise.allSettled. The result promise is
 // built from the receiver C (NewPromiseCapability), so a Promise subclass gets a
-// subclass instance back.
+// subclass instance back; each element goes through C.resolve(...).then(...),
+// and every resolve/reject element function fulfills at most once.
 func (rt *Runtime) promiseAll(C, iterable Value, settled bool) (Value, *ThrowError) {
 	result, resolveFn, rejectFn, e := rt.newPromiseCapability(C)
 	if e != nil {
 		return mkundef(), e
+	}
+	promiseResolve, ok := rt.promiseResolveFn(C, rejectFn)
+	if !ok {
+		return result, nil
 	}
 	vals, e := rt.iterableValues(iterable)
 	if e != nil {
@@ -510,18 +543,27 @@ func (rt *Runtime) promiseAll(C, iterable Value, settled bool) (Value, *ThrowErr
 		}
 	}
 	for i, v := range vals {
-		rt.arraySet(ra, uint32(i), mkundef())
-		p := rt.resolvedPromise(v)
-		po := rt.objPtr(p)
+		idx := i
+		rt.arraySet(ra, uint32(idx), mkundef())
+		nextP, ce := rt.callValue(promiseResolve, C, []Value{v})
+		if ce != nil {
+			rt.callValue(rejectFn, mkundef(), []Value{ce.Value})
+			return result, nil
+		}
+		alreadyCalled := false
 		onF := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			if alreadyCalled {
+				return mkundef(), nil
+			}
+			alreadyCalled = true
 			if settled {
 				o := rt.newPlainObject()
 				oo := rt.objPtr(o)
 				oo.defineOwn("status", rt.newString("fulfilled"), attrDefault)
 				oo.defineOwn("value", arg(a, 0), attrDefault)
-				rt.arraySet(ra, uint32(i), o)
+				rt.arraySet(ra, uint32(idx), o)
 			} else {
-				rt.arraySet(ra, uint32(i), arg(a, 0))
+				rt.arraySet(ra, uint32(idx), arg(a, 0))
 			}
 			tryFinish()
 			return mkundef(), nil
@@ -529,21 +571,25 @@ func (rt *Runtime) promiseAll(C, iterable Value, settled bool) (Value, *ThrowErr
 		var onR Value
 		if settled {
 			onR = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+				if alreadyCalled {
+					return mkundef(), nil
+				}
+				alreadyCalled = true
 				o := rt.newPlainObject()
 				oo := rt.objPtr(o)
 				oo.defineOwn("status", rt.newString("rejected"), attrDefault)
 				oo.defineOwn("reason", arg(a, 0), attrDefault)
-				rt.arraySet(ra, uint32(i), o)
+				rt.arraySet(ra, uint32(idx), o)
 				tryFinish()
 				return mkundef(), nil
 			})
 		} else {
-			onR = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				rt.callValue(rejectFn, mkundef(), []Value{arg(a, 0)})
-				return mkundef(), nil
-			})
+			onR = rejectFn // the shared reject settles the result on the first rejection
 		}
-		rt.promiseThen(onF, onR, po)
+		if te := rt.invokePromiseThen(nextP, onF, onR); te != nil {
+			rt.callValue(rejectFn, mkundef(), []Value{te.Value})
+			return result, nil
+		}
 	}
 	tryFinish()
 	return result, nil
@@ -556,6 +602,10 @@ func (rt *Runtime) promiseRace(C, iterable Value, any bool) (Value, *ThrowError)
 	if e != nil {
 		return mkundef(), e
 	}
+	promiseResolve, ok := rt.promiseResolveFn(C, rejectFn)
+	if !ok {
+		return result, nil
+	}
 	vals, e := rt.iterableValues(iterable)
 	if e != nil {
 		rt.callValue(rejectFn, mkundef(), []Value{e.Value}) // IfAbruptRejectPromise
@@ -565,16 +615,22 @@ func (rt *Runtime) promiseRace(C, iterable Value, any bool) (Value, *ThrowError)
 	errs := rt.newArray()
 	ea := rt.objPtr(errs)
 	for i, v := range vals {
-		p := rt.resolvedPromise(v)
-		po := rt.objPtr(p)
+		idx := i
+		nextP, ce := rt.callValue(promiseResolve, C, []Value{v})
+		if ce != nil {
+			rt.callValue(rejectFn, mkundef(), []Value{ce.Value})
+			return result, nil
+		}
 		var onF, onR Value
 		if any {
-			onF = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				rt.callValue(resolveFn, mkundef(), []Value{arg(a, 0)})
-				return mkundef(), nil
-			})
+			onF = resolveFn // the shared resolve settles on the first fulfillment
+			alreadyCalled := false
 			onR = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				rt.arraySet(ea, uint32(i), arg(a, 0))
+				if alreadyCalled {
+					return mkundef(), nil
+				}
+				alreadyCalled = true
+				rt.arraySet(ea, uint32(idx), arg(a, 0))
 				remaining--
 				if remaining == 0 {
 					agg := rt.makeError(rt.errors.aggProto, "AggregateError", "All promises were rejected")
@@ -586,16 +642,13 @@ func (rt *Runtime) promiseRace(C, iterable Value, any bool) (Value, *ThrowError)
 				return mkundef(), nil
 			})
 		} else {
-			onF = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				rt.callValue(resolveFn, mkundef(), []Value{arg(a, 0)})
-				return mkundef(), nil
-			})
-			onR = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				rt.callValue(rejectFn, mkundef(), []Value{arg(a, 0)})
-				return mkundef(), nil
-			})
+			// race: the shared resolve/reject settle on the first settlement.
+			onF, onR = resolveFn, rejectFn
 		}
-		rt.promiseThen(onF, onR, po)
+		if te := rt.invokePromiseThen(nextP, onF, onR); te != nil {
+			rt.callValue(rejectFn, mkundef(), []Value{te.Value})
+			return result, nil
+		}
 	}
 	if any && len(vals) == 0 {
 		agg := rt.makeError(rt.errors.aggProto, "AggregateError", "All promises were rejected")
