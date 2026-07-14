@@ -173,10 +173,12 @@ func (c *compiler) destructureObject(pattern *Node, src int, kind VarKind) {
 	c.patchJump(coercible)
 
 	var priorKeys []string
+	var computedKeySlots []int
 	for _, prop := range pattern.Args {
 		if prop.Kind == NSpread {
 			// {a, ...rest}: rest is a fresh object with src's enumerable own props
-			// minus the already-destructured keys.
+			// minus the already-destructured keys — both the static names and the
+			// runtime property keys of any computed properties.
 			c.emit(OpObject) // [restObj]
 			c.emit(OpDup)
 			c.emitOpU16(OpGetLocal, uint16(src))
@@ -186,6 +188,12 @@ func (c *compiler) destructureObject(pattern *Node, src int, kind VarKind) {
 			for _, k := range priorKeys {
 				c.emit(OpDup)
 				c.emitConst(c.rt.internString(k))
+				c.emit(OpDelete)
+				c.emit(OpPop)
+			}
+			for _, slot := range computedKeySlots {
+				c.emit(OpDup)
+				c.emitOpU16(OpGetLocal, uint16(slot))
 				c.emit(OpDelete)
 				c.emit(OpPop)
 			}
@@ -203,10 +211,17 @@ func (c *compiler) destructureObject(pattern *Node, src int, kind VarKind) {
 		}
 		nameDefaultTarget(target, defExpr)
 		if computed {
-			// { [expr]: target }: read src[ToPropertyKey(expr)].
+			// { [expr]: target }: read src[ToPropertyKey(expr)]. Evaluate the key
+			// once and remember the resulting property key so a trailing ...rest
+			// excludes it (a computed key may have side effects — no re-evaluation).
 			c.emitOpU16(OpGetLocal, uint16(src)) // [src]
 			c.compileExpr(prop.Left)             // [src, key]
-			c.emit(OpGetElem)                    // [val]
+			c.emit(OpToPropkey)                  // [src, propKey]
+			keySlot := c.addLocal("*restkey*", false)
+			c.emit(OpDup)                            // [src, propKey, propKey]
+			c.emitOpU16(OpPutLocal, uint16(keySlot)) // [src, propKey]
+			computedKeySlots = append(computedKeySlots, keySlot)
+			c.emit(OpGetElem) // [val]
 			c.applyDefault(defExpr)
 			c.destructureTarget(target, kind)
 			continue
