@@ -95,6 +95,19 @@ type jsonStringifier struct {
 	allow      map[string]bool
 	gap        string
 	indent     string
+	stack      []Value // objects/arrays currently being serialized (cycle detection)
+}
+
+// enterCycle pushes v onto the serialization stack, returning a TypeError if v
+// is already present (a cyclical structure). The returned func pops it.
+func (st *jsonStringifier) enterCycle(v Value) (func(), *ThrowError) {
+	for _, s := range st.stack {
+		if s == v {
+			return nil, st.rt.typeError("Converting circular structure to JSON")
+		}
+	}
+	st.stack = append(st.stack, v)
+	return func() { st.stack = st.stack[:len(st.stack)-1] }, nil
 }
 
 func (st *jsonStringifier) str(key string, holder Value, indent string) (string, bool, *ThrowError) {
@@ -154,6 +167,11 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 
 func (st *jsonStringifier) stringifyArray(v Value, indent string) (string, bool, *ThrowError) {
 	rt := st.rt
+	leave, e := st.enterCycle(v)
+	if e != nil {
+		return "", false, e
+	}
+	defer leave()
 	newIndent := indent + st.gap
 	n, e := rt.lengthOf(v)
 	if e != nil {
@@ -181,6 +199,11 @@ func (st *jsonStringifier) stringifyArray(v Value, indent string) (string, bool,
 
 func (st *jsonStringifier) stringifyObject(v Value, indent string) (string, bool, *ThrowError) {
 	rt := st.rt
+	leave, e := st.enterCycle(v)
+	if e != nil {
+		return "", false, e
+	}
+	defer leave()
 	o := rt.objPtr(v)
 	newIndent := indent + st.gap
 	var parts []string
