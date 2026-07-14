@@ -1219,6 +1219,13 @@ restart:
 
 		case OpReturn:
 			r := pop()
+			if fn.isDerivedCtor {
+				var e *ThrowError
+				if r, e = rt.derivedCtorReturn(r, locals[fn.thisSlot]); e != nil {
+					thrown = e
+					goto unwind
+				}
+			}
 			if fip, ok := doReturn(r); ok {
 				ip = fip
 				continue
@@ -1226,12 +1233,20 @@ restart:
 			closeAll()
 			return r, nil
 		case OpReturnUndef:
-			if fip, ok := doReturn(mkundef()); ok {
+			r := mkundef()
+			if fn.isDerivedCtor {
+				var e *ThrowError
+				if r, e = rt.derivedCtorReturn(r, locals[fn.thisSlot]); e != nil {
+					thrown = e
+					goto unwind
+				}
+			}
+			if fip, ok := doReturn(r); ok {
 				ip = fip
 				continue
 			}
 			closeAll()
-			return mkundef(), nil
+			return r, nil
 		case OpHalt:
 			closeAll()
 			return mkundef(), nil

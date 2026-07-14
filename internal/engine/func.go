@@ -36,6 +36,12 @@ type svFunc struct {
 	isGenerator bool
 	isClassCtor bool
 	isMethod    bool // concise method / getter / setter: no [[Construct]], no .prototype
+
+	// isDerivedCtor marks a derived class constructor: `this` starts in its TDZ
+	// (thisSlot holds tEmpty until super() binds it), and OpReturn enforces
+	// GetThisBinding / the object-or-undefined return-value rule.
+	isDerivedCtor bool
+	thisSlot      int // the *this* local slot for a non-arrow function (else 0)
 }
 
 // ---- bytecode emission (compiler side) ----

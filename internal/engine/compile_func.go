@@ -264,6 +264,7 @@ func (c *compiler) compileFunc(n *Node) {
 	// inherits them).
 	child.classFields = c.pendingClassFields
 	child.classDerived = c.pendingClassDerived
+	child.fn.isDerivedCtor = child.classDerived && child.fn.isClassCtor
 	c.pendingClassFields = nil
 	c.pendingClassDerived = false
 	child.compileFunctionBody(n)
@@ -407,7 +408,15 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	// enclosing one lexically via upvalue capture).
 	if n.Flags&fnArrow == 0 {
 		slot := c.declareVar("*this*", false)
-		c.emit(OpThis)
+		c.fn.thisSlot = slot
+		if c.fn.isDerivedCtor {
+			// A derived constructor's `this` is in its temporal dead zone until
+			// super() binds it: reading it before then (or an implicit/undefined
+			// return with no super()) throws a ReferenceError.
+			c.emit(OpEmpty)
+		} else {
+			c.emit(OpThis)
+		}
 		c.emitOpU16(OpPutLocal, uint16(slot))
 		// Bind new.target in *newtarget* so a nested arrow can capture it lexically
 		// (arrows have no new.target of their own). Only when referenced (in the

@@ -81,6 +81,23 @@ func (rt *Runtime) construct(fnVal Value, args []Value) (Value, *ThrowError) {
 	return rt.constructWithTarget(fnVal, args, fnVal)
 }
 
+// derivedCtorReturn applies a derived class constructor's [[Construct]]
+// result rule to a return value r, given the current `this` binding: an Object
+// is returned as-is; undefined resolves to GetThisBinding (a ReferenceError if
+// super() has not run); any other value is a TypeError.
+func (rt *Runtime) derivedCtorReturn(r, thisBinding Value) (Value, *ThrowError) {
+	if r.IsObjectType() || r.Type() == TTypedArray {
+		return r, nil
+	}
+	if !r.IsUndefined() {
+		return mkundef(), rt.typeError("Derived constructors may only return object or undefined")
+	}
+	if thisBinding.IsEmpty() {
+		return mkundef(), rt.referenceError("Must call super constructor in derived class before accessing 'this' or returning from derived constructor")
+	}
+	return thisBinding, nil
+}
+
 // boundArgsOf returns a fresh copy of a bound function's [[BoundArguments]]
 // (stored as a JS array in slotBoundArgs).
 func (rt *Runtime) boundArgsOf(o *object) []Value {
