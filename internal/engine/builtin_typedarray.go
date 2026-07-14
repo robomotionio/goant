@@ -1042,10 +1042,16 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 				}
 			}
 		}
+		// byteLength > requestedMaxByteLength is compared in the constructor,
+		// BEFORE AllocateArrayBuffer creates the object (options-maxbytelength-
+		// compared-before-object-creation).
+		if maxLen >= 0 && n > maxLen {
+			return mkundef(), rt.rangeError("ArrayBuffer length exceeds maxByteLength")
+		}
 		// AllocateArrayBuffer step 1: OrdinaryCreateFromConstructor (resolve the
 		// prototype, surfacing a throwing new.target.prototype getter) happens
 		// BEFORE CreateByteDataBlock's size check, so a bad prototype beats the
-		// allocation RangeError.
+		// allocation RangeError (data-allocation-after-object-creation).
 		ntProto, e := rt.newTargetProtoE(rt.arrayBufferProto)
 		if e != nil {
 			return mkundef(), e
@@ -1057,9 +1063,6 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 			}
 			buf = rt.newArrayBuffer(n)
 		} else {
-			if n > maxLen {
-				return mkundef(), rt.rangeError("ArrayBuffer length exceeds maxByteLength")
-			}
 			if maxLen > maxByteLen {
 				return mkundef(), rt.rangeError("ArrayBuffer allocation failed: maxByteLength too large")
 			}
