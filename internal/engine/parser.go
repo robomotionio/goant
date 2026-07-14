@@ -359,6 +359,10 @@ func (p *parser) parseBindingPattern() *Node {
 		p.consume()
 		return id
 	}
+	if isReservedWordTok(p.tok()) {
+		p.errorf("Unexpected reserved word")
+		return p.mk(NEmpty)
+	}
 	p.consume()
 	return p.mk(NEmpty)
 }
