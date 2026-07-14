@@ -139,7 +139,15 @@ func (rt *Runtime) initReflectBuiltin() {
 		if e := needObj(arg(args, 0), "get"); e != nil {
 			return mkundef(), e
 		}
-		return rt.getElement(arg(args, 0), arg(args, 1))
+		target := arg(args, 0)
+		// Reflect.get(target, key[, receiver]) performs target.[[Get]](key,
+		// receiver); receiver defaults to target. When a distinct receiver is
+		// supplied, any accessor found along target's chain must run with that
+		// receiver as its `this` (getSuperProp walks target's own chain first).
+		if len(args) > 2 && args[2] != target {
+			return rt.getSuperProp(target, arg(args, 1), args[2])
+		}
+		return rt.getElement(target, arg(args, 1))
 	})
 	rt.defMethod(ro, "set", 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if e := needObj(arg(args, 0), "set"); e != nil {
