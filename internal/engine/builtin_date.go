@@ -312,10 +312,14 @@ func (rt *Runtime) initDateBuiltin() {
 
 	// Date constructor.
 	ctor := rt.newNativeFunc("Date", 7, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		ms := rt.computeDateMs(args)
 		if !this.IsObjectType() {
-			// Called as a function: return a string (current time).
+			// Called as a function: return a string (current time). The arguments are
+			// ignored and not coerced.
 			return rt.newString(msToTime(float64(time.Now().UnixMilli())).Format("Mon Jan 02 2006 15:04:05 GMT+0000 (Coordinated Universal Time)")), nil
+		}
+		ms, e := rt.computeDateMs(args)
+		if e != nil {
+			return mkundef(), e
 		}
 		o := rt.objPtr(this)
 		o.boxed = mknum(ms)
@@ -329,7 +333,11 @@ func (rt *Runtime) initDateBuiltin() {
 		return mknum(float64(time.Now().UnixMilli())), nil
 	})
 	rt.defMethod(cobj, "UTC", 7, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return mknum(rt.dateFromComponents(args)), nil
+		ms, e := rt.dateFromComponents(args)
+		if e != nil {
+			return mkundef(), e
+		}
+		return mknum(ms), nil
 	})
 	rt.defMethod(cobj, "parse", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.stringArg(args, 0)
@@ -369,52 +377,80 @@ func (rt *Runtime) setDateMs(this Value, ms float64) {
 	}
 }
 
-// computeDateMs derives the initial millisecond value from constructor args.
-func (rt *Runtime) computeDateMs(args []Value) float64 {
+// computeDateMs derives the initial millisecond value from constructor args,
+// propagating an abrupt ToPrimitive/ToNumber.
+func (rt *Runtime) computeDateMs(args []Value) (float64, *ThrowError) {
 	switch len(args) {
 	case 0:
-		return float64(time.Now().UnixMilli())
+		return float64(time.Now().UnixMilli()), nil
 	case 1:
 		a := args[0]
 		if a.IsString() {
-			return parseDate(string(rt.strBytes(a)))
+			return parseDate(string(rt.strBytes(a))), nil
 		}
 		if a.IsObjectType() {
-			p, _ := rt.toPrimitive(a, "default")
-			if p.IsString() {
-				return parseDate(string(rt.strBytes(p)))
+			p, e := rt.toPrimitive(a, "default")
+			if e != nil {
+				return 0, e
 			}
-			n, _ := rt.toNumberPrimitive(p)
-			return timeClip(n)
+			if p.IsString() {
+				return parseDate(string(rt.strBytes(p))), nil
+			}
+			a = p
 		}
-		n, _ := rt.toNumberPrimitive(a)
-		return timeClip(n)
+		n, e := rt.toNumber(a)
+		if e != nil {
+			return 0, e
+		}
+		return timeClip(n), nil
 	default:
 		return rt.dateFromComponents(args)
 	}
 }
 
-// dateFromComponents builds ms from (year, month, day, h, m, s, ms) args.
-func (rt *Runtime) dateFromComponents(args []Value) float64 {
-	get := func(i, dflt int) int {
+// dateFromComponents builds ms from (year, month, day, h, m, s, ms) args, as
+// used by Date.UTC and the 2-or-more-argument constructor. Every supplied
+// argument is ToNumber'd in order (exactly once, propagating abrupt
+// completions); the year (argument 0) is always read (undefined → NaN). A
+// non-finite component yields NaN.
+func (rt *Runtime) dateFromComponents(args []Value) (float64, *ThrowError) {
+	count := min(len(args), 7)
+	if count < 1 {
+		count = 1 // the year is always read
+	}
+	vals := make([]float64, count)
+	for i := 0; i < count; i++ {
+		a := mkundef()
 		if i < len(args) {
-			return rt.intArg(args, i)
+			a = args[i]
 		}
-		return dflt
+		x, e := rt.toNumber(a)
+		if e != nil {
+			return 0, e
+		}
+		vals[i] = x
 	}
-	year := get(0, 1970)
-	// Years 0..99 map to 1900..1999.
-	if year >= 0 && year <= 99 {
-		year += 1900
+	comp := func(i, dflt int) float64 {
+		if i < len(vals) {
+			return vals[i]
+		}
+		return float64(dflt)
 	}
-	month := get(1, 0)
-	day := get(2, 1)
-	hour := get(3, 0)
-	min := get(4, 0)
-	sec := get(5, 0)
-	msv := get(6, 0)
-	t := time.Date(year, time.Month(month+1), day, hour, min, sec, msv*1e6, time.UTC)
-	return timeClip(float64(t.UnixMilli()))
+	year := comp(0, 1970)
+	if !math.IsNaN(year) && !math.IsInf(year, 0) {
+		if iy := int(year); iy >= 0 && iy <= 99 { // MakeFullYear: 0..99 → 1900..1999
+			year = float64(1900 + iy)
+		}
+	}
+	month, day := comp(1, 0), comp(2, 1)
+	hour, minu, sec, msv := comp(3, 0), comp(4, 0), comp(5, 0), comp(6, 0)
+	for _, c := range []float64{year, month, day, hour, minu, sec, msv} {
+		if math.IsNaN(c) || math.IsInf(c, 0) {
+			return math.NaN(), nil
+		}
+	}
+	t := time.Date(int(year), time.Month(int(month)+1), int(day), int(hour), int(minu), int(sec), int(msv)*1e6, time.UTC)
+	return timeClip(float64(t.UnixMilli())), nil
 }
 
 // parseDate parses a date string (ISO 8601 + a few common formats).
