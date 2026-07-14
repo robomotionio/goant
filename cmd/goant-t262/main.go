@@ -418,8 +418,10 @@ func assemble(variant string, m meta, testSrc string, harness map[string]string,
 		b.WriteString(harness["sta.js"])
 		b.WriteByte('\n')
 		// Host-provided $262 hooks. detachArrayBuffer is implemented via the
-		// engine's ArrayBuffer.prototype.transfer, which detaches its source.
-		b.WriteString("var $262 = { detachArrayBuffer: function (b) { b.transfer(); } };\n")
+		// engine's ArrayBuffer.prototype.transfer, which detaches its source. The
+		// try/catch keeps it idempotent like DetachArrayBuffer: transfer() throws on
+		// an already-detached (or immutable) buffer, which we treat as a no-op.
+		b.WriteString("var $262 = { detachArrayBuffer: function (b) { try { b.transfer(); } catch (e) {} } };\n")
 		if m.isAsync {
 			b.WriteString(harness["doneprintHandle.js"])
 			b.WriteByte('\n')

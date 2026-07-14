@@ -860,6 +860,10 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 		if o == nil || !o.abObj {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.sliceToImmutable on incompatible receiver")
 		}
+		// Non-detachment is verified before the index arguments are coerced.
+		if o.abuf == nil {
+			return mkundef(), rt.typeError("Cannot slice a detached ArrayBuffer")
+		}
 		n := len(o.abuf)
 		ds, e := rt.toIntegerOrInfinity(arg(args, 0))
 		if e != nil {
@@ -974,6 +978,9 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 		}
 		if nbV == this {
 			return mkundef(), rt.typeError("ArrayBuffer species constructor returned the same ArrayBuffer")
+		}
+		if rt.abIsImmutable(nb) {
+			return mkundef(), rt.typeError("ArrayBuffer species constructor returned an immutable ArrayBuffer")
 		}
 		if len(nb.abuf) < newLen {
 			return mkundef(), rt.typeError("ArrayBuffer species constructor returned too small a buffer")
