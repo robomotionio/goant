@@ -34,7 +34,11 @@ func (rt *Runtime) initAnnexBObject() {
 			do.defineOwn(key, fn, attrDefault)
 			do.defineOwn("enumerable", mktrue(), attrDefault)
 			do.defineOwn("configurable", mktrue(), attrDefault)
-			if e := rt.objectDefinePropertyKey(obj, rt.toPropertyKeyValue(arg(args, 0)), desc); e != nil {
+			pk, e := rt.toPropertyKey(arg(args, 0)) // ToPropertyKey (propagating)
+			if e != nil {
+				return mkundef(), e
+			}
+			if e := rt.objectDefinePropertyKey(obj, pk, desc); e != nil {
 				return mkundef(), e
 			}
 			return mkundef(), nil
@@ -117,7 +121,13 @@ func (rt *Runtime) initAnnexBObject() {
 			return mkundef(), e
 		}
 		o := rt.objPtr(obj)
-		if o == nil || o.proto.IsNull() || o.proto == 0 {
+		if o == nil {
+			return mknull(), nil
+		}
+		if o.proxy != nil {
+			return rt.proxyGetPrototypeOf(o.proxy)
+		}
+		if o.proto.IsNull() || o.proto == 0 {
 			return mknull(), nil
 		}
 		return o.proto, nil
@@ -131,6 +141,9 @@ func (rt *Runtime) initAnnexBObject() {
 			return mkundef(), nil // a primitive value is a silent no-op
 		}
 		if o := rt.objPtr(this); o != nil {
+			if o.proxy != nil {
+				return mkundef(), rt.proxySetPrototypeOf(o.proxy, p)
+			}
 			if !rt.ordinarySetProto(o, p) {
 				return mkundef(), rt.typeError("Cannot set the prototype (non-extensible, immutable, or cyclic)")
 			}
