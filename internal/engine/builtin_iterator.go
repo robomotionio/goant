@@ -103,34 +103,37 @@ func (rt *Runtime) iterHelperCallback(this, cb Value, name string) (Value, Value
 	return next, cb, nil
 }
 
-// iterHelperLimit validates the receiver and a numeric limit for take/drop:
-// GetIteratorDirect, then ToNumber(limit) (closing the source on an abrupt
-// completion), rejecting NaN and negatives with a RangeError (closing first).
-// +∞ maps to an unbounded limit.
+// iterHelperLimit validates the receiver and a numeric limit for take/drop, in
+// spec order: ToNumber(limit) first (closing the source on an abrupt completion),
+// then reject NaN and a negative ToIntegerOrInfinity with a RangeError (closing
+// first), and only THEN GetIteratorDirect (read "next"). +∞ / a huge value maps
+// to an unbounded limit; a fractional value truncates toward zero.
 func (rt *Runtime) iterHelperLimit(this, limitArg Value) (Value, int, *ThrowError) {
 	if !this.IsObjectType() {
 		return mkundef(), 0, rt.typeError("Iterator.prototype method called on a non-object")
 	}
-	next, e := rt.getField(this, "next")
-	if e != nil {
-		return mkundef(), 0, e
-	}
 	num, e := rt.toNumber(limitArg)
 	if e != nil {
-		rt.iteratorClose(this)
+		rt.iteratorClose(this) // IfAbruptCloseIterator
 		return mkundef(), 0, e
 	}
 	if num != num { // NaN
 		rt.iteratorClose(this)
 		return mkundef(), 0, rt.rangeError("limit must not be NaN")
 	}
-	if num < 0 {
+	// ToIntegerOrInfinity truncates toward zero, so only a value ≤ -1 is negative
+	// (e.g. -0.5 becomes 0 and is accepted).
+	if num <= -1 {
 		rt.iteratorClose(this)
 		return mkundef(), 0, rt.rangeError("limit must not be negative")
 	}
+	next, e := rt.getField(this, "next") // GetIteratorDirect, after the limit is valid
+	if e != nil {
+		return mkundef(), 0, e
+	}
 	limit := int(^uint(0) >> 1) // +∞ (or huge) → effectively unbounded
 	if num < float64(limit) {
-		limit = int(num)
+		limit = int(num) // truncates toward zero
 	}
 	return next, limit, nil
 }
