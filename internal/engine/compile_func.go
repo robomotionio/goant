@@ -225,6 +225,16 @@ func (c *compiler) checkBlockDeclConflicts(list []*Node, blockScope bool) {
 			return
 		}
 	}
+	// A block-scoped (Annex B) FunctionDeclaration is also a LexicallyDeclaredName
+	// of the block, so its name colliding with a VarDeclaredName is an early error
+	// too: `{ function f(){} var f; }` / `switch(x){case 1: function f(){}
+	// default: var f}`. (Two function declarations of the same name are allowed.)
+	for nm := range plainFn {
+		if varNames[nm] {
+			fail(nm)
+			return
+		}
+	}
 }
 
 // hoistLexicals pre-declares the let/const bindings of a statement list at the
