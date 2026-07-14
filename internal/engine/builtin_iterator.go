@@ -42,14 +42,23 @@ func (rt *Runtime) newIteratorObjectE(source Value, done *bool, next func() (Val
 	}
 	v := rt.newObject(proto)
 	o := rt.objPtr(v)
+	running := false // guards re-entrant next while the helper generator is executing
 	rt.defMethod(o, "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if running {
+			return mkundef(), rt.typeError("Iterator helper is already running")
+		}
+		running = true
 		val, d, e := next()
+		running = false
 		if e != nil {
 			return mkundef(), e
 		}
 		return rt.genResult(val, d), nil
 	})
 	rt.defMethod(o, "return", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if running {
+			return mkundef(), rt.typeError("Iterator helper is already running")
+		}
 		if !*done {
 			*done = true
 			if e := rt.iteratorCloseE(source); e != nil {
