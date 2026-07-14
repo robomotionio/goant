@@ -460,8 +460,44 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 		return rt.proxySet(o.proxy, rt.toPropertyKeyValue(key), v, obj)
 	}
 	if key.IsSymbol() {
+		// Ordinary [[Set]] for a symbol key: walk the chain for an accessor (call
+		// its setter) or a Proxy; honor a non-writable data property (reject); an
+		// own writable data property is updated in place (preserving its
+		// attributes); otherwise a fresh own data property is created on obj.
+		sym := key.handle()
+		for cur := obj; ; {
+			o := rt.objPtr(cur)
+			if o == nil {
+				break
+			}
+			if o.proxy != nil {
+				return rt.proxySet(o.proxy, key, v, obj)
+			}
+			if slot := o.shape.lookupSymbol(sym); slot >= 0 {
+				if o.isAccessorSlot(uint32(slot)) {
+					p := o.shape.propAt(uint32(slot))
+					if p.hasSetter {
+						_, e := rt.callValue(p.setter, obj, []Value{v})
+						return e
+					}
+					return nil // setter-less accessor: rejected
+				}
+				if o.shape.attrsAt(uint32(slot))&attrWritable == 0 {
+					return nil // non-writable data property: rejected
+				}
+				if cur == obj {
+					o.slotSet(uint32(slot), v) // own writable: update value in place
+					return nil
+				}
+				break // inherited writable data: create an own property on obj
+			}
+			cur = o.proto
+		}
 		if o := rt.objPtr(obj); o != nil {
-			o.defineOwnSymbol(key.handle(), v, attrDefault)
+			if !o.flags.extensible {
+				return nil // cannot add to a non-extensible object
+			}
+			o.defineOwnSymbol(sym, v, attrDefault)
 		}
 		return nil
 	}
