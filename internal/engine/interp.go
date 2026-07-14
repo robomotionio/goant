@@ -151,11 +151,16 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	}
 
 restart:
-	// In sloppy mode a nullish `this` is coerced to the global object; strict
-	// functions keep it as-is (strict.this-undefined-in-function).
+	// OrdinaryCallBindThis for a non-strict function: a nullish `this` becomes the
+	// global object, and a primitive `this` is boxed via ToObject. Strict
+	// functions keep `this` as-is (strict.this-undefined-in-function).
 	rt.frameStrict = fn.isStrict
-	if !fn.isStrict && thisVal.IsNullish() {
-		thisVal = rt.global
+	if !fn.isStrict {
+		if thisVal.IsNullish() {
+			thisVal = rt.global
+		} else if !thisVal.IsObjectType() && thisVal.Type() != TTypedArray {
+			thisVal, _ = rt.toObjectValue(thisVal) // non-nullish: cannot error
+		}
 	}
 	// new.target for this invocation: set by construct just before the call and
 	// consumed here so nested ordinary calls see undefined.
