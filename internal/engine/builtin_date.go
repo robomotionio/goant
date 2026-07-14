@@ -112,7 +112,9 @@ func (rt *Runtime) initDateBuiltin() {
 			base := ms
 			if math.IsNaN(ms) {
 				if !nanToZero {
-					rt.setDateMs(this, math.NaN())
+					// t (the time value read before ToNumber) is NaN: return NaN
+					// without writing [[DateValue]], so a valueOf side effect that
+					// changed the date during argument coercion persists.
 					return mknum(math.NaN()), nil
 				}
 				base = 0
