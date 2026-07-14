@@ -63,7 +63,20 @@ func (c *compiler) compileLabel(n *Node) {
 	_ = l
 }
 
+// resetCompletion seeds the script/eval completion slot with undefined. An
+// if / switch / iteration statement's value is UpdateEmpty(inner, undefined), so
+// it never carries a preceding statement's completion value; its compiler calls
+// this before the body may set the slot. (A Block, by contrast, does carry the
+// value, so it does not reset.)
+func (c *compiler) resetCompletion() {
+	if c.isScript {
+		c.emit(OpUndef)
+		c.emitOpU16(OpPutLocal, uint16(c.completionSlot))
+	}
+}
+
 func (c *compiler) compileWhile(n *Node) {
+	c.resetCompletion()
 	l := c.pushLoop(c.consumeLabel(), false)
 	loopStart := len(c.fn.code)
 	l.continueTarget = loopStart
@@ -78,6 +91,7 @@ func (c *compiler) compileWhile(n *Node) {
 }
 
 func (c *compiler) compileDoWhile(n *Node) {
+	c.resetCompletion()
 	l := c.pushLoop(c.consumeLabel(), false)
 	loopStart := len(c.fn.code)
 	c.compileStmt(n.Body)
@@ -91,6 +105,7 @@ func (c *compiler) compileDoWhile(n *Node) {
 
 func (c *compiler) compileFor(n *Node) {
 	c.checkForHeadDecl(n.Init, n.Body)
+	c.resetCompletion()
 	c.scopeDepth++
 	// Initializer (a declaration or expression statement).
 	lexSlot := -1
@@ -155,6 +170,7 @@ func (c *compiler) compileForIn(n *Node) {
 // its return() (IteratorClose). Normal exhaustion does not close (already done).
 func (c *compiler) compileForOf(n *Node) {
 	c.checkForHeadDecl(n.Left, n.Body)
+	c.resetCompletion()
 	// `for (using x of iter)` disposes each element at the end of its iteration.
 	// Rewrite to `for (const $tmp of iter) { using x = $tmp; body }` so the body's
 	// using-block drives the per-iteration disposal.
@@ -250,6 +266,7 @@ func (c *compiler) compileForOf(n *Node) {
 // an async function/generator (OpAwait suspends the coroutine).
 func (c *compiler) compileForAwaitOf(n *Node) {
 	c.checkForHeadDecl(n.Left, n.Body)
+	c.resetCompletion()
 	c.scopeDepth++
 	store, lexSlot := c.forInStore(n.Left)
 	if store == nil {
@@ -301,6 +318,7 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 // compileForArray implements the shared for-in/for-of lowering: produceOp turns
 // the source into an array (keys or values), which is then iterated by index.
 func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
+	c.resetCompletion()
 	c.scopeDepth++
 	store, lexSlot := c.forInStore(n.Left)
 	if store == nil {
@@ -553,13 +571,9 @@ func (c *compiler) compileSwitch(n *Node) {
 	c.emitOpU16(OpPutLocal, uint16(discSlot))
 
 	// A switch statement's value is UpdateEmpty(CaseBlockEvaluation, undefined):
-	// it never carries a preceding statement's completion value, so seed the
-	// completion slot with undefined before any clause may set it (`1; switch(x){}`
+	// it never carries a preceding statement's completion value (`1; switch(x){}`
 	// completes with undefined, not 1).
-	if c.isScript {
-		c.emit(OpUndef)
-		c.emitOpU16(OpPutLocal, uint16(c.completionSlot))
-	}
+	c.resetCompletion()
 
 	// The clauses of a switch share a single lexical (CaseBlock) scope, so their
 	// let/const/class bindings are hoisted together — a name declared in two

@@ -528,6 +528,7 @@ func (c *compiler) compileVarDecl(n *Node) {
 }
 
 func (c *compiler) compileIf(n *Node) {
+	c.resetCompletion()
 	c.compileExpr(n.Cond)
 	elseJump := c.emitJump(OpJmpFalse)
 	c.compileIfBranch(n.Left)
