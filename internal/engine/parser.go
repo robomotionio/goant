@@ -1631,6 +1631,20 @@ func (p *parser) parseUnary() *Node {
 	return p.parsePostfix()
 }
 
+// isBareLogicalOp reports whether n is an un-parenthesized binary expression
+// whose operator is one of ops — used to forbid mixing `??` with `&&`/`||`.
+func isBareLogicalOp(n *Node, ops ...Token) bool {
+	if n == nil || n.Kind != NBinary || n.Flags&fnParen != 0 {
+		return false
+	}
+	for _, op := range ops {
+		if n.Op == op {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *parser) parseBinary(minPrec int) *Node {
 	left := p.parseUnary()
 	for {
@@ -1655,6 +1669,18 @@ func (p *parser) parseBinary(minPrec int) *Node {
 		bin.Op = op
 		bin.Left = left
 		bin.Right = right
+		// `??` may not be combined with `&&` or `||` at the same level without
+		// parentheses (`a ?? b && c`, `a || b ?? c` are early SyntaxErrors).
+		mixed := false
+		if op == TokNullish {
+			mixed = isBareLogicalOp(bin.Left, TokLand, TokLor) || isBareLogicalOp(bin.Right, TokLand, TokLor)
+		} else if op == TokLand || op == TokLor {
+			mixed = isBareLogicalOp(bin.Left, TokNullish) || isBareLogicalOp(bin.Right, TokNullish)
+		}
+		if mixed {
+			p.errorf("'??' cannot be mixed with '&&' or '||'; wrap an operand in parentheses")
+			return p.mk(NEmpty)
+		}
 		left = bin
 	}
 	return left
