@@ -318,6 +318,43 @@ func collectVarFuncNames(stmts []*Node, out map[string]bool) {
 	}
 }
 
+// collectBindingNames adds every identifier bound by a binding target — a plain
+// name or an array/object destructuring pattern (with defaults and rest) — to
+// out. Used so `var` names in a pattern are hoisted (pre-declared) like a plain
+// `var name`, which strict-mode resolution requires.
+func collectBindingNames(pat *Node, out map[string]bool) {
+	if pat == nil {
+		return
+	}
+	switch pat.Kind {
+	case NIdent:
+		out[pat.Str] = true
+	case NArray:
+		for _, e := range pat.Args {
+			collectBindingNames(e, out)
+		}
+	case NObject:
+		for _, prop := range pat.Args {
+			if prop == nil {
+				continue
+			}
+			if prop.Kind == NSpread || prop.Kind == NRest {
+				collectBindingNames(prop.Right, out)
+				continue
+			}
+			collectBindingNames(prop.Right, out)
+		}
+	case NAssignPat:
+		collectBindingNames(pat.Left, out)
+	case NAssign:
+		if pat.Op == TokAssign {
+			collectBindingNames(pat.Left, out)
+		}
+	case NRest, NSpread:
+		collectBindingNames(pat.Right, out)
+	}
+}
+
 func collectVarFuncNamesNode(n *Node, out map[string]bool) {
 	if n == nil {
 		return
@@ -330,8 +367,8 @@ func collectVarFuncNamesNode(n *Node, out map[string]bool) {
 	case NVar:
 		if n.VarKind == VarVar {
 			for _, d := range n.Args {
-				if d != nil && d.Left != nil && d.Left.Kind == NIdent {
-					out[d.Left.Str] = true
+				if d != nil {
+					collectBindingNames(d.Left, out)
 				}
 			}
 		}
