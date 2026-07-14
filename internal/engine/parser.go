@@ -589,6 +589,26 @@ func (p *parser) checkArrowEarlyErrors(fn *Node) {
 	if bodyHasUseStrict(fn.Body) && hasNonSimpleParams(fn) {
 		p.errorf("Illegal 'use strict' directive in function with non-simple parameter list")
 	}
+	// Arrow parameters come from a parenthesized cover grammar, so the rest and
+	// destructuring-pattern early errors are validated here rather than in parseFunc.
+	for i, param := range fn.Args {
+		switch param.Kind {
+		case NRest:
+			if i != len(fn.Args)-1 {
+				p.errorf("Rest parameter must be the last formal parameter")
+			}
+			if param.Right != nil && (param.Right.Kind == NAssign || param.Right.Kind == NAssignPat) {
+				p.errorf("A rest parameter may not have a default initializer")
+			}
+			p.validatePatternTarget(param.Right)
+		case NArray:
+			p.validateArrayPattern(param)
+		case NObject:
+			p.validateObjectPattern(param)
+		case NAssignPat:
+			p.validatePatternTarget(param.Left)
+		}
+	}
 }
 
 // parseArrowBody parses a concise-body arrow tail. An async arrow establishes
