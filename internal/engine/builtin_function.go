@@ -1,6 +1,9 @@
 package engine
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 // Function constructor + Function.prototype (ant builtin_function): call, apply,
 // bind, toString. Function.prototype is itself callable (returns undefined).
@@ -86,35 +89,57 @@ func (rt *Runtime) initFunctionBuiltin() {
 			return rt.callValue(target, boundThis, full)
 		})
 		// A bound function's [[Prototype]] is the target's [[Prototype]] (19.2.3.2),
-		// and it has [[Construct]] iff the target does. [[BoundTargetFunction]] lets
-		// @@hasInstance chase the target.
+		// and it has [[Construct]] iff the target does. [[BoundTargetFunction]] /
+		// [[BoundThis]] / [[BoundArguments]] let @@hasInstance chase the target and
+		// [[Construct]] forward to it (constructWithTarget reads these slots).
+		bo := rt.objPtr(bound)
 		if to := rt.objPtr(target); to != nil {
-			rt.objPtr(bound).proto = to.proto
+			bo.proto = to.proto
 		}
-		rt.objPtr(bound).setSlot(slotTargetFunc, target)
-		rt.objPtr(bound).flags.isConstructor = rt.isConstructorValue(target)
+		bo.setSlot(slotTargetFunc, target)
+		bo.setSlot(slotBoundThis, boundThis)
+		argsArr := rt.newArray()
+		aa := rt.objPtr(argsArr)
+		for _, a := range boundArgs {
+			rt.arraySet(aa, aa.arrLen, a)
+		}
+		bo.setSlot(slotBoundArgs, argsArr)
+		bo.flags.isConstructor = rt.isConstructorValue(target)
 		// Spec order: SetFunctionLength first (HasOwnProperty then Get "length"),
 		// then SetFunctionName (Get "name"). Both Gets are observable via a trap.
-		tlen := 0
+		// SetFunctionLength allows an infinite length: +∞ stays +∞, -∞/NaN → 0,
+		// otherwise max(ToIntegerOrInfinity(len) - boundArgs, 0).
+		L := 0.0
 		if has, e := rt.hasOwnPropertyOf(target, "length"); e != nil {
 			return mkundef(), e
 		} else if has {
-			if lv, e := rt.getField(target, "length"); e == nil && lv.Type() == TNum {
-				tlen = int(lv.Number())
+			lv, e := rt.getField(target, "length")
+			if e != nil {
+				return mkundef(), e
+			}
+			if lv.Type() == TNum {
+				tl := lv.Number()
+				switch {
+				case math.IsInf(tl, 1):
+					L = math.Inf(1)
+				case math.IsInf(tl, -1) || tl != tl: // -∞ or NaN
+					L = 0
+				default:
+					L = math.Trunc(tl) - float64(len(boundArgs))
+					if L <= 0 { // also normalizes -0 to +0
+						L = 0
+					}
+				}
 			}
 		}
-		blen := tlen - len(boundArgs)
-		if blen < 0 {
-			blen = 0
-		}
-		rt.objPtr(bound).defineOwn("length", mknum(float64(blen)), attrConfigurable)
+		bo.defineOwn("length", mknum(L), attrConfigurable)
 		targetName := ""
 		if nv, e := rt.getField(target, "name"); e != nil {
 			return mkundef(), e
 		} else if nv.IsString() {
 			targetName = string(rt.strBytes(nv))
 		}
-		rt.objPtr(bound).defineOwn("name", rt.internString("bound "+targetName), attrConfigurable)
+		bo.defineOwn("name", rt.internString("bound "+targetName), attrConfigurable)
 		return bound, nil
 	})
 

@@ -81,6 +81,22 @@ func (rt *Runtime) construct(fnVal Value, args []Value) (Value, *ThrowError) {
 	return rt.constructWithTarget(fnVal, args, fnVal)
 }
 
+// boundArgsOf returns a fresh copy of a bound function's [[BoundArguments]]
+// (stored as a JS array in slotBoundArgs).
+func (rt *Runtime) boundArgsOf(o *object) []Value {
+	ao := rt.objPtr(o.getSlot(slotBoundArgs))
+	if ao == nil {
+		return nil
+	}
+	out := make([]Value, ao.arrLen)
+	for i := uint32(0); i < ao.arrLen; i++ {
+		if int(i) < len(ao.arr) {
+			out[i] = ao.arr[i]
+		}
+	}
+	return out
+}
+
 // isConstructorValue reports whether v has a [[Construct]] internal method
 // (IsConstructor). Ordinary function constructors, flagged native constructors,
 // and proxies wrapping a constructor qualify; methods, arrows, generators,
@@ -144,6 +160,19 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 			nt = fnVal
 		}
 		return rt.proxyConstruct(o.proxy, args, nt)
+	}
+	// A bound function forwards [[Construct]] to its [[BoundTargetFunction]] with
+	// [[BoundArguments]] prepended; when new.target is the bound function itself
+	// it is replaced by the target (BoundFunctionCreate's [[Construct]]).
+	if o.native != nil && o.flags.isConstructor {
+		if bt := o.getSlot(slotTargetFunc); bt.IsObjectType() {
+			full := append(rt.boundArgsOf(o), args...)
+			nt := newTarget
+			if nt == 0 || nt == fnVal {
+				nt = bt
+			}
+			return rt.constructWithTarget(bt, full, nt)
+		}
 	}
 	if cl := rt.closures.get(o.closure); cl != nil && (cl.fn.isGenerator || cl.fn.isAsync || cl.fn.isArrow || cl.fn.isMethod) {
 		nm := cl.fn.name

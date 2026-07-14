@@ -21,6 +21,8 @@ const (
 	slotAsyncGeneratorProto
 	slotAux
 	slotTargetFunc
+	slotBoundThis
+	slotBoundArgs
 	slotModuleCtx
 	slotMap
 	slotSet
