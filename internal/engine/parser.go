@@ -2162,7 +2162,13 @@ func (p *parser) parseClass() *Node {
 	}
 	if p.next() == TokIdentifier && p.tlen() == 7 && p.tokStr() == "extends" {
 		p.consume()
+		// All parts of a class definition are strict-mode code, including the
+		// ClassHeritage, so a nested function there is strict too (`class C extends
+		// (function(){ with ({}) {} }) {}` is a SyntaxError).
+		savedStrict := p.lx.strict
+		p.lx.strict = true
 		cls.Left = p.parseAssign()
+		p.lx.strict = savedStrict
 		// ClassHeritage is `extends LeftHandSideExpression`: an unparenthesized
 		// arrow (`class extends () => {}`) or a bare assignment is not one.
 		if h := cls.Left; h != nil && h.Flags&fnParen == 0 &&
