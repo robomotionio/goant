@@ -2588,8 +2588,15 @@ func (p *parser) parseFor() *Node {
 		n.Right = p.parseExpr()
 		p.expect(TokRParen)
 		n.Body = p.parseStmt()
-		if p.lx.strict && initNode != nil && initNode.Kind == NVar && varDeclHasInitializer(initNode) {
-			p.errorf("for-in loop variable declaration may not have an initializer in strict mode")
+		if initNode != nil && initNode.Kind == NVar && varDeclHasInitializer(initNode) {
+			// A for-in head declaration may not carry an initializer, except the
+			// sloppy-mode legacy form `var <Identifier> = init` (Annex B.3.6).
+			simpleVar := initNode.VarKind == VarVar && len(initNode.Args) == 1 &&
+				initNode.Args[0] != nil && initNode.Args[0].Left != nil &&
+				initNode.Args[0].Left.Kind == NIdent
+			if p.lx.strict || !simpleVar {
+				p.errorf("for-in loop variable declaration may not have an initializer")
+			}
 		}
 		if isForbiddenLoopBody(n.Body) {
 			p.errorf("Lexical declaration cannot appear in single-statement context")
@@ -2605,6 +2612,10 @@ func (p *parser) parseFor() *Node {
 		n := p.mk(kind)
 		n.Left = initNode
 		p.validateArrayPattern(initNode)
+		// A for-of head declaration may never carry an initializer.
+		if initNode != nil && initNode.Kind == NVar && varDeclHasInitializer(initNode) {
+			p.errorf("a for-of loop variable declaration may not have an initializer")
+		}
 		n.Right = p.parseAssign()
 		p.expect(TokRParen)
 		n.Body = p.parseStmt()
