@@ -93,7 +93,12 @@ func (rt *Runtime) getAsyncIterator(source Value) (Value, *ThrowError) {
 		if e != nil {
 			return mkundef(), e
 		}
-		if rt.isCallable(m) {
+		// GetMethod semantics: a present @@asyncIterator that is not callable is a
+		// TypeError (the sync-iterator fallback applies only when it is absent).
+		if !m.IsNullish() {
+			if !rt.isCallable(m) {
+				return mkundef(), rt.typeError("[Symbol.asyncIterator] is not a function")
+			}
 			it, e := rt.callValue(m, source, nil)
 			if e != nil {
 				return mkundef(), e
