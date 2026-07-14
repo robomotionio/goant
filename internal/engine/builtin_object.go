@@ -124,20 +124,7 @@ func (rt *Runtime) initObjectBuiltin() {
 	proto.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 
 	rt.defMethod(cobj, "keys", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		v := arg(args, 0)
-		if o := rt.objPtr(v); o != nil && o.proxy != nil {
-			keys, e := rt.enumerableOwnKeysE(v)
-			if e != nil {
-				return mkundef(), e
-			}
-			arr := rt.newArray()
-			ao := rt.objPtr(arr)
-			for _, k := range keys {
-				rt.arraySet(ao, ao.arrLen, rt.internString(k))
-			}
-			return arr, nil
-		}
-		return rt.objectKeys(v), nil
+		return rt.enumerableOwnProps(arg(args, 0), 0)
 	})
 	rt.defMethod(cobj, "getPrototypeOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		obj, e := rt.toObjectValue(arg(args, 0))
@@ -461,26 +448,10 @@ func (rt *Runtime) initObjectBuiltin() {
 		return obj, nil
 	})
 	rt.defMethod(cobj, "values", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		res := rt.newArray()
-		ro := rt.objPtr(res)
-		for _, k := range rt.enumerableOwnKeys(arg(args, 0)) {
-			v, _ := rt.getField(arg(args, 0), k)
-			rt.arraySet(ro, ro.arrLen, v)
-		}
-		return res, nil
+		return rt.enumerableOwnProps(arg(args, 0), 1)
 	})
 	rt.defMethod(cobj, "entries", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		res := rt.newArray()
-		ro := rt.objPtr(res)
-		for _, k := range rt.enumerableOwnKeys(arg(args, 0)) {
-			v, _ := rt.getField(arg(args, 0), k)
-			pair := rt.newArray()
-			po := rt.objPtr(pair)
-			rt.arraySet(po, 0, rt.internString(k))
-			rt.arraySet(po, 1, v)
-			rt.arraySet(ro, ro.arrLen, pair)
-		}
-		return res, nil
+		return rt.enumerableOwnProps(arg(args, 0), 2)
 	})
 	rt.defMethod(cobj, "fromEntries", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		res := rt.newPlainObject()
@@ -611,6 +582,53 @@ func (rt *Runtime) ownKeyValues(v Value) ([]Value, *ThrowError) {
 		keys = append(keys, mkval(TSymbol, uint64(off)))
 	}
 	return keys, nil
+}
+
+// enumerableOwnProps implements EnumerableOwnProperties for Object.keys/values/
+// entries (kind 0/1/2): ToObject, then for each own string key (snapshot) that
+// [[GetOwnProperty]] reports enumerable, collect the key / Get value / [key,val]
+// pair — so a getter that toggles a later key's enumerability is observed.
+func (rt *Runtime) enumerableOwnProps(v Value, kind int) (Value, *ThrowError) {
+	obj, e := rt.toObjectValue(v)
+	if e != nil {
+		return mkundef(), e
+	}
+	keys, e := rt.ownKeyValues(obj)
+	if e != nil {
+		return mkundef(), e
+	}
+	res := rt.newArray()
+	ro := rt.objPtr(res)
+	for _, key := range keys {
+		if key.IsSymbol() {
+			continue // string keys only
+		}
+		enum, exists, e := rt.ownKeyEnumerable(obj, key)
+		if e != nil {
+			return mkundef(), e
+		}
+		if !exists || !enum {
+			continue
+		}
+		if kind == 0 { // keys
+			rt.arraySet(ro, ro.arrLen, key)
+			continue
+		}
+		val, e := rt.getElement(obj, key)
+		if e != nil {
+			return mkundef(), e
+		}
+		if kind == 1 { // values
+			rt.arraySet(ro, ro.arrLen, val)
+			continue
+		}
+		pair := rt.newArray() // entries
+		po := rt.objPtr(pair)
+		rt.arraySet(po, 0, key)
+		rt.arraySet(po, 1, val)
+		rt.arraySet(ro, ro.arrLen, pair)
+	}
+	return res, nil
 }
 
 // ownKeyEnumerable reports whether key is an own enumerable property of v (and
