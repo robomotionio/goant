@@ -1983,12 +1983,28 @@ func (p *parser) parseClass() *Node {
 			p.consume()
 			p.next()
 			if p.tok() == TokLBrace {
-				savedStrict := p.lx.strict
+				// A class static block is strict, has a meaningful new.target
+				// (undefined), and reserves `await`; `yield`/`return` are already
+				// disallowed (strict reserves yield; the block is not a function body
+				// so a top-level return is illegal). `arguments` and an await
+				// expression are early errors, checked once the block is parsed.
+				savedStrict, savedNT := p.lx.strict, p.newTargetOK
+				savedAsync, savedGen := p.inAsync, p.inGenerator
 				p.lx.strict = true
+				p.newTargetOK = true
+				p.inAsync = true
+				p.inGenerator = false
 				block := p.parseBlock(false)
-				p.lx.strict = savedStrict
+				p.lx.strict, p.newTargetOK = savedStrict, savedNT
+				p.inAsync, p.inGenerator = savedAsync, savedGen
 				block.Kind = NStaticBlock
 				block.Flags = fnStatic | fnClassBody
+				if nodeContainsArguments(block) {
+					p.errorf("'arguments' is not allowed in a class static block")
+				}
+				if paramsContainYieldAwait([]*Node{block}, false, true) {
+					p.errorf("'await' is not allowed in a class static block")
+				}
 				cls.Args = append(cls.Args, block)
 				continue
 			}

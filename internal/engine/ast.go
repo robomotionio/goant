@@ -169,7 +169,7 @@ var exprStmtNodes = func() [nNodeCount]bool {
 		NTemplate, NRegexp, NIdent, NBinary, NUnary, NUpdate, NAssign, NTernary,
 		NCall, NNew, NMember, NOptional, NArray, NObject, NProperty, NSpread,
 		NSequence, NArrow, NYield, NAwait, NTypeof, NDelete, NVoid,
-		NTaggedTemplate, NImport,
+		NTaggedTemplate, NImport, NNewTarget,
 	} {
 		t[k] = true
 	}
