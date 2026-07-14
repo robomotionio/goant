@@ -113,7 +113,11 @@ func (p *parser) expect(t Token) {
 	p.next()
 	if p.tok() == t {
 		p.consume()
+		return
 	}
+	// A required token is missing: a genuine SyntaxError (e.g. `while 1 …` without
+	// parentheses). Only reported once (errorf keeps the first error).
+	p.errorf("Unexpected token")
 }
 
 func (p *parser) mkPlain(kind NodeKind) *Node { return &Node{Kind: kind} }
