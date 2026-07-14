@@ -213,10 +213,20 @@ func (c *compiler) compileForOf(n *Node) {
 	iterSlot := c.addLocal("*foi*", false)
 	c.emitOpU16(OpPutLocal, uint16(iterSlot))
 	resSlot := c.addLocal("*for*", false)
+	// needsClose gates IteratorClose: it is set for every abrupt completion
+	// (break past the loop, `return`, throw, a labelled continue that exits) but
+	// cleared on normal exhaustion (done === true), which must NOT call return().
+	closeSlot := c.addLocal("*foc*", false)
+	c.emit(OpTrue)
+	c.emitOpU16(OpPutLocal, uint16(closeSlot))
 
-	// A try-handler covers the loop so a throw in next()/the body closes the
-	// iterator before propagating.
-	catchHandler := c.emitJump(OpTryPush)
+	// A try-FINALLY wraps the loop so every abrupt completion routes through the
+	// finally via the interpreter's unwind machinery (doReturn / doJump / throw
+	// unwind), which then performs IteratorClose when needsClose is still set.
+	// This covers `return` and a labelled break/continue leaving the loop, not
+	// just the plain break handled by the inline landing below.
+	tryJump := c.emitJump(OpTryPushFinally)
+	c.unwindPush(unwTryFinally)
 
 	l := c.pushLoop(c.consumeLabel(), false)
 	condStart := len(c.fn.code)
@@ -229,7 +239,7 @@ func (c *compiler) compileForOf(n *Node) {
 	// if result.done: exit without closing (iterator already exhausted)
 	c.emitOpU16(OpGetLocal, uint16(resSlot))
 	c.emitFieldOp(OpGetField, "done")
-	normalExit := c.emitJump(OpJmpTrue)
+	exhausted := c.emitJump(OpJmpTrue)
 	// v = result.value
 	c.emitOpU16(OpGetLocal, uint16(resSlot))
 	c.emitFieldOp(OpGetField, "value")
@@ -245,29 +255,32 @@ func (c *compiler) compileForOf(n *Node) {
 	c.emit(OpJmp)
 	c.emitU32(uint32(condStart))
 
-	// break lands here (popLoop patches l.breaks here): pop the handler, close
-	// the iterator, jump to end.
+	// Normal exhaustion (done === true): clear needsClose, then fall through to
+	// the shared teardown that a plain break also lands on.
+	c.patchJump(exhausted)
+	c.emit(OpFalse)
+	c.emitOpU16(OpPutLocal, uint16(closeSlot))
+
+	// A plain break targeting this loop lands here (needsClose still set): pop
+	// the finally handler and fall into the finally, which closes the iterator.
 	c.popLoop()
 	c.emit(OpTryPop)
+	c.unwindPop()
+
+	// The finally block — entered on the normal/break fall-through and, via the
+	// unwind machinery, on throw/return/labelled-jump. Close the iterator when
+	// needsClose is set, then resume the pending completion (OpFinallyRet).
+	c.patchJump(tryJump)
+	finallyJump := c.emitJump(OpFinally)
+	c.unwindPush(unwFinallyBody)
+	c.emitOpU16(OpGetLocal, uint16(closeSlot))
+	skipClose := c.emitJump(OpJmpFalse)
 	c.emitOpU16(OpGetLocal, uint16(iterSlot))
 	c.emit(OpIterClose)
-	endBreak := c.emitJump(OpJmp)
-
-	// normal exhaustion: pop the handler (no close — already done), jump to end.
-	c.patchJump(normalExit)
-	c.emit(OpTryPop)
-	endDone := c.emitJump(OpJmp)
-
-	// throw: close the iterator, then re-throw the caught value.
-	c.patchJump(catchHandler)
-	c.emit(OpCatch)
-	c.emitU32(0)
-	c.emitOpU16(OpGetLocal, uint16(iterSlot))
-	c.emit(OpIterClose)
-	c.emit(OpThrow)
-
-	c.patchJump(endBreak)
-	c.patchJump(endDone)
+	c.patchJump(skipClose)
+	c.unwindPop()
+	c.emit(OpFinallyRet)
+	c.patchJump(finallyJump)
 
 	c.scopeDepth--
 	c.popBlockScope()
