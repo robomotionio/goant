@@ -717,6 +717,32 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	ro.defineOwn("index", mknum(float64(m.Index)), attrDefault)
 	ro.defineOwn("input", s, attrDefault)
 	ro.defineOwn("groups", groups, attrDefault)
+	// The `d` (hasIndices) flag adds an `indices` array of [start, end] pairs
+	// (undefined for an unmatched group) plus a matching `indices.groups`.
+	if strings.Contains(re.Flags, "d") {
+		indices := rt.newArray()
+		io := rt.objPtr(indices)
+		idxGroups := mkundef()
+		for i, g := range m.Groups {
+			pair := mkundef()
+			if g.Index >= 0 {
+				p := rt.newArray()
+				po := rt.objPtr(p)
+				rt.arraySet(po, 0, mknum(float64(g.Index)))
+				rt.arraySet(po, 1, mknum(float64(g.Index+g.Length)))
+				pair = p
+			}
+			rt.arraySet(io, uint32(i), pair)
+			if g.Name != "" && !allDigits(g.Name) {
+				if idxGroups.IsUndefined() {
+					idxGroups = rt.newObject(mknull())
+				}
+				rt.objPtr(idxGroups).defineOwn(g.Name, pair, attrDefault)
+			}
+		}
+		io.defineOwn("groups", idxGroups, attrDefault)
+		ro.defineOwn("indices", indices, attrDefault)
+	}
 	return res, nil
 }
 
