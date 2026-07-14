@@ -48,14 +48,17 @@ func (rt *Runtime) initNumberBuiltin() {
 		if !ok {
 			return mkundef(), rt.typeError("Number.prototype.toFixed requires a number")
 		}
-		digits := rt.intArg(args, 0)
-		if digits < 0 || digits > 100 {
+		f, e := rt.toIntegerOrInfinity(arg(args, 0)) // ToIntegerOrInfinity: throws on Symbol/BigInt
+		if e != nil {
+			return mkundef(), e
+		}
+		if f < 0 || f > 100 {
 			return mkundef(), rt.rangeError("toFixed() digits argument must be between 0 and 100")
 		}
 		if math.IsNaN(n) {
 			return rt.internString("NaN"), nil
 		}
-		return rt.newString(strconvFixed(n, digits)), nil
+		return rt.newString(strconvFixed(n, int(f))), nil
 	})
 
 	rt.defMethod(proto, "toExponential", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -63,19 +66,24 @@ func (rt *Runtime) initNumberBuiltin() {
 		if !ok {
 			return mkundef(), rt.typeError("Number.prototype.toExponential requires a number")
 		}
-		// A non-finite value returns before the fractionDigits range check (so
-		// NaN.toExponential(Infinity) yields "NaN", not a RangeError).
-		if math.IsNaN(n) || math.IsInf(n, 0) {
+		// fractionDigits is ToIntegerOrInfinity'd first (throwing on a Symbol/BigInt),
+		// before the non-finite value returns "NaN"/"Infinity" without a range check.
+		argv := arg(args, 0)
+		undef := argv.IsUndefined()
+		var d float64
+		if !undef {
+			var e *ThrowError
+			if d, e = rt.toIntegerOrInfinity(argv); e != nil {
+				return mkundef(), e
+			}
+		}
+		if math.IsNaN(n) || math.IsInf(n, 0) || undef {
 			return rt.newString(toExponentialStr(n, 0, false)), nil
 		}
-		if arg(args, 0).IsUndefined() {
-			return rt.newString(toExponentialStr(n, 0, false)), nil
-		}
-		d := rt.intArg(args, 0)
 		if d < 0 || d > 100 {
 			return mkundef(), rt.rangeError("toExponential() argument must be between 0 and 100")
 		}
-		return rt.newString(toExponentialStr(n, d, true)), nil
+		return rt.newString(toExponentialStr(n, int(d), true)), nil
 	})
 	rt.defMethod(proto, "toPrecision", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		n, ok := numOf(this)
@@ -85,11 +93,17 @@ func (rt *Runtime) initNumberBuiltin() {
 		if arg(args, 0).IsUndefined() {
 			return rt.newString(numberToString(n)), nil
 		}
-		p := rt.intArg(args, 0)
+		p, e := rt.toIntegerOrInfinity(arg(args, 0)) // throws on Symbol/BigInt
+		if e != nil {
+			return mkundef(), e
+		}
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return rt.newString(numberToString(n)), nil
+		}
 		if p < 1 || p > 100 {
 			return mkundef(), rt.rangeError("toPrecision() argument must be between 1 and 100")
 		}
-		return rt.newString(toPrecisionStr(n, p)), nil
+		return rt.newString(toPrecisionStr(n, int(p))), nil
 	})
 
 	rt.defMethod(proto, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
