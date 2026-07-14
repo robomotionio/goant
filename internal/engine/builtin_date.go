@@ -202,12 +202,18 @@ func (rt *Runtime) initDateBuiltin() {
 			if h := arg(args, 0); h.IsString() {
 				hint = string(rt.strBytes(h))
 			}
-			method := "toString"
-			if hint == "number" {
-				method = "valueOf"
+			// "string"/"default" try toString first; "number" tries valueOf first;
+			// any other hint is a TypeError. Date defaults to the string form.
+			tryFirst := ""
+			switch hint {
+			case "string", "default":
+				tryFirst = "string"
+			case "number":
+				tryFirst = "number"
+			default:
+				return mkundef(), rt.typeError("invalid hint passed to Date.prototype[Symbol.toPrimitive]")
 			}
-			fn, _ := rt.getField(this, method)
-			return rt.callValue(fn, this, nil)
+			return rt.ordinaryToPrimitive(this, tryFirst)
 		}), attrConfigurable)
 	}
 	rt.defMethod(proto, "toUTCString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

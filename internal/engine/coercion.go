@@ -101,6 +101,14 @@ func (rt *Runtime) toPrimitive(v Value, hint string) (Value, *ThrowError) {
 			return res, nil
 		}
 	}
+	return rt.ordinaryToPrimitive(v, hint)
+}
+
+// ordinaryToPrimitive implements OrdinaryToPrimitive(O, hint): try valueOf then
+// toString (or toString then valueOf when hint is "string"), skipping a
+// non-callable method and returning the first primitive result; a TypeError if
+// neither yields a primitive.
+func (rt *Runtime) ordinaryToPrimitive(v Value, hint string) (Value, *ThrowError) {
 	methods := [2]string{"valueOf", "toString"}
 	if hint == "string" {
 		methods = [2]string{"toString", "valueOf"}
