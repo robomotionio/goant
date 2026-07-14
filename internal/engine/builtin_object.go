@@ -467,36 +467,61 @@ func (rt *Runtime) initObjectBuiltin() {
 		return rt.enumerableOwnProps(arg(args, 0), 2)
 	})
 	rt.defMethod(cobj, "fromEntries", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		iterable := arg(args, 0)
+		if iterable.IsNullish() { // RequireObjectCoercible
+			return mkundef(), rt.typeError("Object.fromEntries called on null or undefined")
+		}
 		res := rt.newPlainObject()
 		o := rt.objPtr(res)
-		vals, e := rt.iterableValues(arg(args, 0))
+		// AddEntriesFromIterable: step one entry at a time, closing the iterator on
+		// any abrupt completion (a non-object entry, a throwing element get, or a
+		// throwing key coercion) rather than draining it eagerly.
+		iter, e := rt.getSyncIterator(iterable)
 		if e != nil {
 			return mkundef(), e
 		}
-		for _, entry := range vals {
+		nextMethod, e := rt.getField(iter, "next")
+		if e != nil {
+			return mkundef(), e
+		}
+		// closeAbrupt closes the iterator (best effort) and returns the pending error.
+		closeAbrupt := func(e *ThrowError) (Value, *ThrowError) {
+			rt.iteratorClose(iter)
+			return mkundef(), e
+		}
+		for {
+			entry, done, e := rt.iterStepValue(iter, nextMethod)
+			if e != nil {
+				return mkundef(), e // IteratorStep abrupt: the record is already closed
+			}
+			if done {
+				return res, nil
+			}
 			if !entry.IsObjectType() {
-				return mkundef(), rt.typeError("iterator value is not an entry object")
+				return closeAbrupt(rt.typeError("iterator value is not an entry object"))
 			}
 			k, e := rt.getElement(entry, mknum(0))
 			if e != nil {
-				return mkundef(), e
+				return closeAbrupt(e)
 			}
 			v, e := rt.getElement(entry, mknum(1))
 			if e != nil {
-				return mkundef(), e
+				return closeAbrupt(e)
 			}
-			// CreateDataPropertyOnObject with ToPropertyKey(k) (symbol keys allowed).
-			pk, e := rt.toPropertyKey(k)
+			pk, e := rt.toPropertyKey(k) // CreateDataPropertyOnObject: ToPropertyKey(k)
 			if e != nil {
-				return mkundef(), e
+				return closeAbrupt(e)
 			}
 			if pk.IsSymbol() {
 				o.defineOwnSymbol(pk.handle(), v, attrDefault)
 			} else {
-				o.defineOwn(string(rt.strBytes(pk)), v, attrDefault)
+				name, e := rt.propKeyString(pk)
+				if e != nil {
+					return closeAbrupt(e)
+				}
+				o.defineOwn(name, v, attrDefault)
 			}
 		}
-		return res, nil
 	})
 
 	rt.defGlobal("Object", ctor)
