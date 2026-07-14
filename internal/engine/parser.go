@@ -1274,6 +1274,10 @@ func (p *parser) parseObjectKey(prop *Node) {
 	case p.tok() == TokString:
 		prop.Left = p.mkStringFromTok()
 		p.consume()
+	case p.tok() == TokHash:
+		// A private name is only valid as a class element key, never in an object
+		// literal (`{ get #x(){} }`, `{ *#x(){} }`).
+		p.errorf("Private names are not allowed in object literals")
 	default:
 		prop.Left = p.mkIdentFromTok()
 		p.consume()
