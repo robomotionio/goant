@@ -7,6 +7,121 @@ import "strconv"
 // Object.* statics. Reflect methods return booleans for the [[Set]]-family ops
 // (never throw on rejection) and forward faithfully otherwise.
 
+// ownDescOf is [[GetOwnProperty]](P) for a non-proxy object, covering array/
+// typed-array/string-wrapper elements and the array "length" that ownDescriptor
+// (shape-only) misses.
+func (rt *Runtime) ownDescOf(o *object, pk Value) ownDesc {
+	if pk.IsSymbol() {
+		return o.ownDescriptorSym(pk.handle())
+	}
+	name := string(rt.strBytes(pk))
+	if idx, ok := canonicalIndex(name); ok {
+		switch {
+		case o.ta != nil:
+			if v, live := rt.taGet(o, int(idx)); live {
+				return ownDesc{exists: true, writable: true, enumerable: true, configable: true, value: v}
+			}
+			return ownDesc{}
+		case o.typeTag == TArr:
+			if idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
+				return ownDesc{exists: true, writable: true, enumerable: true, configable: true, value: o.arr[idx]}
+			}
+		case o.boxed.Type() == TStr:
+			b := rt.strBytes(o.boxed)
+			if int(idx) < utf16Len(b) {
+				return ownDesc{exists: true, writable: false, enumerable: true, configable: false, value: rt.charAt(b, int(idx))}
+			}
+		}
+	}
+	if name == "length" && o.typeTag == TArr {
+		return ownDesc{exists: true, writable: !o.flags.arrLenNonWritable, value: mknum(float64(o.arrLen))}
+	}
+	return o.ownDescriptor(name)
+}
+
+// reflectSet implements OrdinarySet(target, key, val, receiver) returning whether
+// the write took effect (Reflect.set's boolean), honoring the receiver.
+func (rt *Runtime) reflectSet(target, key, val, receiver Value) (bool, *ThrowError) {
+	pk, e := rt.toPropertyKey(key)
+	if e != nil {
+		return false, e
+	}
+	cur := target
+	for depth := 0; depth < maxProtoChainDepth; depth++ {
+		o := rt.objPtr(cur)
+		if o == nil {
+			break
+		}
+		if o.proxy != nil {
+			e := rt.proxySet(o.proxy, pk, val, receiver)
+			return e == nil, e
+		}
+		d := rt.ownDescOf(o, pk)
+		if d.exists {
+			if d.isAccessor {
+				if d.setter.IsUndefined() {
+					return false, nil
+				}
+				if _, e := rt.callValue(d.setter, receiver, []Value{val}); e != nil {
+					return false, e
+				}
+				return true, nil
+			}
+			if !d.writable || !receiver.IsObjectType() {
+				return false, nil
+			}
+			return rt.setDataOnReceiver(receiver, pk, val)
+		}
+		cur = o.proto
+	}
+	if !receiver.IsObjectType() {
+		return false, nil
+	}
+	return rt.setDataOnReceiver(receiver, pk, val)
+}
+
+// setDataOnReceiver writes val to receiver[pk] as a data property: updates an
+// existing writable data property (rejecting an accessor / non-writable one) or
+// creates a fresh one (rejecting a non-extensible receiver). Returns false when
+// rejected rather than throwing.
+func (rt *Runtime) setDataOnReceiver(receiver, pk, val Value) (bool, *ThrowError) {
+	ro := rt.objPtr(receiver)
+	if ro == nil {
+		return false, nil
+	}
+	if ro.proxy == nil {
+		ex := rt.ownDescOf(ro, pk)
+		if ex.exists {
+			if ex.isAccessor || !ex.writable {
+				return false, nil
+			}
+		} else if !ro.flags.extensible {
+			return false, nil
+		}
+		desc := rt.newPlainObject()
+		do := rt.objPtr(desc)
+		do.defineOwn("value", val, attrDefault)
+		if !ex.exists { // a new property is a full data descriptor
+			do.defineOwn("writable", mktrue(), attrDefault)
+			do.defineOwn("enumerable", mktrue(), attrDefault)
+			do.defineOwn("configurable", mktrue(), attrDefault)
+		}
+		if e := rt.objectDefinePropertyKey(receiver, pk, desc); e != nil {
+			return false, e
+		}
+		return true, nil
+	}
+	// Proxy receiver: define a data property via its trap.
+	desc := rt.newPlainObject()
+	do := rt.objPtr(desc)
+	do.defineOwn("value", val, attrDefault)
+	do.defineOwn("writable", mktrue(), attrDefault)
+	do.defineOwn("enumerable", mktrue(), attrDefault)
+	do.defineOwn("configurable", mktrue(), attrDefault)
+	e := rt.proxyDefineProperty(ro.proxy, pk, desc)
+	return e == nil, e
+}
+
 func (rt *Runtime) initReflectBuiltin() {
 	reflect := rt.newObject(rt.objectProto)
 	ro := rt.objPtr(reflect)
@@ -28,10 +143,15 @@ func (rt *Runtime) initReflectBuiltin() {
 		if e := needObj(arg(args, 0), "set"); e != nil {
 			return mkundef(), e
 		}
-		if e := rt.setElement(arg(args, 0), arg(args, 1), arg(args, 2)); e != nil {
-			return mkfalse(), nil
+		receiver := arg(args, 0)
+		if len(args) > 3 {
+			receiver = args[3]
 		}
-		return mktrue(), nil
+		ok, e := rt.reflectSet(arg(args, 0), arg(args, 1), arg(args, 2), receiver)
+		if e != nil {
+			return mkundef(), e
+		}
+		return mkbool(ok), nil
 	})
 	rt.defMethod(ro, "has", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if e := needObj(arg(args, 0), "has"); e != nil {
