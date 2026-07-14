@@ -31,24 +31,29 @@ func (rt *Runtime) initIteratorProto() {
 }
 
 // sliceIterator returns an iterator object over a fixed slice of values.
-// newIteratorObjectE builds a lazy iterator whose next step may throw (used by
-// the Iterator helper methods, whose callbacks can raise).
-func (rt *Runtime) newIteratorObjectE(next func() (Value, bool, *ThrowError)) Value {
-	v := rt.newObject(rt.iteratorHelperProtoOr(rt.iteratorProto))
+// newIteratorObjectE builds a lazy iterator helper result whose next step may
+// throw. Its `return` closes the source iterator (forwarding the close) and
+// marks the helper done; `done` is shared with the step closure so an exhausted
+// or already-returned helper does not re-close the source.
+func (rt *Runtime) newIteratorObjectE(source Value, done *bool, next func() (Value, bool, *ThrowError)) Value {
+	v := rt.newObject(rt.iteratorProto)
 	o := rt.objPtr(v)
 	rt.defMethod(o, "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		val, done, e := next()
+		val, d, e := next()
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.genResult(val, done), nil
+		return rt.genResult(val, d), nil
+	})
+	rt.defMethod(o, "return", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !*done {
+			*done = true
+			rt.iteratorClose(source)
+		}
+		return rt.genResult(arg(args, 0), true), nil
 	})
 	return v
 }
-
-// iteratorHelperProtoOr returns %IteratorHelperPrototype% if available, else the
-// given fallback. (goant reuses %Iterator.prototype% for helper results.)
-func (rt *Runtime) iteratorHelperProtoOr(fallback Value) Value { return fallback }
 
 // iterStepValue calls a source iterator's next method and returns (value, done),
 // throwing if the result is not an object.
@@ -191,7 +196,7 @@ func (rt *Runtime) initIteratorHelpers() {
 			return mkundef(), e
 		}
 		idx, done := 0, false
-		return rt.newIteratorObjectE(func() (Value, bool, *ThrowError) {
+		return rt.newIteratorObjectE(this, &done, func() (Value, bool, *ThrowError) {
 			if done {
 				return mkundef(), true, nil
 			}
@@ -216,7 +221,7 @@ func (rt *Runtime) initIteratorHelpers() {
 			return mkundef(), e
 		}
 		idx, done := 0, false
-		return rt.newIteratorObjectE(func() (Value, bool, *ThrowError) {
+		return rt.newIteratorObjectE(this, &done, func() (Value, bool, *ThrowError) {
 			for !done {
 				v, d, e := rt.iterStepValue(this, next)
 				if e != nil || d {
@@ -243,7 +248,7 @@ func (rt *Runtime) initIteratorHelpers() {
 			return mkundef(), e
 		}
 		remaining, done := limit, false
-		return rt.newIteratorObjectE(func() (Value, bool, *ThrowError) {
+		return rt.newIteratorObjectE(this, &done, func() (Value, bool, *ThrowError) {
 			if done {
 				return mkundef(), true, nil
 			}
@@ -267,7 +272,7 @@ func (rt *Runtime) initIteratorHelpers() {
 			return mkundef(), e
 		}
 		toDrop, done := limit, false
-		return rt.newIteratorObjectE(func() (Value, bool, *ThrowError) {
+		return rt.newIteratorObjectE(this, &done, func() (Value, bool, *ThrowError) {
 			if done {
 				return mkundef(), true, nil
 			}
@@ -295,7 +300,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		idx, done := 0, false
 		var innerNext Value // the current inner iterator's next method (0 when none)
 		var inner Value
-		return rt.newIteratorObjectE(func() (Value, bool, *ThrowError) {
+		return rt.newIteratorObjectE(this, &done, func() (Value, bool, *ThrowError) {
 			for !done {
 				if innerNext != 0 {
 					iv, id, ie := rt.iterStepValue(inner, innerNext)
