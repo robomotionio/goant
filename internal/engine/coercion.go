@@ -19,10 +19,10 @@ func (rt *Runtime) toBoolean(v Value) bool {
 		return d != 0 && !math.IsNaN(d)
 	case TStr:
 		return len(rt.strBytes(v)) != 0
-	case TSymbol, TBigInt:
-		// bigint 0n is falsy; symbols always truthy. bigint refinement lands
-		// with the BigInt type in Phase 8.
-		return true
+	case TBigInt:
+		return rt.bigIntVal(v).Sign() != 0 // 0n is falsy
+	case TSymbol:
+		return true // symbols are always truthy
 	default:
 		return true // all objects are truthy
 	}
