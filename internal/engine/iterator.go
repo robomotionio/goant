@@ -320,6 +320,11 @@ func (rt *Runtime) iterateProtocol(v Value) ([]Value, bool, *ThrowError) {
 		if e != nil {
 			return nil, true, e
 		}
+		// IteratorNext: the result must be an Object (a primitive such as a
+		// returned string would otherwise loop forever looking for "done").
+		if !res.IsObjectType() {
+			return nil, true, rt.typeError("iterator result is not an object")
+		}
 		done, e := rt.getField(res, "done")
 		if e != nil {
 			return nil, true, e
