@@ -801,6 +801,16 @@ restart:
 			}
 			push(val)
 			ip++
+		case OpChkCtor:
+			// A class heritage must be null or a constructor (IsConstructor); an
+			// arrow / async / generator / method function is callable but not a
+			// constructor, so `class C extends thatFn {}` throws at definition.
+			sc := pop()
+			if !sc.IsNull() && !rt.isConstructorValue(sc) {
+				thrown = rt.typeError("Class extends value is not a constructor or null")
+				goto unwind
+			}
+			ip++
 		case OpSetHomeObj:
 			// [obj, method] (unchanged): record the method's [[HomeObject]] as obj
 			// so a super reference in the method resolves against obj's prototype.

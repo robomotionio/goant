@@ -872,6 +872,9 @@ func (c *compiler) compileClass(n *Node) {
 		superSlot = c.addLocal("*superctor*", false)
 		c.compileExpr(n.Left)
 		c.emitOpU16(OpPutLocal, uint16(superSlot))
+		// The heritage must be null or a constructor, checked at class definition.
+		c.emitOpU16(OpGetLocal, uint16(superSlot))
+		c.emit(OpChkCtor)
 		superProtoSlot = c.addLocal("*superproto*", false)
 		// superproto = (superctor == null) ? null : superctor.prototype
 		c.emitOpU16(OpGetLocal, uint16(superSlot))

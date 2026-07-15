@@ -268,8 +268,11 @@ const (
 	OpLabel
 	OpLineNum
 	OpColNum
+	// OpChkCtor pops a class-heritage value and throws a TypeError unless it is
+	// null or a constructor (ClassDefinitionEvaluation's IsConstructor check).
+	OpChkCtor
 
-	NumOpcodes = 213
+	NumOpcodes = 214
 )
 
 // Per-opcode JIT metadata flags (ant OP_FLAG / SV_OPF_*).
@@ -512,6 +515,7 @@ var opTable = [NumOpcodes]opInfo{
 	OpLabel:                       {Name: "LABEL", Size: 5, NPop: 0, NPush: 0, Format: FmtLabel, Flags: OpfJitEligible | OpfJitInlineable},
 	OpLineNum:                     {Name: "LINE_NUM", Size: 5, NPop: 0, NPush: 0, Format: FmtU32, Flags: OpfJitEligible | OpfJitInlineable},
 	OpColNum:                      {Name: "COL_NUM", Size: 5, NPop: 0, NPush: 0, Format: FmtU32, Flags: OpfJitEligible | OpfJitInlineable},
+	OpChkCtor:                     {Name: "CHK_CTOR", Size: 1, NPop: 1, NPush: 0, Format: FmtNone, Flags: 0},
 }
 
 // Name returns the opcode mnemonic.
