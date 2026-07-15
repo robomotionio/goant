@@ -1031,7 +1031,7 @@ func (rt *Runtime) initStringRegexpMethods() {
 				}
 				rep = string(rt.strBytes(rvs))
 			} else {
-				rep = expandReplacement(replStr, needle, utf16pos, inputRunes, []regexpjs.Group{{Index: utf16pos, Value: needle}}, nil)
+				rep, _ = rt.expandReplacement(replStr, needle, utf16pos, inputRunes, []regexpjs.Group{{Index: utf16pos, Value: needle}}, false, nil)
 			}
 			b.WriteString(rep)
 			// Emit the skipped code unit for an empty-needle step, then advance.
@@ -1321,21 +1321,32 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 			}
 			replacement = string(rt.strBytes(rs))
 		} else {
-			// Named captures for $<name> come from the match result's `groups`
-			// object (undefined when the pattern has no named groups).
-			var named map[string]string
-			if gv, _ := rt.getField(result, "groups"); gv.IsObjectType() {
-				named = map[string]string{}
-				for _, k := range rt.objPtr(gv).ownKeysEnumerable() {
-					v, _ := rt.getField(gv, k)
-					if v.IsUndefined() {
-						named[k] = ""
-					} else if sv, e := rt.toStringValue(v); e == nil {
-						named[k] = string(rt.strBytes(sv))
-					}
-				}
+			// namedCaptures = ? Get(result, "groups"); if not undefined it is
+			// ToObject'd, and each $<name> resolves via ? Get(groups, name) then
+			// ? ToString — read lazily so the abrupt of only an accessed name shows.
+			gv, e := rt.getField(result, "groups")
+			if e != nil {
+				return mkundef(), e
 			}
-			replacement = expandReplacement(replStr, matched, position, Srunes, groups, named)
+			hasNamed := !gv.IsUndefined()
+			lookup := func(name string) (string, *ThrowError) {
+				v, e := rt.getField(gv, name)
+				if e != nil {
+					return "", e
+				}
+				if v.IsUndefined() {
+					return "", nil
+				}
+				sv, e := rt.toStringValue(v)
+				if e != nil {
+					return "", e
+				}
+				return string(rt.strBytes(sv)), nil
+			}
+			replacement, e = rt.expandReplacement(replStr, matched, position, Srunes, groups, hasNamed, lookup)
+			if e != nil {
+				return mkundef(), e
+			}
 		}
 		if position >= nextPos {
 			out.WriteString(string(Srunes[nextPos:position]))
@@ -1491,7 +1502,8 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 				}
 			}
 		}
-		return expandReplacement(string(rt.strBytes(rs)), match, index, []rune(string(rt.strBytes(s))), groups, named), nil
+		hasNamed, lookup := namedFromMap(named)
+		return rt.expandReplacement(string(rt.strBytes(rs)), match, index, []rune(string(rt.strBytes(s))), groups, hasNamed, lookup)
 	}
 
 	o := rt.objPtr(pattern)
@@ -1565,9 +1577,10 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 // expandReplacement handles the $ substitutions of GetSubstitution (22.1.3.19.1)
 // in a string replacement: $$, $&, $` (portion before the match), $' (portion
 // after), $1..$99 numbered captures, and $<name> named captures. position is the
-// match's rune offset into input; named is nil when the pattern has no named
-// groups (so "$<" stays literal).
-func expandReplacement(tmpl, match string, position int, input []rune, groups []regexpjs.Group, named map[string]string) string {
+// match's rune offset into input. hasNamed is false when the match has no named
+// captures (so "$<" stays literal); otherwise lookupNamed resolves each name to
+// its substitution (propagating a Get/ToString abrupt from a groups object).
+func (rt *Runtime) expandReplacement(tmpl, match string, position int, input []rune, groups []regexpjs.Group, hasNamed bool, lookupNamed func(string) (string, *ThrowError)) (string, *ThrowError) {
 	matchLen := len([]rune(match))
 	var out strings.Builder
 	for i := 0; i < len(tmpl); i++ {
@@ -1593,11 +1606,16 @@ func expandReplacement(tmpl, match string, position int, input []rune, groups []
 				out.WriteString(string(input[end:]))
 			}
 			i++
-		case c == '<' && len(named) > 0:
-			// Only a pattern that actually has named groups makes "$<" special;
-			// otherwise it is literal. An absent/unmatched name yields "".
+		case c == '<' && hasNamed:
+			// Only a match with named captures makes "$<" special; otherwise it is
+			// literal. The name is looked up on the groups object (an absent or
+			// unmatched name yields ""); a Get/ToString abrupt propagates.
 			if gt := strings.IndexByte(tmpl[i+2:], '>'); gt >= 0 {
-				out.WriteString(named[tmpl[i+2:i+2+gt]])
+				s, e := lookupNamed(tmpl[i+2 : i+2+gt])
+				if e != nil {
+					return "", e
+				}
+				out.WriteString(s)
 				i += 2 + gt
 			} else {
 				out.WriteByte('$')
@@ -1628,7 +1646,16 @@ func expandReplacement(tmpl, match string, position int, input []rune, groups []
 			out.WriteByte('$')
 		}
 	}
-	return out.String()
+	return out.String(), nil
+}
+
+// namedFromMap builds an expandReplacement lookup over a pre-computed name→value
+// map (the internal, non-observable replace paths). An absent name yields "".
+func namedFromMap(named map[string]string) (bool, func(string) (string, *ThrowError)) {
+	if named == nil {
+		return false, nil
+	}
+	return true, func(name string) (string, *ThrowError) { return named[name], nil }
 }
 
 // stringSplitRegexp implements String.prototype.split with a regex separator.
