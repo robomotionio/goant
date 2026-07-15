@@ -972,9 +972,13 @@ func (rt *Runtime) initStringRegexpMethods() {
 			if e != nil {
 				return mkundef(), e
 			}
-			if rt.isCallable(replacer) {
-				// @@replace receives the original coercible `this` (O), not its
-				// ToString — any stringification is the trap's responsibility.
+			// GetMethod(searchValue, @@replace): present but not callable is a
+			// TypeError; if present, delegate (@@replace receives the original
+			// coercible `this` (O), not its ToString).
+			if !replacer.IsNullish() {
+				if !rt.isCallable(replacer) {
+					return mkundef(), rt.typeError("String.prototype.replaceAll: searchValue[@@replace] is not a function")
+				}
 				return rt.callValue(replacer, search, []Value{this, arg(args, 1)})
 			}
 		}
