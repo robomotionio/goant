@@ -985,14 +985,21 @@ func (rt *Runtime) initArrayBuiltin() {
 		return fromSlice(vs), nil
 	})
 	rt.defMethod(proto, "toSpliced", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := readAll(this)
+		// len, then coerce start/deleteCount, compute newLen and enforce the length
+		// limits — all BEFORE reading any element (spec order; a throwing element
+		// getter must not run when newLen overflows).
+		n, e := rt.lengthOf(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		n := len(vs)
 		start := rt.relativeIndex(arg(args, 0), n)
-		del := n - start
-		if len(args) > 1 {
+		del := 0
+		switch {
+		case len(args) == 0:
+			del = 0 // start absent: delete nothing
+		case len(args) == 1:
+			del = n - start // deleteCount absent: delete through the end
+		default:
 			del = int(argNum(rt, args, 1))
 			if del < 0 {
 				del = 0
@@ -1005,10 +1012,23 @@ func (rt *Runtime) initArrayBuiltin() {
 		if len(args) > 2 {
 			inserts = args[2:]
 		}
-		out := make([]Value, 0, n-del+len(inserts))
-		out = append(out, vs[:start]...)
+		newLen := n - del + len(inserts)
+		if float64(newLen) > 9007199254740991 { // 2**53-1
+			return mkundef(), rt.typeError("Invalid array length")
+		}
+		if newLen > 0xFFFFFFFF { // ArrayCreate: > 2**32-1
+			return mkundef(), rt.rangeError("Invalid array length")
+		}
+		out := make([]Value, 0, newLen)
+		for i := 0; i < start; i++ {
+			v, _ := rt.getElement(this, mknum(float64(i)))
+			out = append(out, v)
+		}
 		out = append(out, inserts...)
-		out = append(out, vs[start+del:]...)
+		for i := start + del; i < n; i++ {
+			v, _ := rt.getElement(this, mknum(float64(i)))
+			out = append(out, v)
+		}
 		return fromSlice(out), nil
 	})
 
