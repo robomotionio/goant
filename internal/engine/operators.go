@@ -154,6 +154,16 @@ func (rt *Runtime) forInKeys(obj Value) Value {
 				}
 			}
 		}
+		if o.boxed.Type() == TStr {
+			// A String wrapper's characters are enumerable own index properties.
+			for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+				k := numberToString(float64(i))
+				if !seen[k] {
+					seen[k] = true
+					rt.arraySet(ao, ao.arrLen, rt.newString(k))
+				}
+			}
+		}
 		// Every own key (enumerable or not) shadows inherited keys of the same name;
 		// only enumerable own keys are actually enumerated.
 		keys, enum := o.ownKeysForIn()
