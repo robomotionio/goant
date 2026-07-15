@@ -646,6 +646,12 @@ func (rt *Runtime) initArrayBuiltin() {
 	})
 
 	rt.defMethod(proto, "join", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// len is captured (step 2) BEFORE the separator's ToString (step 3): a
+		// separator whose coercion resizes the array does not change the count.
+		n, e := rt.lengthOf(this)
+		if e != nil {
+			return mkundef(), e
+		}
 		sep := ","
 		if len(args) > 0 && !args[0].IsUndefined() {
 			s, e := rt.toStringValue(args[0])
@@ -653,10 +659,6 @@ func (rt *Runtime) initArrayBuiltin() {
 				return mkundef(), e
 			}
 			sep = string(rt.strBytes(s))
-		}
-		n, e := rt.lengthOf(this)
-		if e != nil {
-			return mkundef(), e
 		}
 		out := make([]byte, 0, n*4)
 		for i := 0; i < n; i++ {
