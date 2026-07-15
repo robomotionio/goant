@@ -810,19 +810,22 @@ func (rt *Runtime) initStringRegexpMethods() {
 		if r, ok, e := rt.delegateSymbolMethod(rt.symSearch, arg(args, 0), this); ok {
 			return r, e
 		}
-		b, e := rt.thisStringBytes(this)
+		// S = ToString(this); rx = RegExpCreate(regexp, undefined) (regexpArg, which
+		// does NOT perform IsRegExp); Invoke(rx, @@search, «S») — so a replaced
+		// RegExp.prototype[@@search] is observed.
+		sv, e := rt.toStringValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		re, e := rt.coerceRegExp(arg(args, 0))
+		rx, e := rt.regexpArg(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		m, err := re.Exec([]rune(string(b)), 0)
-		if err != nil || m == nil {
-			return mknum(-1), nil
+		searcher, e := rt.getElement(rx, rt.symSearch)
+		if e != nil {
+			return mkundef(), e
 		}
-		return mknum(float64(m.Index)), nil
+		return rt.callValue(searcher, rx, []Value{sv})
 	})
 
 	rt.defMethod(sp, "match", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -832,41 +835,23 @@ func (rt *Runtime) initStringRegexpMethods() {
 		if r, ok, e := rt.delegateSymbolMethod(rt.symMatch, arg(args, 0), this); ok {
 			return r, e
 		}
+		// S = ToString(this); rx = RegExpCreate(regexp, undefined) (regexpArg, which
+		// does NOT perform IsRegExp); Invoke(rx, @@match, «S») — so a replaced
+		// RegExp.prototype[@@match] is observed and the global/non-global logic
+		// lives in one place (the @@match method).
 		s, e := rt.toStringValue(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		reObj, e := rt.regexpArg(arg(args, 0))
+		rx, e := rt.regexpArg(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		re := rt.objPtr(reObj).regex
-		if !re.Global {
-			return rt.regexpExec(reObj, s)
+		matcher, e := rt.getElement(rx, rt.symMatch)
+		if e != nil {
+			return mkundef(), e
 		}
-		// Global match: collect all whole-match strings.
-		input := []rune(string(rt.strBytes(s)))
-		res := rt.newArray()
-		ro := rt.objPtr(res)
-		pos := 0
-		any := false
-		for {
-			m, err := re.Exec(input, pos)
-			if err != nil || m == nil {
-				break
-			}
-			any = true
-			rt.arraySet(ro, ro.arrLen, rt.newString(m.Groups[0].Value))
-			adv := m.Index + m.Groups[0].Length
-			if adv <= pos {
-				adv = pos + 1
-			}
-			pos = adv
-		}
-		if !any {
-			return mknull(), nil
-		}
-		return res, nil
+		return rt.callValue(matcher, rx, []Value{s})
 	})
 
 	rt.defMethod(sp, "replace", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
