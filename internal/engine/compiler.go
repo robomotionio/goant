@@ -357,6 +357,12 @@ func (c *compiler) compileStmt(n *Node) {
 	switch n.Kind {
 	case NEmpty, NDebugger:
 		return
+	case NExport, NImportDecl:
+		// import/export are valid only at a Module's top level, where
+		// unwrapModuleStmts lowers them before compilation. Reaching here means a
+		// nested/misplaced import|export (or one in a Script): an early SyntaxError.
+		c.syntaxErrorf("'import' and 'export' may only appear at the top level of a module")
+		return
 	case NFunc:
 		// Function declarations are hoisted (bound before the body runs). A
 		// parenthesized function *expression* statement contributes a completion
