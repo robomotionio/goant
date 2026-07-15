@@ -86,6 +86,7 @@ type lexState struct {
 type lexer struct {
 	code   string
 	strict bool
+	module bool // Module goal: HTML-comment openers/closers are not comments
 	st     lexState
 }
 
@@ -255,8 +256,9 @@ func (l *lexer) skipToNext(n int) (int, bool) {
 	}
 
 done:
-	// HTML comments: <!-- ... and (at line start) --> ...
-	for {
+	// HTML comments: <!-- ... and (at line start) --> ... (Annex B; a Module
+	// has no HTML-comment grammar, so there they tokenize as operators → an error).
+	for !l.module {
 		if p+3 < end && code[p] == '<' && code[p+1] == '!' && code[p+2] == '-' && code[p+3] == '-' {
 			p = l.skipHTMLLineComment(p+4, end, &sawNL)
 		} else if p+2 < end && code[p] == '-' && code[p+1] == '-' && code[p+2] == '>' &&

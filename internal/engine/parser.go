@@ -72,6 +72,7 @@ func Parse(filename, src string) (*Node, error) {
 
 func parseMode(filename, src string, strict, module bool) (*Node, error) {
 	p := &parser{lx: newLexer(src, strict), filename: filename}
+	p.lx.module = module
 	// A Module's top level is an async context: `await` is the await operator
 	// (top-level await), reset to identifier inside any nested non-async function.
 	p.inAsync = module
