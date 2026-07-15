@@ -254,6 +254,16 @@ func (rt *Runtime) initObjectBuiltin() {
 					return rt.makeDataDescriptor(v, !o.flags.frozen, true, !o.flags.frozen && !o.flags.sealed), nil
 				}
 			}
+			if o.boxed.Type() == TStr {
+				// String exotic [[GetOwnProperty]]: an in-range index is a
+				// non-writable, enumerable, non-configurable data property.
+				if idx, ok := canonicalIndex(name); ok {
+					b := rt.strBytes(o.boxed)
+					if int(idx) < utf16Len(b) {
+						return rt.makeDataDescriptor(rt.charAt(b, int(idx)), false, true, false), nil
+					}
+				}
+			}
 			return mkundef(), nil
 		}
 		return rt.descriptorToObject(d), nil
