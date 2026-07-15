@@ -397,6 +397,25 @@ func (c *compiler) lexicalAtCurrentDepth(name string) int {
 // bindDeclared binds the value on top of the stack to a declared name (global
 // for the top-level script, otherwise a frame local), consuming it.
 func (c *compiler) bindDeclared(name string) {
+	// A direct eval's hoisted function declaration binds per the eval's variable
+	// environment: an existing caller binding is updated in place, a sloppy
+	// global-scope eval binds on the global object, and any other case is an
+	// eval-frame local (a strict eval keeps its declarations to itself; a
+	// function-scope eval keeps new names local — leaking into the caller's
+	// function scope is future work).
+	if c.borrowed != nil {
+		if uv := c.resolveBorrowed(name); uv >= 0 {
+			c.emitOpU16(OpPutUpval, uint16(uv))
+			return
+		}
+		if c.evalVarGlobal {
+			c.emitGlobalPut(name)
+			return
+		}
+		slot := c.declareVar(name, false)
+		c.emitOpU16(OpPutLocal, uint16(slot))
+		return
+	}
 	if c.isScript && !c.isModule {
 		c.emitGlobalPut(name)
 		return
