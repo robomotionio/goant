@@ -167,7 +167,7 @@ func (rt *Runtime) initObjectBuiltin() {
 	})
 	rt.defMethod(cobj, "create", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		p := arg(args, 0)
-		if !p.IsObjectType() && !p.IsNull() {
+		if !p.IsObjectLike() && !p.IsNull() { // IsObjectLike: a TypedArray is a valid prototype
 			return mkundef(), rt.typeError("Object prototype may only be an Object or null")
 		}
 		obj := rt.newObject(p)
@@ -474,7 +474,7 @@ func (rt *Runtime) initObjectBuiltin() {
 				if !ok {
 					return mkundef(), rt.typeError("Object.setPrototypeOf: proxy [[SetPrototypeOf]] returned false")
 				}
-			} else if p.IsObjectType() || p.IsNull() {
+			} else if p.IsObjectLike() || p.IsNull() { // a TypedArray is a valid prototype
 				if !rt.ordinarySetProto(o, p) {
 					return mkundef(), rt.typeError("Object.setPrototypeOf: cannot set prototype (non-extensible, immutable, or cyclic)")
 				}
