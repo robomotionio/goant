@@ -249,7 +249,9 @@ func (rt *Runtime) initObjectBuiltin() {
 				// descriptor. hasOwnIndex confirms the element is present (not a hole).
 				if idx, ok := canonicalIndex(name); ok && rt.hasOwnIndex(arg(args, 0), o, idx) {
 					v, _ := rt.getElement(arg(args, 0), mknum(float64(idx)))
-					return rt.makeDataDescriptor(v, true, true, true), nil
+					// A frozen array's elements are non-writable; a sealed (or
+					// frozen) array's are non-configurable.
+					return rt.makeDataDescriptor(v, !o.flags.frozen, true, !o.flags.frozen && !o.flags.sealed), nil
 				}
 			}
 			return mkundef(), nil
@@ -346,7 +348,7 @@ func (rt *Runtime) initObjectBuiltin() {
 		case TArr:
 			for i := uint32(0); i < o.arrLen; i++ {
 				if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
-					reso.defineOwn(strconv.Itoa(int(i)), rt.makeDataDescriptor(o.arr[i], true, true, true), attrDefault)
+					reso.defineOwn(strconv.Itoa(int(i)), rt.makeDataDescriptor(o.arr[i], !o.flags.frozen, true, !o.flags.frozen && !o.flags.sealed), attrDefault)
 				}
 			}
 		case TTypedArray:

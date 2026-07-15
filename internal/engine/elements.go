@@ -535,6 +535,9 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 		// (non-writable data rejects the write; an accessor invokes its setter) —
 		// honor it; absent one, keep the array fast.
 		if int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
+			if o.flags.frozen {
+				return nil // a frozen array's elements are non-writable ([[Set]] fails)
+			}
 			rt.arraySet(o, idx, v)
 			return nil
 		}

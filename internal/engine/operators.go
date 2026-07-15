@@ -70,7 +70,13 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 		if name := numberToString(float64(idx)); o.shape.lookupInterned(name) >= 0 {
 			return o.deleteOwn(name), nil
 		}
-		if int(idx) < len(o.arr) {
+		if int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
+			// A sealed or frozen array's elements are non-configurable, so
+			// [[Delete]] fails; a hole / out-of-range index has nothing to
+			// delete and succeeds.
+			if o.flags.frozen || o.flags.sealed {
+				return false, nil
+			}
 			o.arr[idx] = tEmpty
 		}
 		return true, nil
