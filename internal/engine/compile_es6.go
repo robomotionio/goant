@@ -1150,11 +1150,20 @@ func (c *compiler) compileChainLink(n *Node, bail *[]int) {
 func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 	callee := n.Left
 	spread := hasSpread(n.Args)
+	// An optional call `base?.(...)` wraps its callee in NOptional with Right==nil.
+	// The callee VALUE is what gets guarded (not a member of it), so unwrap to the
+	// real callee and remember to guard the loaded value before calling — a member
+	// callee still binds `this` to its base.
+	guardCallee := false
+	if callee.Kind == NOptional && callee.Right == nil {
+		callee = callee.Left
+		guardCallee = true
+	}
 	isMethod := callee.Kind == NMember || (callee.Kind == NOptional && callee.Right != nil)
 	if isMethod {
 		c.compileChainLink(callee.Left, bail) // [recv]
 		if callee.Kind == NOptional {
-			c.emitGuard(bail)
+			c.emitGuard(bail) // a?.b(...): guard the member base
 		}
 		tSlot := c.tempLocal()
 		c.emitOpU16(OpPutLocal, uint16(tSlot))
@@ -1166,10 +1175,27 @@ func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 				c.emitFieldOp(OpGetField, callee.Right.Str)
 			}
 		}
-		if spread {
-			// [method, this, argsArray] -> APPLY
+		// For `base?.(...)` the method value must be guarded, but only while it is
+		// alone on the stack (a bail pops exactly one value). Load it, guard it,
+		// and stash it so `this` can be re-established below.
+		mSlot := -1
+		if guardCallee {
 			c.emitOpU16(OpGetLocal, uint16(tSlot)) // [recv]
 			loadMethod()                           // [method]
+			c.emitGuard(bail)                      // [method] (balanced on bail)
+			mSlot = c.tempLocal()
+			c.emitOpU16(OpPutLocal, uint16(mSlot))
+		}
+		emitMethodValue := func() {
+			if mSlot >= 0 {
+				c.emitOpU16(OpGetLocal, uint16(mSlot))
+			} else {
+				c.emitOpU16(OpGetLocal, uint16(tSlot))
+				loadMethod()
+			}
+		}
+		if spread {
+			emitMethodValue()                      // [method]
 			c.emitOpU16(OpGetLocal, uint16(tSlot)) // [method, this]
 			c.buildSpreadArray(n.Args)             // [method, this, argsArray]
 			c.emit(OpApply)
@@ -1177,8 +1203,7 @@ func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 			return
 		}
 		c.emitOpU16(OpGetLocal, uint16(tSlot)) // [this]
-		c.emitOpU16(OpGetLocal, uint16(tSlot)) // [this, recv]
-		loadMethod()                           // [this, method]
+		emitMethodValue()                      // [this, method]
 		for _, a := range n.Args {
 			c.compileExpr(a)
 		}
@@ -1186,7 +1211,10 @@ func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 		c.emitU16(uint16(len(n.Args)))
 		return
 	}
-	c.compileChainLink(callee, bail) // [fn] (guarded if callee is NOptional)
+	c.compileChainLink(callee, bail) // [fn]
+	if guardCallee {
+		c.emitGuard(bail) // base?.(...) with a non-member callee: guard the value
+	}
 	if spread {
 		c.emit(OpUndef) // [fn, this=undefined]
 		c.buildSpreadArray(n.Args)
