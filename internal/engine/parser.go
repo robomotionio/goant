@@ -348,7 +348,13 @@ func nodeSrcEnd(p *parser, node *Node) uint32 {
 	if node != nil && node.SrcEnd > node.SrcOff {
 		return node.SrcEnd
 	}
-	return uint32(p.toff() + p.tlen())
+	// When the current token is still unconsumed it was only peeked (the body's
+	// last token was the previous one, e.g. the `)` after `x=>x+1`); otherwise
+	// the current token IS the body's last token (e.g. `}` of a block body).
+	if !p.lx.st.consumed {
+		return uint32(p.lx.st.prevEnd)
+	}
+	return uint32(p.lx.st.toff + p.lx.st.tlen)
 }
 
 // lookaheadCrossesLineTerminator reports whether a newline precedes the next

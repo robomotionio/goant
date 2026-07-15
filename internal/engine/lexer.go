@@ -72,6 +72,11 @@ type lexState struct {
 	pos        int
 	toff       int
 	tlen       int
+	// prevEnd is the source offset just past the previous consumed token (set
+	// when next() advances). It gives a concise arrow body's true end, since by
+	// the time its span is recorded the current token is already the following
+	// one (e.g. the `)` after `x=>x+1`).
+	prevEnd int
 	tval       Value
 	tok        Token
 	consumed   bool
@@ -1181,6 +1186,7 @@ func (l *lexer) next() Token {
 	if !l.st.consumed {
 		return l.st.tok
 	}
+	l.st.prevEnd = l.st.toff + l.st.tlen // end of the token being left behind
 	return l.nextRaw()
 }
 
