@@ -1254,6 +1254,16 @@ restart:
 					ip = fip
 					continue
 				}
+				if fn.isDerivedCtor {
+					// Apply the [[Construct]] result rule now that every finally has
+					// run; a non-object return's TypeError escapes the body.
+					r2, e := rt.derivedCtorReturn(r, locals[fn.thisSlot])
+					if e != nil {
+						closeAll()
+						return mkundef(), e
+					}
+					r = r2
+				}
 				closeAll()
 				return r, nil
 			case compJump:
@@ -1458,31 +1468,36 @@ restart:
 
 		case OpReturn:
 			r := pop()
-			if fn.isDerivedCtor {
-				var e *ThrowError
-				if r, e = rt.derivedCtorReturn(r, locals[fn.thisSlot]); e != nil {
-					thrown = e
-					goto unwind
-				}
-			}
 			if fip, ok := doReturn(r); ok {
 				ip = fip
 				continue
+			}
+			if fn.isDerivedCtor {
+				// The [[Construct]] result rule runs as the constructor completes,
+				// after every try/catch/finally of the body — so its TypeError (a
+				// non-object return) escapes the body rather than being caught by it.
+				r2, e := rt.derivedCtorReturn(r, locals[fn.thisSlot])
+				if e != nil {
+					closeAll()
+					return mkundef(), e
+				}
+				r = r2
 			}
 			closeAll()
 			return r, nil
 		case OpReturnUndef:
 			r := mkundef()
-			if fn.isDerivedCtor {
-				var e *ThrowError
-				if r, e = rt.derivedCtorReturn(r, locals[fn.thisSlot]); e != nil {
-					thrown = e
-					goto unwind
-				}
-			}
 			if fip, ok := doReturn(r); ok {
 				ip = fip
 				continue
+			}
+			if fn.isDerivedCtor {
+				r2, e := rt.derivedCtorReturn(r, locals[fn.thisSlot])
+				if e != nil {
+					closeAll()
+					return mkundef(), e
+				}
+				r = r2
 			}
 			closeAll()
 			return r, nil
