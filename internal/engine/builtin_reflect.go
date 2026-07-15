@@ -353,5 +353,6 @@ func (rt *Runtime) initReflectBuiltin() {
 		return rt.constructWithTarget(fn, callArgs, newTarget)
 	})
 
+	rt.setStringTag(reflect, "Reflect") // Reflect[@@toStringTag] === "Reflect"
 	rt.defGlobal("Reflect", reflect)
 }

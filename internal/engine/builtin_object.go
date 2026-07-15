@@ -845,9 +845,24 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	if !existing.exists && !o.flags.extensible {
 		return rt.rejectDefine("Cannot define property, object is not extensible")
 	}
+	// A throwing accessor (or Proxy has/get trap) on the descriptor propagates;
+	// getErr captures the first abrupt and short-circuits the remaining reads.
+	var getErr *ThrowError
 	get := func(k string) (Value, bool) {
-		if rt.hasProp(descVal, k) {
-			v, _ := rt.getField(descVal, k)
+		if getErr != nil {
+			return mkundef(), false
+		}
+		h, e := rt.hasPropE(descVal, k)
+		if e != nil {
+			getErr = e
+			return mkundef(), false
+		}
+		if h {
+			v, e := rt.getField(descVal, k)
+			if e != nil {
+				getErr = e
+				return mkundef(), false
+			}
 			return v, true
 		}
 		return mkundef(), false
@@ -860,6 +875,9 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	wV, hasW := get("writable")
 	getV, hasGet := get("get")
 	setV, hasSet := get("set")
+	if getErr != nil {
+		return getErr
+	}
 
 	// A descriptor cannot mix accessor fields with data fields (ToPropertyDescriptor),
 	// and get/set, when present, must be callable or undefined.
