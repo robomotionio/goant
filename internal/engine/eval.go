@@ -89,7 +89,10 @@ func (c *compiler) isDirectEvalCall(n *Node) bool {
 }
 
 // captureEvalScope snapshots the caller bindings and context permissions visible
-// at the current compile position for a direct eval site.
+// at the current compile position for a direct eval site. Because the eval body
+// may reference any variable reachable from here, every enclosing binding is
+// force-captured as an upvalue (an ordinary reference would capture only the
+// names it mentions statically).
 func (c *compiler) captureEvalScope() *evalScope {
 	sc := &evalScope{}
 	seen := map[string]bool{}
@@ -110,6 +113,20 @@ func (c *compiler) captureEvalScope() *evalScope {
 		}
 		seen[u.name] = true
 		sc.bindings = append(sc.bindings, evalBinding{name: u.name, kind: evalBindUpval, slot: i, isConst: u.isConst})
+	}
+	// Enclosing-scope locals the eval may reach: force each into this function's
+	// upvalue chain (creating the transitive captures) and borrow it as an upvalue.
+	for e := c.enclosing; e != nil; e = e.enclosing {
+		for i := len(e.locals) - 1; i >= 0; i-- {
+			lv := e.locals[i]
+			if lv.dead || seen[lv.name] || !borrowableName(lv.name) {
+				continue
+			}
+			seen[lv.name] = true
+			if uv := c.resolveUpvalue(lv.name); uv >= 0 {
+				sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindUpval, slot: uv, isConst: c.upvalues[uv].isConst})
+			}
+		}
 	}
 	// Context permissions: inside function code (not the top-level script/eval),
 	// new.target/arguments are permitted unless the immediately enclosing function
@@ -150,4 +167,156 @@ func (c *compiler) compileDirectEval(n *Node) {
 	c.emit(OpEval)
 	c.emitU16(uint16(idx))
 	c.emitU16(uint16(len(n.Args)))
+}
+
+// resolveBorrowed resolves name against the caller bindings snapshotted for a
+// direct eval body, adding it as an upvalue of the eval function on first use and
+// returning that upvalue index (or -1). The eval compiler's upvalues are made up
+// exclusively of borrowed bindings, so a name match is an identity match.
+func (c *compiler) resolveBorrowed(name string) int {
+	if c.borrowed == nil {
+		return -1
+	}
+	for i, u := range c.upvalues {
+		if u.name == name {
+			return i
+		}
+	}
+	for _, b := range c.borrowed.bindings {
+		if b.name == name {
+			c.upvalues = append(c.upvalues, upvalDesc{
+				index:   b.slot,
+				isLocal: b.kind == evalBindLocal,
+				isConst: b.isConst,
+				name:    name,
+			})
+			return len(c.upvalues) - 1
+		}
+	}
+	return -1
+}
+
+// ---- run time: compiling and executing a direct eval body ----
+
+// parseEvalSource parses direct eval source in the caller's strictness and
+// context: new.target is permitted when the enclosing function code allows it.
+func parseEvalSource(filename, src string, strict bool, sc *evalScope) (*Node, error) {
+	p := &parser{lx: newLexer(src, strict), filename: filename}
+	p.newTargetOK = sc.newTargetAllowed
+	program := p.mk(NProgram)
+	p.parseStmtList(&program.Args, false, true)
+	if p.err != nil {
+		return nil, p.err
+	}
+	if strict || programIsStrict(program) {
+		program.Flags |= fnParseStrict
+	}
+	return program, nil
+}
+
+// compileDirectEvalBody compiles a parsed direct eval body against a borrowed
+// caller scope. Free names resolve to caller bindings (captured as upvalues);
+// the eval's own let/const stay frame-local. strict is the eval's effective
+// strictness (caller strict or a "use strict" prologue).
+func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc *evalScope, strict bool) (*svFunc, error) {
+	c := &compiler{
+		rt:         rt,
+		isScript:   true,
+		isEval:     true,
+		usingStack: -1,
+		borrowed:   sc,
+		// A sloppy global-scope eval's `var`/function declarations bind on the
+		// global object. A strict eval always has its own variable environment
+		// (declarations never leak); a function-scope sloppy eval keeps new names
+		// frame-local for now (leaking into the caller's function VariableEnvironment
+		// is future work).
+		evalVarGlobal: !sc.inFunction && !strict,
+		fn:            &svFunc{name: "", filename: filename, source: source, isStrict: strict},
+	}
+
+	c.completionSlot = c.addLocal("*completion*", false)
+	c.emit(OpUndef)
+	c.emitOpU16(OpPutLocal, uint16(c.completionSlot))
+
+	thisSlot := c.addLocal("*this*", false)
+	c.emit(OpThis)
+	c.emitOpU16(OpPutLocal, uint16(thisSlot))
+
+	// Pre-create global var/function bindings for a global-scope eval so a read
+	// before the declaration yields undefined rather than a ReferenceError.
+	if c.evalVarGlobal {
+		names := map[string]bool{}
+		collectVarFuncNames(prog.Args, names)
+		g := rt.objPtr(rt.global)
+		for name := range names {
+			if c.resolveBorrowed(name) >= 0 {
+				continue // an existing caller binding is updated in place
+			}
+			if !g.hasOwn(name) {
+				g.defineOwn(name, mkundef(), attrWritable|attrEnumerable)
+			}
+		}
+	}
+
+	c.checkBlockDeclConflicts(prog.Args, false)
+	c.hoistLexicals(prog.Args)
+	c.hoistFunctions(prog.Args, false)
+	c.compileStmts(prog.Args)
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.emitOpU16(OpGetLocal, uint16(c.completionSlot))
+	c.emit(OpReturn)
+
+	c.fn.maxLocals = len(c.locals)
+	if c.fn.maxStack < 8 {
+		c.fn.maxStack = 8
+	}
+	c.fn.upvalDescs = c.upvalues // borrowed bindings are the eval function's upvalues
+	return c.fn, nil
+}
+
+// performDirectEval evaluates direct eval source in the caller's frame context:
+// the caller's strictness, `this`, `new.target`, and in-scope bindings (borrowed
+// as upvalues via capture / the caller closure). It is invoked by OpEval with the
+// running caller frame's state.
+func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closure,
+	thisVal, newTarget Value, capture func(int) *upvalue) (Value, *ThrowError) {
+
+	strict := rt.frameStrict
+	prog, perr := parseEvalSource("<eval>", src, strict, sc)
+	if perr != nil {
+		ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
+		return mkundef(), &ThrowError{Value: ev, rt: rt}
+	}
+	evalStrict := prog.Flags&fnParseStrict != 0
+
+	fn, cerr := rt.compileDirectEvalBody(prog, "<eval>", src, sc, evalStrict)
+	if cerr != nil {
+		ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(cerr.Error())})
+		return mkundef(), &ThrowError{Value: ev, rt: rt}
+	}
+
+	// Build the eval closure's upvalues from its borrowed-binding descriptors —
+	// a caller local is captured live (shared cell), a caller upvalue is aliased.
+	upvals := make([]*upvalue, len(fn.upvalDescs))
+	for i, d := range fn.upvalDescs {
+		if d.isLocal {
+			upvals[i] = capture(d.index)
+		} else if callerCl != nil && d.index < len(callerCl.upvalues) {
+			upvals[i] = callerCl.upvalues[d.index]
+		} else {
+			upvals[i] = &upvalue{closed: mkundef()}
+			upvals[i].location = &upvals[i].closed
+		}
+	}
+	evalCl := &closure{fn: fn, upvalues: upvals}
+	if callerCl != nil {
+		evalCl.home = callerCl.home // object-literal method super in eval
+	}
+
+	// Thread the caller's new.target into the eval frame (a non-arrow function
+	// direct eval sees its new.target; OpSpecialObj kind 2 reads the frame value).
+	rt.pendingNewTarget = newTarget
+	return rt.runFrame(fn, evalCl, mkundef(), thisVal, nil)
 }

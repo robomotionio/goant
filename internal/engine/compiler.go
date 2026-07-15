@@ -43,6 +43,15 @@ type compiler struct {
 	// eval frame (do not leak to the global object), matching strict eval.
 	isEval bool
 
+	// borrowed is the caller's lexical snapshot when compiling a direct eval body:
+	// a free name found here (and not shadowed by an eval-local) resolves to the
+	// caller binding, captured as an upvalue of the eval function. Nil otherwise.
+	borrowed *evalScope
+
+	// evalVarGlobal marks a global-scope direct eval, whose `var`/function
+	// declarations bind on the global object rather than as eval-frame locals.
+	evalVarGlobal bool
+
 	// isModule marks Module compilation (strict, top-level this undefined).
 	isModule bool
 
@@ -483,7 +492,9 @@ func (c *compiler) popBlockScope() {
 // returning the upvalue index (or -1). It marks the captured enclosing local.
 func (c *compiler) resolveUpvalue(name string) int {
 	if c.enclosing == nil {
-		return -1
+		// A direct eval body has no enclosing compiler, but its free names may
+		// resolve to borrowed caller bindings, which act as its upvalues.
+		return c.resolveBorrowed(name)
 	}
 	if slot := c.enclosing.resolveLocal(name); slot >= 0 {
 		c.enclosing.locals[slot].captured = true
@@ -725,9 +736,10 @@ func (c *compiler) compileVarDecl(n *Node) {
 		}
 		return
 	}
-	// Top-level `var` binds globally; `let`/`const` (and any binding inside a
-	// function) are frame locals.
-	asGlobal := n.VarKind == VarVar && c.isScript && !c.isEval && !c.isModule
+	// Top-level `var` binds globally; a global-scope direct eval's `var` also binds
+	// on the global object; `let`/`const` (and any binding inside a function) are
+	// frame locals.
+	asGlobal := n.VarKind == VarVar && ((c.isScript && !c.isEval && !c.isModule) || c.evalVarGlobal)
 	for _, decl := range n.Args {
 		if decl.Left != nil && (decl.Left.Kind == NArray || decl.Left.Kind == NObject) {
 			c.compileDestructureDecl(decl.Left, decl.Right, n.VarKind)
@@ -739,6 +751,19 @@ func (c *compiler) compileVarDecl(n *Node) {
 		}
 		name := decl.Left.Str
 		nameAnonExpr(decl.Right, name)
+		// Sloppy direct eval: a `var` naming an existing caller binding updates that
+		// binding in place (var hoisting into the caller's VariableEnvironment)
+		// rather than creating an eval-frame local that would shadow it. A strict
+		// eval has its own variable environment, so its `var` never leaks.
+		if n.VarKind == VarVar && c.borrowed != nil && !c.fn.isStrict {
+			if uv := c.resolveBorrowed(name); uv >= 0 {
+				if decl.Right != nil {
+					c.compileExpr(decl.Right)
+					c.emitOpU16(OpPutUpval, uint16(uv))
+				}
+				continue
+			}
+		}
 		if asGlobal {
 			if decl.Right != nil {
 				c.compileExpr(decl.Right)

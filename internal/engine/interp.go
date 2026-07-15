@@ -1377,8 +1377,12 @@ restart:
 			case !evalArgs[0].IsString():
 				ret = evalArgs[0]
 			default:
-				_ = scopeIdx // consumed once direct-eval scope borrowing lands
-				ret, e = rt.evalInGlobalScope(string(rt.strBytes(evalArgs[0])), rt.frameStrict)
+				var sc *evalScope
+				if scopeIdx < len(fn.evalScopes) {
+					sc = fn.evalScopes[scopeIdx]
+				}
+				ret, e = rt.performDirectEval(string(rt.strBytes(evalArgs[0])), sc, cl,
+					thisVal, newTarget, captureUpvalue)
 			}
 			if e != nil {
 				thrown = e
