@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -295,15 +296,21 @@ var skipFeatures = map[string]bool{
 }
 
 func (m meta) skipReason() string {
-	if m.isModule {
-		return "module (unsupported)"
-	}
 	for _, f := range m.features {
 		if skipFeatures[f] {
 			return "feature:" + f
 		}
 	}
 	return ""
+}
+
+// staticImportRE matches a static ImportDeclaration or a re-export
+// (export … from / export *), which need module linking not yet implemented.
+// Dynamic import() is fine (it is an expression, handled by the engine).
+var staticImportRE = regexp.MustCompile(`(?m)^\s*import\s+[^(]|(?m)^\s*export\s+(\*|\{[^}]*\}\s+from|.*\bfrom\b)`)
+
+func moduleNeedsLinking(src string) bool {
+	return staticImportRE.MatchString(src)
 }
 
 // ---- execution ----
@@ -381,6 +388,42 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 		incSrc = append(incSrc, h)
 	}
 
+	// A Module runs in the Module goal (implicitly strict, this===undefined) and
+	// cannot be concatenated with the script harness; the harness is instead run
+	// as a script prelude sharing the realm. Static imports need linking (not yet
+	// implemented), so those are still skipped.
+	if m.isModule {
+		if moduleNeedsLinking(string(src)) {
+			return result{rel, outSkip, "module (needs linking)"}
+		}
+		var pre strings.Builder
+		pre.WriteString(harness["assert.js"])
+		pre.WriteByte('\n')
+		pre.WriteString(harness["sta.js"])
+		pre.WriteByte('\n')
+		pre.WriteString("var $262 = { detachArrayBuffer: function (b) { try { b.transfer(); } catch (e) {} } };\n")
+		if m.isAsync {
+			pre.WriteString(harness["doneprintHandle.js"])
+			pre.WriteByte('\n')
+		}
+		for _, h := range incSrc {
+			pre.WriteString(h)
+			pre.WriteByte('\n')
+		}
+		preFile, modFile := scratch+".prelude.js", scratch+".module.mjs"
+		if err := os.WriteFile(preFile, []byte(pre.String()), 0o644); err != nil {
+			return result{rel, outFail, "write: " + err.Error()}
+		}
+		if err := os.WriteFile(modFile, src, 0o644); err != nil {
+			return result{rel, outFail, "write: " + err.Error()}
+		}
+		ex := execRunnerArgs(runner, []string{"-module", modFile, "-prelude", preFile}, timeout)
+		if ok, reason := classify(m, ex); !ok {
+			return result{rel, outFail, "module: " + reason}
+		}
+		return result{rel, outPass, ""}
+	}
+
 	for _, variant := range m.variants() {
 		full := assemble(variant, m, string(src), harness, incSrc)
 		if err := os.WriteFile(scratch, []byte(full), 0o644); err != nil {
@@ -443,9 +486,13 @@ type execResult struct {
 }
 
 func execRunner(runner, file string, timeout time.Duration) execResult {
+	return execRunnerArgs(runner, []string{file}, timeout)
+}
+
+func execRunnerArgs(runner string, args []string, timeout time.Duration) execResult {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, runner, file)
+	cmd := exec.CommandContext(ctx, runner, args...)
 	cmd.Env = append(os.Environ(), "TZ=UTC")
 	var so, se strings.Builder
 	cmd.Stdout = &so

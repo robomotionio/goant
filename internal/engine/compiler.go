@@ -43,6 +43,9 @@ type compiler struct {
 	// eval frame (do not leak to the global object), matching strict eval.
 	isEval bool
 
+	// isModule marks Module compilation (strict, top-level this undefined).
+	isModule bool
+
 	// completionSlot holds the running script/eval completion value.
 	completionSlot int
 
@@ -133,30 +136,83 @@ type loopCtx struct {
 
 // Compile compiles a parsed program to a bytecode function (script mode).
 func (rt *Runtime) Compile(prog *Node, filename, source string) (*svFunc, error) {
-	return rt.compileProgram(prog, filename, source, false)
+	return rt.compileProgram(prog, filename, source, false, false)
 }
 
 // CompileEval compiles an eval body: `var` bindings stay frame-local.
 func (rt *Runtime) CompileEval(prog *Node, filename, source string) (*svFunc, error) {
-	return rt.compileProgram(prog, filename, source, true)
+	return rt.compileProgram(prog, filename, source, true, false)
 }
 
-func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval bool) (*svFunc, error) {
+// CompileModule compiles a Module: it is strict, its top-level `this` is
+// undefined, and its import/export declarations are handled (imports are not yet
+// linked, so a module with static imports is out of scope here).
+func (rt *Runtime) CompileModule(prog *Node, filename, source string) (*svFunc, error) {
+	return rt.compileProgram(prog, filename, source, false, true)
+}
+
+// unwrapModuleStmts lowers a Module's top-level import/export declarations to
+// ordinary statements the compiler already handles. Static imports and re-export
+// forms (export … from / export *) require linking and are dropped here (a first
+// cut targeting modules without static imports); `export <decl>` becomes the
+// declaration, and `export default …` becomes its declaration (named func/class)
+// or an evaluated expression.
+func unwrapModuleStmts(stmts []*Node) []*Node {
+	out := make([]*Node, 0, len(stmts))
+	for _, s := range stmts {
+		switch s.Kind {
+		case NExport:
+			switch {
+			case s.Flags&exDecl != 0 && s.Left != nil:
+				out = append(out, s.Left)
+			case s.Flags&exDefault != 0 && s.Left != nil:
+				d := s.Left
+				if (d.Kind == NFunc || d.Kind == NClass) && d.Str != "" {
+					out = append(out, d) // named default declaration: hoist it
+				} else {
+					// Anonymous func/class or an expression: evaluate for side
+					// effects (the *default* binding is not observable without links).
+					d.Flags |= fnParen
+					out = append(out, d)
+				}
+			}
+			// export { … } / export … from / export * → no local binding to emit.
+		case NImportDecl:
+			// Static import needs linking; nothing to emit for the unlinked cut.
+		default:
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, isModule bool) (*svFunc, error) {
+	strict := prog.Flags&fnParseStrict != 0 || isModule
 	c := &compiler{
 		rt:         rt,
 		isScript:   true,
 		isEval:     isEval,
+		isModule:   isModule,
 		usingStack: -1,
-		fn:         &svFunc{name: "", filename: filename, source: source, isStrict: prog.Flags&fnParseStrict != 0},
+		fn:         &svFunc{name: "", filename: filename, source: source, isStrict: strict},
+	}
+	// A Module's export/import declarations are lowered to their inner
+	// declarations before hoisting so the ordinary declaration machinery applies.
+	if isModule {
+		prog.Args = unwrapModuleStmts(prog.Args)
 	}
 	// Reserve slot 0 for the completion value.
 	c.completionSlot = c.addLocal("*completion*", false)
 	c.emit(OpUndef)
 	c.emitOpU16(OpPutLocal, uint16(c.completionSlot))
 
-	// Bind the script's `this` (the global object) for lexical-this capture.
+	// Bind `this`: the global object for a script, undefined for a module.
 	thisSlot := c.addLocal("*this*", false)
-	c.emit(OpThis)
+	if isModule {
+		c.emit(OpUndef)
+	} else {
+		c.emit(OpThis)
+	}
 	c.emitOpU16(OpPutLocal, uint16(thisSlot))
 
 	// Global instantiation: pre-create var/function bindings so declarations

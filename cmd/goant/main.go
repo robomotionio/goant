@@ -11,15 +11,18 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"goant/internal/engine"
 )
 
 func main() {
 	var (
-		eval   = flag.String("e", "", "evaluate code from the command line")
-		parse  = flag.Bool("parse", false, "parse only; report syntax errors")
-		disasm = flag.Bool("disasm", false, "disassemble compiled bytecode")
+		eval    = flag.String("e", "", "evaluate code from the command line")
+		parse   = flag.Bool("parse", false, "parse only; report syntax errors")
+		disasm  = flag.Bool("disasm", false, "disassemble compiled bytecode")
+		module  = flag.Bool("module", false, "run the file as a Module (strict, this===undefined)")
+		prelude = flag.String("prelude", "", "comma-separated script files to run (as scripts) before the module")
 	)
 	flag.Parse()
 
@@ -53,16 +56,39 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case *module:
+		// Run prelude scripts (harness globals) into the same realm first.
+		if *prelude != "" {
+			for _, pf := range strings.Split(*prelude, ",") {
+				if pf == "" {
+					continue
+				}
+				data, err := os.ReadFile(pf)
+				if err != nil {
+					fatal(err)
+				}
+				if _, err := rt.RunString(pf, string(data)); err != nil {
+					reportAndExit(err)
+				}
+			}
+		}
+		if _, err := rt.RunModule(name, src); err != nil {
+			reportAndExit(err)
+		}
 	default:
 		if _, err := rt.RunString(name, src); err != nil {
-			var exit *engine.ExitError
-			if errors.As(err, &exit) {
-				os.Exit(exit.Code)
-			}
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			reportAndExit(err)
 		}
 	}
+}
+
+func reportAndExit(err error) {
+	var exit *engine.ExitError
+	if errors.As(err, &exit) {
+		os.Exit(exit.Code)
+	}
+	fmt.Fprintln(os.Stderr, err)
+	os.Exit(1)
 }
 
 func fatal(err error) {

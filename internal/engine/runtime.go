@@ -362,3 +362,29 @@ func (rt *Runtime) RunString(filename, src string) (Value, error) {
 	}
 	return v, err
 }
+
+// RunModule parses src in the Module goal (strict) and evaluates it. Preludes
+// (harness scripts) should be run via RunString into the same Runtime first so
+// their globals are visible. Static imports are not yet linked.
+func (rt *Runtime) RunModule(filename, src string) (Value, error) {
+	rt.filename = filename
+	prog, err := parseMode(filename, src, true) // a Module is always strict
+	if err != nil {
+		return mkundef(), err
+	}
+	fn, err := rt.CompileModule(prog, filename, src)
+	if err != nil {
+		return mkundef(), err
+	}
+	v, err := rt.execute(fn)
+	rt.runEventLoop()
+	if err == nil {
+		if p, e := rt.getField(rt.global, "__asyncTestPending"); e == nil && rt.toBoolean(p) {
+			return mkundef(), &ExitError{Code: 1}
+		}
+	}
+	if rt.exitCode != nil {
+		return mkundef(), &ExitError{Code: *rt.exitCode}
+	}
+	return v, err
+}
