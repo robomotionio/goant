@@ -84,6 +84,22 @@ func (rt *Runtime) initObjectBuiltin() {
 		if o == nil {
 			return mkfalse(), nil
 		}
+		// A Proxy routes [[GetOwnProperty]] through its trap (or its target); read
+		// the resulting descriptor's enumerable flag.
+		if o.proxy != nil {
+			descV, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, pk)
+			if e != nil {
+				return mkundef(), e
+			}
+			if descV.IsUndefined() {
+				return mkfalse(), nil
+			}
+			en, e := rt.getField(descV, "enumerable")
+			if e != nil {
+				return mkundef(), e
+			}
+			return mkbool(rt.toBoolean(en)), nil
+		}
 		if pk.IsSymbol() {
 			d := o.ownDescriptorSym(pk.handle())
 			return mkbool(d.exists && d.enumerable), nil
