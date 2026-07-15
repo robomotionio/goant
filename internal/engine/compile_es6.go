@@ -1131,6 +1131,12 @@ func (c *compiler) compileChainLink(n *Node, bail *[]int) {
 			c.emitFieldOp(OpGetField, n.Right.Str)
 		}
 	case NMember:
+		// A super-property base (`super.a?.b`) reads through the super binding, not
+		// an ordinary receiver on the stack.
+		if n.Left != nil && n.Left.Kind == NIdent && n.Left.Str == "super" {
+			c.compileSuperMember(n) // leaves the super-property value
+			return
+		}
 		c.compileChainLink(n.Left, bail)
 		if n.Flags&1 != 0 {
 			c.compileExpr(n.Right)
