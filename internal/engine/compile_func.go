@@ -377,7 +377,7 @@ func (c *compiler) lexicalAtCurrentDepth(name string) int {
 // bindDeclared binds the value on top of the stack to a declared name (global
 // for the top-level script, otherwise a frame local), consuming it.
 func (c *compiler) bindDeclared(name string) {
-	if c.isScript {
+	if c.isScript && !c.isModule {
 		c.emitGlobalPut(name)
 		return
 	}

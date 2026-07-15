@@ -310,7 +310,19 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 	// don't trip the strict "assignment to unresolvable" check, and undeclared
 	// assignments in strict mode correctly throw ReferenceError. (Eval bodies
 	// keep their vars frame-local, so no global pre-creation.)
-	if !c.isEval {
+	if c.isModule {
+		// A Module's top-level var/function bindings are frame-locals (module
+		// environment), not global-object properties: pre-declare them as locals
+		// (like a function body) so references resolve to them and a `var x` does
+		// not create globalThis.x.
+		names := map[string]bool{}
+		collectVarFuncNames(prog.Args, names)
+		for name := range names {
+			if c.resolveLocal(name) < 0 {
+				c.addLocal(name, false)
+			}
+		}
+	} else if !c.isEval {
 		names := map[string]bool{}
 		collectVarFuncNames(prog.Args, names)
 		g := rt.objPtr(rt.global)
@@ -641,7 +653,7 @@ func (c *compiler) compileVarDecl(n *Node) {
 	}
 	// Top-level `var` binds globally; `let`/`const` (and any binding inside a
 	// function) are frame locals.
-	asGlobal := n.VarKind == VarVar && c.isScript && !c.isEval
+	asGlobal := n.VarKind == VarVar && c.isScript && !c.isEval && !c.isModule
 	for _, decl := range n.Args {
 		if decl.Left != nil && (decl.Left.Kind == NArray || decl.Left.Kind == NObject) {
 			c.compileDestructureDecl(decl.Left, decl.Right, n.VarKind)
