@@ -912,7 +912,10 @@ func (rt *Runtime) initStringRegexpMethods() {
 				return rt.callValue(matcher, regexp, []Value{sv})
 			}
 		}
-		// Default: RegExpCreate(regexp, "g") then iterate.
+		// Default: S = ToString(O), rx = RegExpCreate(regexp, "g"), then
+		// Invoke(rx, @@matchAll, « S ») — a normal rx runs RegExp.prototype
+		// [@@matchAll], but a removed/overridden trap is observed (not bypassed by
+		// iterating directly).
 		s, e := rt.toStringValue(this)
 		if e != nil {
 			return mkundef(), e
@@ -921,7 +924,14 @@ func (rt *Runtime) initStringRegexpMethods() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.regexpMatchAllIterator(reObj, s, 0), nil
+		matcher, e := rt.getElement(reObj, rt.symMatchAll)
+		if e != nil {
+			return mkundef(), e
+		}
+		if !rt.isCallable(matcher) {
+			return mkundef(), rt.typeError("rx[Symbol.matchAll] is not a function")
+		}
+		return rt.callValue(matcher, reObj, []Value{s})
 	})
 
 	rt.defMethod(sp, "replaceAll", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
