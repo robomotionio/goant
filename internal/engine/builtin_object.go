@@ -947,6 +947,10 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	if hasSet && !setV.IsUndefined() && !rt.isCallable(setV) {
 		return rt.typeError("Setter must be a function")
 	}
+	// The Array "length" data property can never become an accessor.
+	if !sym && obj.Type() == TArr && name == "length" && (hasGet || hasSet) {
+		return rt.rejectDefine("Cannot redefine property: length")
+	}
 
 	// ValidateAndApplyPropertyDescriptor (10.1.6.3): a non-configurable existing
 	// property tightly constrains what a redefinition may change. Only the exact
@@ -1099,6 +1103,12 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 			return nil
 		}
 		if idx, ok := canonicalIndex(name); ok {
+			// Defining an index at or beyond the current length would extend
+			// length; a non-writable length forbids that (ArraySetLength step,
+			// 15.4.5.1 step 4.b).
+			if idx >= o.arrLen && o.flags.arrLenNonWritable {
+				return rt.rejectDefine("Cannot define property: array length is not writable")
+			}
 			if writable && enumerable && configurable {
 				rt.arraySet(o, idx, val)
 				return nil
