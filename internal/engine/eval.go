@@ -25,10 +25,11 @@ const (
 
 // evalBinding names one caller binding a direct eval body may resolve to.
 type evalBinding struct {
-	name    string
-	kind    evalBindKind
-	slot    int // caller local slot (evalBindLocal) or upvalue index (evalBindUpval)
-	isConst bool
+	name      string
+	kind      evalBindKind
+	slot      int  // caller local slot (evalBindLocal) or upvalue index (evalBindUpval)
+	isConst   bool
+	isLexical bool // a let/const/class binding — an eval `var` may not shadow it
 }
 
 // evalScope is the compile-time snapshot of the lexical context at one direct
@@ -111,7 +112,7 @@ func (c *compiler) captureEvalScope() *evalScope {
 			continue
 		}
 		seen[lv.name] = true
-		sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindLocal, slot: i, isConst: lv.isConst})
+		sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindLocal, slot: i, isConst: lv.isConst, isLexical: lv.blockScoped})
 	}
 	for i, u := range c.upvalues {
 		if seen[u.name] || !borrowableName(u.name) {
@@ -130,7 +131,7 @@ func (c *compiler) captureEvalScope() *evalScope {
 			}
 			seen[lv.name] = true
 			if uv := c.resolveUpvalue(lv.name); uv >= 0 {
-				sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindUpval, slot: uv, isConst: c.upvalues[uv].isConst})
+				sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindUpval, slot: uv, isConst: c.upvalues[uv].isConst, isLexical: lv.blockScoped})
 			}
 		}
 	}
@@ -372,6 +373,29 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 			}
 			if !rt.canDeclareGlobalVar(v) {
 				return mkundef(), rt.typeError("Cannot declare global variable '" + v + "'")
+			}
+		}
+	}
+
+	// EvalDeclarationInstantiation: a sloppy direct eval's var/function declaration
+	// may not hoist over a like-named lexical (let/const/class) binding of the
+	// caller that lies between the eval and its variable environment — a
+	// SyntaxError. A strict eval keeps its declarations in its own variable
+	// environment, so no such conflict arises.
+	if !evalStrict {
+		var varNames map[string]bool
+		for _, b := range sc.bindings {
+			if !b.isLexical {
+				continue
+			}
+			if varNames == nil {
+				varNames = map[string]bool{}
+				collectVarFuncNames(prog.Args, varNames)
+			}
+			if varNames[b.name] {
+				ev, _ := rt.construct(rt.errors.syntaxErr,
+					[]Value{rt.newString("Identifier '" + b.name + "' has already been declared")})
+				return mkundef(), &ThrowError{Value: ev, rt: rt}
 			}
 		}
 	}
