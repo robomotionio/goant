@@ -48,6 +48,12 @@ type evalScope struct {
 	// hoisted function declarations bind in the caller's function VariableEnvironment
 	// rather than on the global object).
 	inFunction bool
+
+	// paramArgsConflict marks a direct eval in the parameter-expression scope of a
+	// non-arrow function, where the parameter environment binds `arguments`. A
+	// var declaration of `arguments` in the eval body then conflicts:
+	// EvalDeclarationInstantiation reports a SyntaxError.
+	paramArgsConflict bool
 }
 
 // evalInGlobalScope parses, compiles, and runs eval source in global scope. It
@@ -136,6 +142,7 @@ func (c *compiler) captureEvalScope() *evalScope {
 	sc.newTargetAllowed = !c.isScript && !c.fn.isArrow
 	sc.argumentsAllowed = !c.isScript && !c.fn.isArrow
 	sc.superAllowed = !c.isScript
+	sc.paramArgsConflict = c.inParamExpr && !c.fn.isArrow
 	return sc
 }
 
@@ -290,6 +297,19 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 		return mkundef(), &ThrowError{Value: ev, rt: rt}
 	}
 	evalStrict := prog.Flags&fnParseStrict != 0
+
+	// EvalDeclarationInstantiation: a `var arguments` (or a function named
+	// `arguments`) in a non-arrow function's parameter-expression scope conflicts
+	// with the parameter environment's `arguments` binding — a SyntaxError.
+	if sc.paramArgsConflict {
+		names := map[string]bool{}
+		collectVarFuncNames(prog.Args, names)
+		if names["arguments"] {
+			ev, _ := rt.construct(rt.errors.syntaxErr,
+				[]Value{rt.newString("Cannot declare 'arguments' in this eval context")})
+			return mkundef(), &ThrowError{Value: ev, rt: rt}
+		}
+	}
 
 	fn, cerr := rt.compileDirectEvalBody(prog, "<eval>", src, sc, evalStrict)
 	if cerr != nil {

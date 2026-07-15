@@ -52,6 +52,12 @@ type compiler struct {
 	// declarations bind on the global object rather than as eval-frame locals.
 	evalVarGlobal bool
 
+	// inParamExpr is set while compiling a function's parameter default/destructuring
+	// expressions, whose evaluation scope is the parameter environment. A direct eval
+	// there in a non-arrow function may not var-declare `arguments` (the parameter
+	// scope already binds it): EvalDeclarationInstantiation throws a SyntaxError.
+	inParamExpr bool
+
 	// isModule marks Module compilation (strict, top-level this undefined).
 	isModule bool
 

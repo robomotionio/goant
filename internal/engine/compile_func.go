@@ -668,6 +668,10 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	// its raw argument (or default) in turn, so a default referencing the same or a
 	// later parameter throws (default-params.tdz). Otherwise fall back to the
 	// simpler frame-prefill + default-fixup path.
+	// Parameter default / destructuring expressions evaluate in the parameter
+	// environment (a direct eval there is governed by that scope).
+	savedInParam := c.inParamExpr
+	c.inParamExpr = true
 	if len(defaults) > 0 && len(patterns) == 0 {
 		for _, o := range ordered {
 			c.emit(OpEmpty)
@@ -704,6 +708,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		}
 		c.destructureTarget(dp.pattern, VarLet)
 	}
+	c.inParamExpr = savedInParam
 
 	if n.Body == nil {
 		c.emit(OpReturnUndef)
