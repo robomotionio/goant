@@ -186,6 +186,77 @@ func moduleLocalNames(n *Node, out map[string]bool) {
 	}
 }
 
+// validateModuleLexicalConflicts enforces a Module's top-level declaration
+// static semantics: its lexically-declared names (let/const/class, an imported
+// binding, AND a top-level function/generator/async declaration — which are
+// lexical in a Module, unlike a Script) must be unique and must not also be
+// var-declared. An `export <decl>` contributes its inner declaration's names.
+func validateModuleLexicalConflicts(stmts []*Node) *SyntaxError {
+	lex := map[string]bool{} // let/const/class/function/import locals
+	varn := map[string]bool{}
+	var walk func(n *Node) *SyntaxError
+	addLex := func(name string) *SyntaxError {
+		if lex[name] {
+			return &SyntaxError{Msg: "duplicate lexical declaration '" + name + "' in module"}
+		}
+		lex[name] = true
+		return nil
+	}
+	walk = func(n *Node) *SyntaxError {
+		if n == nil {
+			return nil
+		}
+		switch n.Kind {
+		case NFunc:
+			if n.Str != "" && n.Flags&fnArrow == 0 {
+				return addLex(n.Str)
+			}
+		case NClass:
+			if n.Str != "" {
+				return addLex(n.Str)
+			}
+		case NVar:
+			names := map[string]bool{}
+			for _, d := range n.Args {
+				if d != nil {
+					collectBindingNames(d.Left, names)
+				}
+			}
+			for nm := range names {
+				if n.VarKind == VarVar {
+					varn[nm] = true
+				} else if e := addLex(nm); e != nil {
+					return e
+				}
+			}
+		case NImportDecl:
+			for _, spec := range n.Args {
+				if spec.Right != nil {
+					if e := addLex(spec.Right.Str); e != nil {
+						return e
+					}
+				}
+			}
+		case NExport:
+			if n.Flags&(exDecl|exDefault) != 0 {
+				return walk(n.Left)
+			}
+		}
+		return nil
+	}
+	for _, s := range stmts {
+		if e := walk(s); e != nil {
+			return e
+		}
+	}
+	for nm := range lex {
+		if varn[nm] {
+			return &SyntaxError{Msg: "'" + nm + "' is declared both lexically and as a var in module"}
+		}
+	}
+	return nil
+}
+
 // validateModuleExports enforces a Module's ExportEntries static semantics: the
 // exported names must be unique, and a local (no-`from`) named export must refer
 // to a top-level binding of the module. A violation is an early SyntaxError.
@@ -287,6 +358,9 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 	// semantics) then lowered to their inner declarations before hoisting so the
 	// ordinary declaration machinery applies.
 	if isModule {
+		if e := validateModuleLexicalConflicts(prog.Args); e != nil {
+			return nil, e
+		}
 		if e := validateModuleExports(prog.Args); e != nil {
 			return nil, e
 		}
