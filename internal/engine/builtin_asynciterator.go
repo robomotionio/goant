@@ -234,6 +234,13 @@ func (rt *Runtime) initAsyncIterator() {
 	rt.defMethod(ao, "return", 1, drive(genReturn))
 	rt.defMethod(ao, "throw", 1, drive(genThrow))
 	rt.setStringTag(agp, "AsyncGenerator")
+	// %AsyncGeneratorFunction.prototype%.prototype is %AsyncGeneratorPrototype%,
+	// pointing back via constructor ({[[Writable]]:false,[[Enumerable]]:false,
+	// [[Configurable]]:true}).
+	if rt.asyncGeneratorFnProto != 0 {
+		rt.objPtr(rt.asyncGeneratorFnProto).defineOwn("prototype", agp, attrConfigurable)
+		ao.defineOwn("constructor", rt.asyncGeneratorFnProto, attrConfigurable)
+	}
 }
 
 // asyncIterLoop drives an async iterator: it repeatedly awaits this.next() and

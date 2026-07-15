@@ -226,6 +226,13 @@ func (rt *Runtime) initGeneratorBuiltin() {
 	if rt.symToStringTag != 0 {
 		po.defineOwnSymbol(rt.symToStringTag.handle(), rt.newString("Generator"), attrConfigurable)
 	}
+	// %GeneratorFunction.prototype%.prototype is %GeneratorPrototype% and points
+	// back via constructor ({[[Writable]]:false,[[Enumerable]]:false,
+	// [[Configurable]]:true}); the function-family prototypes exist by now.
+	if rt.generatorFuncProto != 0 {
+		rt.objPtr(rt.generatorFuncProto).defineOwn("prototype", proto, attrConfigurable)
+		po.defineOwn("constructor", rt.generatorFuncProto, attrConfigurable)
+	}
 }
 
 // ---- async generators ----
