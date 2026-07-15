@@ -704,6 +704,12 @@ func (rt *Runtime) enumerableOwnKeysE(v Value) ([]string, *ThrowError) {
 			keys = append(keys, strconv.Itoa(i))
 		}
 	}
+	if o.boxed.Type() == TStr {
+		// A String wrapper's characters are enumerable own index properties.
+		for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+			keys = append(keys, strconv.Itoa(i))
+		}
+	}
 	keys = append(keys, o.ownKeysEnumerable()...)
 	return keys, nil
 }
