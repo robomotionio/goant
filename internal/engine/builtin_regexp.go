@@ -1667,9 +1667,15 @@ func (rt *Runtime) stringSplitRegexp(this Value, re *regexpjs.Regexp, limitV Val
 	input := []rune(string(rt.strBytes(s)))
 	res := rt.newArray()
 	ro := rt.objPtr(res)
-	limit := -1
+	// lim = (limit is undefined) ? 2^32-1 : ToUint32(limit); a throwing coercion
+	// propagates.
+	var limit int64 = 1<<32 - 1
 	if !limitV.IsUndefined() {
-		limit = rt.intArg([]Value{limitV}, 0)
+		ln, e := rt.toNumber(limitV)
+		if e != nil {
+			return mkundef(), e
+		}
+		limit = int64(toUint32(ln))
 	}
 	if limit == 0 {
 		return res, nil
@@ -1696,14 +1702,18 @@ func (rt *Runtime) stringSplitRegexp(this Value, re *regexpjs.Regexp, limitV Val
 			continue
 		}
 		rt.arraySet(ro, ro.arrLen, rt.newString(string(input[last:m.Index])))
-		if limit >= 0 && int(ro.arrLen) >= limit {
+		if int64(ro.arrLen) >= limit {
 			return res, nil
 		}
+		// Each capture is its own result element and counts toward the limit.
 		for gi := 1; gi < len(m.Groups); gi++ {
 			if m.Groups[gi].Index < 0 {
 				rt.arraySet(ro, ro.arrLen, mkundef())
 			} else {
 				rt.arraySet(ro, ro.arrLen, rt.newString(m.Groups[gi].Value))
+			}
+			if int64(ro.arrLen) >= limit {
+				return res, nil
 			}
 		}
 		last = end
