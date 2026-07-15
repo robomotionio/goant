@@ -1005,6 +1005,14 @@ restart:
 				thrown = e
 				goto unwind
 			}
+			// GetIterator caches the iterator's "next" method once; the delegation
+			// CALLS the cached method each round rather than re-getting it (throw and
+			// return are still looked up on demand, per the yield* algorithm).
+			nextFn, e := rt.getField(inner, "next")
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
 			sent := mkundef()
 			kind := genNext
 			ipSet := false // set when a genReturn routes into an enclosing finally
@@ -1035,7 +1043,6 @@ restart:
 					}
 					result, re = rt.callValue(returnFn, inner, []Value{sent})
 				default:
-					nextFn, _ := rt.getField(inner, "next")
 					result, re = rt.callValue(nextFn, inner, []Value{sent})
 				}
 				if re != nil {
@@ -1065,8 +1072,16 @@ restart:
 					thrown = rt.typeError("iterator result is not an object")
 					goto unwind
 				}
-				doneV, _ := rt.getField(result, "done")
-				value, _ := rt.getField(result, "value")
+				doneV, de := rt.getField(result, "done") // IteratorComplete: ? Get(result, "done")
+				if de != nil {
+					thrown = de
+					goto unwind
+				}
+				value, ve := rt.getField(result, "value") // IteratorValue: ? Get(result, "value")
+				if ve != nil {
+					thrown = ve
+					goto unwind
+				}
 				if rt.toBoolean(doneV) {
 					if kind == genReturn {
 						// Inner honored return: propagate it, running any finally.
