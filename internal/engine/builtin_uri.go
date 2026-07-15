@@ -37,22 +37,26 @@ func (rt *Runtime) initURIBuiltins() {
 			return rt.newString(uriEncode(b, keep)), nil
 		}
 	}
-	decode := func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.stringArg(args, 0)
-		if e != nil {
-			return mkundef(), e
+	decode := func(reserved string) nativeFunc {
+		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			b, e := rt.stringArg(args, 0)
+			if e != nil {
+				return mkundef(), e
+			}
+			out, ok := uriDecode(b, reserved)
+			if !ok {
+				ev, _ := rt.construct(rt.errors.uriErr, []Value{rt.newString("URI malformed")})
+				return mkundef(), &ThrowError{Value: ev, rt: rt}
+			}
+			return rt.newStringBytes(out), nil
 		}
-		out, ok := uriDecode(b)
-		if !ok {
-			ev, _ := rt.construct(rt.errors.uriErr, []Value{rt.newString("URI malformed")})
-			return mkundef(), &ThrowError{Value: ev, rt: rt}
-		}
-		return rt.newStringBytes(out), nil
 	}
 	rt.defMethod(g, "encodeURIComponent", 1, encode(uriUnreserved))
 	rt.defMethod(g, "encodeURI", 1, encode(uriUnreserved+uriReserved))
-	rt.defMethod(g, "decodeURIComponent", 1, decode)
-	rt.defMethod(g, "decodeURI", 1, decode)
+	// decodeURIComponent decodes every escape; decodeURI keeps the reserved set
+	// (and '#') percent-encoded (its reservedURISet).
+	rt.defMethod(g, "decodeURIComponent", 1, decode(""))
+	rt.defMethod(g, "decodeURI", 1, decode(uriReserved))
 }
 
 // jsEscape implements the annex-b escape function over UTF-16 code units.
@@ -119,19 +123,78 @@ func uriEncode(b []byte, keep string) string {
 	return sb.String()
 }
 
-// uriDecode reverses percent-encoding; ok=false on malformed input.
-func uriDecode(b []byte) ([]byte, bool) {
+// uriDecode implements the spec Decode operation: it reverses percent-encoding,
+// assembling a multi-octet UTF-8 sequence from consecutive %XX escapes and
+// rejecting (ok=false → URIError) any malformed byte, missing/invalid
+// continuation octet, overlong encoding, surrogate, or out-of-range code point.
+// A decoded ASCII character in the reserved set is left percent-encoded.
+func uriDecode(b []byte, reserved string) ([]byte, bool) {
 	var out []byte
-	for i := 0; i < len(b); i++ {
-		if b[i] == '%' {
-			if i+2 >= len(b) || !isHexByte(b[i+1]) || !isHexByte(b[i+2]) {
+	n := len(b)
+	for i := 0; i < n; i++ {
+		if b[i] != '%' {
+			out = append(out, b[i])
+			continue
+		}
+		if i+2 >= n || !isHexByte(b[i+1]) || !isHexByte(b[i+2]) {
+			return nil, false
+		}
+		c := byte(hexVal(b[i+1])<<4 | hexVal(b[i+2]))
+		start := i
+		i += 2
+		if c < 0x80 {
+			if strings.IndexByte(reserved, c) >= 0 {
+				out = append(out, b[start], b[start+1], b[start+2]) // keep "%XX"
+			} else {
+				out = append(out, c)
+			}
+			continue
+		}
+		// Multi-octet lead byte: the count comes from the leading one-bits.
+		var nOct int
+		switch {
+		case c&0xE0 == 0xC0:
+			nOct = 2
+		case c&0xF0 == 0xE0:
+			nOct = 3
+		case c&0xF8 == 0xF0:
+			nOct = 4
+		default:
+			return nil, false // a lone continuation (0x80–0xBF) or an invalid lead
+		}
+		octets := make([]byte, 1, nOct)
+		octets[0] = c
+		for j := 1; j < nOct; j++ {
+			if i+3 >= n || b[i+1] != '%' || !isHexByte(b[i+2]) || !isHexByte(b[i+3]) {
 				return nil, false
 			}
-			out = append(out, byte(hexVal(b[i+1])<<4|hexVal(b[i+2])))
-			i += 2
-		} else {
-			out = append(out, b[i])
+			c2 := byte(hexVal(b[i+2])<<4 | hexVal(b[i+3]))
+			if c2&0xC0 != 0x80 {
+				return nil, false // not a continuation octet
+			}
+			octets = append(octets, c2)
+			i += 3
 		}
+		// Assemble the code point and reject overlong / surrogate / out-of-range.
+		var v uint32
+		switch nOct {
+		case 2:
+			v = uint32(octets[0]&0x1F)<<6 | uint32(octets[1]&0x3F)
+			if v < 0x80 {
+				return nil, false
+			}
+		case 3:
+			v = uint32(octets[0]&0x0F)<<12 | uint32(octets[1]&0x3F)<<6 | uint32(octets[2]&0x3F)
+			if v < 0x800 || (v >= 0xD800 && v <= 0xDFFF) {
+				return nil, false
+			}
+		case 4:
+			v = uint32(octets[0]&0x07)<<18 | uint32(octets[1]&0x3F)<<12 | uint32(octets[2]&0x3F)<<6 | uint32(octets[3]&0x3F)
+			if v < 0x10000 || v > 0x10FFFF {
+				return nil, false
+			}
+		}
+		out = append(out, octets...) // a validated UTF-8 sequence
 	}
 	return out, true
 }
