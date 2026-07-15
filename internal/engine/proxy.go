@@ -475,13 +475,11 @@ func (rt *Runtime) proxyGetOwnPropertyDescriptor(p *proxyState, key Value) (Valu
 	if to.proxy != nil {
 		return rt.proxyGetOwnPropertyDescriptor(to.proxy, key)
 	}
-	var d ownDesc
-	if key.IsSymbol() {
-		d = to.ownDescriptorSym(key.handle())
-	} else {
-		name, _ := rt.propKeyString(key)
-		d = to.ownDescriptor(name)
-	}
+	// ownDescOf is the complete ordinary [[GetOwnProperty]]: unlike a bare
+	// ownDescriptor it synthesizes the exotic own properties (Array "length" and
+	// indices, typed-array indices, String-wrapper characters), so a proxy over
+	// such a target reports them instead of undefined.
+	d := rt.ownDescOf(to, rt.toPropertyKeyValue(key))
 	if !d.exists {
 		return mkundef(), nil
 	}

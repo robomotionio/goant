@@ -1057,6 +1057,16 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	// property (element reads fall back to it) but still extends the length.
 	if obj.Type() == TArr && !sym {
 		if name == "length" && !hasGet && !hasSet {
+			// "length" is always non-configurable and non-enumerable: a descriptor
+			// that would flip either attribute to true is rejected (a no-op false is
+			// fine). existing is all-false here, so the resolved booleans are true
+			// only when the descriptor explicitly requested the forbidden change.
+			if configurable {
+				return rt.rejectDefine("Cannot redefine property: length")
+			}
+			if enumerable {
+				return rt.rejectDefine("Cannot redefine property: length")
+			}
 			// Array exotic length [[DefineOwnProperty]]: a non-writable length cannot
 			// be changed or made writable again; a value sets the length; writable:false
 			// locks it.
