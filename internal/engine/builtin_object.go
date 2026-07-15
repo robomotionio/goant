@@ -57,15 +57,27 @@ func (rt *Runtime) initObjectBuiltin() {
 		if !target.IsObjectType() {
 			return mkfalse(), nil
 		}
-		cur := rt.objPtr(target)
-		for depth := 0; depth < maxProtoChainDepth && cur != nil; depth++ {
-			if !cur.proto.IsObjectType() {
-				break
+		// ToObject(this) happens after the V-is-object check, so a null/undefined
+		// receiver throws only when V is an object (matching 20.1.3.4).
+		o, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		// Walk V's prototype chain via [[GetPrototypeOf]] (a proxy in the chain
+		// routes through its trap, which can throw) looking for O.
+		cur := target
+		for depth := 0; depth < maxProtoChainDepth; depth++ {
+			p, e := rt.getPrototypeOfValue(cur)
+			if e != nil {
+				return mkundef(), e
 			}
-			if cur.proto == this {
+			if !p.IsObjectType() {
+				return mkfalse(), nil
+			}
+			if p == o {
 				return mktrue(), nil
 			}
-			cur = rt.objPtr(cur.proto)
+			cur = p
 		}
 		return mkfalse(), nil
 	})
@@ -127,7 +139,13 @@ func (rt *Runtime) initObjectBuiltin() {
 		return rt.internString(tag), nil
 	})
 	rt.defMethod(proto, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.toStringValue(this)
+		// 20.1.3.5: return ? Invoke(O, "toString") — a nullish receiver throws in
+		// GetV, and the actual (possibly overridden) toString is dispatched.
+		m, e := rt.getField(this, "toString")
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.callValue(m, this, nil)
 	})
 	rt.defMethod(proto, "valueOf", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.toObjectValue(this) // ToObject(this): a primitive returns its wrapper
