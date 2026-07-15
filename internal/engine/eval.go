@@ -249,18 +249,29 @@ func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc
 	c.emit(OpThis)
 	c.emitOpU16(OpPutLocal, uint16(thisSlot))
 
-	// Pre-create global var/function bindings for a global-scope eval so a read
-	// before the declaration yields undefined rather than a ReferenceError.
-	if c.evalVarGlobal {
+	// Hoist the eval body's var/function names so a reference before the
+	// declaration reads undefined rather than throwing. A name that already exists
+	// as a caller binding is updated in place (borrowed); a sloppy global-scope
+	// eval binds new names on the global object (configurable, unlike a script's
+	// var); otherwise the name is an eval-frame local (a strict eval's own
+	// variable environment, or a function-scope eval whose new names stay local —
+	// leaking into the caller's function scope is future work).
+	{
 		names := map[string]bool{}
 		collectVarFuncNames(prog.Args, names)
 		g := rt.objPtr(rt.global)
 		for name := range names {
-			if c.resolveBorrowed(name) >= 0 {
-				continue // an existing caller binding is updated in place
+			if c.borrowed != nil && c.resolveBorrowed(name) >= 0 {
+				continue
 			}
-			if !g.hasOwn(name) {
-				g.defineOwn(name, mkundef(), attrWritable|attrEnumerable)
+			if c.evalVarGlobal {
+				if !g.hasOwn(name) {
+					g.defineOwn(name, mkundef(), attrWritable|attrEnumerable|attrConfigurable)
+				}
+				continue
+			}
+			if c.resolveLocal(name) < 0 {
+				c.addLocal(name, false)
 			}
 		}
 	}
