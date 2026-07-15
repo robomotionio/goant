@@ -811,6 +811,14 @@ func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) *T
 	if e != nil {
 		return e
 	}
+	// DefinePropertyOrThrow: a method/accessor cannot redefine a non-configurable
+	// own property (only a data method's own configurable "length"/"name" below
+	// legitimately replaces; a static [ "prototype" ] on the constructor throws).
+	if flags != 3 {
+		if d := o.ownDescriptor(name); d.exists && !d.configable {
+			return rt.typeError("Cannot redefine property: " + name)
+		}
+	}
 	if flags == 3 { // enumerable own data property (CreateDataProperty), bypassing
 		// any inherited setter such as Object.prototype's __proto__.
 		o.defineOwn(name, accFn, attrWritable|attrEnumerable|attrConfigurable)
