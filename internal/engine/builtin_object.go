@@ -152,7 +152,18 @@ func (rt *Runtime) initObjectBuiltin() {
 	})
 
 	// Object constructor.
-	ctor := rt.newNativeFunc("Object", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	var ctor Value
+	ctor = rt.newNativeFunc("Object", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// 20.1.1.1 step 1: when NewTarget is a subclass (neither undefined nor the
+		// Object constructor itself), ignore the argument and create an ordinary
+		// object from NewTarget.prototype.
+		if rt.constructing() && rt.pendingNewTarget != ctor {
+			proto, e := rt.newTargetProtoE(rt.objectProto)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.newObject(proto), nil
+		}
 		v := arg(args, 0)
 		if v.IsNullish() {
 			return rt.newPlainObject(), nil
