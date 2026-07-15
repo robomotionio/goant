@@ -959,11 +959,16 @@ func (rt *Runtime) initArrayBuiltin() {
 		return fromSlice(vs), nil
 	})
 	rt.defMethod(proto, "toSorted", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// A non-undefined, non-callable comparefn is a TypeError, checked before any
+		// element is read.
+		cmp := arg(args, 0)
+		if !cmp.IsUndefined() && !rt.isCallable(cmp) {
+			return mkundef(), rt.typeError("The comparison function must be either a function or undefined")
+		}
 		vs, e := readAll(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		cmp := arg(args, 0)
 		if e := rt.sortValues(vs, cmp); e != nil {
 			return mkundef(), e
 		}
