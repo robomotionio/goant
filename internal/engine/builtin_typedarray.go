@@ -1426,7 +1426,7 @@ func (rt *Runtime) toIndex(v Value) (int, *ThrowError) {
 // to the intrinsic for exemplar's element kind). The result must be a
 // non-detached TypedArray, and — for a single numeric length argument — at
 // least that long.
-func (rt *Runtime) typedArraySpeciesCreate(this Value, args []Value) (Value, *ThrowError) {
+func (rt *Runtime) typedArraySpeciesCreate(this Value, args []Value, write bool) (Value, *ThrowError) {
 	o := rt.objPtr(this)
 	if o == nil || o.ta == nil {
 		return mkundef(), rt.typeError("not a TypedArray")
@@ -1446,6 +1446,11 @@ func (rt *Runtime) typedArraySpeciesCreate(this Value, args []Value) (Value, *Th
 	}
 	if rt.taDetached(ro) {
 		return mkundef(), rt.typeError("TypedArray species constructor returned a detached TypedArray")
+	}
+	// A write-mode destination (map/filter/slice's result) may not be backed by
+	// an immutable buffer.
+	if write && rt.abIsImmutable(rt.objPtr(ro.ta.buf)) {
+		return mkundef(), rt.typeError("TypedArray species constructor returned an immutable-buffer-backed TypedArray")
 	}
 	if len(args) == 1 && args[0].IsNumber() && rt.taCurrentLen(ro) < int(args[0].Number()) {
 		return mkundef(), rt.typeError("Derived TypedArray constructor created an array shorter than requested")
@@ -1598,7 +1603,7 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 			return mkundef(), rt.typeError("TypedArray.prototype.map callback is not a function")
 		}
 		l := length(this)
-		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(l))})
+		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(l))}, true)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -1630,7 +1635,7 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 				keep = append(keep, el)
 			}
 		}
-		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(len(keep)))})
+		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(len(keep)))}, true)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -1986,7 +1991,7 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		if count < 0 {
 			count = 0
 		}
-		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(count))})
+		out, e := rt.typedArraySpeciesCreate(this, []Value{mknum(float64(count))}, true)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -2059,7 +2064,7 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 			}
 			ctorArgs = append(ctorArgs, mknum(float64(end-start)))
 		}
-		return rt.typedArraySpeciesCreate(this, ctorArgs)
+		return rt.typedArraySpeciesCreate(this, ctorArgs, false)
 	})
 	m("copyWithin", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if e := rt.taWriteImmutable(this); e != nil {
