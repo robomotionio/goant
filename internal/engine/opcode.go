@@ -271,8 +271,11 @@ const (
 	// OpChkCtor pops a class-heritage value and throws a TypeError unless it is
 	// null or a constructor (ClassDefinitionEvaluation's IsConstructor check).
 	OpChkCtor
+	// OpChkProto pops a superclass's .prototype and throws a TypeError unless it
+	// is an Object or null (the protoParent check).
+	OpChkProto
 
-	NumOpcodes = 214
+	NumOpcodes = 215
 )
 
 // Per-opcode JIT metadata flags (ant OP_FLAG / SV_OPF_*).
@@ -516,6 +519,7 @@ var opTable = [NumOpcodes]opInfo{
 	OpLineNum:                     {Name: "LINE_NUM", Size: 5, NPop: 0, NPush: 0, Format: FmtU32, Flags: OpfJitEligible | OpfJitInlineable},
 	OpColNum:                      {Name: "COL_NUM", Size: 5, NPop: 0, NPush: 0, Format: FmtU32, Flags: OpfJitEligible | OpfJitInlineable},
 	OpChkCtor:                     {Name: "CHK_CTOR", Size: 1, NPop: 1, NPush: 0, Format: FmtNone, Flags: 0},
+	OpChkProto:                    {Name: "CHK_PROTO", Size: 1, NPop: 1, NPush: 0, Format: FmtNone, Flags: 0},
 }
 
 // Name returns the opcode mnemonic.

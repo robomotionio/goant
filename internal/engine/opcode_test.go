@@ -3,8 +3,8 @@ package engine
 import "testing"
 
 func TestOpcodeTableSanity(t *testing.T) {
-	if NumOpcodes != 214 {
-		t.Fatalf("NumOpcodes=%d want 214", NumOpcodes)
+	if NumOpcodes != 215 {
+		t.Fatalf("NumOpcodes=%d want 215", NumOpcodes)
 	}
 	if OpInvalid != 0 {
 		t.Fatal("OpInvalid must be 0")

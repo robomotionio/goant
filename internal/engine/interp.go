@@ -811,6 +811,15 @@ restart:
 				goto unwind
 			}
 			ip++
+		case OpChkProto:
+			// A superclass's .prototype (the protoParent) must be an Object or null
+			// (e.g. a bound function is a constructor but has no "prototype").
+			pv := pop()
+			if !pv.IsNull() && !pv.IsObjectType() {
+				thrown = rt.typeError("Class extends value does not have valid prototype property")
+				goto unwind
+			}
+			ip++
 		case OpSetHomeObj:
 			// [obj, method] (unchanged): record the method's [[HomeObject]] as obj
 			// so a super reference in the method resolves against obj's prototype.

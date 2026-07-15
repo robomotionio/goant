@@ -887,6 +887,9 @@ func (c *compiler) compileClass(n *Node) {
 		c.emitFieldOp(OpGetField, "prototype")
 		c.patchJump(doneP)
 		c.emitOpU16(OpPutLocal, uint16(superProtoSlot))
+		// The protoParent (superclass.prototype) must be an Object or null.
+		c.emitOpU16(OpGetLocal, uint16(superProtoSlot))
+		c.emit(OpChkProto)
 	}
 
 	// The private environment is now in scope for the constructor, members, field
