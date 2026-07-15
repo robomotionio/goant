@@ -2133,6 +2133,12 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		// SetTypedArrayFromTypedArray: read the whole source first so overlapping
 		// buffers copy correctly.
 		if so := rt.objPtr(src); so != nil && so.ta != nil {
+			// The offset coercion above may have detached/shrunk the SOURCE's buffer;
+			// a detached or out-of-bounds source is a TypeError (SetTypedArrayFrom-
+			// TypedArray re-checks the source after the target).
+			if rt.taOutOfBounds(so) {
+				return mkundef(), rt.typeError("Cannot set from a detached or out-of-bounds source TypedArray")
+			}
 			srcLen := rt.taCurrentLen(so)
 			if math.IsInf(offN, 1) || float64(srcLen)+offN > float64(targetLen) {
 				return mkundef(), rt.rangeError("Source array is too large")
