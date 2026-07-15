@@ -287,7 +287,27 @@ func (c *compiler) hoistLexicals(list []*Node) {
 	// pre-existing binding from an outer/enclosing construct isn't misread as one.
 	seen := map[string]bool{}
 	for _, stmt := range list {
-		if stmt == nil || stmt.Kind != NVar {
+		if stmt == nil {
+			continue
+		}
+		// A class declaration is lexically scoped: pre-declare its name as an
+		// empty TDZ hole so a read before the declaration throws (bindClassDecl
+		// reuses the slot). Only at the same lexical depth (a nested block's class
+		// is hoisted by that block).
+		if stmt.Kind == NClass && stmt.Str != "" {
+			if seen[stmt.Str] || varNames[stmt.Str] {
+				c.syntaxErrorf("Identifier '%s' has already been declared", stmt.Str)
+				return
+			}
+			seen[stmt.Str] = true
+			if c.lexicalAtCurrentDepth(stmt.Str) < 0 {
+				slot := c.declareLexical(stmt.Str, false)
+				c.emit(OpEmpty)
+				c.emitOpU16(OpPutLocal, uint16(slot))
+			}
+			continue
+		}
+		if stmt.Kind != NVar {
 			continue
 		}
 		if stmt.VarKind != VarLet && stmt.VarKind != VarConst {
@@ -391,6 +411,13 @@ func (c *compiler) bindDeclared(name string) {
 // and is hidden when the block exits (class.block-scoped). At function/script top
 // level it binds like any other declaration.
 func (c *compiler) bindClassDecl(name string) {
+	// hoistLexicals pre-declared the class name as an empty TDZ slot at this
+	// lexical depth; initialize that slot in place so a read before the class
+	// declaration hit the temporal dead zone.
+	if slot := c.lexicalAtCurrentDepth(name); slot >= 0 {
+		c.emitOpU16(OpPutLocal, uint16(slot))
+		return
+	}
 	if c.scopeDepth > 0 {
 		slot := c.declareLexical(name, false)
 		c.emitOpU16(OpPutLocal, uint16(slot))
