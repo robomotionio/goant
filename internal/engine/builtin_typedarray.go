@@ -448,8 +448,10 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 		}
 		buf := rt.newArrayBuffer(n * size)
 		o.ta = &typedArray{buf: buf, kind: kind, length: n}
-	case rt.isArrayBufferValue(a0):
-		// InitializeTypedArrayFromArrayBuffer.
+	case a0.IsObjectType() && rt.objPtr(a0) != nil && rt.objPtr(a0).abObj:
+		// InitializeTypedArrayFromArrayBuffer. The brand check (abObj) also matches
+		// a detached buffer, so it takes this branch and throws the detached
+		// TypeError below rather than being treated as an array-like object.
 		bo := rt.objPtr(a0)
 		offset, e := rt.toIndex(arg(args, 1))
 		if e != nil {
