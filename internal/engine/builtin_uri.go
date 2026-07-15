@@ -34,7 +34,12 @@ func (rt *Runtime) initURIBuiltins() {
 			if e != nil {
 				return mkundef(), e
 			}
-			return rt.newString(uriEncode(b, keep)), nil
+			out, ok := uriEncode(b, keep)
+			if !ok {
+				ev, _ := rt.construct(rt.errors.uriErr, []Value{rt.newString("URI malformed")})
+				return mkundef(), &ThrowError{Value: ev, rt: rt}
+			}
+			return rt.newString(out), nil
 		}
 	}
 	decode := func(reserved string) nativeFunc {
@@ -108,19 +113,58 @@ func jsUnescape(b []byte) []byte {
 	return utf16ToWTF8(units)
 }
 
-// uriEncode percent-encodes UTF-8 bytes not in the keep set.
-func uriEncode(b []byte, keep string) string {
+// uriEncode implements the spec Encode operation over UTF-16 code units: a code
+// unit in the keep set is copied, any other is UTF-8 encoded and percent-escaped
+// octet by octet. A surrogate must be part of a valid pair; a lone surrogate is
+// malformed (ok=false → URIError).
+func uriEncode(b []byte, keep string) (string, bool) {
 	var sb strings.Builder
-	for _, c := range b {
-		if c < 128 && strings.IndexByte(keep, c) >= 0 {
-			sb.WriteByte(c)
-		} else {
+	n := utf16Len(b)
+	for i := 0; i < n; i++ {
+		cu := utf16CodeUnitAt(b, i)
+		var cp uint32
+		switch {
+		case cu >= 0xD800 && cu <= 0xDBFF: // high surrogate: a low surrogate must follow
+			if i+1 >= n {
+				return "", false
+			}
+			lo := utf16CodeUnitAt(b, i+1)
+			if lo < 0xDC00 || lo > 0xDFFF {
+				return "", false
+			}
+			cp = 0x10000 + (uint32(cu-0xD800) << 10) + uint32(lo-0xDC00)
+			i++
+		case cu >= 0xDC00 && cu <= 0xDFFF: // lone low surrogate
+			return "", false
+		default:
+			cp = uint32(cu)
+		}
+		if cp < 128 && strings.IndexByte(keep, byte(cp)) >= 0 {
+			sb.WriteByte(byte(cp))
+			continue
+		}
+		var octets [4]byte
+		var m int
+		switch {
+		case cp < 0x80:
+			octets[0], m = byte(cp), 1
+		case cp < 0x800:
+			octets[0], octets[1] = 0xC0|byte(cp>>6), 0x80|byte(cp&0x3F)
+			m = 2
+		case cp < 0x10000:
+			octets[0], octets[1], octets[2] = 0xE0|byte(cp>>12), 0x80|byte((cp>>6)&0x3F), 0x80|byte(cp&0x3F)
+			m = 3
+		default:
+			octets[0], octets[1], octets[2], octets[3] = 0xF0|byte(cp>>18), 0x80|byte((cp>>12)&0x3F), 0x80|byte((cp>>6)&0x3F), 0x80|byte(cp&0x3F)
+			m = 4
+		}
+		for k := 0; k < m; k++ {
 			sb.WriteByte('%')
-			sb.WriteByte(hexDigits[c>>4])
-			sb.WriteByte(hexDigits[c&0xF])
+			sb.WriteByte(hexDigits[octets[k]>>4])
+			sb.WriteByte(hexDigits[octets[k]&0xF])
 		}
 	}
-	return sb.String()
+	return sb.String(), true
 }
 
 // uriDecode implements the spec Decode operation: it reverses percent-encoding,
