@@ -417,7 +417,9 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 		if err := os.WriteFile(modFile, src, 0o644); err != nil {
 			return result{rel, outFail, "write: " + err.Error()}
 		}
-		ex := execRunnerArgs(runner, []string{"-module", modFile, "-prelude", preFile}, timeout)
+		// Flags must precede the positional file (flag parsing stops at the first
+		// non-flag argument).
+		ex := execRunnerArgs(runner, []string{"-module", "-prelude", preFile, modFile}, timeout)
 		if ok, reason := classify(m, ex); !ok {
 			return result{rel, outFail, "module: " + reason}
 		}
