@@ -280,7 +280,7 @@ func (rt *Runtime) initObjectBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.ownPropertyNames(obj, false), nil
+		return rt.ownPropertyNames(obj, false)
 	})
 	rt.defMethod(cobj, "hasOwn", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		obj, e := rt.toObjectValue(arg(args, 0))
@@ -347,6 +347,20 @@ func (rt *Runtime) initObjectBuiltin() {
 		res := rt.newArray()
 		ra := rt.objPtr(res)
 		if o := rt.objPtr(obj); o != nil {
+			if o.proxy != nil {
+				// Route through the [[OwnPropertyKeys]] trap so its invariants run
+				// (an abrupt completion propagates); keep only the Symbol keys.
+				keys, e := rt.proxyOwnKeys(o.proxy)
+				if e != nil {
+					return mkundef(), e
+				}
+				for _, kv := range keys {
+					if kv.IsSymbol() {
+						rt.arraySet(ra, ra.arrLen, kv)
+					}
+				}
+				return res, nil
+			}
 			for _, off := range o.ownSymbolKeys() {
 				rt.arraySet(ra, ra.arrLen, mkval(TSymbol, uint64(off)))
 			}
@@ -1164,7 +1178,7 @@ func (rt *Runtime) makeDataDescriptor(v Value, w, e, c bool) Value {
 
 // ownPropertyNames returns own keys (including non-enumerable when all=false
 // means include-all). Integer indices come first.
-func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) Value {
+func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) (Value, *ThrowError) {
 	arr := rt.newArray()
 	if v.IsString() {
 		ao := rt.objPtr(arr)
@@ -1175,21 +1189,28 @@ func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) Value {
 		if !enumerableOnly {
 			rt.arraySet(ao, ao.arrLen, rt.internString("length"))
 		}
-		return arr
+		return arr, nil
 	}
 	o := rt.objPtr(v)
 	if o == nil {
-		return arr
+		return arr, nil
 	}
 	ao := rt.objPtr(arr)
 	if o.proxy != nil {
-		keys, _ := rt.proxyOwnKeys(o.proxy)
+		// The [[OwnPropertyKeys]] trap validates its own invariants (only property
+		// keys, no duplicates, non-configurable/non-extensible coverage) even
+		// though getOwnPropertyNames keeps only the String keys — so its abrupt
+		// completion must propagate.
+		keys, e := rt.proxyOwnKeys(o.proxy)
+		if e != nil {
+			return mkundef(), e
+		}
 		for _, kv := range keys {
 			if kv.IsString() {
 				rt.arraySet(ao, ao.arrLen, kv)
 			}
 		}
-		return arr
+		return arr, nil
 	}
 	if v.Type() == TArr {
 		for i := uint32(0); i < o.arrLen; i++ {
@@ -1218,7 +1239,7 @@ func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) Value {
 	for _, k := range keys {
 		rt.arraySet(ao, ao.arrLen, rt.internString(k))
 	}
-	return arr
+	return arr, nil
 }
 
 // sealObject implements Object.seal / Object.freeze.

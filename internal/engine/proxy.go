@@ -377,6 +377,12 @@ func (rt *Runtime) targetOwnKeyList(target Value) []Value {
 	for _, k := range to.ownKeys() {
 		out = append(out, rt.newString(k))
 	}
+	// Symbol keys come last in [[OwnPropertyKeys]] order. Including them lets the
+	// trap invariants catch an omitted non-configurable symbol (and a missing
+	// ownKeys trap forwards the full key list, symbols included).
+	for _, off := range to.ownSymbolKeys() {
+		out = append(out, mkval(TSymbol, uint64(off)))
+	}
 	return out
 }
 
