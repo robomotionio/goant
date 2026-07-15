@@ -591,11 +591,38 @@ func canonicalFlags(flags string) string {
 
 const brandRegExp = 1001
 
+// nonEmptySource implements EscapeRegExpPattern (22.2.3.2.5): an empty pattern
+// renders as "(?:)", and every unescaped "/" and line terminator is escaped so
+// the result is a valid RegularExpressionLiteral body (/source/flags).
 func nonEmptySource(p string) string {
 	if p == "" {
 		return "(?:)"
 	}
-	return p
+	var b strings.Builder
+	rs := []rune(p)
+	for i := 0; i < len(rs); i++ {
+		switch c := rs[i]; c {
+		case '\\': // keep an escape sequence intact (do not re-escape its operand)
+			b.WriteByte('\\')
+			if i+1 < len(rs) {
+				i++
+				b.WriteRune(rs[i])
+			}
+		case '/':
+			b.WriteString("\\/")
+		case '\n':
+			b.WriteString("\\n")
+		case '\r':
+			b.WriteString("\\r")
+		case ' ':
+			b.WriteString("\\u2028")
+		case ' ':
+			b.WriteString("\\u2029")
+		default:
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
 }
 
 // regexpExec runs RegExp.prototype.exec, returning a match-result array or null.
