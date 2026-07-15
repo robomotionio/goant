@@ -473,16 +473,26 @@ func (rt *Runtime) toPropertyKey(key Value) (Value, *ThrowError) {
 
 // setElement writes obj[key] = v with the array fast path.
 func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
+	_, e := rt.setElementR(obj, key, v)
+	return e
+}
+
+// setElementR is [[Set]] for a computed/element key, additionally reporting
+// whether the assignment took effect. It returns false (with no error) for a
+// silently-refused write — a non-writable data property, a setter-less
+// accessor, an add to a non-extensible object, or a frozen array element — so a
+// strict-mode assignment can throw a TypeError on that result.
+func (rt *Runtime) setElementR(obj Value, key, v Value) (bool, *ThrowError) {
 	if obj.IsNullish() {
-		return rt.typeError("cannot set properties of " + rt.nullishName(obj))
+		return false, rt.typeError("cannot set properties of " + rt.nullishName(obj))
 	}
 	pk, ke := rt.toPropertyKey(key)
 	if ke != nil {
-		return ke
+		return false, ke
 	}
 	key = pk
 	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
-		if _, e := rt.proxySet(o.proxy, rt.toPropertyKeyValue(key), v, obj); e != nil { return e } else { return nil }
+		return rt.proxySet(o.proxy, rt.toPropertyKeyValue(key), v, obj)
 	}
 	if key.IsSymbol() {
 		// Ordinary [[Set]] for a symbol key: walk the chain for an accessor (call
@@ -496,23 +506,23 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 				break
 			}
 			if o.proxy != nil {
-				if _, e := rt.proxySet(o.proxy, key, v, obj); e != nil { return e } else { return nil }
+				return rt.proxySet(o.proxy, key, v, obj)
 			}
 			if slot := o.shape.lookupSymbol(sym); slot >= 0 {
 				if o.isAccessorSlot(uint32(slot)) {
 					p := o.shape.propAt(uint32(slot))
 					if p.hasSetter {
 						_, e := rt.callValue(p.setter, obj, []Value{v})
-						return e
+						return e == nil, e
 					}
-					return nil // setter-less accessor: rejected
+					return false, nil // setter-less accessor: rejected
 				}
 				if o.shape.attrsAt(uint32(slot))&attrWritable == 0 {
-					return nil // non-writable data property: rejected
+					return false, nil // non-writable data property: rejected
 				}
 				if cur == obj {
 					o.slotSet(uint32(slot), v) // own writable: update value in place
-					return nil
+					return true, nil
 				}
 				break // inherited writable data: create an own property on obj
 			}
@@ -520,11 +530,11 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 		}
 		if o := rt.objPtr(obj); o != nil {
 			if !o.flags.extensible {
-				return nil // cannot add to a non-extensible object
+				return false, nil // cannot add to a non-extensible object
 			}
 			o.defineOwnSymbol(sym, v, attrDefault)
 		}
-		return nil
+		return true, nil
 	}
 	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TArr {
 		o := rt.objPtr(obj)
@@ -536,10 +546,10 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 		// honor it; absent one, keep the array fast.
 		if int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
 			if o.flags.frozen {
-				return nil // a frozen array's elements are non-writable ([[Set]] fails)
+				return false, nil // a frozen array's elements are non-writable ([[Set]] fails)
 			}
 			rt.arraySet(o, idx, v)
-			return nil
+			return true, nil
 		}
 		// A far index whose gap past the dense store would balloon the backing
 		// slice spills to a named property (sparse array): length still tracks the
@@ -547,26 +557,24 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 		if idx > uint32(len(o.arr)) && idx-uint32(len(o.arr)) > maxDenseGap {
 			name := strconv.Itoa(int(idx))
 			if o.shape.lookupInterned(name) >= 0 {
-				_, e := rt.setFieldR(obj, name, v)
-				return e
+				return rt.setFieldR(obj, name, v)
 			}
 			o.defineOwn(name, v, attrDefault)
 			if idx+1 > o.arrLen {
 				o.arrLen = idx + 1
 			}
-			return nil
+			return true, nil
 		}
 		if idx >= o.arrLen {
 			rt.arraySet(o, idx, v)
-			return nil
+			return true, nil
 		}
 		name := strconv.Itoa(int(idx))
 		if o.shape.lookupInterned(name) >= 0 {
-			_, e := rt.setFieldR(obj, name, v)
-			return e
+			return rt.setFieldR(obj, name, v)
 		}
 		rt.arraySet(o, idx, v)
-		return nil
+		return true, nil
 	}
 	if obj.Type() == TTypedArray {
 		fidx, isNum := key.Number(), key.IsNumber()
@@ -584,7 +592,7 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 			if o.ta != nil && isBigIntKind(o.ta.kind) {
 				bi, e := rt.toBigInt(v)
 				if e != nil {
-					return e
+					return false, e
 				}
 				if integral {
 					rt.taSetBig(o, idx, bi)
@@ -592,20 +600,22 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 			} else {
 				n, e := rt.toNumber(v)
 				if e != nil {
-					return e
+					return false, e
 				}
 				if integral {
 					rt.taSet(o, idx, n)
 				}
 			}
-			return nil
+			// Integer-indexed exotic [[Set]] always reports success (an
+			// out-of-range write is a silent no-op, never a strict-mode throw).
+			return true, nil
 		}
 	}
 	name, e := rt.propKeyString(key)
 	if e != nil {
-		return e
+		return false, e
 	}
-	return rt.setField(obj, name, v)
+	return rt.setFieldR(obj, name, v)
 }
 
 // ---- array helpers ----

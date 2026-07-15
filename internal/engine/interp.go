@@ -629,8 +629,13 @@ restart:
 			val := pop()
 			key := pop()
 			obj := pop()
-			if e := rt.setElement(obj, key, val); e != nil {
+			ok, e := rt.setElementR(obj, key, val)
+			if e != nil {
 				thrown = e
+				goto unwind
+			}
+			if !ok && fn.isStrict {
+				thrown = rt.typeError("Cannot assign to read only property")
 				goto unwind
 			}
 			ip++
