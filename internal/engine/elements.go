@@ -566,6 +566,12 @@ func (rt *Runtime) setElementR(obj Value, key, v Value) (bool, *ThrowError) {
 			rt.arraySet(o, idx, v)
 			return true, nil
 		}
+		// Past the live-element fast path the index would be a new own property;
+		// a non-extensible array rejects it (unless a named index property already
+		// lives there, updated via setFieldR below).
+		if !o.flags.extensible && o.shape.lookupInterned(strconv.Itoa(int(idx))) < 0 {
+			return false, nil
+		}
 		// A far index whose gap past the dense store would balloon the backing
 		// slice spills to a named property (sparse array): length still tracks the
 		// index, but we never allocate the intervening holes (e.g. a[2**32-2]=x).
