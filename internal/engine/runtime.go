@@ -368,7 +368,7 @@ func (rt *Runtime) RunString(filename, src string) (Value, error) {
 // their globals are visible. Static imports are not yet linked.
 func (rt *Runtime) RunModule(filename, src string) (Value, error) {
 	rt.filename = filename
-	prog, err := parseMode(filename, src, true) // a Module is always strict
+	prog, err := parseMode(filename, src, true, true) // a Module: strict + module goal
 	if err != nil {
 		return mkundef(), err
 	}
@@ -376,8 +376,14 @@ func (rt *Runtime) RunModule(filename, src string) (Value, error) {
 	if err != nil {
 		return mkundef(), err
 	}
-	v, err := rt.execute(fn)
+	// A Module evaluates asynchronously: run its body as an async coroutine (so
+	// top-level await suspends) and drive the loop until its completion promise
+	// settles; a rejection is the module's evaluation error.
+	promise := rt.runAsync(fn, nil, mkundef(), mkundef(), nil)
 	rt.runEventLoop()
+	if po := rt.objPtr(promise); po != nil && po.promise != nil && po.promise.state == 2 { // rejected
+		return mkundef(), &ThrowError{Value: po.promise.value, rt: rt}
+	}
 	if err == nil {
 		if p, e := rt.getField(rt.global, "__asyncTestPending"); e == nil && rt.toBoolean(p) {
 			return mkundef(), &ExitError{Code: 1}
@@ -386,5 +392,5 @@ func (rt *Runtime) RunModule(filename, src string) (Value, error) {
 	if rt.exitCode != nil {
 		return mkundef(), &ExitError{Code: *rt.exitCode}
 	}
-	return v, err
+	return mkundef(), nil
 }

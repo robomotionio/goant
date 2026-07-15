@@ -104,7 +104,7 @@ func (rt *Runtime) initBuiltins() {
 		}
 		src := string(rt.strBytes(v))
 		// A direct eval inherits the caller's strict mode (frameStrict).
-		prog, perr := parseMode("<eval>", src, rt.frameStrict)
+		prog, perr := parseMode("<eval>", src, rt.frameStrict, false)
 		if perr != nil {
 			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
 			return mkundef(), &ThrowError{Value: ev, rt: rt}

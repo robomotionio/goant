@@ -67,11 +67,14 @@ type parser struct {
 
 // Parse tokenizes and parses src into an AST (N_PROGRAM root node).
 func Parse(filename, src string) (*Node, error) {
-	return parseMode(filename, src, false)
+	return parseMode(filename, src, false, false)
 }
 
-func parseMode(filename, src string, strict bool) (*Node, error) {
+func parseMode(filename, src string, strict, module bool) (*Node, error) {
 	p := &parser{lx: newLexer(src, strict), filename: filename}
+	// A Module's top level is an async context: `await` is the await operator
+	// (top-level await), reset to identifier inside any nested non-async function.
+	p.inAsync = module
 	program := p.mk(NProgram)
 	p.parseStmtList(&program.Args, false, true)
 	if p.err != nil {

@@ -194,7 +194,9 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		isEval:     isEval,
 		isModule:   isModule,
 		usingStack: -1,
-		fn:         &svFunc{name: "", filename: filename, source: source, isStrict: strict},
+		// A Module evaluates asynchronously (top-level await), so its body is
+		// compiled and driven as an async coroutine.
+		fn: &svFunc{name: "", filename: filename, source: source, isStrict: strict, isAsync: isModule},
 	}
 	// A Module's export/import declarations are lowered to their inner
 	// declarations before hoisting so the ordinary declaration machinery applies.
