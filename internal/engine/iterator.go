@@ -145,10 +145,17 @@ func (rt *Runtime) getAsyncIterator(source Value) (Value, *ThrowError) {
 		if e != nil {
 			return mkundef(), e
 		}
-		if rt.isCallable(m) {
+		if !m.IsNullish() {
+			if !rt.isCallable(m) {
+				return mkundef(), rt.typeError("[Symbol.iterator] is not a function")
+			}
 			syncIt, e := rt.callValue(m, source, nil)
 			if e != nil {
 				return mkundef(), e
+			}
+			// GetIterator: the returned iterator must be an Object.
+			if !syncIt.IsObjectType() {
+				return mkundef(), rt.typeError("[Symbol.iterator]() returned a non-object")
 			}
 			return rt.createAsyncFromSyncIterator(syncIt), nil
 		}
