@@ -307,7 +307,10 @@ func (rt *Runtime) proxyOwnKeys(p *proxyState) ([]Value, *ThrowError) {
 		if e != nil {
 			return nil, e
 		}
-		keys, e := rt.iterableValues(r)
+		// The trap result is processed with CreateListFromArrayLike (read length
+		// then indexed elements), NOT the iterator protocol — a plain array-like
+		// object is a valid ownKeys result.
+		keys, e := rt.createListFromArrayLike(r)
 		if e != nil {
 			return nil, e
 		}
