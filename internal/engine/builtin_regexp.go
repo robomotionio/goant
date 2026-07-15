@@ -1545,6 +1545,16 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 		return mkundef(), e
 	}
 	pat := string(rt.strBytes(ps))
+	// A non-callable replaceValue is coerced to a string BEFORE the search (so its
+	// ToString runs even when there is no match). Using the coerced string in
+	// replaceOne is idempotent (toStringValue on a string calls no user code).
+	if !rt.isCallable(repl) {
+		rs, e := rt.toStringValue(repl)
+		if e != nil {
+			return mkundef(), e
+		}
+		repl = rs
+	}
 	idx := strings.Index(subject, pat)
 	if idx < 0 {
 		return s, nil
