@@ -375,6 +375,30 @@ func (rt *Runtime) initObjectBuiltin() {
 		o := rt.objPtr(obj)
 		res := rt.newPlainObject()
 		reso := rt.objPtr(res)
+		if o != nil && o.proxy != nil {
+			// Proxy: [[OwnPropertyKeys]] once, then [[GetOwnProperty]] per key,
+			// storing the FromPropertyDescriptor result (skip an undefined desc).
+			keys, e := rt.proxyOwnKeys(o.proxy)
+			if e != nil {
+				return mkundef(), e
+			}
+			for _, k := range keys {
+				d, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, k)
+				if e != nil {
+					return mkundef(), e
+				}
+				if d.IsUndefined() {
+					continue
+				}
+				if k.IsSymbol() {
+					reso.defineOwnSymbol(k.handle(), d, attrDefault)
+				} else {
+					name, _ := rt.propKeyString(k)
+					reso.defineOwn(name, d, attrDefault)
+				}
+			}
+			return res, nil
+		}
 		switch obj.Type() {
 		case TArr:
 			for i := uint32(0); i < o.arrLen; i++ {
