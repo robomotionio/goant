@@ -817,8 +817,10 @@ func (rt *Runtime) defineMethodComputed(target, key, accFn Value, flags byte) *T
 		return nil
 	}
 	if flags == 0 {
-		rt.setField(target, name, accFn)
-		o.setAttrsOwn(name, attrWritable|attrConfigurable)
+		// DefineMethod uses [[DefineOwnProperty]], not [[Set]]: a computed method
+		// named "length"/"name" must replace the constructor's own non-writable
+		// default (a Set would silently fail), and no inherited setter runs.
+		o.defineOwn(name, accFn, attrWritable|attrConfigurable)
 		return nil
 	}
 	g, s := mkundef(), mkundef()
