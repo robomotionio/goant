@@ -766,6 +766,25 @@ restart:
 			}
 			push(v)
 			ip++
+		case OpPutSuperVal:
+			// [receiver(this), base(superproto), key, val] -> val. A super write
+			// performs base.[[Set]](key, val, this): a setter on the super chain runs
+			// with `this`, and a writable data property is created on `this`.
+			val := pop()
+			key := pop()
+			base := pop()
+			recv := pop()
+			ok, e := rt.putSuperProp(base, key, val, recv)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			if !ok && fn.isStrict {
+				thrown = rt.typeError("Cannot assign to read only super property")
+				goto unwind
+			}
+			push(val)
+			ip++
 		case OpSetHomeObj:
 			// [obj, method] (unchanged): record the method's [[HomeObject]] as obj
 			// so a super reference in the method resolves against obj's prototype.

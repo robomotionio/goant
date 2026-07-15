@@ -474,20 +474,52 @@ func (c *compiler) superHomeBinding() string {
 
 // hasClassSuper reports whether a `super` reference resolves to a class's home
 // binding (*superproto* / *superctor*) rather than an object-literal method's
-// runtime [[HomeObject]]. A class element captures that binding, which lives as
-// a LOCAL of the element's immediately enclosing (class) compiler; an object
-// method — even one nested inside a class method — does not, so its super uses
-// its home object instead. Arrows are transparent (they inherit the enclosing
-// method's super), so the check is made at the nearest non-arrow function.
+// runtime [[HomeObject]]. The nearest enclosing non-arrow function decides:
+// a class element (isClassElement) captures the class binding, an object method
+// does not. Arrows are transparent — they inherit the enclosing method's super.
+// (A plain local lookup would misfire, since a *superproto* local left in an
+// enclosing scope by a sibling class is not this method's super binding.)
 func (c *compiler) hasClassSuper() bool {
-	name := c.superHomeBinding()
 	for e := c; e != nil; e = e.enclosing {
 		if e.fn == nil || e.fn.isArrow {
 			continue
 		}
-		return e.enclosing != nil && e.enclosing.resolveLocal(name) >= 0
+		// Only a *derived* class element captures *superproto* / *superctor*. A
+		// base class element (no heritage) has neither, so — like an object
+		// method — its super resolves via the element's [[HomeObject]] (the
+		// class prototype for an instance element, the class for a static one).
+		return e.fn.isClassElement && e.fn.classIsDerived
 	}
 	return false
+}
+
+// emitSuperBase pushes the object a super reference looks up on: a class home
+// binding (*superproto* / *superctor*) inside a class element, or an object
+// method's [[HomeObject]].[[Prototype]] (via OpGetSuper). Returns false when
+// super is not available in the current context.
+func (c *compiler) emitSuperBase() bool {
+	if c.hasClassSuper() {
+		return c.resolveClassBinding(c.superHomeBinding())
+	}
+	if c.fn != nil && c.fn.isMethod && !c.fn.isArrow {
+		c.fn.usesSuper = true
+		c.emit(OpGetSuper)
+		return true
+	}
+	return false
+}
+
+// emitSuperThis pushes the `this` a super reference uses as its accessor
+// receiver: the captured *this* in a class element, the dynamic `this` in an
+// object-literal method.
+func (c *compiler) emitSuperThis() {
+	if c.hasClassSuper() {
+		if !c.resolveClassBinding("*this*") {
+			c.emit(OpUndef)
+		}
+		return
+	}
+	c.emit(OpThis)
 }
 
 // resolveClassBinding emits a load of a captured class binding (*superctor* /
@@ -903,7 +935,8 @@ func (c *compiler) compileClass(n *Node) {
 			blockFn := &Node{Kind: NFunc, Body: body, Flags: fnClassBody}
 			c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // this
 			c.pendingStaticSuper = true               // a static block's home is the constructor
-			c.compileFunc(blockFn)                    // func
+			c.pendingClassDerived = n.Left != nil
+			c.compileFunc(blockFn) // func
 			c.emit(OpCallMethod)                      // [this, func] -> result
 			c.emitU16(0)
 			c.emit(OpPop)
@@ -922,6 +955,7 @@ func (c *compiler) compileClass(n *Node) {
 		}
 		target := protoSlot
 		c.pendingStaticSuper = false
+		c.pendingClassDerived = n.Left != nil
 		if m.Flags&fnStatic != 0 {
 			target = ctorSlot
 			c.pendingStaticSuper = true // a static method's home is the constructor

@@ -159,6 +159,24 @@ func (c *compiler) compileSuperMember(n *Node) {
 	c.emit(OpGetSuperVal)
 }
 
+// compileSuperMemberAssign compiles `super.x = v` / `super[k] = v`: it emits
+// [receiver(this), base, key, val] and performs base.[[Set]](key, val, this).
+func (c *compiler) compileSuperMemberAssign(n *Node) {
+	member := n.Left
+	c.emitSuperThis() // receiver
+	if !c.emitSuperBase() {
+		c.syntaxErrorf("'super' keyword unexpected here")
+		return
+	}
+	if member.Flags&1 != 0 { // computed key
+		c.compileExpr(member.Right)
+	} else {
+		c.emitConst(c.rt.internString(member.Right.Str))
+	}
+	c.compileExpr(n.Right) // value
+	c.emit(OpPutSuperVal)  // [receiver, base, key, val] -> val
+}
+
 // tempLocal allocates a fresh anonymous local slot.
 func (c *compiler) tempLocal() int { return c.addLocal("*tmp*", false) }
 
@@ -179,6 +197,12 @@ func (c *compiler) loadMember(member *Node, tSlot, kSlot int) {
 func (c *compiler) compileMemberAssign(n *Node) {
 	member := n.Left
 	computed := member.Flags&1 != 0
+
+	// `super.x = v` / `super[k] = v` (plain assignment): a Super Reference write.
+	if n.Op == TokAssign && member.Left != nil && member.Left.Kind == NIdent && member.Left.Str == "super" {
+		c.compileSuperMemberAssign(n)
+		return
+	}
 
 	if n.Op == TokAssign {
 		c.compileExpr(member.Left) // obj

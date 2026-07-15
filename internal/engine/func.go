@@ -38,6 +38,16 @@ type svFunc struct {
 	isGenerator bool
 	isClassCtor bool
 	isMethod    bool // concise method / getter / setter: no [[Construct]], no .prototype
+	// isClassElement marks a class constructor / method / accessor / static block:
+	// its `super` resolves via the class's captured *superproto* / *superctor*
+	// bindings, distinguishing it from an object-literal method (whose super uses
+	// a runtime [[HomeObject]]). Without this a *superproto* local left in an
+	// enclosing scope by a sibling class would be mistaken for a super binding.
+	isClassElement bool
+	// classIsDerived marks a class element whose class has a heritage (`extends`).
+	// Only then are the *superproto* / *superctor* bindings available, so a base
+	// class element (like an object method) resolves super via its [[HomeObject]].
+	classIsDerived bool
 	// usesSuper marks a concise object-literal method whose body reads a super
 	// property outside any class scope. Such a method's closure carries a
 	// [[HomeObject]] (set when the method is defined on its object) so OpGetSuper

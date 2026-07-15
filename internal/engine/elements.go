@@ -455,6 +455,22 @@ func (rt *Runtime) getSuperProp(base, key, receiver Value) (Value, *ThrowError) 
 	return mkundef(), nil
 }
 
+// putSuperProp implements a super-property write (`super.x = v`): PutValue on a
+// Super Reference performs base.[[Set]](key, v, this) — a setter on the super
+// chain runs with `this`, and a writable data property is created/updated on
+// the receiver (this), not on the base. It reports whether the write took
+// effect (false for a refused write, so strict code can throw).
+func (rt *Runtime) putSuperProp(base, key, v, receiver Value) (bool, *ThrowError) {
+	if base.IsNullish() {
+		return false, rt.typeError("cannot set properties of " + rt.nullishName(base))
+	}
+	pk, ke := rt.toPropertyKey(key)
+	if ke != nil {
+		return false, ke
+	}
+	return rt.ordinarySet(base, pk, v, receiver)
+}
+
 func (rt *Runtime) hasFieldSymbol(obj Value, sym uint32) bool {
 	cur := obj
 	for depth := 0; depth < maxProtoChainDepth; depth++ {
