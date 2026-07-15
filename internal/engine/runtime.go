@@ -175,6 +175,10 @@ func (u *upvalue) closeUp()    { u.closed = *u.location; u.location = &u.closed 
 type closure struct {
 	fn       *svFunc
 	upvalues []*upvalue
+	// home is the [[HomeObject]] of an object-literal method that reads super
+	// (set when the method is defined on its object); a super-property lookup
+	// starts at home's [[Prototype]]. Unset (0) for every other function.
+	home Value
 }
 
 // macrotask is a pending timer callback (setTimeout/setInterval). goant has no

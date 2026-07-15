@@ -510,6 +510,7 @@ restart:
 			enumerable := flags&4 != 0 // bit 4: object-literal accessor (enumerable)
 			flags &= 3
 			accFn := pop()
+			rt.setMethodHome(accFn, peek()) // [[HomeObject]] for a super-using method
 			if len(name) > 0 && name[0] == '#' {
 				if o := rt.objPtr(peek()); o != nil {
 					switch flags {
@@ -555,6 +556,7 @@ restart:
 			flags := code[ip+1]
 			accFn := pop()
 			key := pop()
+			rt.setMethodHome(accFn, peek()) // [[HomeObject]] for a super-using method
 			if e := rt.defineMethodComputed(peek(), key, accFn, flags); e != nil {
 				thrown = e
 				goto unwind
@@ -763,6 +765,27 @@ restart:
 				goto unwind
 			}
 			push(v)
+			ip++
+		case OpSetHomeObj:
+			// [obj, method] (unchanged): record the method's [[HomeObject]] as obj
+			// so a super reference in the method resolves against obj's prototype.
+			if len(stack) >= 2 {
+				rt.setMethodHome(stack[len(stack)-1], stack[len(stack)-2])
+			}
+			ip++
+		case OpGetSuper:
+			// Push the [[Prototype]] of the current object-literal method's
+			// HomeObject — the base for a super-property lookup outside a class.
+			var base Value
+			if cl != nil && cl.home.IsObjectType() {
+				p, e := rt.getPrototypeOfValue(cl.home)
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				base = p
+			}
+			push(base)
 			ip++
 		case OpSetNameComp:
 			// [key, func] (unchanged): NamedEvaluation for an anonymous function or

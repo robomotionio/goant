@@ -363,7 +363,7 @@ var opTable = [NumOpcodes]opInfo{
 	OpPutPrivate:                  {Name: "PUT_PRIVATE", Size: 1, NPop: 3, NPush: 1, Format: FmtNone, Flags: OpfJitEligible},
 	OpDefPrivate:                  {Name: "DEF_PRIVATE", Size: 2, NPop: 3, NPush: 1, Format: FmtU8, Flags: 0},
 	OpHasPrivate:                  {Name: "HAS_PRIVATE", Size: 1, NPop: 2, NPush: 1, Format: FmtNone, Flags: 0},
-	OpGetSuper:                    {Name: "GET_SUPER", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: 0},
+	OpGetSuper:                    {Name: "GET_SUPER", Size: 1, NPop: 0, NPush: 1, Format: FmtNone, Flags: 0},
 	OpGetSuperVal:                 {Name: "GET_SUPER_VAL", Size: 1, NPop: 3, NPush: 1, Format: FmtNone, Flags: 0},
 	OpPutSuperVal:                 {Name: "PUT_SUPER_VAL", Size: 1, NPop: 4, NPush: 0, Format: FmtNone, Flags: 0},
 	OpAdd:                         {Name: "ADD", Size: 1, NPop: 2, NPush: 1, Format: FmtNone, Flags: OpfJitEligible | OpfJitInlineable | OpfJitNeedsBailout},

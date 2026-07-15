@@ -38,6 +38,11 @@ type svFunc struct {
 	isGenerator bool
 	isClassCtor bool
 	isMethod    bool // concise method / getter / setter: no [[Construct]], no .prototype
+	// usesSuper marks a concise object-literal method whose body reads a super
+	// property outside any class scope. Such a method's closure carries a
+	// [[HomeObject]] (set when the method is defined on its object) so OpGetSuper
+	// can start the lookup at the home object's prototype.
+	usesSuper bool
 
 	// isDerivedCtor marks a derived class constructor: `this` starts in its TDZ
 	// (thisSlot holds tEmpty until super() binds it), and OpReturn enforces

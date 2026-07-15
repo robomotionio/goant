@@ -86,7 +86,13 @@ func (c *compiler) compileObject(n *Node) {
 			continue
 		}
 		nameAnonExpr(prop.Right, name)
+		before := len(c.fn.childFuncs)
 		c.compileExpr(prop.Right)
+		// A concise method that reads super needs its [[HomeObject]] set to the
+		// object before it becomes an ordinary (enumerable) data property.
+		if len(c.fn.childFuncs) > before && c.fn.childFuncs[len(c.fn.childFuncs)-1].usesSuper {
+			c.emit(OpSetHomeObj) // [obj, method] -> [obj, method]
+		}
 		c.emitDefineField(name) // obj val -> obj
 	}
 }
@@ -126,10 +132,22 @@ func (c *compiler) compileMember(n *Node) {
 // the lookup starts at the home object's prototype (*superproto*) but the
 // accessor receiver is the current `this`.
 func (c *compiler) compileSuperMember(n *Node) {
-	if !c.resolveClassBinding("*this*") { // receiver
-		c.emit(OpUndef)
-	}
-	if !c.resolveClassBinding(c.superHomeBinding()) { // base
+	switch {
+	case c.hasClassSuper():
+		// Class element: the receiver is the captured *this*, the base is the
+		// class's home binding (*superproto* / *superctor*).
+		if !c.resolveClassBinding("*this*") {
+			c.emit(OpUndef)
+		}
+		c.resolveClassBinding(c.superHomeBinding())
+	case c.fn != nil && c.fn.isMethod && !c.fn.isArrow:
+		// Object-literal method: the receiver is the dynamic `this`, the base is
+		// the method's [[HomeObject]].[[Prototype]] (read at runtime via the
+		// method's closure). Flag the method so it receives a home object.
+		c.fn.usesSuper = true
+		c.emit(OpThis)
+		c.emit(OpGetSuper)
+	default:
 		c.syntaxErrorf("'super' keyword unexpected here")
 		return
 	}

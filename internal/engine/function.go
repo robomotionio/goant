@@ -66,6 +66,15 @@ func (rt *Runtime) closureOf(v Value) *closure {
 	return rt.closures.get(o.closure)
 }
 
+// setMethodHome records a method's [[HomeObject]] when the method reads super
+// outside a class scope. It is a no-op for every other function, so it is safe
+// to call for every object-literal method definition.
+func (rt *Runtime) setMethodHome(fnVal, home Value) {
+	if cl := rt.closureOf(fnVal); cl != nil && cl.fn.usesSuper {
+		cl.home = home
+	}
+}
+
 // newNativeFunc creates a callable built-in function object.
 func (rt *Runtime) newNativeFunc(name string, length int, fn nativeFunc) Value {
 	oh, obj := rt.objects.alloc()

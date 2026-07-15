@@ -472,6 +472,24 @@ func (c *compiler) superHomeBinding() string {
 	return "*superproto*"
 }
 
+// hasClassSuper reports whether a `super` reference resolves to a class's home
+// binding (*superproto* / *superctor*) rather than an object-literal method's
+// runtime [[HomeObject]]. A class element captures that binding, which lives as
+// a LOCAL of the element's immediately enclosing (class) compiler; an object
+// method — even one nested inside a class method — does not, so its super uses
+// its home object instead. Arrows are transparent (they inherit the enclosing
+// method's super), so the check is made at the nearest non-arrow function.
+func (c *compiler) hasClassSuper() bool {
+	name := c.superHomeBinding()
+	for e := c; e != nil; e = e.enclosing {
+		if e.fn == nil || e.fn.isArrow {
+			continue
+		}
+		return e.enclosing != nil && e.enclosing.resolveLocal(name) >= 0
+	}
+	return false
+}
+
 // resolveClassBinding emits a load of a captured class binding (*superctor* /
 // *superproto* / *this*), returning false if it's not in scope.
 func (c *compiler) resolveClassBinding(name string) bool {
@@ -534,44 +552,62 @@ func (c *compiler) compileSuperCall(n *Node) {
 }
 
 // compileSuperMethodCall compiles `super.method(...)`: it invokes the parent
-// prototype's method with the current `this`.
+// prototype's method with the current `this`. The lookup base is a class home
+// binding (*superproto* / *superctor*) inside a class element, or the object
+// method's [[HomeObject]].[[Prototype]] (via OpGetSuper) inside an object
+// literal method.
 func (c *compiler) compileSuperMethodCall(n *Node) {
 	member := n.Left
-	// Spread args: emit [method, this, argsArray] for APPLY.
-	if hasSpread(n.Args) {
-		if !c.resolveClassBinding(c.superHomeBinding()) {
-			c.syntaxErrorf("'super' keyword unexpected here")
+	// emitSuperBase pushes the object to look the method up on; false → error.
+	emitSuperBase := func() bool {
+		if c.hasClassSuper() {
+			return c.resolveClassBinding(c.superHomeBinding())
+		}
+		if c.fn != nil && c.fn.isMethod && !c.fn.isArrow {
+			c.fn.usesSuper = true
+			c.emit(OpGetSuper)
+			return true
+		}
+		return false
+	}
+	// emitSuperThis pushes the receiver: the captured *this* in a class element,
+	// the dynamic `this` in an object method.
+	emitSuperThis := func() {
+		if c.hasClassSuper() {
+			if !c.resolveClassBinding("*this*") {
+				c.emit(OpUndef)
+			}
 			return
 		}
+		c.emit(OpThis)
+	}
+	emitMethod := func() {
 		if member.Flags&1 != 0 {
 			c.compileExpr(member.Right)
 			c.emit(OpGetElem)
 		} else {
 			c.emitFieldOp(OpGetField, member.Right.Str)
-		} // [method]
-		if !c.resolveClassBinding("*this*") {
-			c.emit(OpUndef)
-		} // [method, this]
+		}
+	}
+	// Spread args: emit [method, this, argsArray] for APPLY.
+	if hasSpread(n.Args) {
+		if !emitSuperBase() {
+			c.syntaxErrorf("'super' keyword unexpected here")
+			return
+		}
+		emitMethod()   // [method]
+		emitSuperThis() // [method, this]
 		c.buildSpreadArray(n.Args) // [method, this, argsArray]
 		c.emit(OpApply)
 		c.emitU16(0)
 		return
 	}
-	// this = current this
-	if !c.resolveClassBinding("*this*") {
-		c.emit(OpUndef)
-	}
-	// method = *superproto*.name
-	if !c.resolveClassBinding(c.superHomeBinding()) {
+	emitSuperThis() // [this]
+	if !emitSuperBase() {
 		c.syntaxErrorf("'super' keyword unexpected here")
 		return
 	}
-	if member.Flags&1 != 0 {
-		c.compileExpr(member.Right)
-		c.emit(OpGetElem)
-	} else {
-		c.emitFieldOp(OpGetField, member.Right.Str)
-	}
+	emitMethod() // [this, method]
 	for _, a := range n.Args {
 		c.compileExpr(a)
 	}
