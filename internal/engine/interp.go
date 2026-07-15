@@ -1403,6 +1403,15 @@ restart:
 				thrown = e
 				goto unwind
 			}
+			// BindThisValue: a second super() in the same derived constructor throws
+			// a ReferenceError (the parent is still constructed first, per spec). The
+			// guard is limited to the constructor frame itself — a super() nested in
+			// an arrow binds the enclosing ctor's `this` via an upvalue, not this
+			// frame's thisSlot.
+			if fn.isDerivedCtor && fn.thisSlot >= 0 && fn.thisSlot < len(locals) && !locals[fn.thisSlot].IsEmpty() {
+				thrown = rt.referenceError("Super constructor may only be called once per derived class constructor")
+				goto unwind
+			}
 			push(ret)
 			ip += 3
 		case OpApply:
