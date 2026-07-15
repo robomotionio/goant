@@ -1906,11 +1906,19 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		}
 		o := rt.objPtr(this)
 		l := length(this)
+		bigKind := isBigIntKind(o.ta.kind)
 		for i := 0; i < l/2; i++ {
 			a, _ := rt.taGet(o, i)
 			b, _ := rt.taGet(o, l-1-i)
-			rt.taSet(o, i, b.Number())
-			rt.taSet(o, l-1-i, a.Number())
+			if bigKind {
+				ba, _ := rt.toBigInt(a)
+				bb, _ := rt.toBigInt(b)
+				rt.taSetBig(o, i, bb)
+				rt.taSetBig(o, l-1-i, ba)
+			} else {
+				rt.taSet(o, i, b.Number())
+				rt.taSet(o, l-1-i, a.Number())
+			}
 		}
 		return this, nil
 	})
