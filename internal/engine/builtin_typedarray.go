@@ -1695,6 +1695,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	})
 	m("find", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("TypedArray.prototype.find: predicate is not a function")
+		}
 		for i, l := 0, length(this); i < l; i++ {
 			el := get(this, i)
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
@@ -1709,6 +1712,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	})
 	m("findIndex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("TypedArray.prototype.findIndex: predicate is not a function")
+		}
 		for i, l := 0, length(this); i < l; i++ {
 			r, e := rt.callValue(cb, arg(args, 1), []Value{get(this, i), mknum(float64(i)), this})
 			if e != nil {
@@ -1722,6 +1728,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	})
 	m("findLast", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("TypedArray.prototype.findLast: predicate is not a function")
+		}
 		for i := length(this) - 1; i >= 0; i-- {
 			el := get(this, i)
 			r, e := rt.callValue(cb, arg(args, 1), []Value{el, mknum(float64(i)), this})
@@ -1736,6 +1745,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 	})
 	m("findLastIndex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		cb := arg(args, 0)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("TypedArray.prototype.findLastIndex: predicate is not a function")
+		}
 		for i := length(this) - 1; i >= 0; i-- {
 			r, e := rt.callValue(cb, arg(args, 1), []Value{get(this, i), mknum(float64(i)), this})
 			if e != nil {
