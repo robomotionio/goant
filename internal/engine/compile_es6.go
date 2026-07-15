@@ -1165,6 +1165,41 @@ func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 		callee = callee.Left
 		guardCallee = true
 	}
+	// A super method callee (`super.m?.()`) reads the method through the super
+	// binding and calls it with the method's `this`, not an ordinary receiver.
+	if callee.Kind == NMember && callee.Left != nil && callee.Left.Kind == NIdent && callee.Left.Str == "super" {
+		if !c.emitSuperBase() { // [base]
+			c.syntaxErrorf("'super' keyword unexpected here")
+			return
+		}
+		if callee.Flags&1 != 0 { // method = base[key]
+			c.compileExpr(callee.Right)
+			c.emit(OpGetElem)
+		} else {
+			c.emitFieldOp(OpGetField, callee.Right.Str)
+		} // [method]
+		if guardCallee {
+			c.emitGuard(bail) // [method] (balanced on bail)
+		}
+		mSlot := c.tempLocal()
+		c.emitOpU16(OpPutLocal, uint16(mSlot))
+		if spread {
+			c.emitOpU16(OpGetLocal, uint16(mSlot)) // [method]
+			c.emitSuperThis()                      // [method, this]
+			c.buildSpreadArray(n.Args)             // [method, this, argsArray]
+			c.emit(OpApply)
+			c.emitU16(0)
+			return
+		}
+		c.emitSuperThis()                      // [this]
+		c.emitOpU16(OpGetLocal, uint16(mSlot)) // [this, method]
+		for _, a := range n.Args {
+			c.compileExpr(a)
+		}
+		c.emit(OpCallMethod)
+		c.emitU16(uint16(len(n.Args)))
+		return
+	}
 	isMethod := callee.Kind == NMember || (callee.Kind == NOptional && callee.Right != nil)
 	if isMethod {
 		c.compileChainLink(callee.Left, bail) // [recv]
