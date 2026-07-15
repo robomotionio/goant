@@ -657,11 +657,22 @@ func (rt *Runtime) initStringBuiltin() {
 		}
 		var b []byte
 		for i := 0; i < n; i++ {
-			seg, _ := rt.getElement(rawV, mknum(float64(i)))
-			ss, _ := rt.toStringValue(seg)
+			// Get(raw, i) then ToString: a Symbol segment (or one whose toString
+			// throws) is an abrupt completion that must propagate.
+			seg, e := rt.getElement(rawV, mknum(float64(i)))
+			if e != nil {
+				return mkundef(), e
+			}
+			ss, e := rt.toStringValue(seg)
+			if e != nil {
+				return mkundef(), e
+			}
 			b = append(b, rt.strBytes(ss)...)
 			if i+1 < n && i+1 < len(args) {
-				sub, _ := rt.toStringValue(args[i+1])
+				sub, e := rt.toStringValue(args[i+1])
+				if e != nil {
+					return mkundef(), e
+				}
 				b = append(b, rt.strBytes(sub)...)
 			}
 		}
