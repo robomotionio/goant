@@ -276,7 +276,9 @@ func (rt *Runtime) initGlobalNumberFns() {
 			if e != nil {
 				return mkundef(), e
 			}
-			radix = int(int32(r))
+			// R = ToInt32(radix): NaN/±∞ → 0 (jsParseInt then defaults to 10), and a
+			// value past 2^31 wraps modulo 2^32 (Go's int32(float64) would not).
+			radix = int(toInt32(r))
 		}
 		return mknum(jsParseInt(string(b), radix)), nil
 	})
