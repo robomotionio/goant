@@ -894,6 +894,15 @@ func (rt *Runtime) objectDefineProperty(obj Value, name string, descVal Value) *
 // objectDefinePropertyKey applies a descriptor to obj[key] for a string or
 // symbol key.
 func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) *ThrowError {
+	// ToPropertyKey(P) precedes ToPropertyDescriptor(Attributes): a throwing key
+	// coercion must be observed before the "descriptor must be an object" check
+	// (Reflect.defineProperty / Object.defineProperty step ordering). The result
+	// is a string/symbol, so the later key handling does not re-coerce it.
+	pk, e := rt.toPropertyKey(key)
+	if e != nil {
+		return e
+	}
+	key = pk
 	if !descVal.IsObjectType() {
 		return rt.typeError("Property description must be an object")
 	}
