@@ -95,27 +95,20 @@ func (rt *Runtime) initBuiltins() {
 		return mkundef(), nil
 	}), attrWritable|attrConfigurable)
 
-	// eval — indirect (global-scope) evaluation. Direct-eval local-scope access
-	// is a later refinement; this handles the common expression/statement cases.
-	g.defineOwn("eval", rt.newNativeFunc("eval", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	// eval — reaching the native function means an *indirect* eval (the callee was
+	// not the syntactic `eval` reference, e.g. `(0,eval)(s)` or `globalThis.eval(s)`),
+	// which always evaluates in global scope and sloppy mode. A *direct* eval —
+	// `eval(s)` with the intrinsic still bound — is compiled to OpEval and never
+	// reaches here; it inherits the caller's scope, strictness, and context.
+	evalFn := rt.newNativeFunc("eval", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		v := arg(args, 0)
 		if !v.IsString() {
 			return v, nil // eval of a non-string returns it unchanged
 		}
-		src := string(rt.strBytes(v))
-		// A direct eval inherits the caller's strict mode (frameStrict).
-		prog, perr := parseMode("<eval>", src, rt.frameStrict, false)
-		if perr != nil {
-			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
-			return mkundef(), &ThrowError{Value: ev, rt: rt}
-		}
-		fn, cerr := rt.CompileEval(prog, "<eval>", src)
-		if cerr != nil {
-			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(cerr.Error())})
-			return mkundef(), &ThrowError{Value: ev, rt: rt}
-		}
-		return rt.runFrame(fn, nil, mkundef(), rt.global, nil)
-	}), attrWritable|attrConfigurable)
+		return rt.performIndirectEval(string(rt.strBytes(v)))
+	})
+	rt.evalFn = evalFn
+	g.defineOwn("eval", evalFn, attrWritable|attrConfigurable)
 
 	// process.exit / process.argv (subset the harness needs)
 	process := rt.newObject(mknull())

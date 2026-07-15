@@ -139,6 +139,11 @@ type Runtime struct {
 	// direct eval() (native call) inherits the caller's strict mode.
 	frameStrict bool
 
+	// evalFn is the intrinsic %eval% function value. A compiled direct-eval site
+	// (OpEval) checks the callee against it: only when the callee is exactly this
+	// value is the call a direct eval; otherwise it degrades to an ordinary call.
+	evalFn Value
+
 	// exitCode is set by process.exit() to request termination.
 	exitCode *int
 

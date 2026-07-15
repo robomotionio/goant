@@ -488,22 +488,22 @@ func (c *compiler) resolveUpvalue(name string) int {
 	if slot := c.enclosing.resolveLocal(name); slot >= 0 {
 		c.enclosing.locals[slot].captured = true
 		lv := c.enclosing.locals[slot]
-		return c.addUpvalue(slot, true, lv.isConst, lv.selfName)
+		return c.addUpvalue(slot, true, lv.isConst, lv.selfName, name)
 	}
 	if uv := c.enclosing.resolveUpvalue(name); uv >= 0 {
 		u := c.enclosing.upvalues[uv]
-		return c.addUpvalue(uv, false, u.isConst, u.selfName)
+		return c.addUpvalue(uv, false, u.isConst, u.selfName, name)
 	}
 	return -1
 }
 
-func (c *compiler) addUpvalue(index int, isLocal, isConst, selfName bool) int {
+func (c *compiler) addUpvalue(index int, isLocal, isConst, selfName bool, name string) int {
 	for i, u := range c.upvalues {
 		if u.index == index && u.isLocal == isLocal {
 			return i
 		}
 	}
-	c.upvalues = append(c.upvalues, upvalDesc{index: index, isLocal: isLocal, isConst: isConst, selfName: selfName})
+	c.upvalues = append(c.upvalues, upvalDesc{index: index, isLocal: isLocal, isConst: isConst, selfName: selfName, name: name})
 	return len(c.upvalues) - 1
 }
 

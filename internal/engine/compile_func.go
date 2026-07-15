@@ -885,6 +885,14 @@ func (c *compiler) compileCall(n *Node) {
 		return
 	}
 
+	// Direct eval: `eval(src)` with the intrinsic `eval` still bound runs in the
+	// caller's scope. Emit OpEval (which verifies the callee at run time). A
+	// spread argument list falls through to an ordinary call.
+	if !spread && c.isDirectEvalCall(n) {
+		c.compileDirectEval(n)
+		return
+	}
+
 	// Plain call: `this` is undefined.
 	if spread {
 		c.compileExpr(n.Left) // [func]

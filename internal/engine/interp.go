@@ -1354,6 +1354,38 @@ restart:
 			}
 			push(ret)
 			ip += 3
+		case OpEval:
+			// Direct eval site. Stack: [callee, arg0, ...]. If the callee is no
+			// longer the intrinsic %eval% (the binding was reassigned), this is an
+			// ordinary call; otherwise evaluate the source string.
+			scopeIdx := int(readU16(code, ip+1))
+			argc := int(readU16(code, ip+3))
+			evalArgs := make([]Value, argc)
+			for i := argc - 1; i >= 0; i-- {
+				evalArgs[i] = pop()
+			}
+			callee := pop()
+			var (
+				ret Value
+				e   *ThrowError
+			)
+			switch {
+			case rt.evalFn == 0 || callee != rt.evalFn:
+				ret, e = rt.callValue(callee, mkundef(), evalArgs)
+			case argc == 0:
+				ret = mkundef()
+			case !evalArgs[0].IsString():
+				ret = evalArgs[0]
+			default:
+				_ = scopeIdx // consumed once direct-eval scope borrowing lands
+				ret, e = rt.evalInGlobalScope(string(rt.strBytes(evalArgs[0])), rt.frameStrict)
+			}
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(ret)
+			ip += 5
 		case OpTailCall, OpTailCallMethod:
 			// Proper tail call: `return f(args)` in strict code. If the callee is an
 			// ordinary compiled function we reset this frame and reuse the Go stack

@@ -12,6 +12,7 @@ type upvalDesc struct {
 	isLocal  bool
 	isConst  bool // captures a const binding — assigning through it throws a TypeError
 	selfName bool // captures a named-function-expression self-reference (immutable)
+	name     string // the captured binding's source name (for direct-eval scope capture)
 }
 
 type svFunc struct {
@@ -59,6 +60,11 @@ type svFunc struct {
 	// GetThisBinding / the object-or-undefined return-value rule.
 	isDerivedCtor bool
 	thisSlot      int // the *this* local slot for a non-arrow function (else 0)
+
+	// evalScopes are the compile-time lexical snapshots for this function's direct
+	// eval() call sites, indexed by the OpEval operand. Each records the caller
+	// bindings a direct eval may borrow and which context constructs it may use.
+	evalScopes []*evalScope
 }
 
 // ---- bytecode emission (compiler side) ----
