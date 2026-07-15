@@ -2071,6 +2071,25 @@ func (rt *Runtime) isArrayValue(v Value) bool {
 	return false
 }
 
+// isArrayE is IsArray(v) with abrupt completion: a revoked proxy in the unwrap
+// chain throws a TypeError (7.2.2 step 3.a) rather than reporting false.
+func (rt *Runtime) isArrayE(v Value) (bool, *ThrowError) {
+	for i := 0; i < maxProtoChainDepth; i++ {
+		if v.Type() == TArr {
+			return true, nil
+		}
+		o := rt.objPtr(v)
+		if o == nil || o.proxy == nil {
+			return false, nil
+		}
+		if o.proxy.revoked {
+			return false, rt.typeError("Cannot perform 'IsArray' on a proxy that has been revoked")
+		}
+		v = o.proxy.target
+	}
+	return false, nil
+}
+
 // flattenInto appends the elements of arr into dst, recursing into nested
 // arrays up to depth levels (Array.prototype.flat).
 // flattenIntoArray implements FlattenIntoArray(target, source, sourceLen, start,

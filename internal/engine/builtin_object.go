@@ -120,7 +120,11 @@ func (rt *Runtime) initObjectBuiltin() {
 	})
 
 	rt.defMethod(proto, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return rt.internString(rt.objectToStringTag(this)), nil
+		tag, e := rt.objectToStringTag(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.internString(tag), nil
 	})
 	rt.defMethod(proto, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.toStringValue(this)
@@ -1416,28 +1420,34 @@ func (rt *Runtime) isSealedOrFrozenE(v Value, frozen bool) (bool, *ThrowError) {
 }
 
 // objectToStringTag returns Object.prototype.toString's "[object Tag]" result.
-func (rt *Runtime) objectToStringTag(v Value) string {
+func (rt *Runtime) objectToStringTag(v Value) (string, *ThrowError) {
 	switch v.Type() {
 	case TUndef:
-		return "[object Undefined]"
+		return "[object Undefined]", nil
 	case TNull:
-		return "[object Null]"
+		return "[object Null]", nil
+	}
+	// IsArray unwraps proxies and throws on a revoked proxy (7.2.2), so a proxy
+	// over an array tags as "Array".
+	isArr, e := rt.isArrayE(v)
+	if e != nil {
+		return "", e
 	}
 	builtin := "Object"
-	switch v.Type() {
-	case TArr:
+	switch {
+	case isArr:
 		builtin = "Array"
 		// The arguments object is array-backed but tags as "Arguments".
 		if o := rt.objPtr(v); o != nil && o.hasOwn("callee") {
 			builtin = "Arguments"
 		}
-	case TFunc, TCFunc:
+	case v.Type() == TFunc, v.Type() == TCFunc:
 		builtin = "Function"
-	case TStr:
+	case v.Type() == TStr:
 		builtin = "String"
-	case TNum:
+	case v.Type() == TNum:
 		builtin = "Number"
-	case TBool:
+	case v.Type() == TBool:
 		builtin = "Boolean"
 	default:
 		if o := rt.objPtr(v); o != nil {
@@ -1466,19 +1476,24 @@ func (rt *Runtime) objectToStringTag(v Value) string {
 		}
 	}
 	// A string-valued Symbol.toStringTag (own or inherited, via the wrapper
-	// prototype for primitives) overrides the built-in tag.
+	// prototype for primitives) overrides the built-in tag; its Get can throw
+	// (a proxy get trap or a throwing accessor) and must propagate.
 	if rt.symToStringTag != 0 {
 		lookup := v
 		if !v.IsObjectType() {
 			lookup = rt.primitiveProto(v)
 		}
 		if lookup.IsObjectType() {
-			if tag, _ := rt.getFieldSymbol(lookup, rt.symToStringTag.handle()); tag.IsString() {
+			tag, e := rt.getFieldSymbol(lookup, rt.symToStringTag.handle())
+			if e != nil {
+				return "", e
+			}
+			if tag.IsString() {
 				builtin = string(rt.strBytes(tag))
 			}
 		}
 	}
-	return "[object " + builtin + "]"
+	return "[object " + builtin + "]", nil
 }
 
 // objectKeys returns an array of own enumerable string keys (integer indices

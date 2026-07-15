@@ -358,6 +358,11 @@ func (rt *Runtime) getFieldSymbol(obj Value, sym uint32) (Value, *ThrowError) {
 		if o == nil {
 			break
 		}
+		if o.proxy != nil {
+			// A symbol read on a proxy routes through its [[Get]] trap (with the
+			// original receiver), forwarding to the target when no trap is present.
+			return rt.proxyGet(o.proxy, mkval(TSymbol, uint64(sym)), obj)
+		}
 		if slot := o.shape.lookupSymbol(sym); slot >= 0 {
 			if o.isAccessorSlot(uint32(slot)) {
 				p := o.shape.propAt(uint32(slot))
