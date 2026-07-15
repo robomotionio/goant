@@ -151,6 +151,91 @@ func (rt *Runtime) CompileModule(prog *Node, filename, source string) (*svFunc, 
 	return rt.compileProgram(prog, filename, source, false, true)
 }
 
+// moduleLocalNames adds the top-level binding names a single module statement
+// introduces (var/let/const, function, class, import locals, and the inner
+// declaration of an `export <decl>`).
+func moduleLocalNames(n *Node, out map[string]bool) {
+	if n == nil {
+		return
+	}
+	switch n.Kind {
+	case NFunc:
+		if n.Str != "" && n.Flags&fnArrow == 0 {
+			out[n.Str] = true
+		}
+	case NClass:
+		if n.Str != "" {
+			out[n.Str] = true
+		}
+	case NVar:
+		for _, d := range n.Args {
+			if d != nil {
+				collectBindingNames(d.Left, out)
+			}
+		}
+	case NImportDecl:
+		for _, spec := range n.Args {
+			if spec.Right != nil {
+				out[spec.Right.Str] = true
+			}
+		}
+	case NExport:
+		if n.Flags&(exDecl|exDefault) != 0 {
+			moduleLocalNames(n.Left, out)
+		}
+	}
+}
+
+// validateModuleExports enforces a Module's ExportEntries static semantics: the
+// exported names must be unique, and a local (no-`from`) named export must refer
+// to a top-level binding of the module. A violation is an early SyntaxError.
+func validateModuleExports(stmts []*Node) *SyntaxError {
+	local := map[string]bool{}
+	for _, s := range stmts {
+		moduleLocalNames(s, local)
+	}
+	exported := map[string]bool{}
+	add := func(name string) *SyntaxError {
+		if exported[name] {
+			return &SyntaxError{Msg: "duplicate export name '" + name + "'"}
+		}
+		exported[name] = true
+		return nil
+	}
+	for _, s := range stmts {
+		if s.Kind != NExport {
+			continue
+		}
+		switch {
+		case s.Flags&exDefault != 0:
+			if e := add("default"); e != nil {
+				return e
+			}
+		case s.Flags&exDecl != 0:
+			names := map[string]bool{}
+			moduleLocalNames(s.Left, names)
+			for n := range names {
+				if e := add(n); e != nil {
+					return e
+				}
+			}
+		case s.Flags&exFrom == 0 && s.Flags&exNamed != 0:
+			for _, spec := range s.Args {
+				if spec.Right == nil {
+					continue
+				}
+				if e := add(spec.Right.Str); e != nil {
+					return e
+				}
+				if spec.Left != nil && !local[spec.Left.Str] {
+					return &SyntaxError{Msg: "export '" + spec.Left.Str + "' is not defined in module"}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // unwrapModuleStmts lowers a Module's top-level import/export declarations to
 // ordinary statements the compiler already handles. Static imports and re-export
 // forms (export … from / export *) require linking and are dropped here (a first
@@ -198,9 +283,13 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		// compiled and driven as an async coroutine.
 		fn: &svFunc{name: "", filename: filename, source: source, isStrict: strict, isAsync: isModule},
 	}
-	// A Module's export/import declarations are lowered to their inner
-	// declarations before hoisting so the ordinary declaration machinery applies.
+	// A Module's export/import declarations are validated (ExportEntries static
+	// semantics) then lowered to their inner declarations before hoisting so the
+	// ordinary declaration machinery applies.
 	if isModule {
+		if e := validateModuleExports(prog.Args); e != nil {
+			return nil, e
+		}
 		prog.Args = unwrapModuleStmts(prog.Args)
 	}
 	// Reserve slot 0 for the completion value.
