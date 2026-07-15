@@ -192,7 +192,27 @@ func (rt *Runtime) initDateBuiltin() {
 		if math.IsNaN(v.Number()) {
 			return mkundef(), rt.rangeError("Invalid time value")
 		}
-		return rt.newString(msToTime(v.Number()).Format("2006-01-02T15:04:05.000Z")), nil
+		// ISO 8601 uses a 4-digit year in [0, 9999]; a year outside that range is
+		// an expanded representation, ±YYYYYY (Go's Format never signs it).
+		t := msToTime(v.Number())
+		year := t.Year()
+		pad := func(n, width int) string {
+			s := strconv.Itoa(n)
+			for len(s) < width {
+				s = "0" + s
+			}
+			return s
+		}
+		var ys string
+		switch {
+		case year >= 0 && year <= 9999:
+			ys = pad(year, 4)
+		case year < 0:
+			ys = "-" + pad(-year, 6)
+		default:
+			ys = "+" + pad(year, 6)
+		}
+		return rt.newString(ys + t.Format("-01-02T15:04:05.000Z")), nil
 	})
 	toStr := func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		v, e := rt.dateMs(this)
@@ -370,7 +390,9 @@ func (rt *Runtime) initDateBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return mknum(parseDate(string(b))), nil
+		// TimeClip the parsed value: a time 1 ms outside ±8.64e15 is not a valid
+		// Date and parses to NaN (idempotent for an in-range value).
+		return mknum(timeClip(parseDate(string(b)))), nil
 	})
 	rt.defGlobal("Date", ctor)
 }
