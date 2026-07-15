@@ -1968,6 +1968,11 @@ func (rt *Runtime) initArrayBuiltin() {
 	rt.defMethod(cobj, "from", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		src := arg(args, 0)
 		mapFn := arg(args, 1)
+		// A mapfn that is present but not callable (null, a Symbol, …) is a
+		// TypeError up front, before any element is read.
+		if !mapFn.IsUndefined() && !rt.isCallable(mapFn) {
+			return mkundef(), rt.typeError("Array.from: mapfn is not a function")
+		}
 		mapEach := func(it Value, i int) (Value, *ThrowError) {
 			if rt.isCallable(mapFn) {
 				return rt.callValue(mapFn, arg(args, 2), []Value{it, mknum(float64(i))})
