@@ -552,12 +552,28 @@ restart:
 
 		case OpDefineMethodComp:
 			// [target, key, func] -> [target]. flags: 0=data method, 1=getter,
-			// 2=setter. The key is any property key (string index or symbol).
+			// 2=setter, 3=data property. The key is any property key.
 			flags := code[ip+1]
 			accFn := pop()
 			key := pop()
 			rt.setMethodHome(accFn, peek()) // [[HomeObject]] for a super-using method
-			if e := rt.defineMethodComputed(peek(), key, accFn, flags); e != nil {
+			// ToPropertyKey once (observable), then SetFunctionName on the anonymous
+			// method/accessor from that key (a plain [k]:v data property is named by
+			// OpSetNameComp instead). The coerced key is reused by the define below.
+			pk, e := rt.toPropertyKey(key)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			switch flags & 3 {
+			case 0:
+				rt.nameMethodFromKey(accFn, pk, "")
+			case 1:
+				rt.nameMethodFromKey(accFn, pk, "get ")
+			case 2:
+				rt.nameMethodFromKey(accFn, pk, "set ")
+			}
+			if e := rt.defineMethodComputed(peek(), pk, accFn, flags); e != nil {
 				thrown = e
 				goto unwind
 			}

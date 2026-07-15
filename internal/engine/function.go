@@ -66,6 +66,26 @@ func (rt *Runtime) closureOf(v Value) *closure {
 	return rt.closures.get(o.closure)
 }
 
+// nameMethodFromKey performs SetFunctionName on an anonymous method/accessor
+// from an already-coerced property key (string or symbol): a symbol contributes
+// "[description]", and an accessor takes a "get "/"set " prefix. The "name"
+// property is non-writable, non-enumerable, configurable.
+func (rt *Runtime) nameMethodFromKey(fn, k Value, prefix string) {
+	o := rt.objPtr(fn)
+	if o == nil || !o.flags.isCallable {
+		return
+	}
+	var name string
+	if k.IsSymbol() {
+		if desc := rt.symbolDesc(k); !desc.IsUndefined() {
+			name = "[" + string(rt.strBytes(desc)) + "]"
+		}
+	} else {
+		name = string(rt.strBytes(k))
+	}
+	o.defineOwn("name", rt.newString(prefix+name), attrConfigurable)
+}
+
 // setMethodHome records a method's [[HomeObject]] when the method reads super
 // outside a class scope. It is a no-op for every other function, so it is safe
 // to call for every object-literal method definition.

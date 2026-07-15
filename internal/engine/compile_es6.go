@@ -978,6 +978,15 @@ func (c *compiler) compileClass(n *Node) {
 			// Computed data method / field: target[key] = value.
 			c.emitOpU16(OpGetLocal, uint16(target)) // [target]
 			c.compileExpr(m.Left)                   // [target, key]
+			if m.Right != nil && m.Right.Kind == NFunc && m.Right.Flags&fnMethod != 0 {
+				// A computed method is a non-enumerable data property whose name is
+				// the key (DefineMethod → SetFunctionName), not an ordinary [k]=v.
+				c.compileFunc(m.Right)
+				c.emit(OpDefineMethodComp)
+				c.emitByte(0) // data method
+				c.emit(OpPop)
+				continue
+			}
 			if m.Right != nil && m.Right.Kind == NFunc {
 				c.compileFunc(m.Right)
 			} else {
