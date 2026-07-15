@@ -264,7 +264,14 @@ func (rt *Runtime) asyncGenDrain(g *genState) {
 func (rt *Runtime) asyncGenStep(g *genState, kind genResumeKind, val Value) {
 	if kind == genReturn {
 		req := g.asyncReqs[0]
-		awaited := rt.resolvedPromise(val)
+		// Await = PromiseResolve(%Promise%, value): reading a native promise's
+		// "constructor" is observable and its abrupt rejects the request.
+		awaited, e := rt.promiseResolve(rt.promiseCtor, val)
+		if e != nil {
+			rt.rejectPromise(req.po, e.Value)
+			rt.asyncGenFinishReq(g)
+			return
+		}
 		onF := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
 			rt.asyncGenResume(g, genReturn, arg(a, 0))
 			return mkundef(), nil
