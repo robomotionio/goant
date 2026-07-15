@@ -512,6 +512,21 @@ func (rt *Runtime) dateFromComponents(args []Value) (float64, *ThrowError) {
 
 // parseDate parses a date string (ISO 8601 + a few common formats).
 func parseDate(s string) float64 {
+	// Date.prototype.toString appends a parenthesized zone name that no Go layout
+	// covers, e.g. "... GMT+0000 (Coordinated Universal Time)"; drop the trailing
+	// "(...)" (and the space before it) so the GMT-offset layout matches.
+	if n := len(s); n > 0 && s[n-1] == ')' {
+		for i := n - 2; i >= 0; i-- {
+			if s[i] == '(' {
+				j := i
+				for j > 0 && s[j-1] == ' ' {
+					j--
+				}
+				s = s[:j]
+				break
+			}
+		}
+	}
 	formats := []string{
 		"2006-01-02T15:04:05.000Z07:00",
 		"2006-01-02T15:04:05Z07:00",
