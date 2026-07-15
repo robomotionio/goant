@@ -541,6 +541,15 @@ func (rt *Runtime) abIsImmutable(o *object) bool {
 	return o != nil && rt.toBoolean(o.getSlot(slotImmutableBuffer))
 }
 
+// taWriteImmutable enforces ValidateTypedArray(O, ~write~): a mutating method
+// rejects a typed array whose viewed buffer is immutable.
+func (rt *Runtime) taWriteImmutable(this Value) *ThrowError {
+	if o := rt.objPtr(this); o != nil && o.ta != nil && rt.abIsImmutable(rt.objPtr(o.ta.buf)) {
+		return rt.typeError("Cannot modify an immutable ArrayBuffer")
+	}
+	return nil
+}
+
 // resolveABBound maps a ToIntegerOrInfinity result to a byte offset in [0, n]
 // (ResolveBounds: -∞→0, negative→max(n+d,0), else→min(d,n)).
 func resolveABBound(d float64, n int) int {
@@ -1890,6 +1899,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		return rt.newString(out), nil
 	})
 	m("reverse", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if e := rt.taWriteImmutable(this); e != nil {
+			return mkundef(), e
+		}
 		o := rt.objPtr(this)
 		l := length(this)
 		for i := 0; i < l/2; i++ {
@@ -1901,6 +1913,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		return this, nil
 	})
 	m("fill", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if e := rt.taWriteImmutable(this); e != nil {
+			return mkundef(), e
+		}
 		o := rt.objPtr(this)
 		l := length(this)
 		// Coerce value (BigInt vs Number) then the bounds, propagating aborts.
@@ -2037,6 +2052,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		return rt.typedArraySpeciesCreate(this, ctorArgs)
 	})
 	m("copyWithin", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if e := rt.taWriteImmutable(this); e != nil {
+			return mkundef(), e
+		}
 		o := rt.objPtr(this)
 		l := length(this)
 		to, e := rt.relativeIndexE(arg(args, 0), l)
@@ -2085,6 +2103,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		return this, nil
 	})
 	m("set", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if e := rt.taWriteImmutable(this); e != nil {
+			return mkundef(), e
+		}
 		o := rt.objPtr(this)
 		// targetOffset = ToIntegerOrInfinity(offset); a negative offset throws.
 		offN, e := rt.toNumber(arg(args, 1))
@@ -2173,6 +2194,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		cmp := arg(args, 0)
 		if !cmp.IsUndefined() && !rt.isCallable(cmp) {
 			return mkundef(), rt.typeError("The comparison function must be either a function or undefined")
+		}
+		if e := rt.taWriteImmutable(this); e != nil {
+			return mkundef(), e
 		}
 		o := rt.objPtr(this)
 		l := length(this)
