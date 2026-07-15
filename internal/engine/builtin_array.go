@@ -929,6 +929,11 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return nil, e
 		}
+		// The by-copy methods ArrayCreate a result of this length: a length above
+		// 2**32-1 is a RangeError, thrown before any element is read.
+		if n > 0xFFFFFFFF {
+			return nil, rt.rangeError("Invalid array length")
+		}
 		out := make([]Value, n)
 		for i := 0; i < n; i++ {
 			out[i], _ = rt.getElement(this, mknum(float64(i)))
