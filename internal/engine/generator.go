@@ -51,6 +51,7 @@ type genState struct {
 
 	started   bool
 	completed bool
+	running   bool // the coroutine is mid-step: a re-entrant resume is a TypeError
 	genDepth  int
 
 	// asyncReqs is the async-generator request queue (AsyncGeneratorRequest
@@ -103,6 +104,11 @@ func (rt *Runtime) genRun(g *genState) {
 // genDrive advances a suspended coroutine one step, returning what it produced.
 // It saves/restores the driver's curGen and frame depth around the handoff.
 func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
+	if g.running {
+		// GeneratorValidate: resuming a generator that is already executing (a
+		// re-entrant next/return/throw from within its own body) is a TypeError.
+		return genMsg{err: rt.typeError("Generator is already running")}
+	}
 	if g.completed {
 		switch kind {
 		case genReturn:
@@ -121,8 +127,10 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 		g.started = true
 		go rt.genRun(g)
 	}
+	g.running = true
 	g.toGen <- genResume{kind: kind, val: val}
 	m := <-g.fromGen
+	g.running = false
 	g.genDepth = rt.frameDepth
 	rt.curGen = prevGen
 	rt.frameDepth = mainDepth
