@@ -865,10 +865,14 @@ func (c *compiler) compileClass(n *Node) {
 	// capture *superctor* / *superproto* as upvalues (for super() / super.x).
 	superSlot, superProtoSlot := -1, -1
 	if n.Left != nil {
-		superSlot = c.declareVar("*superctor*", false)
+		// Each class needs its OWN *superctor* / *superproto* slot: declareVar
+		// reuses a same-named binding in scope, so two sibling derived classes
+		// would share one slot and the later class's parent would clobber the
+		// earlier's — turning the earlier's super() into infinite self-recursion.
+		superSlot = c.addLocal("*superctor*", false)
 		c.compileExpr(n.Left)
 		c.emitOpU16(OpPutLocal, uint16(superSlot))
-		superProtoSlot = c.declareVar("*superproto*", false)
+		superProtoSlot = c.addLocal("*superproto*", false)
 		// superproto = (superctor == null) ? null : superctor.prototype
 		c.emitOpU16(OpGetLocal, uint16(superSlot))
 		c.emit(OpDup)
