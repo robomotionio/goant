@@ -335,11 +335,19 @@ func (rt *Runtime) initObjectBuiltin() {
 		return mkbool(o.ownDescriptor(name).exists), nil
 	})
 	rt.defMethod(cobj, "groupBy", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// RequireObjectCoercible(items) then IsCallable(callback) precede the
+		// GetIterator step, so an invalid callback throws even for empty input.
+		if arg(args, 0).IsNullish() {
+			return mkundef(), rt.typeError("Object.groupBy called on null or undefined")
+		}
+		cb := arg(args, 1)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Object.groupBy: callback is not a function")
+		}
 		items, e := rt.iterableValues(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		cb := arg(args, 1)
 		res := rt.newObject(mknull())
 		ro := rt.objPtr(res)
 		for i, it := range items {

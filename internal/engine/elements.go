@@ -191,6 +191,16 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
 		return rt.proxySet(o.proxy, rt.internString(name), v, obj)
 	}
+	// A String exotic object's in-range character indices are non-writable,
+	// non-configurable data properties: [[Set]] on one fails (a strict-mode
+	// assignment then throws).
+	if o := rt.objPtr(obj); o != nil && o.boxed.Type() == TStr {
+		if fidx, isNum := canonicalNumericIndex(name); isNum {
+			if idx, integral := integerIndex(fidx); integral && idx >= 0 && idx < utf16Len(rt.strBytes(o.boxed)) {
+				return false, nil
+			}
+		}
+	}
 	if obj.Type() == TArr && name == "length" {
 		// A non-writable length rejects any [[Set]] (OpPutField throws in strict
 		// mode / stays silent otherwise; mutators check the rejection explicitly).
