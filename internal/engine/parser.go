@@ -904,6 +904,13 @@ func (p *parser) parsePrimary() *Node {
 		return n
 	case TokSuper:
 		p.consume()
+		// `super` is only a valid expression as super.property, super[expr], or a
+		// super(...) call; a bare `super` is an early SyntaxError. (Whether super is
+		// allowed in the current context is checked later, in the compiler.)
+		if la := p.next(); la != TokDot && la != TokLBracket && la != TokLParen {
+			p.errorf("'super' keyword unexpected here")
+			return p.mk(NEmpty)
+		}
 		return mkIdent("super")
 	case TokRest:
 		p.consume()
