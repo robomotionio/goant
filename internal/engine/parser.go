@@ -1088,44 +1088,65 @@ func (p *parser) parseImportExpr() *Node {
 	p.consume() // 'import'
 	switch p.next() {
 	case TokDot:
-		// `import.meta` is valid only in a Module goal; every other `import.<x>`
-		// (the unadopted import.defer / import.source proposals) is never valid.
-		// The runner evaluates scripts, so either way this is an early error here.
+		p.consume() // '.'
+		// `import.meta` is valid only in a Module goal; the runner evaluates
+		// scripts, so it is an early error here.
+		if p.next() == TokIdentifier && p.tlen() == 4 && p.tokStr() == "meta" {
+			p.consume()
+			p.errorf("'import.meta' may only appear in a module")
+			return p.mk(NEmpty)
+		}
+		// import.defer(...) / import.source(...) — the deferred-module and
+		// module-source ImportCall proposals; both parse as a dynamic import.
+		if p.next() == TokIdentifier && ((p.tlen() == 5 && p.tokStr() == "defer") || (p.tlen() == 6 && p.tokStr() == "source")) {
+			p.consume() // 'defer' | 'source'
+			if p.next() != TokLParen {
+				p.errorf("import.defer / import.source must be called with a specifier")
+				return p.mk(NEmpty)
+			}
+			return p.parseImportCallArgs()
+		}
 		p.errorf("'import.meta' may only appear in a module")
 		return p.mk(NEmpty)
 	case TokLParen:
-		p.consume()
-		n := p.mk(NImport)
-		if p.next() == TokRParen {
-			p.errorf("import() requires a specifier argument")
-			return p.mk(NEmpty)
-		}
-		// ImportCall arguments are AssignmentExpressions (a specifier and an
-		// optional options object) — not a comma sequence, and no spread.
-		if p.next() == TokRest {
-			p.errorf("`...` spread is not allowed in import()")
-			return p.mk(NEmpty)
-		}
-		n.Right = p.parseAssign()
-		if p.next() == TokComma {
-			p.consume()
-			if p.next() != TokRParen {
-				if p.next() == TokRest {
-					p.errorf("`...` spread is not allowed in import()")
-					return p.mk(NEmpty)
-				}
-				n.Left = p.parseAssign()
-				if p.next() == TokComma {
-					p.consume() // trailing comma
-				}
-			}
-		}
-		p.expect(TokRParen)
-		return n
+		return p.parseImportCallArgs()
 	default:
 		p.errorf("'import' is only valid in a call import(...) here")
 		return p.mk(NEmpty)
 	}
+}
+
+// parseImportCallArgs parses `( AssignmentExpression [, AssignmentExpression] )`
+// with the current token positioned at the opening '(' (shared by import(),
+// import.defer() and import.source()). ImportCall arguments are
+// AssignmentExpressions — not a comma sequence, and no spread.
+func (p *parser) parseImportCallArgs() *Node {
+	p.consume() // '('
+	n := p.mk(NImport)
+	if p.next() == TokRParen {
+		p.errorf("import() requires a specifier argument")
+		return p.mk(NEmpty)
+	}
+	if p.next() == TokRest {
+		p.errorf("`...` spread is not allowed in import()")
+		return p.mk(NEmpty)
+	}
+	n.Right = p.parseAssign()
+	if p.next() == TokComma {
+		p.consume()
+		if p.next() != TokRParen {
+			if p.next() == TokRest {
+				p.errorf("`...` spread is not allowed in import()")
+				return p.mk(NEmpty)
+			}
+			n.Left = p.parseAssign()
+			if p.next() == TokComma {
+				p.consume() // trailing comma
+			}
+		}
+	}
+	p.expect(TokRParen)
+	return n
 }
 
 func (p *parser) parseRegex() *Node {
