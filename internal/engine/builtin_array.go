@@ -936,7 +936,9 @@ func (rt *Runtime) initArrayBuiltin() {
 		}
 		out := make([]Value, n)
 		for i := 0; i < n; i++ {
-			out[i], _ = rt.getElement(this, mknum(float64(i)))
+			if out[i], e = rt.getElement(this, mknum(float64(i))); e != nil {
+				return nil, e
+			}
 		}
 		return out, nil
 	}
@@ -949,14 +951,22 @@ func (rt *Runtime) initArrayBuiltin() {
 		return res
 	}
 	rt.defMethod(proto, "toReversed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		vs, e := readAll(this)
+		n, e := rt.lengthOf(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		for i, j := 0, len(vs)-1; i < j; i, j = i+1, j-1 {
-			vs[i], vs[j] = vs[j], vs[i]
+		if n > 0xFFFFFFFF { // ArrayCreate: > 2**32-1
+			return mkundef(), rt.rangeError("Invalid array length")
 		}
-		return fromSlice(vs), nil
+		// A[i] = O[len-1-i]: the source is read from the end downward, using the
+		// length captured once (a mid-iteration length change does not shift it).
+		out := make([]Value, n)
+		for i := 0; i < n; i++ {
+			if out[i], e = rt.getElement(this, mknum(float64(n-1-i))); e != nil {
+				return mkundef(), e
+			}
+		}
+		return fromSlice(out), nil
 	})
 	rt.defMethod(proto, "toSorted", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		// A non-undefined, non-callable comparefn is a TypeError, checked before any
