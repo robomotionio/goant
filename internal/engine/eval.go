@@ -146,6 +146,48 @@ func (c *compiler) captureEvalScope() *evalScope {
 	return sc
 }
 
+// topLevelFuncNames collects the names of top-level function declarations in an
+// eval body (the eval's declaredFunctionNames, which bind via
+// CanDeclareGlobalFunction rather than CanDeclareGlobalVar).
+func topLevelFuncNames(stmts []*Node, out map[string]bool) {
+	for _, n := range stmts {
+		s := n
+		if s != nil && s.Kind == NLabel {
+			s = s.Body
+		}
+		if s != nil && s.Kind == NFunc && s.Str != "" && s.Flags&fnArrow == 0 {
+			out[s.Str] = true
+		}
+	}
+}
+
+// canDeclareGlobalVar mirrors CanDeclareGlobalVar: a new global var binding is
+// allowed when the name already exists as an own global property or the global
+// object is extensible.
+func (rt *Runtime) canDeclareGlobalVar(name string) bool {
+	g := rt.objPtr(rt.global)
+	if g.hasOwn(name) {
+		return true
+	}
+	return g.flags.extensible
+}
+
+// canDeclareGlobalFunction mirrors CanDeclareGlobalFunction: a new global
+// function binding is allowed when the name is absent (and the global is
+// extensible), the existing property is configurable, or it is an enumerable,
+// writable data property.
+func (rt *Runtime) canDeclareGlobalFunction(name string) bool {
+	g := rt.objPtr(rt.global)
+	d := g.ownDescriptor(name)
+	if !d.exists {
+		return g.flags.extensible
+	}
+	if d.configable {
+		return true
+	}
+	return !d.isAccessor && d.writable && d.enumerable
+}
+
 // borrowableName reports whether a compiler binding name denotes a source-level
 // identifier a direct eval can resolve to (excludes engine-internal `*...*` and
 // private `#...` names).
@@ -308,6 +350,31 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 		return mkundef(), &ThrowError{Value: ev, rt: rt}
 	}
 	evalStrict := prog.Flags&fnParseStrict != 0
+
+	// EvalDeclarationInstantiation for a sloppy global-scope eval validates that
+	// every new global var/function binding is definable BEFORE creating any of
+	// them: an undefinable name (a non-extensible global, or a function name
+	// colliding with a non-configurable global property) is a TypeError, and no
+	// partial bindings are left behind.
+	if !sc.inFunction && !evalStrict {
+		funcNames := map[string]bool{}
+		topLevelFuncNames(prog.Args, funcNames)
+		allNames := map[string]bool{}
+		collectVarFuncNames(prog.Args, allNames)
+		for f := range funcNames {
+			if !rt.canDeclareGlobalFunction(f) {
+				return mkundef(), rt.typeError("Cannot declare global function '" + f + "'")
+			}
+		}
+		for v := range allNames {
+			if funcNames[v] {
+				continue
+			}
+			if !rt.canDeclareGlobalVar(v) {
+				return mkundef(), rt.typeError("Cannot declare global variable '" + v + "'")
+			}
+		}
+	}
 
 	// EvalDeclarationInstantiation: a `var arguments` (or a function named
 	// `arguments`) in a non-arrow function's parameter-expression scope conflicts
