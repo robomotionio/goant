@@ -1602,17 +1602,19 @@ func expandReplacement(tmpl, match string, position int, input []rune, groups []
 			} else {
 				out.WriteByte('$')
 			}
-		case c >= '1' && c <= '9':
-			n := int(c - '0')
-			consumed := 1
-			// Prefer a two-digit reference when it names an existing capture.
+		case c >= '0' && c <= '9':
+			// $nn (two decimal digits 01..99, a leading zero allowed) is preferred
+			// when it names an existing capture; otherwise a single digit $n (1..9).
+			n, consumed := -1, 0
 			if i+2 < len(tmpl) && tmpl[i+2] >= '0' && tmpl[i+2] <= '9' {
-				if two := n*10 + int(tmpl[i+2]-'0'); two >= 1 && two < len(groups) {
-					n = two
-					consumed = 2
+				if two := int(c-'0')*10 + int(tmpl[i+2]-'0'); two >= 1 && two < len(groups) {
+					n, consumed = two, 2
 				}
 			}
-			if n >= 1 && n < len(groups) {
+			if n < 0 && c >= '1' && int(c-'0') < len(groups) {
+				n, consumed = int(c-'0'), 1
+			}
+			if n >= 1 {
 				if groups[n].Index >= 0 {
 					out.WriteString(groups[n].Value)
 				}
