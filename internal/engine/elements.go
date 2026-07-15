@@ -447,6 +447,12 @@ func (rt *Runtime) hasFieldSymbol(obj Value, sym uint32) bool {
 		if o == nil {
 			break
 		}
+		// A Proxy in the chain routes [[HasProperty]] through its trap (or forwards
+		// to its target), including for a symbol key.
+		if o.proxy != nil {
+			has, _ := rt.proxyHas(o.proxy, mkval(TSymbol, uint64(sym)))
+			return has
+		}
 		if o.shape.lookupSymbol(sym) >= 0 {
 			return true
 		}

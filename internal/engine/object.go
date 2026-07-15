@@ -562,8 +562,9 @@ func (rt *Runtime) hasProp(obj Value, key string) bool {
 		if s := o.shape.lookupInterned(key); s >= 0 {
 			return true
 		}
-		// An Array's exotic "length" is an own property but not a shape slot.
-		if key == "length" && cur.Type() == TArr {
+		// An Array's or String exotic object's "length" is an own property but
+		// not a shape slot.
+		if key == "length" && (cur.Type() == TArr || o.boxed.Type() == TStr) {
 			return true
 		}
 		cur = o.proto
@@ -597,8 +598,9 @@ func (rt *Runtime) hasPropE(obj Value, key string) (bool, *ThrowError) {
 		if s := o.shape.lookupInterned(key); s >= 0 {
 			return true, nil
 		}
-		// An Array's exotic "length" is an own property but not a shape slot.
-		if key == "length" && cur.Type() == TArr {
+		// An Array's or String exotic object's "length" is an own property but
+		// not a shape slot.
+		if key == "length" && (cur.Type() == TArr || o.boxed.Type() == TStr) {
 			return true, nil
 		}
 		cur = o.proto
