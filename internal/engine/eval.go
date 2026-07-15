@@ -162,6 +162,25 @@ func topLevelFuncNames(stmts []*Node, out map[string]bool) {
 	}
 }
 
+// evalVarDeclaredNames returns an eval body's VarDeclaredNames: its var and
+// function-declaration names. Top-level class declarations (which collectVarFuncNames
+// also gathers) are lexical — they bind in the eval's own declarative environment,
+// not the variable environment — so they are excluded here.
+func evalVarDeclaredNames(stmts []*Node) map[string]bool {
+	names := map[string]bool{}
+	collectVarFuncNames(stmts, names)
+	for _, n := range stmts {
+		s := n
+		if s != nil && s.Kind == NLabel {
+			s = s.Body
+		}
+		if s != nil && s.Kind == NClass && s.Str != "" {
+			delete(names, s.Str) // a class binds lexically, not as a var
+		}
+	}
+	return names
+}
+
 // canDeclareGlobalVar mirrors CanDeclareGlobalVar: a new global var binding is
 // allowed when the name already exists as an own global property or the global
 // object is extensible.
@@ -300,8 +319,7 @@ func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc
 	// variable environment, or a function-scope eval whose new names stay local —
 	// leaking into the caller's function scope is future work).
 	{
-		names := map[string]bool{}
-		collectVarFuncNames(prog.Args, names)
+		names := evalVarDeclaredNames(prog.Args)
 		g := rt.objPtr(rt.global)
 		for name := range names {
 			if c.borrowed != nil && c.resolveBorrowed(name) >= 0 {
@@ -360,8 +378,7 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 	if !sc.inFunction && !evalStrict {
 		funcNames := map[string]bool{}
 		topLevelFuncNames(prog.Args, funcNames)
-		allNames := map[string]bool{}
-		collectVarFuncNames(prog.Args, allNames)
+		allNames := evalVarDeclaredNames(prog.Args)
 		for f := range funcNames {
 			if !rt.canDeclareGlobalFunction(f) {
 				return mkundef(), rt.typeError("Cannot declare global function '" + f + "'")
@@ -389,8 +406,7 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 				continue
 			}
 			if varNames == nil {
-				varNames = map[string]bool{}
-				collectVarFuncNames(prog.Args, varNames)
+				varNames = evalVarDeclaredNames(prog.Args)
 			}
 			if varNames[b.name] {
 				ev, _ := rt.construct(rt.errors.syntaxErr,
@@ -404,8 +420,7 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 	// `arguments`) in a non-arrow function's parameter-expression scope conflicts
 	// with the parameter environment's `arguments` binding — a SyntaxError.
 	if sc.paramArgsConflict {
-		names := map[string]bool{}
-		collectVarFuncNames(prog.Args, names)
+		names := evalVarDeclaredNames(prog.Args)
 		if names["arguments"] {
 			ev, _ := rt.construct(rt.errors.syntaxErr,
 				[]Value{rt.newString("Cannot declare 'arguments' in this eval context")})
