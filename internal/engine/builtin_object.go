@@ -201,7 +201,14 @@ func (rt *Runtime) initObjectBuiltin() {
 		return obj, nil
 	})
 	rt.defMethod(cobj, "getOwnPropertyDescriptor", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(arg(args, 0))
+		// [[GetOwnProperty]] begins with ToObject: null/undefined throw a
+		// TypeError, and a primitive (e.g. a string) is wrapped so its exotic
+		// own properties (indices, "length") are observable.
+		obj, e := rt.toObjectValue(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		o := rt.objPtr(obj)
 		if o == nil {
 			return mkundef(), nil
 		}
