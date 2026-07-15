@@ -2089,6 +2089,9 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		if count > l-to {
 			count = l - to
 		}
+		if count < 0 { // final < from (or to past the end): copy nothing
+			count = 0
+		}
 		bigKind := isBigIntKind(o.ta.kind)
 		tmp := make([]Value, count)
 		for i := 0; i < count; i++ {
