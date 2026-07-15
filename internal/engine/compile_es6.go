@@ -1156,6 +1156,12 @@ func (c *compiler) compileChainLink(n *Node, bail *[]int) {
 func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 	callee := n.Left
 	spread := hasSpread(n.Args)
+	// A super constructor call `super(...)` as a chain base (super()?.x) leaves the
+	// constructed `this` on the stack.
+	if callee.Kind == NIdent && callee.Str == "super" {
+		c.compileSuperCall(n)
+		return
+	}
 	// An optional call `base?.(...)` wraps its callee in NOptional with Right==nil.
 	// The callee VALUE is what gets guarded (not a member of it), so unwrap to the
 	// real callee and remember to guard the loaded value before calling — a member
