@@ -257,10 +257,33 @@ func (rt *Runtime) asyncGenDrain(g *genState) {
 	rt.asyncGenStep(g, req.kind, req.val)
 }
 
-// asyncGenStep resumes the coroutine: on a completion it settles the front
+// asyncGenStep services the front request. A return() completion is first run
+// through AsyncGeneratorAwaitReturn — its value is awaited so return(promise)
+// resolves with the unwrapped value (and a broken/rejected value rejects the
+// request) — then resumes like any other completion.
+func (rt *Runtime) asyncGenStep(g *genState, kind genResumeKind, val Value) {
+	if kind == genReturn {
+		req := g.asyncReqs[0]
+		awaited := rt.resolvedPromise(val)
+		onF := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			rt.asyncGenResume(g, genReturn, arg(a, 0))
+			return mkundef(), nil
+		})
+		onR := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			rt.rejectPromise(req.po, arg(a, 0))
+			rt.asyncGenFinishReq(g)
+			return mkundef(), nil
+		})
+		rt.promiseThen(onF, onR, rt.objPtr(awaited))
+		return
+	}
+	rt.asyncGenResume(g, kind, val)
+}
+
+// asyncGenResume resumes the coroutine: on a completion it settles the front
 // request; on an `await`/`yield` it awaits the operand, then resumes the body
 // (await) or delivers the awaited value to the consumer (yield).
-func (rt *Runtime) asyncGenStep(g *genState, kind genResumeKind, val Value) {
+func (rt *Runtime) asyncGenResume(g *genState, kind genResumeKind, val Value) {
 	m := rt.genDrive(g, kind, val)
 	req := g.asyncReqs[0]
 	if m.err != nil {
