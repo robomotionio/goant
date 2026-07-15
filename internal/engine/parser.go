@@ -1051,13 +1051,15 @@ func (p *parser) parseNew() *Node {
 	}
 	// `import(...)` is a CallExpression, so neither it nor a member access rooted
 	// at it (`new import(x).prop`) is a valid MemberExpression operand for `new`.
+	// A parenthesized `new (import(x))` IS valid, though — the parens make it a
+	// PrimaryExpression — so it parses and throws a TypeError only at runtime.
 	for b := callee; b != nil && b.Kind == NMember; b = b.Left {
-		if b.Left != nil && b.Left.Kind == NImport {
+		if b.Left != nil && b.Left.Kind == NImport && b.Left.Flags&fnParen == 0 {
 			callee = b.Left
 			break
 		}
 	}
-	if callee != nil && callee.Kind == NImport {
+	if callee != nil && callee.Kind == NImport && callee.Flags&fnParen == 0 {
 		p.errorf("Invalid new expression: import() is not a valid constructor")
 		return p.mk(NEmpty)
 	}
