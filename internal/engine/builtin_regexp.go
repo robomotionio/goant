@@ -973,11 +973,9 @@ func (rt *Runtime) initStringRegexpMethods() {
 				return mkundef(), e
 			}
 			if rt.isCallable(replacer) {
-				sv, e := rt.toStringValue(this)
-				if e != nil {
-					return mkundef(), e
-				}
-				return rt.callValue(replacer, search, []Value{sv, arg(args, 1)})
+				// @@replace receives the original coercible `this` (O), not its
+				// ToString — any stringification is the trap's responsibility.
+				return rt.callValue(replacer, search, []Value{this, arg(args, 1)})
 			}
 		}
 		s, e := rt.toStringValue(this)
