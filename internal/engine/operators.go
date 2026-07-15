@@ -89,6 +89,11 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 	if e != nil {
 		return false, e
 	}
+	// An Array's / String exotic object's "length" is a non-configurable own
+	// property and cannot be deleted (it is not a shape slot deleteOwn tracks).
+	if name == "length" && (obj.Type() == TArr || o.boxed.Type() == TStr) {
+		return false, nil
+	}
 	return o.deleteOwn(name), nil
 }
 
