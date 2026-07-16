@@ -168,12 +168,15 @@ func (c *compiler) compileIfBranch(n *Node) {
 			c.emit(OpPop)
 			return
 		}
-		switch {
-		case c.resolveLocal(n.Str) >= 0:
-			c.emitOpU16(OpPutLocal, uint16(c.resolveLocal(n.Str)))
-		case c.resolveUpvalue(n.Str) >= 0:
-			c.emitOpU16(OpPutUpval, uint16(c.resolveUpvalue(n.Str)))
-		default:
+		// The B.3.4 assignment targets the enclosing var-scope binding (the one
+		// declareAnnexBName created), not an intervening catch parameter: a simple
+		// catch parameter may coexist with the var, so `try{}catch(f){if(1)function
+		// f(){}}` updates the outer/global `f`, leaving the catch parameter alone.
+		if slot := c.resolveLocal(n.Str); slot >= 0 && !c.locals[slot].catchParam {
+			c.emitOpU16(OpPutLocal, uint16(slot))
+		} else if uv := c.resolveUpvalue(n.Str); uv >= 0 {
+			c.emitOpU16(OpPutUpval, uint16(uv))
+		} else {
 			c.emitGlobalPut(n.Str)
 		}
 		return
