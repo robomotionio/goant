@@ -92,7 +92,12 @@ type lexer struct {
 	code   string
 	strict bool
 	module bool // Module goal: HTML-comment openers/closers are not comments
-	st     lexState
+	// commentErr is set when whitespace skipping runs off the end of an
+	// unterminated block comment (`/* …` with no closing `*/`). Per the spec an
+	// unterminated MultiLineComment is an early SyntaxError, so nextRaw turns this
+	// into a TokErr rather than reaching a clean EOF.
+	commentErr bool
+	st         lexState
 }
 
 func newLexer(code string, strict bool) *lexer {
@@ -248,15 +253,23 @@ func (l *lexer) skipToNext(n int) (int, bool) {
 				}
 			} else if code[p+1] == '*' {
 				p += 2
+				closed := false
 				for p+1 < end {
 					if code[p] == '*' && code[p+1] == '/' {
 						p += 2
+						closed = true
 						break
 					}
 					if code[p] == '\n' {
 						sawNL = true
 					}
 					p++
+				}
+				if !closed {
+					// Unterminated block comment: no `*/` before end of input.
+					l.commentErr = true
+					p = end
+					goto done
 				}
 			} else {
 				goto done
@@ -1239,6 +1252,12 @@ func (l *lexer) nextRaw() Token {
 	l.st.pos = l.st.toff
 	l.st.tlen = 0
 	l.st.escKeyword = false
+
+	if l.commentErr {
+		// An unterminated block comment ran off the end of input: an early error.
+		l.st.tok = TokErr
+		return TokErr
+	}
 
 	if l.st.toff >= len(l.code) {
 		l.st.tok = TokEOF
