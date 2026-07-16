@@ -46,7 +46,7 @@ func (c *compiler) annexBVarShadowed(name string) bool {
 	}
 	for i := len(c.locals) - 1; i >= 0; i-- {
 		lv := c.locals[i]
-		if lv.dead || !lv.blockScoped || lv.name != name {
+		if lv.dead || !lv.blockScoped || lv.catchParam || lv.name != name {
 			continue
 		}
 		if lv.depth < c.scopeDepth {
@@ -68,11 +68,12 @@ func (c *compiler) hoistFunctions(list []*Node, blockScoped bool) {
 			continue
 		}
 		c.compileFunc(fn)
-		if blockScoped && (c.fn.isStrict || c.annexBVarShadowed(fn.Str)) {
-			// Strict: a block FunctionDeclaration is purely lexical. Sloppy: the
-			// Annex B.3.3 var-hoisting extension is skipped when an enclosing-block
-			// let/const/class shadows the name (the equivalent `var` would be an
-			// early error), so the declaration binds only lexically here too.
+		if blockScoped && (c.fn.isStrict || fn.Flags&(fnAsync|fnGenerator) != 0 || c.annexBVarShadowed(fn.Str)) {
+			// A block FunctionDeclaration binds only lexically (no enclosing var) when:
+			// strict mode; it is async/generator (never eligible for the Annex B.3.3
+			// web-compat extension); or B.3.3 is skipped because an enclosing-block
+			// let/const/class shadows the name (the equivalent `var` would be an early
+			// error).
 			slot := c.declareLexical(fn.Str, false)
 			c.emitOpU16(OpPutLocal, uint16(slot))
 		} else {
@@ -122,7 +123,7 @@ func (c *compiler) annexBIfVarShadowed(name string) bool {
 	}
 	for i := len(c.locals) - 1; i >= 0; i-- {
 		lv := c.locals[i]
-		if lv.dead || !lv.blockScoped || lv.name != name {
+		if lv.dead || !lv.blockScoped || lv.catchParam || lv.name != name {
 			continue
 		}
 		if lv.depth <= c.scopeDepth {

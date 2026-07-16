@@ -655,6 +655,9 @@ func (c *compiler) compileSwitch(n *Node) {
 	}
 	c.checkBlockDeclConflicts(caseStmts, true)
 	c.hoistLexicals(caseStmts)
+	// A CaseBlock is a block scope: its FunctionDeclarations hoist like any other
+	// block-level function (lexical binding, plus the Annex B.3.3 var update).
+	c.hoistFunctions(caseStmts, true)
 
 	l := c.pushLoop("", true)
 
@@ -767,6 +770,9 @@ func (c *compiler) compileCatchBody(n *Node) {
 		// writes to the outer binding). An Annex B `var e` inside still reuses this
 		// slot, since declareVar resolves to this lexical binding.
 		slot := c.declareLexical(n.CatchParam.Str, false)
+		// A simple identifier catch parameter may coexist with a same-named var
+		// (Annex B.3.4), so it does NOT trigger the B.3.3/B.3.4 var-hoisting skip.
+		c.locals[slot].catchParam = true
 		c.emitOpU16(OpPutLocal, uint16(slot))
 		c.compileStmt(n.CatchBody)
 		c.scopeDepth--

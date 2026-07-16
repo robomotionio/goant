@@ -23,6 +23,7 @@ type localVar struct {
 	blockScoped bool // let/const: hidden once its block is exited
 	dead        bool // scope exited; no longer resolvable
 	selfName    bool // a named function expression's immutable self-reference
+	catchParam  bool // a simple identifier catch parameter (may coexist with a var)
 }
 
 type compiler struct {
