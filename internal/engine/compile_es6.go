@@ -481,6 +481,20 @@ func (c *compiler) superHomeBinding() string {
 // does not. Arrows are transparent — they inherit the enclosing method's super.
 // (A plain local lookup would misfire, since a *superproto* local left in an
 // enclosing scope by a sibling class is not this method's super binding.)
+// superAvailable reports whether a `super` reference is permitted here: the
+// nearest enclosing non-arrow function must be an object method, a class element,
+// or a class constructor (each carries a [[HomeObject]] / class-super bindings).
+// Used to decide whether a direct eval at this site may contain `super`.
+func (c *compiler) superAvailable() bool {
+	for e := c; e != nil; e = e.enclosing {
+		if e.fn == nil || e.fn.isArrow {
+			continue
+		}
+		return e.fn.isMethod || e.fn.isClassElement || e.fn.isClassCtor
+	}
+	return false
+}
+
 func (c *compiler) hasClassSuper() bool {
 	for e := c; e != nil; e = e.enclosing {
 		if e.fn == nil || e.fn.isArrow {
@@ -505,6 +519,11 @@ func (c *compiler) emitSuperBase() bool {
 	}
 	if c.fn != nil && c.fn.isMethod && !c.fn.isArrow {
 		c.fn.usesSuper = true
+		c.emit(OpGetSuper)
+		return true
+	}
+	if c.borrowed != nil && c.borrowed.superAllowed {
+		// Direct eval nested in a method/constructor borrows the home object.
 		c.emit(OpGetSuper)
 		return true
 	}

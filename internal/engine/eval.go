@@ -147,7 +147,7 @@ func (c *compiler) captureEvalScope() *evalScope {
 	sc.inFunction = !c.isScript
 	sc.newTargetAllowed = !c.isScript && !c.fn.isArrow
 	sc.argumentsAllowed = !c.isScript && !c.fn.isArrow
-	sc.superAllowed = !c.isScript
+	sc.superAllowed = c.superAvailable()
 	sc.paramArgsConflict = c.inParamExpr && !c.fn.isArrow
 	// Snapshot the enclosing class private environments in outermost-first order
 	// (each compiler's own stack is already outer-to-inner), so the eval compiler
