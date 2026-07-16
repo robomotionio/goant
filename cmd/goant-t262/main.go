@@ -401,7 +401,7 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 		pre.WriteByte('\n')
 		pre.WriteString(harness["sta.js"])
 		pre.WriteByte('\n')
-		pre.WriteString("var $262 = { detachArrayBuffer: function (b) { try { b.transfer(); } catch (e) {} } };\n")
+		pre.WriteString(host262JS)
 		if m.isAsync {
 			pre.WriteString(harness["doneprintHandle.js"])
 			pre.WriteByte('\n')
@@ -439,6 +439,12 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 	return result{rel, outPass, ""}
 }
 
+// host262JS defines the Test262 host object $262. evalScript is indirect
+// (global-scope) eval; global is the global object (indirect eval's `this`);
+// detachArrayBuffer uses the engine's transferring ArrayBuffer.prototype.transfer;
+// gc is a no-op. createRealm/agent are unsupported (their tests are not covered).
+const host262JS = "var $262 = { global: (0, eval)(\"this\"), evalScript: function (s) { return (0, eval)(s); }, gc: function () {}, detachArrayBuffer: function (b) { try { b.transfer(); } catch (e) {} } };\n"
+
 func (m meta) variants() []string {
 	switch {
 	case m.isRaw:
@@ -462,11 +468,7 @@ func assemble(variant string, m meta, testSrc string, harness map[string]string,
 		b.WriteByte('\n')
 		b.WriteString(harness["sta.js"])
 		b.WriteByte('\n')
-		// Host-provided $262 hooks. detachArrayBuffer is implemented via the
-		// engine's ArrayBuffer.prototype.transfer, which detaches its source. The
-		// try/catch keeps it idempotent like DetachArrayBuffer: transfer() throws on
-		// an already-detached (or immutable) buffer, which we treat as a no-op.
-		b.WriteString("var $262 = { detachArrayBuffer: function (b) { try { b.transfer(); } catch (e) {} } };\n")
+		b.WriteString(host262JS)
 		if m.isAsync {
 			b.WriteString(harness["doneprintHandle.js"])
 			b.WriteByte('\n')
