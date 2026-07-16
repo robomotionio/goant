@@ -1290,6 +1290,7 @@ type arrIterState struct {
 	src   Value
 	index int
 	kind  iterKind
+	done  bool // exhausted: the spec detaches the source, so later growth isn't seen
 }
 
 func (rt *Runtime) newIndexIterator(src Value, kind iterKind) Value {
@@ -1309,8 +1310,12 @@ func (rt *Runtime) arrIterNext(this Value) (Value, *ThrowError) {
 	if st == nil {
 		return mkundef(), rt.typeError("Array Iterator.prototype.next called on an incompatible receiver")
 	}
+	if st.done {
+		return rt.genResult(mkundef(), true), nil
+	}
 	n, _ := rt.lengthOf(st.src)
 	if st.index >= n {
+		st.done = true
 		return rt.genResult(mkundef(), true), nil
 	}
 	idx := st.index
@@ -1339,6 +1344,7 @@ type collIterState struct {
 	c     *collection
 	index int
 	kind  iterKind
+	done  bool // exhausted: the spec detaches [[IteratedSet]], so later adds aren't seen
 }
 
 func (rt *Runtime) newCollectionIterator(c *collection, kind iterKind, proto Value) Value {
@@ -1357,6 +1363,9 @@ func (rt *Runtime) collIterNext(this Value, wantSet bool) (Value, *ThrowError) {
 	st := rt.collIterStates[rt.objPtr(this)]
 	if st == nil || st.c.isSet != wantSet {
 		return mkundef(), rt.typeError("next called on an incompatible iterator receiver")
+	}
+	if st.done {
+		return rt.genResult(mkundef(), true), nil
 	}
 	c := st.c
 	for st.index < len(c.keys) {
@@ -1386,5 +1395,6 @@ func (rt *Runtime) collIterNext(this Value, wantSet bool) (Value, *ThrowError) {
 			return rt.genResult(pair, false), nil
 		}
 	}
+	st.done = true
 	return rt.genResult(mkundef(), true), nil
 }
