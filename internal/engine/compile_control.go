@@ -762,10 +762,15 @@ func (c *compiler) compileCatchBody(n *Node) {
 	c.checkCatchParamConflict(n)
 	if n.CatchParam != nil && n.CatchParam.Kind == NIdent {
 		c.scopeDepth++
-		slot := c.declareVar(n.CatchParam.Str, false)
+		// A CatchParameter is lexically scoped and must shadow a same-named outer
+		// binding rather than alias it (declareVar reuses an in-scope slot, leaking
+		// writes to the outer binding). An Annex B `var e` inside still reuses this
+		// slot, since declareVar resolves to this lexical binding.
+		slot := c.declareLexical(n.CatchParam.Str, false)
 		c.emitOpU16(OpPutLocal, uint16(slot))
 		c.compileStmt(n.CatchBody)
 		c.scopeDepth--
+		c.popBlockScope()
 	} else if n.CatchParam != nil && (n.CatchParam.Kind == NArray || n.CatchParam.Kind == NObject) {
 		// Destructuring catch binding: bind the pattern from the thrown value.
 		c.scopeDepth++
