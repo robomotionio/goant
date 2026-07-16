@@ -909,6 +909,13 @@ func (c *compiler) compileTailCall(n *Node) bool {
 	if hasSpread(n.Args) || containsOptional(n) {
 		return false
 	}
+	// A direct eval is not an ordinary call: it needs OpEval and the borrowed
+	// caller-scope model (compileDirectEval). Never lower it as a tail call, or it
+	// degrades to an indirect eval that cannot see the enclosing function's
+	// locals, this, super, or private names.
+	if c.isDirectEvalCall(n) {
+		return false
+	}
 	if n.Left != nil && n.Left.Kind == NIdent && n.Left.Str == "super" {
 		return false
 	}
