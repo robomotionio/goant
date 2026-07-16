@@ -552,6 +552,37 @@ func decimalBigIntEligible(s string) bool {
 	return len(s) == 1 || s[0] != '0'
 }
 
+// leadingZeroOctalRun reports whether the digit run after a leading `0` is a
+// LegacyOctalIntegerLiteral (every digit 0-7). A run containing 8 or 9 (e.g.
+// 0790) is a NonOctalDecimalIntegerLiteral and must be evaluated in base 10.
+func leadingZeroOctalRun(buf string) bool {
+	for i := 1; i < len(buf) && isDigitByte(buf[i]); i++ {
+		if buf[i] == '8' || buf[i] == '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// leadingZeroSepBad reports whether a leading-zero integer literal misuses `_`
+// separators. A LegacyOctal / NonOctalDecimal integer (0 followed by more integer
+// digits) admits no separators at all, so any `_` in the integer part (before a
+// `.` or exponent) is a SyntaxError — e.g. 0_0, 08_0, 0_0123456789.
+func leadingZeroSepBad(digits string) bool {
+	if len(digits) < 2 || digits[0] != '0' {
+		return false
+	}
+	for i := 0; i < len(digits); i++ {
+		switch digits[i] {
+		case '.', 'e', 'E':
+			return false // reached fractional/exponent with no integer-part separator
+		case '_':
+			return true
+		}
+	}
+	return false
+}
+
 // parseDecimalLiteral scans and evaluates a decimal literal, returning its
 // length, the float64 value, and ok.
 func parseDecimalLiteral(buf string) (length int, value float64, ok bool) {
@@ -632,17 +663,29 @@ func (l *lexer) parseNumber(off int) {
 		switch {
 		case c1 == 'b':
 			numlen, value = parseRadix(buf, 2, 2, isBin)
+			if numlen == 2 { // "0b" with no binary digits
+				l.st.tok, l.st.tlen = TokErr, 2
+				return
+			}
 			sepBad = hasBadSeparator(buf[2:numlen], isBin)
 			bigIntOK = true
 		case c1 == 'o':
 			numlen, value = parseRadix(buf, 8, 2, isOctalByte)
+			if numlen == 2 { // "0o" with no octal digits
+				l.st.tok, l.st.tlen = TokErr, 2
+				return
+			}
 			sepBad = hasBadSeparator(buf[2:numlen], isOctalByte)
 			bigIntOK = true
 		case c1 == 'x':
 			numlen, value = parseRadix(buf, 16, 2, isXDigitByte)
+			if numlen == 2 { // "0x" with no hex digits
+				l.st.tok, l.st.tlen = TokErr, 2
+				return
+			}
 			sepBad = hasBadSeparator(buf[2:numlen], isXDigitByte)
 			bigIntOK = true
-		case isOctalByte(buf[1]):
+		case isOctalByte(buf[1]) && leadingZeroOctalRun(buf):
 			if l.strict {
 				l.st.tok, l.st.tlen = TokErr, 1
 				return
@@ -665,7 +708,7 @@ func (l *lexer) parseNumber(off int) {
 				l.st.tok, l.st.tlen = TokErr, numlen
 				return
 			}
-			sepBad = hasBadSeparator(buf[:numlen], isDigitByte)
+			sepBad = hasBadSeparator(buf[:numlen], isDigitByte) || leadingZeroSepBad(buf[:numlen])
 			bigIntOK = decimalBigIntEligible(buf[:numlen])
 		}
 	} else {
@@ -1119,7 +1162,7 @@ func (l *lexer) parseOperator(off int) bool {
 			set(TokRest, 3)
 		case rem > 1 && isDigitByte(buf[1]):
 			n, v, ok := parseDecimalLiteral(buf)
-			if !ok || numberHasInvalidTail(buf, n) {
+			if !ok || numberHasInvalidTail(buf, n) || hasBadSeparator(buf[:n], isDigitByte) {
 				set(TokErr, n)
 			} else {
 				l.st.tval = tov(v)
