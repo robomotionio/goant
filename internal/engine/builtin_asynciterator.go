@@ -17,6 +17,38 @@ func (rt *Runtime) initAsyncIterator() {
 		})
 		po.defineOwnSymbol(rt.symAsyncIterator.handle(), self, attrWritable|attrConfigurable)
 	}
+	if rt.symAsyncDispose != 0 {
+		// %AsyncIteratorPrototype%[@@asyncDispose] closes the iterator by calling its
+		// `return` method, resolving the returned promise with the (awaited) result.
+		disp := rt.newNativeFunc("[Symbol.asyncDispose]", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			p, pp := rt.makePromise()
+			if !this.IsObjectType() {
+				rt.rejectPromise(pp, rt.typeError("AsyncIterator.prototype[Symbol.asyncDispose] called on a non-object").Value)
+				return p, nil
+			}
+			rf, e := rt.getField(this, "return")
+			if e != nil {
+				rt.rejectPromise(pp, e.Value)
+				return p, nil
+			}
+			if rf.IsNullish() {
+				rt.fulfillPromise(pp, mkundef())
+				return p, nil
+			}
+			if !rt.isCallable(rf) {
+				rt.rejectPromise(pp, rt.typeError("'return' is not a function").Value)
+				return p, nil
+			}
+			res, e := rt.callValue(rf, this, nil)
+			if e != nil {
+				rt.rejectPromise(pp, e.Value)
+				return p, nil
+			}
+			rt.resolvePromise(p, pp, res)
+			return p, nil
+		})
+		po.defineOwnSymbol(rt.symAsyncDispose.handle(), disp, attrWritable|attrConfigurable)
+	}
 	rt.setStringTag(proto, "AsyncIterator")
 
 	// Consuming helpers return a promise.

@@ -53,6 +53,11 @@ func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 			protoAttr = 0
 		}
 		obj.defineOwn("prototype", proto, protoAttr)
+	} else if fn.isAsync && fn.isGenerator && rt.asyncGenProto != 0 {
+		// An async generator function has its OWN .prototype (writable, not a
+		// constructor) whose [[Prototype]] is %AsyncGeneratorPrototype% — mirroring a
+		// sync generator, so `g.prototype`'s chain reaches %AsyncIteratorPrototype%.
+		obj.defineOwn("prototype", rt.newObject(rt.asyncGenProto), attrWritable)
 	}
 	return fnVal
 }
