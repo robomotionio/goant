@@ -1313,6 +1313,11 @@ func (rt *Runtime) arrIterNext(this Value) (Value, *ThrowError) {
 	if st.done {
 		return rt.genResult(mkundef(), true), nil
 	}
+	// A TypedArray source whose buffer has been detached (or shrunk out of bounds)
+	// throws a TypeError when stepped (23.1.5.2.1 step 8).
+	if o := rt.objPtr(st.src); o != nil && o.ta != nil && rt.taOutOfBounds(o) {
+		return mkundef(), rt.typeError("Cannot iterate a TypedArray backed by a detached buffer")
+	}
 	n, _ := rt.lengthOf(st.src)
 	if st.index >= n {
 		st.done = true
