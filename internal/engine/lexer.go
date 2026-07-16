@@ -228,9 +228,10 @@ func (l *lexer) skipToNext(n int) (int, bool) {
 			break
 		}
 		switch c {
-		case ' ', '\t', '\r', '\v', '\f':
+		case ' ', '\t', '\v', '\f':
 			p++
-		case '\n':
+		case '\n', '\r':
+			// Both LF and CR are LineTerminators (relevant to ASI).
 			sawNL = true
 			p++
 		case '/':
@@ -238,7 +239,12 @@ func (l *lexer) skipToNext(n int) (int, bool) {
 				goto done
 			}
 			if code[p+1] == '/' {
-				for p += 2; p < end && code[p] != '\n'; p++ {
+				// A single-line comment runs to the next LineTerminator: LF, CR, or
+				// the UTF-8 LS/PS sequences (left unconsumed for the newline handling).
+				p += 2
+				for p < end && !isSingleByteLineTerm(code[p]) &&
+					!isLSorPS(code, p, end) {
+					p++
 				}
 			} else if code[p+1] == '*' {
 				p += 2
@@ -283,6 +289,16 @@ done:
 		p = p2
 	}
 	return p, sawNL
+}
+
+// isSingleByteLineTerm reports whether c is an ASCII LineTerminator (LF or CR).
+func isSingleByteLineTerm(c byte) bool { return c == '\n' || c == '\r' }
+
+// isLSorPS reports whether code[p:] begins with the UTF-8 encoding of LINE
+// SEPARATOR (U+2028) or PARAGRAPH SEPARATOR (U+2029), both LineTerminators.
+func isLSorPS(code string, p, end int) bool {
+	return p+2 < end && code[p] == 0xE2 && code[p+1] == 0x80 &&
+		(code[p+2] == 0xA8 || code[p+2] == 0xA9)
 }
 
 func (l *lexer) skipHTMLLineComment(p, end int, sawNL *bool) int {
