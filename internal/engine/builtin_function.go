@@ -43,6 +43,13 @@ func (rt *Runtime) initFunctionBuiltin() {
 	rt.poison = rt.newNativeFunc("", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return mkundef(), rt.typeError("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions")
 	})
+	// %ThrowTypeError% is a frozen function: length 0 and name "" are non-writable
+	// and non-configurable, and the object is non-extensible (integrity: frozen).
+	if pp := rt.objPtr(rt.poison); pp != nil {
+		pp.defineOwn("length", mknum(0), 0)
+		pp.defineOwn("name", rt.internString(""), 0)
+		pp.flags.extensible = false
+	}
 	proto.defineAccessor("caller", rt.poison, rt.poison, true, true, attrConfigurable)
 	proto.defineAccessor("arguments", rt.poison, rt.poison, true, true, attrConfigurable)
 
