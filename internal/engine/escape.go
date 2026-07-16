@@ -72,6 +72,21 @@ func decodeUnicodeFixed(in string, pos, end int, out []byte) ([]byte, int) {
 // the updated slice and the extra byte count consumed beyond `\X`.
 func decodeEscape(in string, pos, end int, out []byte, quote byte) ([]byte, int) {
 	c := in[pos+1]
+	// LineContinuation: a backslash immediately followed by a LineTerminator
+	// sequence (LF, CR, CR LF, and the UTF-8 encodings of LS U+2028 / PS U+2029)
+	// evaluates to the empty String.
+	switch {
+	case c == '\n':
+		return out, 0
+	case c == '\r':
+		if charAt(in, pos+2, end) == '\n' {
+			return out, 1
+		}
+		return out, 0
+	case c == 0xE2 && charAt(in, pos+2, end) == 0x80 &&
+		(charAt(in, pos+3, end) == 0xA8 || charAt(in, pos+3, end) == 0xA9):
+		return out, 2
+	}
 	switch c {
 	case 'n':
 		return append(out, '\n'), 0
