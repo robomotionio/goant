@@ -652,7 +652,15 @@ func numberHasInvalidTail(buf string, toklen int) bool {
 	if toklen >= len(buf) {
 		return false
 	}
-	return isIdentContinueByte(buf[toklen])
+	c := buf[toklen]
+	if c < 0x80 {
+		return charType[c]&(charIdent|charIdent1) != 0
+	}
+	// A multi-byte follower only invalidates the numeric literal if it is a
+	// Unicode IdentifierPart (`1é`); whitespace and line terminators like LS/PS
+	// (which begin with 0xE2) legitimately separate the number from the next token.
+	r, _ := utf8.DecodeRuneInString(buf[toklen:])
+	return isUnicodeIdentContinue(uint32(r))
 }
 
 func isIdentContinueByte(c byte) bool {
