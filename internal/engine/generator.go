@@ -158,12 +158,14 @@ func (rt *Runtime) suspend(value Value, isAwait bool) (resumed Value, inject *ge
 
 // newGenerator creates a generator object wrapping an unstarted coroutine.
 func (rt *Runtime) newGenerator(fn *svFunc, cl *closure, fnVal, thisVal Value, args []Value) (Value, *ThrowError) {
+	// A generator instance inherits from its function's own .prototype (which
+	// chains to %GeneratorPrototype% / %AsyncGeneratorPrototype%). Falls back to the
+	// intrinsic prototype only if the function has no object .prototype.
 	proto := rt.genProto
 	if fn.isAsync && rt.asyncGenProto != 0 {
-		proto = rt.asyncGenProto // async generator: %AsyncGeneratorPrototype%
-	} else if fnVal.IsObjectType() {
-		// A sync generator instance inherits from the generator function's own
-		// .prototype (which itself chains to %GeneratorPrototype%).
+		proto = rt.asyncGenProto
+	}
+	if fnVal.IsObjectType() {
 		if p, e := rt.getField(fnVal, "prototype"); e == nil && p.IsObjectType() {
 			proto = p
 		}
