@@ -38,6 +38,9 @@ func (rt *Runtime) initIteratorProto() {
 	rt.defMethod(rt.objPtr(rt.mapIterProto), "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.collIterNext(this, false)
 	})
+	rt.defMethod(rt.objPtr(rt.arrayIterProto), "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.arrIterNext(this)
+	})
 }
 
 // sliceIterator returns an iterator object over a fixed slice of values.
@@ -1251,30 +1254,51 @@ const (
 )
 
 // newIndexIterator builds an Array/TypedArray iterator over live length.
+// arrIterState is the internal state of an Array/TypedArray iterator: its source,
+// current index, and kind. Held in rt.arrIterStates keyed by the iterator object.
+type arrIterState struct {
+	src   Value
+	index int
+	kind  iterKind
+}
+
 func (rt *Runtime) newIndexIterator(src Value, kind iterKind) Value {
-	i := 0
-	return rt.newIteratorObjectP(rt.arrayIterProto, func() (Value, bool) {
-		n, _ := rt.lengthOf(src)
-		if i >= n {
-			return mkundef(), true
-		}
-		idx := i
-		i++
-		switch kind {
-		case iterKeys:
-			return mknum(float64(idx)), false
-		case iterEntries:
-			el, _ := rt.getElement(src, mknum(float64(idx)))
-			pair := rt.newArray()
-			po := rt.objPtr(pair)
-			rt.arraySet(po, 0, mknum(float64(idx)))
-			rt.arraySet(po, 1, el)
-			return pair, false
-		default:
-			el, _ := rt.getElement(src, mknum(float64(idx)))
-			return el, false
-		}
-	})
+	v := rt.newObject(rt.arrayIterProto)
+	if rt.arrIterStates == nil {
+		rt.arrIterStates = map[*object]*arrIterState{}
+	}
+	rt.arrIterStates[rt.objPtr(v)] = &arrIterState{src: src, kind: kind}
+	return v
+}
+
+// arrIterNext is the shared %ArrayIteratorPrototype%.next: it reads the receiver's
+// iteration state (a TypeError if absent — the missing-brand check) and yields the
+// next index/value/entry over the source's live length.
+func (rt *Runtime) arrIterNext(this Value) (Value, *ThrowError) {
+	st := rt.arrIterStates[rt.objPtr(this)]
+	if st == nil {
+		return mkundef(), rt.typeError("Array Iterator.prototype.next called on an incompatible receiver")
+	}
+	n, _ := rt.lengthOf(st.src)
+	if st.index >= n {
+		return rt.genResult(mkundef(), true), nil
+	}
+	idx := st.index
+	st.index++
+	switch st.kind {
+	case iterKeys:
+		return rt.genResult(mknum(float64(idx)), false), nil
+	case iterEntries:
+		el, _ := rt.getElement(st.src, mknum(float64(idx)))
+		pair := rt.newArray()
+		po := rt.objPtr(pair)
+		rt.arraySet(po, 0, mknum(float64(idx)))
+		rt.arraySet(po, 1, el)
+		return rt.genResult(pair, false), nil
+	default:
+		el, _ := rt.getElement(st.src, mknum(float64(idx)))
+		return rt.genResult(el, false), nil
+	}
 }
 
 // newCollectionIterator builds a Map/Set iterator over a snapshot of entries.

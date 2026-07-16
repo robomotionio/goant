@@ -99,6 +99,10 @@ type Runtime struct {
 	// than a per-instance closure) reads it and the missing-brand check works.
 	collIterStates map[*object]*collIterState
 
+	// arrIterStates holds the iteration state of Array/TypedArray iterator objects
+	// (same shared-prototype-next / brand-check purpose as collIterStates).
+	arrIterStates map[*object]*arrIterState
+
 	// Well-known symbols and the Symbol.for registry.
 	symbolCounter         uint64
 	symbolRegistry        map[string]Value
