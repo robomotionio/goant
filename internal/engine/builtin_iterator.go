@@ -28,6 +28,16 @@ func (rt *Runtime) initIteratorProto() {
 	rt.mapIterProto = mk("Map Iterator")
 	rt.setIterProto = mk("Set Iterator")
 	rt.stringIterProto = mk("String Iterator")
+
+	// %SetIteratorPrototype%.next / %MapIteratorPrototype%.next are shared methods
+	// (length 0, name "next") that read the receiver's iteration state and enforce
+	// the per-kind brand check, rather than a per-instance closure.
+	rt.defMethod(rt.objPtr(rt.setIterProto), "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.collIterNext(this, true)
+	})
+	rt.defMethod(rt.objPtr(rt.mapIterProto), "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.collIterNext(this, false)
+	})
 }
 
 // sliceIterator returns an iterator object over a fixed slice of values.
@@ -1268,36 +1278,59 @@ func (rt *Runtime) newIndexIterator(src Value, kind iterKind) Value {
 }
 
 // newCollectionIterator builds a Map/Set iterator over a snapshot of entries.
+// collIterState is the internal state of a Set/Map iterator: its target
+// collection, the current index, and the iteration kind. Held in rt.collIterStates
+// (keyed by the iterator object) so a shared prototype next can read it.
+type collIterState struct {
+	c     *collection
+	index int
+	kind  iterKind
+}
+
 func (rt *Runtime) newCollectionIterator(c *collection, kind iterKind, proto Value) Value {
-	i := 0
-	return rt.newIteratorObjectP(proto, func() (Value, bool) {
-		for i < len(c.keys) {
-			if c.keys[i].IsEmpty() {
-				i++
-				continue
-			}
-			k, val := c.keys[i], c.vals[i]
-			i++
-			switch kind {
-			case iterKeys:
-				return k, false
-			case iterValues:
-				if c.isSet {
-					return k, false
-				}
-				return val, false
-			default: // entries
-				pair := rt.newArray()
-				po := rt.objPtr(pair)
-				rt.arraySet(po, 0, k)
-				if c.isSet {
-					rt.arraySet(po, 1, k)
-				} else {
-					rt.arraySet(po, 1, val)
-				}
-				return pair, false
-			}
+	v := rt.newObject(proto)
+	if rt.collIterStates == nil {
+		rt.collIterStates = map[*object]*collIterState{}
+	}
+	rt.collIterStates[rt.objPtr(v)] = &collIterState{c: c, kind: kind}
+	return v
+}
+
+// collIterNext is the shared %SetIteratorPrototype%/%MapIteratorPrototype% next.
+// wantSet brand-checks the receiver: a Set-iterator next rejects a Map iterator
+// (and vice versa) and any non-iterator, throwing a TypeError.
+func (rt *Runtime) collIterNext(this Value, wantSet bool) (Value, *ThrowError) {
+	st := rt.collIterStates[rt.objPtr(this)]
+	if st == nil || st.c.isSet != wantSet {
+		return mkundef(), rt.typeError("next called on an incompatible iterator receiver")
+	}
+	c := st.c
+	for st.index < len(c.keys) {
+		if c.keys[st.index].IsEmpty() {
+			st.index++
+			continue
 		}
-		return mkundef(), true
-	})
+		k, val := c.keys[st.index], c.vals[st.index]
+		st.index++
+		switch st.kind {
+		case iterKeys:
+			return rt.genResult(k, false), nil
+		case iterValues:
+			if c.isSet {
+				return rt.genResult(k, false), nil
+			}
+			return rt.genResult(val, false), nil
+		default: // entries
+			pair := rt.newArray()
+			po := rt.objPtr(pair)
+			rt.arraySet(po, 0, k)
+			if c.isSet {
+				rt.arraySet(po, 1, k)
+			} else {
+				rt.arraySet(po, 1, val)
+			}
+			return rt.genResult(pair, false), nil
+		}
+	}
+	return rt.genResult(mkundef(), true), nil
 }

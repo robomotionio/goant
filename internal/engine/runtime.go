@@ -94,6 +94,11 @@ type Runtime struct {
 	// and its brand check are program-observable.
 	finRegistries map[*object][]finCell
 
+	// collIterStates holds the iteration state of Set/Map iterator objects, keyed
+	// by the iterator object, so a shared %<Kind>IteratorPrototype%.next (rather
+	// than a per-instance closure) reads it and the missing-brand check works.
+	collIterStates map[*object]*collIterState
+
 	// Well-known symbols and the Symbol.for registry.
 	symbolCounter         uint64
 	symbolRegistry        map[string]Value
