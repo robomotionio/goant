@@ -194,6 +194,24 @@ func (c *compiler) loadMember(member *Node, tSlot, kSlot int) {
 
 // compileMemberAssign compiles obj.name = v / obj[k] = v (and compound forms)
 // as an expression, leaving the assigned value on the stack.
+// requireCoercibleAndPropKey enforces S11.13.2 reference semantics for a computed
+// compound/update member assignment `base[key] op= v`: base (tSlot) must be
+// object-coercible — a null/undefined base throws a TypeError BEFORE any key
+// coercion — then the key (kSlot) is run through ToPropertyKey exactly once, so
+// the read and the write reuse the same property key (ToString/toString runs once).
+func (c *compiler) requireCoercibleAndPropKey(tSlot, kSlot int) {
+	c.emitOpU16(OpGetLocal, uint16(tSlot))
+	c.emit(OpIsUndefOrNull)
+	ok := c.emitJump(OpJmpFalse)
+	c.emit(OpThrowError)
+	c.emitU32(uint32(c.constant(c.rt.internString("Cannot read properties of null or undefined"))))
+	c.emitByte(0) // TypeError
+	c.patchJump(ok)
+	c.emitOpU16(OpGetLocal, uint16(kSlot))
+	c.emit(OpToPropkey)
+	c.emitOpU16(OpPutLocal, uint16(kSlot))
+}
+
 func (c *compiler) compileMemberAssign(n *Node) {
 	member := n.Left
 	computed := member.Flags&1 != 0
@@ -230,6 +248,7 @@ func (c *compiler) compileMemberAssign(n *Node) {
 			kSlot = c.tempLocal()
 			c.compileExpr(member.Right)
 			c.emitOpU16(OpPutLocal, uint16(kSlot))
+			c.requireCoercibleAndPropKey(tSlot, kSlot)
 		}
 		c.loadMember(member, tSlot, kSlot) // [old]
 		c.emit(OpDup)                      // [old, old]
@@ -266,6 +285,7 @@ func (c *compiler) compileMemberAssign(n *Node) {
 		kSlot = c.tempLocal()
 		c.compileExpr(member.Right)
 		c.emitOpU16(OpPutLocal, uint16(kSlot))
+		c.requireCoercibleAndPropKey(tSlot, kSlot)
 	}
 	c.loadMember(member, tSlot, kSlot) // [old]
 	c.compileExpr(n.Right)             // [old, rhs]
@@ -304,6 +324,7 @@ func (c *compiler) compileMemberUpdate(n *Node) {
 		kSlot = c.tempLocal()
 		c.compileExpr(member.Right)
 		c.emitOpU16(OpPutLocal, uint16(kSlot))
+		c.requireCoercibleAndPropKey(tSlot, kSlot)
 	}
 
 	oldSlot := c.tempLocal()
