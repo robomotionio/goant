@@ -792,19 +792,38 @@ func (l *lexer) scanString(off int, quote byte) {
 		}
 		skip := 2
 		if escChar == 'x' {
+			// \xHH requires exactly two hexadecimal digits.
+			if escPos+3 >= rem || !isXDigitByte(buf[escPos+2]) || !isXDigitByte(buf[escPos+3]) {
+				l.st.tok, l.st.tlen = TokErr, escPos+2
+				return
+			}
 			skip = 4
 		} else if escChar == 'u' {
 			if escPos+2 < rem && buf[escPos+2] == '{' {
+				// \u{H+} needs at least one hex digit (no separators), a closing
+				// '}', and a code point <= 0x10FFFF.
 				j := escPos + 3
-				for j < rem && buf[j] != '}' {
+				var cp uint32
+				for j < rem && isXDigitByte(buf[j]) {
+					cp = cp<<4 | uint32(hexVal(buf[j]))
+					if cp > 0x10FFFF {
+						cp = 0x110000 // sentinel: out of range
+					}
 					j++
 				}
-				if j < rem {
-					skip = j - escPos + 1
-				} else {
-					skip = rem - escPos
+				if j == escPos+3 || j >= rem || buf[j] != '}' || cp > 0x10FFFF {
+					l.st.tok, l.st.tlen = TokErr, j
+					return
 				}
+				skip = j - escPos + 1
 			} else {
+				// \uHHHH requires exactly four hexadecimal digits.
+				if escPos+5 >= rem ||
+					!isXDigitByte(buf[escPos+2]) || !isXDigitByte(buf[escPos+3]) ||
+					!isXDigitByte(buf[escPos+4]) || !isXDigitByte(buf[escPos+5]) {
+					l.st.tok, l.st.tlen = TokErr, escPos+2
+					return
+				}
 				skip = 6
 			}
 		}
