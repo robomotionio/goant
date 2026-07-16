@@ -780,9 +780,20 @@ func (c *compiler) compileCatchBody(n *Node) {
 	} else if n.CatchParam != nil && (n.CatchParam.Kind == NArray || n.CatchParam.Kind == NObject) {
 		// Destructuring catch binding: bind the pattern from the thrown value.
 		c.scopeDepth++
+		// Pre-declare each bound name as a fresh block-scoped binding so the pattern
+		// shadows (not aliases) a same-named outer binding; destructureTarget then
+		// reuses these current-depth slots. (A destructuring catch parameter is not
+		// eligible for the Annex B.3.4 var coexistence, so it is not catchParam-flagged
+		// — it correctly participates in the B.3.3/B.3.4 var-hoisting shadow check.)
+		var names []string
+		collectPatternNames(n.CatchParam, &names)
+		for _, nm := range names {
+			c.declareLexical(nm, false)
+		}
 		c.destructureTarget(n.CatchParam, VarLet)
 		c.compileStmt(n.CatchBody)
 		c.scopeDepth--
+		c.popBlockScope()
 	} else {
 		c.emit(OpPop) // discard thrown value (optional binding)
 		c.compileStmt(n.CatchBody)

@@ -630,7 +630,14 @@ func collectVarFuncNamesNode(n *Node, out map[string]bool, topLevel bool, shadow
 		collectVarFuncNamesNode(n.Body, out, false, inner)
 	case NTry:
 		collectVarFuncNamesNode(n.Body, out, false, shadow)
-		collectVarFuncNamesNode(n.CatchBody, out, false, shadow)
+		// A *destructuring* catch parameter shadows a same-named block-level function
+		// in the catch body (B.3.4's catch/var coexistence applies only to a simple
+		// identifier catch parameter).
+		catchShadow := shadow
+		if n.CatchParam != nil && (n.CatchParam.Kind == NArray || n.CatchParam.Kind == NObject) {
+			catchShadow = shadowUnion(shadow, func(m map[string]bool) { collectBindingNames(n.CatchParam, m) })
+		}
+		collectVarFuncNamesNode(n.CatchBody, out, false, catchShadow)
 		collectVarFuncNamesNode(n.FinallyBody, out, false, shadow)
 	case NSwitch:
 		// A CaseBlock is a single lexical scope spanning all clauses.
