@@ -472,9 +472,61 @@ func collectBodyVarNames(n *Node, out map[string]bool) {
 }
 
 func collectVarFuncNames(stmts []*Node, out map[string]bool) {
+	shadow := map[string]bool{}
+	lexNamesOfList(stmts, shadow)
 	for _, n := range stmts {
-		collectVarFuncNamesNode(n, out, true)
+		collectVarFuncNamesNode(n, out, true, shadow)
 	}
+}
+
+// lexNamesOfList adds the let/const/class/using names lexically declared directly
+// in a statement list to out. It is the Annex B.3.3 "shadow" set: a nested
+// block-level function is var-hoisted to the enclosing scope only when no such
+// name in an intervening block shares its identifier (otherwise the equivalent
+// `var` would be an early error and the web-compat extension is skipped).
+func lexNamesOfList(stmts []*Node, out map[string]bool) {
+	for _, s := range stmts {
+		if s == nil {
+			continue
+		}
+		switch s.Kind {
+		case NVar:
+			if s.VarKind == VarLet || s.VarKind == VarConst ||
+				s.VarKind == VarUsing || s.VarKind == VarAwaitUsing {
+				for _, d := range s.Args {
+					if d != nil {
+						collectBindingNames(d.Left, out)
+					}
+				}
+			}
+		case NClass:
+			if s.Str != "" {
+				out[s.Str] = true
+			}
+		}
+	}
+}
+
+// lexNamesOfForHead adds the let/const names bound by a for/for-in/for-of head.
+func lexNamesOfForHead(head *Node, out map[string]bool) {
+	if head != nil && head.Kind == NVar &&
+		(head.VarKind == VarLet || head.VarKind == VarConst) {
+		for _, d := range head.Args {
+			if d != nil {
+				collectBindingNames(d.Left, out)
+			}
+		}
+	}
+}
+
+// shadowUnion returns a copy of shadow with names added by add.
+func shadowUnion(shadow map[string]bool, add func(map[string]bool)) map[string]bool {
+	inner := make(map[string]bool, len(shadow)+2)
+	for k := range shadow {
+		inner[k] = true
+	}
+	add(inner)
+	return inner
 }
 
 // collectBindingNames adds every identifier bound by a binding target — a plain
@@ -520,7 +572,7 @@ func collectBindingNames(pat *Node, out map[string]bool) {
 // Annex B plain FunctionDeclarations. A class, async function, or generator
 // declaration nested in a block is lexically block-scoped and must NOT leak to
 // the global scope, so it is collected only when topLevel is true.
-func collectVarFuncNamesNode(n *Node, out map[string]bool, topLevel bool) {
+func collectVarFuncNamesNode(n *Node, out map[string]bool, topLevel bool, shadow map[string]bool) {
 	if n == nil {
 		return
 	}
@@ -528,7 +580,12 @@ func collectVarFuncNamesNode(n *Node, out map[string]bool, topLevel bool) {
 	case NFunc:
 		if n.Str != "" && n.Flags&fnArrow == 0 &&
 			(topLevel || n.Flags&(fnAsync|fnGenerator) == 0) {
-			out[n.Str] = true
+			// Annex B.3.3: a nested block-level FunctionDeclaration is var-hoisted
+			// only when replacing it with `var F` would not be an early error — i.e.
+			// no intervening let/const/class/using in an enclosing block shadows F.
+			if topLevel || !shadow[n.Str] {
+				out[n.Str] = true
+			}
 		}
 	case NVar:
 		if n.VarKind == VarVar {
@@ -544,34 +601,53 @@ func collectVarFuncNamesNode(n *Node, out map[string]bool, topLevel bool) {
 		if topLevel && n.Str != "" {
 			out[n.Str] = true
 		}
-	case NBlock, NCase:
+	case NBlock:
+		inner := shadowUnion(shadow, func(m map[string]bool) { lexNamesOfList(n.Args, m) })
 		for _, s := range n.Args {
-			collectVarFuncNamesNode(s, out, false)
+			collectVarFuncNamesNode(s, out, false, inner)
 		}
 	case NProgram:
 		for _, s := range n.Args {
-			collectVarFuncNamesNode(s, out, topLevel)
+			collectVarFuncNamesNode(s, out, topLevel, shadow)
 		}
 	case NLabel:
 		// A labelled statement stays at the enclosing level (a top-level
 		// `l: function f(){}` still hoists).
-		collectVarFuncNamesNode(n.Body, out, topLevel)
+		collectVarFuncNamesNode(n.Body, out, topLevel, shadow)
 	case NIf:
-		collectVarFuncNamesNode(n.Left, out, false)
-		collectVarFuncNamesNode(n.Right, out, false)
+		collectVarFuncNamesNode(n.Left, out, false, shadow)
+		collectVarFuncNamesNode(n.Right, out, false, shadow)
 	case NWhile, NDoWhile, NWith:
-		collectVarFuncNamesNode(n.Body, out, false)
+		collectVarFuncNamesNode(n.Body, out, false, shadow)
 	case NFor, NForIn, NForOf:
-		collectVarFuncNamesNode(n.Init, out, false)
-		collectVarFuncNamesNode(n.Left, out, false)
-		collectVarFuncNamesNode(n.Body, out, false)
+		// A lexical for-head binding shadows a body block-function of the same name.
+		inner := shadowUnion(shadow, func(m map[string]bool) {
+			lexNamesOfForHead(n.Init, m)
+			lexNamesOfForHead(n.Left, m)
+		})
+		collectVarFuncNamesNode(n.Init, out, false, inner)
+		collectVarFuncNamesNode(n.Left, out, false, inner)
+		collectVarFuncNamesNode(n.Body, out, false, inner)
 	case NTry:
-		collectVarFuncNamesNode(n.Body, out, false)
-		collectVarFuncNamesNode(n.CatchBody, out, false)
-		collectVarFuncNamesNode(n.FinallyBody, out, false)
+		collectVarFuncNamesNode(n.Body, out, false, shadow)
+		collectVarFuncNamesNode(n.CatchBody, out, false, shadow)
+		collectVarFuncNamesNode(n.FinallyBody, out, false, shadow)
 	case NSwitch:
+		// A CaseBlock is a single lexical scope spanning all clauses.
+		inner := shadowUnion(shadow, func(m map[string]bool) {
+			for _, cse := range n.Args {
+				if cse != nil {
+					lexNamesOfList(cse.Args, m)
+				}
+			}
+		})
 		for _, s := range n.Args {
-			collectVarFuncNamesNode(s, out, false)
+			collectVarFuncNamesNode(s, out, false, inner)
+		}
+	case NCase:
+		// The enclosing switch already folded every clause's lexicals into shadow.
+		for _, s := range n.Args {
+			collectVarFuncNamesNode(s, out, false, shadow)
 		}
 	}
 }

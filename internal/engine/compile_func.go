@@ -31,6 +31,25 @@ func functionSelfNameShadowed(n *Node) bool {
 	return bodyVars[name]
 }
 
+// annexBVarShadowed reports whether name is lexically bound (let/const/class,
+// catch parameter, ...) in a block enclosing the current one within this
+// function. Such a binding makes the equivalent `var name` an early error, so the
+// Annex B.3.3 block-function var-hoisting extension is skipped and the
+// declaration binds only lexically. Mirrors ast.go's shadow set so the compiler
+// and the global pre-creation (collectVarFuncNames) agree.
+func (c *compiler) annexBVarShadowed(name string) bool {
+	for i := len(c.locals) - 1; i >= 0; i-- {
+		lv := c.locals[i]
+		if lv.dead || !lv.blockScoped || lv.name != name {
+			continue
+		}
+		if lv.depth < c.scopeDepth {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *compiler) hoistFunctions(list []*Node, blockScoped bool) {
 	for _, stmt := range list {
 		fn := stmt
@@ -43,7 +62,11 @@ func (c *compiler) hoistFunctions(list []*Node, blockScoped bool) {
 			continue
 		}
 		c.compileFunc(fn)
-		if blockScoped && c.fn.isStrict {
+		if blockScoped && (c.fn.isStrict || c.annexBVarShadowed(fn.Str)) {
+			// Strict: a block FunctionDeclaration is purely lexical. Sloppy: the
+			// Annex B.3.3 var-hoisting extension is skipped when an enclosing-block
+			// let/const/class shadows the name (the equivalent `var` would be an
+			// early error), so the declaration binds only lexically here too.
 			slot := c.declareLexical(fn.Str, false)
 			c.emitOpU16(OpPutLocal, uint16(slot))
 		} else {
