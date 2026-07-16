@@ -110,9 +110,35 @@ func (c *compiler) hoistAnnexBIf(stmt *Node) {
 	}
 }
 
+// annexBIfVarShadowed reports whether the Annex B.3.4 var-hoisting extension for
+// an if-branch FunctionDeclaration named `name` is skipped: when a formal
+// parameter or a lexical binding in the same-or-enclosing scope shares the name
+// (the equivalent `var name` would be an early error). Unlike a block-level
+// function (annexBVarShadowed), an if-branch declaration's var target is the
+// enclosing scope itself, so a sibling let/const at the current depth shadows it.
+func (c *compiler) annexBIfVarShadowed(name string) bool {
+	if c.paramNames[name] {
+		return true
+	}
+	for i := len(c.locals) - 1; i >= 0; i-- {
+		lv := c.locals[i]
+		if lv.dead || !lv.blockScoped || lv.name != name {
+			continue
+		}
+		if lv.depth <= c.scopeDepth {
+			return true
+		}
+	}
+	return false
+}
+
 // declareAnnexBName creates an enclosing-scope binding (initialized to undefined)
-// for an Annex B if-body function, unless one already exists.
+// for an Annex B if-body function, unless one already exists or the extension is
+// skipped because a parameter/lexical shadows the name.
 func (c *compiler) declareAnnexBName(name string) {
+	if c.annexBIfVarShadowed(name) {
+		return
+	}
 	if c.isScript {
 		g := c.rt.objPtr(c.rt.global)
 		if !g.hasOwn(name) {
@@ -134,6 +160,13 @@ func (c *compiler) compileIfBranch(n *Node) {
 	if !c.fn.isStrict && n != nil && n.Kind == NFunc && n.Str != "" &&
 		n.Flags&fnArrow == 0 && n.Flags&fnParen == 0 {
 		c.compileFunc(n)
+		// When the B.3.4 extension is skipped (a parameter/lexical shadows the
+		// name), the declaration must not update the enclosing binding: compile the
+		// function for its early errors, then discard its value.
+		if c.annexBIfVarShadowed(n.Str) {
+			c.emit(OpPop)
+			return
+		}
 		switch {
 		case c.resolveLocal(n.Str) >= 0:
 			c.emitOpU16(OpPutLocal, uint16(c.resolveLocal(n.Str)))
