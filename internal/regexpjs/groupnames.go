@@ -148,6 +148,84 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 	return out.String(), reverse, kinds, nil
 }
 
+// validateModifierGroups checks ECMAScript inline modifier groups — `(?flags:…)`
+// and `(?flags-flags:…)` from the Pattern Modifiers proposal — for the early
+// errors the grammar imposes: every flag is one of i, m, s; no flag repeats
+// within the add-set, within the remove-set, or across the two; a `:` must
+// terminate the flag section; and the add and remove sets are not both empty.
+// regexp2 (.NET inline-option syntax) is far more permissive here — it accepts
+// `(?d:…)`, `(?ii:…)`, and the group-scoped `(?i)` form ECMAScript forbids — so
+// these must be rejected before the pattern reaches it. Only a `(?` followed by
+// an ASCII letter or `-` is a modifier group; `(?:`, `(?=`, `(?!`, `(?<…`,
+// `(?>…`, `(?#…` are left for regexp2.
+func validateModifierGroups(src string) error {
+	rs := []rune(src)
+	inClass := false
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' {
+			i++ // skip the escaped rune
+			continue
+		}
+		if c == '[' {
+			inClass = true
+			continue
+		}
+		if c == ']' {
+			inClass = false
+			continue
+		}
+		if inClass || c != '(' || i+2 >= len(rs) || rs[i+1] != '?' {
+			continue
+		}
+		d := rs[i+2]
+		isLetter := (d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z')
+		if !isLetter && d != '-' {
+			continue // not a modifier group; let regexp2 parse it
+		}
+		add := map[rune]bool{}
+		rem := map[rune]bool{}
+		inRemove := false
+		sawDash := false
+		colon := false
+		j := i + 2
+		for ; j < len(rs); j++ {
+			f := rs[j]
+			if f == ':' {
+				colon = true
+				break
+			}
+			if f == '-' {
+				if sawDash {
+					return fmt.Errorf("invalid regular expression modifiers")
+				}
+				sawDash = true
+				inRemove = true
+				continue
+			}
+			if f != 'i' && f != 'm' && f != 's' {
+				return fmt.Errorf("invalid regular expression modifier flag '%c'", f)
+			}
+			if add[f] || rem[f] {
+				return fmt.Errorf("duplicate regular expression modifier flag '%c'", f)
+			}
+			if inRemove {
+				rem[f] = true
+			} else {
+				add[f] = true
+			}
+		}
+		if !colon {
+			return fmt.Errorf("regular expression modifier group missing ':'")
+		}
+		if len(add) == 0 && len(rem) == 0 {
+			return fmt.Errorf("regular expression modifier group has no flags")
+		}
+		i = j // resume scanning after the ':'
+	}
+	return nil
+}
+
 // decodeGroupName reads a group name starting at rs[start] up to the closing '>',
 // decoding \u{HHHH} / \uHHHH escapes to their code points, and returns the decoded
 // name and the index of the '>'.

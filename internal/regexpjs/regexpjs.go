@@ -127,6 +127,11 @@ func Compile(pattern, flags string) (*Regexp, error) {
 			return nil, fmt.Errorf("invalid regular expression flag '%c'", f)
 		}
 	}
+	// Inline modifier groups `(?ims-ims:…)` have grammar early errors regexp2's
+	// permissive .NET option syntax would not catch; reject the invalid ones here.
+	if err := validateModifierGroups(pattern); err != nil {
+		return nil, fmt.Errorf("invalid regular expression: %v", err)
+	}
 	// An empty pattern matches the empty string; ECMAScript spells it (?:).
 	src := pattern
 	// Annex B identity escapes: outside Unicode mode, `\A \Z \z \G` are literal
