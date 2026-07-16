@@ -180,10 +180,17 @@ func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) Value {
 				return mkundef(), e
 			}
 			if !rt.isCallable(fn) {
-				if method == "next" {
+				switch method {
+				case "next":
 					return rt.resolvedPromise(rt.genResult(mkundef(), true)), nil
+				case "throw":
+					// A missing sync `throw`: close the sync iterator, then reject with a
+					// TypeError (protocol violation).
+					rt.iteratorClose(syncIt)
+					return rt.rejectedPromise(rt.makeError(rt.errors.typeProto, "TypeError", "The iterator does not provide a 'throw' method")), nil
+				default: // return
+					return rt.resolvedPromise(rt.genResult(arg(args, 0), true)), nil
 				}
-				return rt.resolvedPromise(rt.genResult(arg(args, 0), true)), nil
 			}
 			res, e := rt.callValue(fn, syncIt, args)
 			if e != nil {
@@ -223,6 +230,7 @@ func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) Value {
 	}
 	rt.defMethod(o, "next", 1, step("next"))
 	rt.defMethod(o, "return", 1, step("return"))
+	rt.defMethod(o, "throw", 1, step("throw"))
 	if rt.symAsyncIterator != 0 {
 		self := rt.newNativeFunc("[Symbol.asyncIterator]", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			return this, nil
