@@ -192,9 +192,17 @@ func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) Value {
 			if !res.IsObjectType() {
 				return rt.rejectedPromise(rt.makeError(rt.errors.typeProto, "TypeError", "iterator result is not an object")), nil
 			}
-			doneV, _ := rt.getField(res, "done")
-			val, _ := rt.getField(res, "value")
+			// IteratorComplete then IteratorValue: a poisoned `done`/`value` getter
+			// throws, which rejects the returned promise (not swallowed).
+			doneV, e := rt.getField(res, "done")
+			if e != nil {
+				return rt.rejectedPromise(e.Value), nil
+			}
 			done := rt.toBoolean(doneV)
+			val, e := rt.getField(res, "value")
+			if e != nil {
+				return rt.rejectedPromise(e.Value), nil
+			}
 			// AsyncFromSyncIteratorContinuation: Await the sync value (so a thenable
 			// value resolves) before re-wrapping it in an IteratorResult carrying the
 			// sync `done` flag. For next(), a rejecting value closes the sync iterator
