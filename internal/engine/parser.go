@@ -196,6 +196,13 @@ func (p *parser) strictCheckBindingIdent(s string) {
 	if s == "" {
 		return
 	}
+	// `extends` and `enum` are always-reserved words with no dedicated token (they
+	// lex as identifiers, so isReservedWordTok misses them). Reject them as binding
+	// identifiers in every context; the decoded name also rejects `extend\u{73}`.
+	if s == "extends" || s == "enum" {
+		p.errorf("Unexpected reserved word")
+		return
+	}
 	// `yield`/`await` are reserved as binding identifiers inside a generator /
 	// async body (regardless of strict mode).
 	if p.inGenerator && s == "yield" {
