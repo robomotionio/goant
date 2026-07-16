@@ -1,5 +1,7 @@
 package engine
 
+import "strconv"
+
 // ES6 expression/statement compilation (Phase 5): template literals, spread in
 // array literals and calls, and for-of iteration. More ES6 (destructuring,
 // default/rest params, classes, generators) lands incrementally.
@@ -724,7 +726,7 @@ func (c *compiler) emitInstanceFieldInit() {
 		}
 		loadThis()
 		c.compileFunc(m.Right)
-		idx := c.constant(c.rt.internString(m.Left.Str))
+		idx := c.constant(c.rt.internString(c.privateKey(m.Left.Str)))
 		c.emit(OpDefineMethod)
 		c.emitU32(uint32(idx))
 		c.emitByte(flags)
@@ -793,7 +795,7 @@ func collectClassPrivateNames(n *Node) map[string]bool {
 func (c *compiler) privateNameDeclared(name string) bool {
 	for e := c; e != nil; e = e.enclosing {
 		for _, env := range e.classPrivateEnvs {
-			if env[name] {
+			if _, ok := env[name]; ok {
 				return true
 			}
 		}
@@ -802,6 +804,39 @@ func (c *compiler) privateNameDeclared(name string) bool {
 		}
 	}
 	return false
+}
+
+// mangleClassPrivates maps each private name of a class body to a storage key
+// unique to that body (`#x` -> `#x\x00<id>`), giving `#x` in distinct classes
+// distinct identities so a cross-class private access fails the brand check.
+func (c *compiler) mangleClassPrivates(names map[string]bool) map[string]string {
+	if len(names) == 0 {
+		return nil
+	}
+	c.rt.privClassSeq++
+	suffix := "\x00" + strconv.Itoa(c.rt.privClassSeq)
+	m := make(map[string]string, len(names))
+	for name := range names {
+		m[name] = name + suffix
+	}
+	return m
+}
+
+// privateKey resolves a private name (`#x`) to its per-class-body mangled storage
+// key (nearest enclosing declaring class wins, matching lexical scope). A public
+// name is returned unchanged; an unresolved private name keeps its raw form.
+func (c *compiler) privateKey(name string) string {
+	if len(name) == 0 || name[0] != '#' {
+		return name
+	}
+	for e := c; e != nil; e = e.enclosing {
+		for i := len(e.classPrivateEnvs) - 1; i >= 0; i-- {
+			if m, ok := e.classPrivateEnvs[i][name]; ok {
+				return m
+			}
+		}
+	}
+	return name
 }
 
 func (c *compiler) compileClass(n *Node) {
@@ -894,7 +929,7 @@ func (c *compiler) compileClass(n *Node) {
 
 	// The private environment is now in scope for the constructor, members, field
 	// initializers, and static blocks (the heritage above was compiled without it).
-	c.classPrivateEnvs = append(c.classPrivateEnvs, collectClassPrivateNames(n))
+	c.classPrivateEnvs = append(c.classPrivateEnvs, c.mangleClassPrivates(collectClassPrivateNames(n)))
 
 	// Collect instance fields and hand them to the constructor so it initializes
 	// them per-instance (base: at entry; derived: after super()). They are NOT
@@ -1037,7 +1072,7 @@ func (c *compiler) compileClass(n *Node) {
 		} else if m.Flags&fnSetter != 0 {
 			flags = 2
 		}
-		idx := c.constant(c.rt.internString(name))
+		idx := c.constant(c.rt.internString(c.privateKey(name)))
 		c.emit(OpDefineMethod)
 		c.emitU32(uint32(idx))
 		c.emitByte(flags)

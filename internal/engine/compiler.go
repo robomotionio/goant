@@ -106,7 +106,7 @@ type compiler struct {
 	// its enclosing class, and both environments stay in scope. A private
 	// reference must resolve to a name in some level here or in an enclosing
 	// compiler.
-	classPrivateEnvs []map[string]bool
+	classPrivateEnvs []map[string]string
 
 	// pendingLabel is a label awaiting the loop/statement it prefixes.
 	pendingLabel string
@@ -1052,7 +1052,7 @@ func (c *compiler) compileBinary(n *Node) {
 			c.syntaxErrorf("Private field '" + n.Left.Str + "' must be declared in an enclosing class")
 			return
 		}
-		c.emitConst(c.rt.internString(n.Left.Str))
+		c.emitConst(c.rt.internString(c.privateKey(n.Left.Str)))
 		c.compileExpr(n.Right)
 		c.emit(OpIn)
 		return

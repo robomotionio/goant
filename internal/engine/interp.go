@@ -494,9 +494,9 @@ restart:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			val := pop()
 			if o := rt.objPtr(peek()); o != nil {
-				if len(name) > 0 && name[0] == '#' {
+				if isPrivateKey(name) {
 					if !o.definePrivateField(name, val) {
-						thrown = rt.typeError("Cannot initialize private field " + name + " twice on the same object")
+						thrown = rt.typeError("Cannot initialize private field " + privDisplay(name) + " twice on the same object")
 						goto unwind
 					}
 				} else {
@@ -511,7 +511,7 @@ restart:
 			flags &= 3
 			accFn := pop()
 			rt.setMethodHome(accFn, peek()) // [[HomeObject]] for a super-using method
-			if len(name) > 0 && name[0] == '#' {
+			if isPrivateKey(name) {
 				if o := rt.objPtr(peek()); o != nil {
 					switch flags {
 					case 1:
@@ -584,7 +584,7 @@ restart:
 			obj := pop()
 			var v Value
 			var e *ThrowError
-			if len(name) > 0 && name[0] == '#' {
+			if isPrivateKey(name) {
 				v, e = rt.getPrivate(obj, name)
 			} else {
 				v, e = rt.getField(obj, name)
@@ -601,7 +601,7 @@ restart:
 			obj := peek()
 			var v Value
 			var e *ThrowError
-			if len(name) > 0 && name[0] == '#' {
+			if isPrivateKey(name) {
 				v, e = rt.getPrivate(obj, name)
 			} else {
 				v, e = rt.getField(obj, name)
@@ -616,7 +616,7 @@ restart:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			val := pop()
 			obj := pop()
-			if len(name) > 0 && name[0] == '#' {
+			if isPrivateKey(name) {
 				if e := rt.setPrivate(obj, name, val); e != nil {
 					thrown = e
 					goto unwind

@@ -6,6 +6,30 @@ package engine
 // an ordinary "#x" string property. Access to a private name the object's class
 // did not declare (the "brand check") throws a TypeError.
 
+// isPrivateKey reports whether a member-access key names a private element. A
+// syntactic private access is compiled to a per-class mangled key `#x\x00<id>`
+// (see compiler.privateKey), so it always contains a NUL; an ordinary string
+// property key such as `"#x"` (from `obj["#x"]`) never does and stays public.
+func isPrivateKey(name string) bool {
+	for i := 0; i < len(name); i++ {
+		if name[i] == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// privDisplay strips the per-class mangling suffix (`#x\x00<id>` -> `#x`) so a
+// brand-check error message shows the source-level private name.
+func privDisplay(name string) string {
+	for i := 0; i < len(name); i++ {
+		if name[i] == 0 {
+			return name[:i]
+		}
+	}
+	return name
+}
+
 type privKind uint8
 
 const (
@@ -79,11 +103,11 @@ func (rt *Runtime) getPrivate(obj Value, name string) (Value, *ThrowError) {
 		e = o.findPriv(name)
 	}
 	if e == nil {
-		return mkundef(), rt.typeError("Cannot read private member " + name + " from an object whose class did not declare it")
+		return mkundef(), rt.typeError("Cannot read private member " + privDisplay(name) + " from an object whose class did not declare it")
 	}
 	if e.kind == privAccessor {
 		if e.getter.IsUndefined() {
-			return mkundef(), rt.typeError("'" + name + "' was defined without a getter")
+			return mkundef(), rt.typeError("'" + privDisplay(name) + "' was defined without a getter")
 		}
 		return rt.callValue(e.getter, obj, nil)
 	}
@@ -100,7 +124,7 @@ func (rt *Runtime) setPrivate(obj Value, name string, v Value) *ThrowError {
 		e = o.findPriv(name)
 	}
 	if e == nil {
-		return rt.typeError("Cannot write private member " + name + " to an object whose class did not declare it")
+		return rt.typeError("Cannot write private member " + privDisplay(name) + " to an object whose class did not declare it")
 	}
 	switch e.kind {
 	case privField:
@@ -108,12 +132,12 @@ func (rt *Runtime) setPrivate(obj Value, name string, v Value) *ThrowError {
 		return nil
 	case privAccessor:
 		if e.setter.IsUndefined() {
-			return rt.typeError("'" + name + "' was defined without a setter")
+			return rt.typeError("'" + privDisplay(name) + "' was defined without a setter")
 		}
 		_, err := rt.callValue(e.setter, obj, []Value{v})
 		return err
 	default: // method
-		return rt.typeError("Cannot write to private method " + name)
+		return rt.typeError("Cannot write to private method " + privDisplay(name))
 	}
 }
 

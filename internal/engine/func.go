@@ -120,7 +120,7 @@ func (c *compiler) emitFieldOp(op Opcode, name string) {
 		c.syntaxErrorf("Private field '" + name + "' must be declared in an enclosing class")
 		return
 	}
-	idx := c.constant(c.rt.internString(name))
+	idx := c.constant(c.rt.internString(c.privateKey(name)))
 	c.emit(op)
 	c.emitU32(uint32(idx))
 	c.emitU16(0) // inline-cache slot placeholder
@@ -128,7 +128,7 @@ func (c *compiler) emitFieldOp(op Opcode, name string) {
 
 // emitDefineField emits DEFINE_FIELD (u32 name-const, size 5).
 func (c *compiler) emitDefineField(name string) {
-	idx := c.constant(c.rt.internString(name))
+	idx := c.constant(c.rt.internString(c.privateKey(name)))
 	c.emit(OpDefineField)
 	c.emitU32(uint32(idx))
 }

@@ -55,6 +55,11 @@ type evalScope struct {
 	// var declaration of `arguments` in the eval body then conflicts:
 	// EvalDeclarationInstantiation reports a SyntaxError.
 	paramArgsConflict bool
+
+	// privateEnvs are the mangled private-name maps of the class bodies enclosing
+	// the eval site (innermost last), so a direct eval's `this.#x` resolves to the
+	// same per-class storage key the enclosing class uses (private-name identity).
+	privateEnvs []map[string]string
 }
 
 // evalInGlobalScope parses, compiles, and runs eval source in global scope. It
@@ -144,6 +149,16 @@ func (c *compiler) captureEvalScope() *evalScope {
 	sc.argumentsAllowed = !c.isScript && !c.fn.isArrow
 	sc.superAllowed = !c.isScript
 	sc.paramArgsConflict = c.inParamExpr && !c.fn.isArrow
+	// Snapshot the enclosing class private environments in outermost-first order
+	// (each compiler's own stack is already outer-to-inner), so the eval compiler
+	// can mangle `#x` to the same key the declaring class uses.
+	var chain []*compiler
+	for e := c; e != nil; e = e.enclosing {
+		chain = append(chain, e)
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		sc.privateEnvs = append(sc.privateEnvs, chain[i].classPrivateEnvs...)
+	}
 	return sc
 }
 
@@ -302,6 +317,9 @@ func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc
 		evalVarGlobal: !sc.inFunction && !strict,
 		fn:            &svFunc{name: "", filename: filename, source: source, isStrict: strict},
 	}
+	// A direct eval sees the enclosing class private environments, so its `this.#x`
+	// mangles to the same per-class key the declaring class uses (privateKey).
+	c.classPrivateEnvs = sc.privateEnvs
 
 	c.completionSlot = c.addLocal("*completion*", false)
 	c.emit(OpUndef)

@@ -13,6 +13,11 @@ import (
 // public entry points. Phases 1–3 wire in the lexer/parser, object model, and
 // interpreter.
 type Runtime struct {
+	// privClassSeq assigns a unique id to each compiled class body, so a private
+	// name `#x` in one class is a distinct storage key from `#x` in another
+	// (per-class private-name identity / brand check).
+	privClassSeq int
+
 	// Heap pools (TODO 0.2). Payload element types are placeholders that fill
 	// in as the object model (Phase 2) and strings land.
 	objects  *pool[object]
