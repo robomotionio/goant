@@ -371,7 +371,11 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		isScript:   true,
 		isEval:     isEval,
 		isModule:   isModule,
-		usingStack: -1,
+		// A sloppy indirect eval runs in global scope, so its `var`/function
+		// declarations bind on the global object (a strict eval keeps its own
+		// variable environment; a direct eval sets this via its own compile path).
+		evalVarGlobal: isEval && !isModule && !strict,
+		usingStack:    -1,
 		// A Module evaluates asynchronously (top-level await), so its body is
 		// compiled and driven as an async coroutine.
 		fn: &svFunc{name: "", filename: filename, source: source, isStrict: strict, isAsync: isModule},
@@ -425,6 +429,18 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		for name := range names {
 			if !g.hasOwn(name) {
 				g.defineOwn(name, mkundef(), attrWritable|attrEnumerable)
+			}
+		}
+	} else if c.evalVarGlobal {
+		// Sloppy indirect eval: pre-create its var/function names on the global as
+		// CONFIGURABLE properties (unlike a script's non-configurable vars), so a
+		// bare `var x;` binds and eval-created globals are deletable.
+		names := map[string]bool{}
+		collectVarFuncNames(prog.Args, names)
+		g := rt.objPtr(rt.global)
+		for name := range names {
+			if !g.hasOwn(name) {
+				g.defineOwn(name, mkundef(), attrWritable|attrEnumerable|attrConfigurable)
 			}
 		}
 	}
