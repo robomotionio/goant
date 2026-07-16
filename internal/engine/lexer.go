@@ -539,6 +539,19 @@ func scanDecimalLiteral(buf string) int {
 	return i
 }
 
+// decimalBigIntEligible reports whether a scanned decimal literal (possibly with
+// `_` separators) may legally carry a BigInt `n` suffix. Per the grammar, only
+// `0` or a NonZeroDigit-led integer qualifies: a fractional part, an exponent, or
+// a superfluous leading zero (08, 09) all disqualify it.
+func decimalBigIntEligible(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c == '.' || c == 'e' || c == 'E' {
+			return false
+		}
+	}
+	return len(s) == 1 || s[0] != '0'
+}
+
 // parseDecimalLiteral scans and evaluates a decimal literal, returning its
 // length, the float64 value, and ok.
 func parseDecimalLiteral(buf string) (length int, value float64, ok bool) {
@@ -609,6 +622,10 @@ func (l *lexer) parseNumber(off int) {
 	numlen := 0
 
 	sepBad := false
+	// bigIntOK tracks whether the scanned form may legally carry a BigInt `n`
+	// suffix: `0`, a non-leading-zero decimal integer, or a 0b/0o/0x literal —
+	// never a legacy octal (07n), non-octal decimal (08n), or fractional/exponent.
+	bigIntOK := false
 	if buf[0] == '0' && len(buf) > 1 {
 		c1 := buf[1] | 0x20
 		isBin := func(c byte) bool { return c == '0' || c == '1' }
@@ -616,12 +633,15 @@ func (l *lexer) parseNumber(off int) {
 		case c1 == 'b':
 			numlen, value = parseRadix(buf, 2, 2, isBin)
 			sepBad = hasBadSeparator(buf[2:numlen], isBin)
+			bigIntOK = true
 		case c1 == 'o':
 			numlen, value = parseRadix(buf, 8, 2, isOctalByte)
 			sepBad = hasBadSeparator(buf[2:numlen], isOctalByte)
+			bigIntOK = true
 		case c1 == 'x':
 			numlen, value = parseRadix(buf, 16, 2, isXDigitByte)
 			sepBad = hasBadSeparator(buf[2:numlen], isXDigitByte)
+			bigIntOK = true
 		case isOctalByte(buf[1]):
 			if l.strict {
 				l.st.tok, l.st.tlen = TokErr, 1
@@ -646,6 +666,7 @@ func (l *lexer) parseNumber(off int) {
 				return
 			}
 			sepBad = hasBadSeparator(buf[:numlen], isDigitByte)
+			bigIntOK = decimalBigIntEligible(buf[:numlen])
 		}
 	} else {
 		var ok bool
@@ -655,6 +676,7 @@ func (l *lexer) parseNumber(off int) {
 			return
 		}
 		sepBad = hasBadSeparator(buf[:numlen], isDigitByte)
+		bigIntOK = decimalBigIntEligible(buf[:numlen])
 	}
 	if sepBad {
 		l.st.tok, l.st.tlen = TokErr, numlen
@@ -664,6 +686,10 @@ func (l *lexer) parseNumber(off int) {
 	l.st.tval = tov(value)
 	toklen := numlen
 	if toklen < len(buf) && buf[toklen] == 'n' {
+		if !bigIntOK {
+			l.st.tok, l.st.tlen = TokErr, toklen+1
+			return
+		}
 		l.st.tok = TokBigInt
 		toklen++
 	} else {
