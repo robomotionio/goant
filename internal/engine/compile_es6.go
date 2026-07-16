@@ -611,29 +611,11 @@ func (c *compiler) compileSuperCall(n *Node) {
 // literal method.
 func (c *compiler) compileSuperMethodCall(n *Node) {
 	member := n.Left
-	// emitSuperBase pushes the object to look the method up on; false → error.
-	emitSuperBase := func() bool {
-		if c.hasClassSuper() {
-			return c.resolveClassBinding(c.superHomeBinding())
-		}
-		if c.fn != nil && c.fn.isMethod && !c.fn.isArrow {
-			c.fn.usesSuper = true
-			c.emit(OpGetSuper)
-			return true
-		}
-		return false
-	}
-	// emitSuperThis pushes the receiver: the captured *this* in a class element,
-	// the dynamic `this` in an object method.
-	emitSuperThis := func() {
-		if c.hasClassSuper() {
-			if !c.resolveClassBinding("*this*") {
-				c.emit(OpUndef)
-			}
-			return
-		}
-		c.emit(OpThis)
-	}
+	// emitSuperBase / emitSuperThis are the shared helpers: they also cover a
+	// direct eval nested in a method/constructor (c.borrowed.superAllowed), so
+	// `super.method()` inside such an eval resolves like it does in the method.
+	emitSuperBase := c.emitSuperBase
+	emitSuperThis := c.emitSuperThis
 	emitMethod := func() {
 		if member.Flags&1 != 0 {
 			c.compileExpr(member.Right)

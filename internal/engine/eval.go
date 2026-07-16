@@ -148,6 +148,22 @@ func (c *compiler) captureEvalScope() *evalScope {
 	sc.newTargetAllowed = !c.isScript && !c.fn.isArrow
 	sc.argumentsAllowed = !c.isScript && !c.fn.isArrow
 	sc.superAllowed = c.superAvailable()
+	if sc.superAllowed {
+		// The eval body may reference super. An object-literal method captures its
+		// [[HomeObject]] only when its own body reads super (usesSuper → OpSetHomeObj);
+		// a super buried in an eval string is invisible to that check, so mark the
+		// enclosing method now to force the home capture. (Class elements resolve
+		// super via captured *superproto*/*this* bindings, handled separately.)
+		for e := c; e != nil; e = e.enclosing {
+			if e.fn == nil || e.fn.isArrow {
+				continue
+			}
+			if e.fn.isMethod {
+				e.fn.usesSuper = true
+			}
+			break
+		}
+	}
 	sc.paramArgsConflict = c.inParamExpr && !c.fn.isArrow
 	// Snapshot the enclosing class private environments in outermost-first order
 	// (each compiler's own stack is already outer-to-inner), so the eval compiler
