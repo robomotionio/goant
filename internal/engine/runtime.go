@@ -103,6 +103,10 @@ type Runtime struct {
 	// (same shared-prototype-next / brand-check purpose as collIterStates).
 	arrIterStates map[*object]*arrIterState
 
+	// strIterStates holds the iteration state of String iterator objects (a
+	// code-point snapshot + index) for a shared %StringIteratorPrototype%.next.
+	strIterStates map[*object]*strIterState
+
 	// Well-known symbols and the Symbol.for registry.
 	symbolCounter         uint64
 	symbolRegistry        map[string]Value

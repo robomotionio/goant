@@ -41,6 +41,36 @@ func (rt *Runtime) initIteratorProto() {
 	rt.defMethod(rt.objPtr(rt.arrayIterProto), "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.arrIterNext(this)
 	})
+	rt.defMethod(rt.objPtr(rt.stringIterProto), "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		st := rt.strIterStates[rt.objPtr(this)]
+		if st == nil {
+			return mkundef(), rt.typeError("String Iterator.prototype.next called on an incompatible receiver")
+		}
+		if st.index >= len(st.vals) {
+			return rt.genResult(mkundef(), true), nil
+		}
+		v := st.vals[st.index]
+		st.index++
+		return rt.genResult(v, false), nil
+	})
+}
+
+// strIterState is the internal state of a String iterator: a snapshot of the
+// string's code points and the current index.
+type strIterState struct {
+	vals  []Value
+	index int
+}
+
+// newStringIterator builds a String iterator over a pre-computed code-point slice,
+// storing its state for the shared %StringIteratorPrototype%.next.
+func (rt *Runtime) newStringIterator(vals []Value) Value {
+	v := rt.newObject(rt.stringIterProto)
+	if rt.strIterStates == nil {
+		rt.strIterStates = map[*object]*strIterState{}
+	}
+	rt.strIterStates[rt.objPtr(v)] = &strIterState{vals: vals}
+	return v
 }
 
 // sliceIterator returns an iterator object over a fixed slice of values.

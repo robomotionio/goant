@@ -600,15 +600,7 @@ func (rt *Runtime) initStringBuiltin() {
 				return mkundef(), e
 			}
 			vals, _ := rt.iterableValues(s)
-			i := 0
-			return rt.newIteratorObjectP(rt.stringIterProto, func() (Value, bool) {
-				if i >= len(vals) {
-					return mkundef(), true
-				}
-				v := vals[i]
-				i++
-				return v, false
-			}), nil
+			return rt.newStringIterator(vals), nil
 		})
 		proto.defineOwnSymbol(rt.symIterator.handle(), strIter, attrWritable|attrConfigurable)
 	}
