@@ -763,6 +763,13 @@ func (l *lexer) scanString(off int, quote byte) {
 				b = j
 				break
 			}
+			// A raw LF or CR may not appear in a string literal (only escaped or via
+			// a line continuation). LS (U+2028) and PS (U+2029) ARE permitted since
+			// ES2019's JSON-superset change, so they are deliberately not rejected.
+			if buf[j] == '\n' || buf[j] == '\r' {
+				l.st.tok, l.st.tlen = TokErr, j
+				return
+			}
 		}
 		if q == -1 && b == -1 {
 			l.st.tok, l.st.tlen = TokErr, rem
