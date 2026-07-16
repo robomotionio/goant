@@ -58,6 +58,12 @@ type compiler struct {
 	// scope already binds it): EvalDeclarationInstantiation throws a SyntaxError.
 	inParamExpr bool
 
+	// paramNames holds the current function's formal-parameter names (and, when an
+	// arguments object is present, "arguments"). Annex B.3.3 skips the block-level
+	// function var-hoisting extension for any name already bound as a parameter, so
+	// such a declaration must not overwrite the parameter's slot.
+	paramNames map[string]bool
+
 	// isModule marks Module compilation (strict, top-level this undefined).
 	isModule bool
 

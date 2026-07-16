@@ -38,6 +38,12 @@ func functionSelfNameShadowed(n *Node) bool {
 // declaration binds only lexically. Mirrors ast.go's shadow set so the compiler
 // and the global pre-creation (collectVarFuncNames) agree.
 func (c *compiler) annexBVarShadowed(name string) bool {
+	// A formal parameter (or the implicit `arguments`) already binds the name in
+	// the function scope, so the extension is skipped (B.3.3.1: "F is not an
+	// element of parameterNames").
+	if c.paramNames[name] {
+		return true
+	}
 	for i := len(c.locals) - 1; i >= 0; i-- {
 		lv := c.locals[i]
 		if lv.dead || !lv.blockScoped || lv.name != name {
@@ -543,6 +549,24 @@ func (c *compiler) compileFunctionBody(n *Node) {
 				break
 			}
 		}
+	}
+
+	// Record the formal-parameter names (plus the implicit `arguments` binding of
+	// an ordinary function) so Annex B.3.3 can skip var-hoisting a block-level
+	// function whose name is already a parameter (see annexBVarShadowed).
+	c.paramNames = map[string]bool{}
+	for _, param := range n.Args {
+		switch param.Kind {
+		case NAssignPat:
+			collectBindingNames(param.Left, c.paramNames)
+		case NRest:
+			collectBindingNames(param.Right, c.paramNames)
+		default:
+			collectBindingNames(param, c.paramNames)
+		}
+	}
+	if n.Flags&fnArrow == 0 {
+		c.paramNames["arguments"] = true
 	}
 
 	// Duplicate parameter names are forbidden for an arrow, a method/accessor, any
