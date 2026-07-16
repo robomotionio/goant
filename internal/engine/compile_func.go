@@ -240,6 +240,12 @@ func (c *compiler) checkBlockDeclConflicts(list []*Node, blockScope bool) {
 	if c.err != nil {
 		return
 	}
+	// VarDeclaredNames of the StatementList includes `var`s hoisted out of nested
+	// blocks and statements (but not nested functions), so a lexical name here
+	// conflicts with a deeper var too: `{ { var f; } let f; }`.
+	for _, stmt := range list {
+		collectBodyVarNames(stmt, varNames)
+	}
 	for nm := range lexical {
 		if varNames[nm] || plainFn[nm] {
 			fail(nm)
