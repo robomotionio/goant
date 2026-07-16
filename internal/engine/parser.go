@@ -1181,7 +1181,17 @@ func (p *parser) parseRegex() *Node {
 	inClass := false
 	for pos < clen {
 		c := code[pos]
+		// A regular-expression literal may not contain a LineTerminator (LF, CR,
+		// LS, PS), even inside a class or after a backslash — it is a SyntaxError.
+		if c == '\n' || c == '\r' || isLSorPS(code, pos, clen) {
+			p.errorf("regular expression literal may not contain a line terminator")
+			return p.mk(NEmpty)
+		}
 		if c == '\\' && pos+1 < clen {
+			if n := code[pos+1]; n == '\n' || n == '\r' || isLSorPS(code, pos+1, clen) {
+				p.errorf("regular expression literal may not contain a line terminator")
+				return p.mk(NEmpty)
+			}
 			pos += 2
 			continue
 		}

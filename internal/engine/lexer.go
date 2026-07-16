@@ -1339,10 +1339,18 @@ func skipRegexLiteral2(buf string, rem, start int) int {
 	inClass := false
 	for i < rem {
 		c := buf[i]
-		if c == '\n' {
-			return start // unterminated
+		// A regex literal may not contain any LineTerminator (LF, CR, LS, PS),
+		// even after a backslash — such input is an unterminated regex.
+		if c == '\n' || c == '\r' || isLSorPS(buf, i, rem) {
+			return start
 		}
-		if c == '\\' && i+1 < rem {
+		if c == '\\' {
+			if i+1 >= rem {
+				return start
+			}
+			if n := buf[i+1]; n == '\n' || n == '\r' || isLSorPS(buf, i+1, rem) {
+				return start
+			}
 			i += 2
 			continue
 		}
