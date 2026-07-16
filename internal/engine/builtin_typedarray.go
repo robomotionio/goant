@@ -729,6 +729,19 @@ func (rt *Runtime) initTypedArrays() {
 // defUint8ArrayBase64Hex installs the Uint8Array base64/hex conversions
 // (toBase64/fromBase64/setFromBase64, toHex/fromHex/setFromHex — TC39 stage 4).
 func (rt *Runtime) defUint8ArrayBase64Hex(cobj, proto *object, kind taKind) {
+	// requireU8 validates the receiver of an instance base64/hex method: it must be
+	// a Uint8Array (ValidateUint8Array) whose backing buffer is neither detached nor
+	// out of bounds — otherwise a TypeError, before any argument coercion.
+	requireU8 := func(this Value) (*object, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || o.ta == nil || o.ta.kind != taUint8 {
+			return nil, rt.typeError("Uint8Array method called on an incompatible receiver")
+		}
+		if rt.taOutOfBounds(o) {
+			return nil, rt.typeError("Cannot perform Uint8Array operation on a detached or out-of-bounds buffer")
+		}
+		return o, nil
+	}
 	readBytes := func(this Value) []byte {
 		o := rt.objPtr(this)
 		n := rt.taLength(o)
@@ -767,12 +780,21 @@ func (rt *Runtime) defUint8ArrayBase64Hex(cobj, proto *object, kind taKind) {
 	}
 
 	rt.defMethod(proto, "toHex", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := requireU8(this); e != nil {
+			return mkundef(), e
+		}
 		return rt.newString(hex.EncodeToString(readBytes(this))), nil
 	})
 	rt.defMethod(proto, "toBase64", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := requireU8(this); e != nil {
+			return mkundef(), e
+		}
 		return rt.newString(base64.StdEncoding.EncodeToString(readBytes(this))), nil
 	})
 	rt.defMethod(cobj, "fromHex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !arg(args, 0).IsString() {
+			return mkundef(), rt.typeError("Uint8Array.fromHex requires a string argument")
+		}
 		s := string(rt.strBytes(arg(args, 0)))
 		b, err := hex.DecodeString(s)
 		if err != nil {
@@ -781,6 +803,9 @@ func (rt *Runtime) defUint8ArrayBase64Hex(cobj, proto *object, kind taKind) {
 		return newFrom(b), nil
 	})
 	rt.defMethod(cobj, "fromBase64", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !arg(args, 0).IsString() {
+			return mkundef(), rt.typeError("Uint8Array.fromBase64 requires a string argument")
+		}
 		b, err := base64.StdEncoding.DecodeString(string(rt.strBytes(arg(args, 0))))
 		if err != nil {
 			return mkundef(), rt.syntaxError("Invalid base64 string")
@@ -788,6 +813,12 @@ func (rt *Runtime) defUint8ArrayBase64Hex(cobj, proto *object, kind taKind) {
 		return newFrom(b), nil
 	})
 	rt.defMethod(proto, "setFromHex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := requireU8(this); e != nil {
+			return mkundef(), e
+		}
+		if !arg(args, 0).IsString() {
+			return mkundef(), rt.typeError("setFromHex requires a string argument")
+		}
 		s := string(rt.strBytes(arg(args, 0)))
 		b, err := hex.DecodeString(s)
 		if err != nil {
@@ -796,6 +827,12 @@ func (rt *Runtime) defUint8ArrayBase64Hex(cobj, proto *object, kind taKind) {
 		return setInto(this, b, len(s)), nil
 	})
 	rt.defMethod(proto, "setFromBase64", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := requireU8(this); e != nil {
+			return mkundef(), e
+		}
+		if !arg(args, 0).IsString() {
+			return mkundef(), rt.typeError("setFromBase64 requires a string argument")
+		}
 		s := string(rt.strBytes(arg(args, 0)))
 		b, err := base64.StdEncoding.DecodeString(s)
 		if err != nil {
