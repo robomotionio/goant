@@ -121,6 +121,13 @@ type Runtime struct {
 	// shared %RegExpStringIteratorPrototype%.next that steps RegExpExec lazily.
 	regexpStrIterStates map[*object]*regexpStrIterState
 
+	// indexedProtoIntercept becomes true once any integer-indexed accessor or
+	// non-writable indexed data property is defined anywhere (it may sit on a
+	// prototype). While false, an array-index [[Set]] to an absent index can skip
+	// the prototype-chain walk for an inherited interceptor and write fast storage
+	// directly. Monotonic: a rare over-approximation only costs a chain walk.
+	indexedProtoIntercept bool
+
 	// Well-known symbols and the Symbol.for registry.
 	symbolCounter         uint64
 	symbolRegistry        map[string]Value

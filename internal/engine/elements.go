@@ -565,6 +565,42 @@ func (rt *Runtime) setElement(obj Value, key, v Value) *ThrowError {
 	return e
 }
 
+// inheritedIndexedSet handles the OrdinarySet case where an index is not an own
+// property of the receiver but the prototype chain (walked from `start`) holds
+// an interceptor for it: an accessor (invoke its setter, or reject when
+// setter-less) or a non-writable data property (reject). handled is false when
+// no interceptor is found — the caller then creates an own element on the
+// receiver (inherited writable data / absent both create own). Only called when
+// rt.indexedProtoIntercept is set, so ordinary array growth pays nothing.
+func (rt *Runtime) inheritedIndexedSet(receiver, start Value, idx uint32, v Value) (handled, ok bool, err *ThrowError) {
+	name := strconv.Itoa(int(idx))
+	for cur := start; ; {
+		o := rt.objPtr(cur)
+		if o == nil {
+			return false, false, nil
+		}
+		if o.proxy != nil {
+			b, e := rt.proxySet(o.proxy, rt.internString(name), v, receiver)
+			return true, b, e
+		}
+		if slot := o.shape.lookupInterned(name); slot >= 0 {
+			if o.isAccessorSlot(uint32(slot)) {
+				p := o.shape.propAt(uint32(slot))
+				if p.hasSetter {
+					_, e := rt.callValue(p.setter, receiver, []Value{v})
+					return true, e == nil, e
+				}
+				return true, false, nil // setter-less accessor: rejected
+			}
+			if o.shape.attrsAt(uint32(slot))&attrWritable == 0 {
+				return true, false, nil // inherited non-writable data: rejected
+			}
+			return false, false, nil // inherited writable data: create own on receiver
+		}
+		cur = o.proto
+	}
+}
+
 // setElementR is [[Set]] for a computed/element key, additionally reporting
 // whether the assignment took effect. It returns false (with no error) for a
 // silently-refused write — a non-writable data property, a setter-less
@@ -644,6 +680,15 @@ func (rt *Runtime) setElementR(obj Value, key, v Value) (bool, *ThrowError) {
 		// lives there, updated via setFieldR below).
 		if !o.flags.extensible && o.shape.lookupInterned(strconv.Itoa(int(idx))) < 0 {
 			return false, nil
+		}
+		// When idx is not an own property, an inherited indexed accessor or
+		// non-writable data property on the prototype chain intercepts the write
+		// (OrdinarySet). Gated on the runtime flag so ordinary growth stays a direct
+		// fast write; own named-index properties (checked below) take precedence.
+		if rt.indexedProtoIntercept && o.shape.lookupInterned(strconv.Itoa(int(idx))) < 0 {
+			if handled, ok, e := rt.inheritedIndexedSet(obj, o.proto, idx, v); e != nil || handled {
+				return ok, e
+			}
 		}
 		// A far index whose gap past the dense store would balloon the backing
 		// slice spills to a named property (sparse array): length still tracks the

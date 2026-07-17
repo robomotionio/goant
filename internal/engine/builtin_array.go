@@ -428,6 +428,20 @@ func (rt *Runtime) arrayCreate(length int) (Value, *ThrowError) {
 	return a, nil
 }
 
+// setElementOrThrow performs Set(O, key, v, true): a TypeError when the write is
+// refused (a non-writable data property, a setter-less accessor, or an add to a
+// non-extensible object). The array mutators Set elements with throw=true.
+func (rt *Runtime) setElementOrThrow(obj, key, v Value) *ThrowError {
+	ok, e := rt.setElementR(obj, key, v)
+	if e != nil {
+		return e
+	}
+	if !ok {
+		return rt.typeError("Cannot assign to read only property '" + numberToString(key.Number()) + "'")
+	}
+	return nil
+}
+
 // setLengthOrThrow performs Set(O, "length", n, true): a TypeError if the length
 // is not writable. The array mutators always Set length with throw=true.
 func (rt *Runtime) setLengthOrThrow(obj Value, n float64) *ThrowError {
@@ -504,7 +518,7 @@ func (rt *Runtime) initArrayBuiltin() {
 			return mkundef(), rt.typeError("Cannot add property " + numberToString(float64(n)) + ", object is not extensible")
 		}
 		for _, a := range args {
-			if e := rt.setElement(obj, mknum(float64(n)), a); e != nil {
+			if e := rt.setElementOrThrow(obj, mknum(float64(n)), a); e != nil {
 				return mkundef(), e
 			}
 			n++
@@ -624,7 +638,7 @@ func (rt *Runtime) initArrayBuiltin() {
 					if e != nil {
 						return mkundef(), e
 					}
-					if e := rt.setElement(obj, mknum(float64(to)), v); e != nil {
+					if e := rt.setElementOrThrow(obj, mknum(float64(to)), v); e != nil {
 						return mkundef(), e
 					}
 				} else {
@@ -634,7 +648,7 @@ func (rt *Runtime) initArrayBuiltin() {
 				}
 			}
 			for i := 0; i < k; i++ {
-				if e := rt.setElement(obj, mknum(float64(i)), args[i]); e != nil {
+				if e := rt.setElementOrThrow(obj, mknum(float64(i)), args[i]); e != nil {
 					return mkundef(), e
 				}
 			}

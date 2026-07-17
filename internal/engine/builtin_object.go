@@ -1060,6 +1060,17 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	if configurable {
 		attrs |= attrConfigurable
 	}
+	// Record that an integer-indexed accessor or non-writable indexed data
+	// property now exists (it may live on a prototype), so an array-index [[Set]]
+	// to an absent index knows it must walk the chain for an inherited interceptor.
+	if !sym {
+		resultIsAccessor := hasGet || hasSet || (existing.exists && existing.isAccessor && !hasVal && !hasW)
+		if resultIsAccessor || !writable {
+			if _, isIdx := canonicalIndex(name); isIdx {
+				rt.indexedProtoIntercept = true
+			}
+		}
+	}
 
 	if hasGet || hasSet {
 		g, s := existing.getter, existing.setter
