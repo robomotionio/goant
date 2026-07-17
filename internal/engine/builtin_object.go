@@ -1160,7 +1160,13 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 					return e
 				}
 				if !ok {
-					// A non-configurable element blocked the requested shrink.
+					// A non-configurable element blocked the requested shrink: length
+					// stops one past that index. Per ArraySetLength step 17.d, a
+					// requested writable:false is still applied to the length before the
+					// define is reported as failed (which throws in a throwing context).
+					if hasW && !writable {
+						o.flags.arrLenNonWritable = true
+					}
 					return rt.rejectDefine("Cannot redefine property: length")
 				}
 			}
