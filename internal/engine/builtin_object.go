@@ -1392,7 +1392,7 @@ func (rt *Runtime) sealObject(v Value, freeze bool) *ThrowError {
 	for i := 0; i < o.shape.count(); i++ {
 		p := &o.shape.props[i]
 		p.attrs &^= attrConfigurable
-		if freeze && !(p.hasGetter || p.hasSetter) {
+		if freeze && !p.isAccessor {
 			p.attrs &^= attrWritable
 		}
 	}

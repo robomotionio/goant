@@ -54,6 +54,7 @@ type childKey struct {
 type shapeProp struct {
 	key       propKey
 	attrs     uint8
+	isAccessor bool // an accessor property (may still have an undefined get/set)
 	hasGetter bool
 	hasSetter bool
 	getter    Value
@@ -284,7 +285,7 @@ func (s *shape) clearAccessor(slot uint32) bool {
 	if p == nil {
 		return false
 	}
-	p.hasGetter, p.hasSetter, p.getter, p.setter = false, false, 0, 0
+	p.isAccessor, p.hasGetter, p.hasSetter, p.getter, p.setter = false, false, false, 0, 0
 	icEpochBump()
 	return true
 }

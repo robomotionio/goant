@@ -356,6 +356,7 @@ func (o *object) defineAccessorSymbol(sym uint32, getter, setter Value, hasGet, 
 	}
 	o.ensureUniqueShape()
 	p := o.shape.propAt(slot)
+	p.isAccessor = true
 	p.hasGetter, p.hasSetter = hasGet, hasSet
 	p.getter, p.setter = getter, setter
 	o.slotSet(slot, mkundef())
@@ -369,12 +370,13 @@ func (o *object) defineOwn(key string, v Value, attrs uint8) bool {
 	if !ok {
 		return false
 	}
-	// Converting an accessor slot to a data property: clear the getter/setter
-	// markers (privatizing the shape first, since they are stamped per-object).
-	if p := o.shape.propAt(slot); p.hasGetter || p.hasSetter {
+	// Converting an accessor slot to a data property: clear the accessor markers
+	// (privatizing the shape first, since they are stamped per-object). Keyed on
+	// isAccessor so an accessor with an undefined get/set is also cleared.
+	if p := o.shape.propAt(slot); p.isAccessor {
 		o.ensureUniqueShape()
 		p = o.shape.propAt(slot)
-		p.hasGetter, p.hasSetter = false, false
+		p.isAccessor, p.hasGetter, p.hasSetter = false, false, false
 		p.getter, p.setter = mkundef(), mkundef()
 	}
 	o.slotSet(slot, v)
@@ -684,7 +686,7 @@ func (rt *Runtime) ownIndexElement(o *object, obj Value, idx uint32) (Value, boo
 // isAccessorSlot reports whether a shape slot is an accessor property.
 func (o *object) isAccessorSlot(slot uint32) bool {
 	p := o.shape.propAt(slot)
-	return p != nil && (p.hasGetter || p.hasSetter)
+	return p != nil && p.isAccessor
 }
 
 // ownDescriptor returns the full property descriptor for an own key.
@@ -923,6 +925,7 @@ func (o *object) defineAccessor(key string, getter, setter Value, hasGet, hasSet
 	// sharing the shape would see this object's accessors.
 	o.ensureUniqueShape()
 	p := o.shape.propAt(slot)
+	p.isAccessor = true
 	p.hasGetter, p.hasSetter = hasGet, hasSet
 	p.getter, p.setter = getter, setter
 	o.slotSet(slot, mkundef())
