@@ -412,9 +412,24 @@ restart:
 							goto unwind
 						}
 					}
-				} else if e := rt.setField(base, name, val); e != nil {
-					thrown = e
-					goto unwind
+				} else {
+					// Object Environment Record SetMutableBinding: if the bound property
+					// was deleted between the reference's read and this write (e.g. a
+					// getter deleted it), a strict assignment is a ReferenceError rather
+					// than re-creating the property.
+					has, he := rt.hasPropE(base, name)
+					if he != nil {
+						thrown = he
+						goto unwind
+					}
+					if !has && fn.isStrict {
+						thrown = rt.referenceError(name + " is not defined")
+						goto unwind
+					}
+					if e := rt.setField(base, name, val); e != nil {
+						thrown = e
+						goto unwind
+					}
 				}
 				push(val)
 				ip += 8
