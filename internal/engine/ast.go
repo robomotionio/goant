@@ -76,6 +76,7 @@ const (
 	NImportSpec
 	NExport
 	NProgram
+	NImportMeta // `import.meta` (module goal only)
 	nNodeCount
 )
 

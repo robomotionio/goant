@@ -955,6 +955,11 @@ func (c *compiler) compileExpr(n *Node) {
 		c.emitConst(c.rt.internString(n.Str))
 		c.emitConst(c.rt.internString(n.Aux))
 		c.emit(OpRegexp)
+	case NImportMeta:
+		// import.meta: the module's own meta object (a per-module ordinary object,
+		// the same one on every access). Runtime kind 3 of OpSpecialObj.
+		c.emit(OpSpecialObj)
+		c.emitByte(3)
 	case NGlobalThis:
 		c.emit(OpGlobal)
 	case NNewTarget:

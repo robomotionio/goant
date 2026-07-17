@@ -1172,12 +1172,14 @@ func (p *parser) parseImportExpr() *Node {
 	switch p.next() {
 	case TokDot:
 		p.consume() // '.'
-		// `import.meta` is valid only in a Module goal; the runner evaluates
-		// scripts, so it is an early error here.
+		// `import.meta` is valid only in a Module goal.
 		if p.next() == TokIdentifier && p.tlen() == 4 && p.tokStr() == "meta" {
 			p.consume()
-			p.errorf("'import.meta' may only appear in a module")
-			return p.mk(NEmpty)
+			if !p.lx.module {
+				p.errorf("'import.meta' may only appear in a module")
+				return p.mk(NEmpty)
+			}
+			return p.mk(NImportMeta)
 		}
 		// import.defer(...) / import.source(...) — the deferred-module and
 		// module-source ImportCall proposals; both parse as a dynamic import.

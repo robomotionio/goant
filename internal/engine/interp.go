@@ -571,6 +571,11 @@ restart:
 				push(fnVal)
 			case 2: // new.target
 				push(newTarget)
+			case 3: // import.meta — a per-module ordinary object, created once
+				if rt.importMeta == 0 {
+					rt.importMeta = rt.newObject(rt.objectProto)
+				}
+				push(rt.importMeta)
 			default:
 				push(mkundef())
 			}

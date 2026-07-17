@@ -37,6 +37,10 @@ type Runtime struct {
 	// and predefined globals (NaN/Infinity/undefined) live here.
 	global Value
 
+	// importMeta is the module's `import.meta` object, created lazily on first
+	// access and returned identically thereafter (one Module per runner process).
+	importMeta Value
+
 	// Core prototype objects (ant isolate proto fields).
 	objectProto           Value
 	functionProto         Value
