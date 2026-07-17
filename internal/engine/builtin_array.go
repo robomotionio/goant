@@ -1994,9 +1994,18 @@ func (rt *Runtime) initArrayBuiltin() {
 			usingIterator = m
 		}
 		if rt.isCallable(usingIterator) {
-			res, e := rt.arrayFromCtor(this, 0)
-			if e != nil {
-				return mkundef(), e
+			// Iterable path: A = IsConstructor(C) ? Construct(C) : ArrayCreate(0).
+			// The constructor is called with NO arguments (the array-like path below
+			// passes the length; this one does not).
+			var res Value
+			if rt.isCallable(this) {
+				v, ce := rt.construct(this, nil)
+				if ce != nil {
+					return mkundef(), ce
+				}
+				res = v
+			} else {
+				res = rt.newArray()
 			}
 			it, e := rt.callValue(usingIterator, src, nil)
 			if e != nil {
@@ -2019,7 +2028,9 @@ func (rt *Runtime) initArrayBuiltin() {
 			}); e != nil {
 				return mkundef(), e
 			}
-			rt.setField(res, "length", mknum(float64(i)))
+			if e := rt.setLengthOrThrow(res, float64(i)); e != nil { // Set(A,"length",len,true)
+				return mkundef(), e
+			}
 			return res, nil
 		}
 		if src.IsNullish() {
@@ -2043,7 +2054,9 @@ func (rt *Runtime) initArrayBuiltin() {
 				return mkundef(), e
 			}
 		}
-		rt.setField(res, "length", mknum(float64(n)))
+		if e := rt.setLengthOrThrow(res, float64(n)); e != nil { // Set(A,"length",len,true)
+			return mkundef(), e
+		}
 		return res, nil
 	})
 	rt.defMethod(cobj, "fromAsync", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
