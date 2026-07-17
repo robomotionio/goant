@@ -304,8 +304,11 @@ func (rt *Runtime) taValidIndex(o *object, i int) bool {
 // is rejected (a non-nil error, which Object.defineProperty throws and
 // Reflect.defineProperty reports as false).
 func (rt *Runtime) taDefineIndex(o *object, idx int, descVal Value) *ThrowError {
+	// A failed integer-indexed [[DefineOwnProperty]] returns false, so use
+	// rejectDefine (Object.defineProperty throws it, Reflect.defineProperty reports
+	// false) rather than a hard TypeError that would throw in both.
 	if !rt.taValidIndex(o, idx) {
-		return rt.typeError("Cannot define property: invalid typed array index")
+		return rt.rejectDefine("Cannot define property: invalid typed array index")
 	}
 	field := func(k string) (Value, bool) {
 		if rt.hasProp(descVal, k) {
@@ -315,19 +318,19 @@ func (rt *Runtime) taDefineIndex(o *object, idx int, descVal Value) *ThrowError 
 		return mkundef(), false
 	}
 	if v, ok := field("configurable"); ok && !rt.toBoolean(v) {
-		return rt.typeError("Cannot redefine typed array element as non-configurable")
+		return rt.rejectDefine("Cannot redefine typed array element as non-configurable")
 	}
 	if v, ok := field("enumerable"); ok && !rt.toBoolean(v) {
-		return rt.typeError("Cannot redefine typed array element as non-enumerable")
+		return rt.rejectDefine("Cannot redefine typed array element as non-enumerable")
 	}
 	if _, ok := field("get"); ok {
-		return rt.typeError("Cannot redefine typed array element as an accessor")
+		return rt.rejectDefine("Cannot redefine typed array element as an accessor")
 	}
 	if _, ok := field("set"); ok {
-		return rt.typeError("Cannot redefine typed array element as an accessor")
+		return rt.rejectDefine("Cannot redefine typed array element as an accessor")
 	}
 	if v, ok := field("writable"); ok && !rt.toBoolean(v) {
-		return rt.typeError("Cannot redefine typed array element as non-writable")
+		return rt.rejectDefine("Cannot redefine typed array element as non-writable")
 	}
 	if v, ok := field("value"); ok {
 		if isBigIntKind(o.ta.kind) {
