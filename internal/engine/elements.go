@@ -307,6 +307,29 @@ func canonicalNumericIndex(s string) (float64, bool) {
 	return 0, false
 }
 
+// typedArrayCanonicalHas implements the integer-indexed exotic [[HasProperty]]
+// for a canonical numeric index key: such a key is an own check
+// (IsValidIntegerIndex) that never consults the prototype. isCanon reports
+// whether name is a CanonicalNumericIndexString at all; when false the caller
+// falls back to OrdinaryHasProperty. obj must be a typed array.
+func (rt *Runtime) typedArrayCanonicalHas(obj Value, name string) (has, isCanon bool) {
+	if obj.Type() != TTypedArray {
+		return false, false
+	}
+	fidx, canon := canonicalNumericIndex(name)
+	if !canon {
+		return false, false
+	}
+	if idx, integral := integerIndex(fidx); integral {
+		if o := rt.objPtr(obj); o != nil {
+			if _, live := rt.taGet(o, idx); live {
+				return true, true
+			}
+		}
+	}
+	return false, true
+}
+
 // integerIndex reports whether f is a valid integer index value (a non-negative
 // integer that is not -0), returning it as an int.
 func integerIndex(f float64) (int, bool) {

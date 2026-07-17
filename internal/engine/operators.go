@@ -232,6 +232,9 @@ func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
 	if e != nil {
 		return false, e
 	}
+	if has, isCanon := rt.typedArrayCanonicalHas(obj, name); isCanon {
+		return has, nil // integer-indexed exotic [[HasProperty]]: no prototype walk
+	}
 	return rt.hasProp(obj, name), nil
 }
 
