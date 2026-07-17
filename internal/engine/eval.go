@@ -85,7 +85,24 @@ func (rt *Runtime) evalInGlobalScope(src string, strict bool) (Value, *ThrowErro
 		ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(cerr.Error())})
 		return mkundef(), &ThrowError{Value: ev, rt: rt}
 	}
+	rt.prepareGlobalFuncBindings(prog)
 	return rt.runFrame(fn, nil, mkundef(), rt.global, nil)
+}
+
+// prepareGlobalFuncBindings applies CreateGlobalFunctionBinding for the top-level
+// function declarations of a global-scope (indirect) eval: an absent or
+// configurable existing global property is (re)defined with fresh data
+// attributes (writable/enumerable/configurable) so the function value and its
+// attributes overwrite a prior binding, unlike a plain var.
+func (rt *Runtime) prepareGlobalFuncBindings(prog *Node) {
+	funcNames := map[string]bool{}
+	topLevelFuncNames(prog.Args, funcNames)
+	g := rt.objPtr(rt.global)
+	for name := range funcNames {
+		if d := g.ownDescriptor(name); !d.exists || d.configable {
+			g.defineOwn(name, mkundef(), attrWritable|attrEnumerable|attrConfigurable)
+		}
+	}
 }
 
 // performIndirectEval runs an indirect eval: always global scope, always sloppy
@@ -404,6 +421,25 @@ func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc
 			}
 			if c.resolveLocal(name) < 0 {
 				c.addLocal(name, false)
+			}
+		}
+	}
+	// CreateGlobalFunctionBinding: unlike a plain `var` (which leaves an existing
+	// global binding untouched), a function declaration at global scope overwrites
+	// an existing CONFIGURABLE property with fresh data attributes (writable,
+	// enumerable, configurable), so its value and attributes replace the prior
+	// binding. Redefine here (absent names were already defined by the var loop)
+	// so the compiled value store below is not blocked by a non-writable property.
+	if c.evalVarGlobal {
+		funcNames := map[string]bool{}
+		topLevelFuncNames(prog.Args, funcNames)
+		g := rt.objPtr(rt.global)
+		for name := range funcNames {
+			if c.borrowed != nil && c.resolveBorrowed(name) >= 0 {
+				continue
+			}
+			if d := g.ownDescriptor(name); d.exists && d.configable {
+				g.defineOwn(name, mkundef(), attrWritable|attrEnumerable|attrConfigurable)
 			}
 		}
 	}
