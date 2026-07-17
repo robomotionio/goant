@@ -34,18 +34,26 @@ func (rt *Runtime) typeofString(v Value) string {
 // removed (or absent).
 // isUnscopable reports whether name is excluded from a `with` scope via the
 // object's Symbol.unscopables list.
-func (rt *Runtime) isUnscopable(obj Value, name string) bool {
+func (rt *Runtime) isUnscopable(obj Value, name string) (bool, *ThrowError) {
 	if rt.symUnscopables == 0 {
-		return false
+		return false, nil
 	}
 	// Get(obj, @@unscopables) through [[Get]] so a Proxy's trap observes it
-	// (with-statement HasBinding consults @@unscopables before the name).
-	unsc, _ := rt.getElement(obj, rt.symUnscopables)
-	if !unsc.IsObjectType() {
-		return false
+	// (with-statement HasBinding consults @@unscopables before the name). A throw
+	// from the @@unscopables getter — or from reading the blocked name off it —
+	// propagates out of HasBinding.
+	unsc, e := rt.getElement(obj, rt.symUnscopables)
+	if e != nil {
+		return false, e
 	}
-	v, _ := rt.getField(unsc, name)
-	return rt.toBoolean(v)
+	if !unsc.IsObjectType() {
+		return false, nil
+	}
+	v, e := rt.getField(unsc, name)
+	if e != nil {
+		return false, e
+	}
+	return rt.toBoolean(v), nil
 }
 
 func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {

@@ -337,7 +337,19 @@ restart:
 					thrown = e
 					goto unwind
 				}
-				if has && !rt.isUnscopable(withStack[k], name) {
+				// @@unscopables is consulted only once the object actually has the
+				// name (Object Environment Record HasBinding step 2 returns before the
+				// @@unscopables Get when HasProperty is false).
+				unscoped := false
+				if has {
+					u, ue := rt.isUnscopable(withStack[k], name)
+					if ue != nil {
+						thrown = ue
+						goto unwind
+					}
+					unscoped = u
+				}
+				if has && !unscoped {
 					v, e := rt.getField(withStack[k], name)
 					if e != nil {
 						thrown = e
@@ -442,7 +454,19 @@ restart:
 					thrown = e
 					goto unwind
 				}
-				if has && !rt.isUnscopable(withStack[k], name) {
+				// @@unscopables is consulted only once the object actually has the
+				// name (Object Environment Record HasBinding step 2 returns before the
+				// @@unscopables Get when HasProperty is false).
+				unscoped := false
+				if has {
+					u, ue := rt.isUnscopable(withStack[k], name)
+					if ue != nil {
+						thrown = ue
+						goto unwind
+					}
+					unscoped = u
+				}
+				if has && !unscoped {
 					if e := rt.setField(withStack[k], name, val); e != nil {
 						thrown = e
 						goto unwind
@@ -482,7 +506,19 @@ restart:
 					thrown = e
 					goto unwind
 				}
-				if has && !rt.isUnscopable(withStack[k], name) {
+				// @@unscopables is consulted only once the object actually has the
+				// name (Object Environment Record HasBinding step 2 returns before the
+				// @@unscopables Get when HasProperty is false).
+				unscoped := false
+				if has {
+					u, ue := rt.isUnscopable(withStack[k], name)
+					if ue != nil {
+						thrown = ue
+						goto unwind
+					}
+					unscoped = u
+				}
+				if has && !unscoped {
 					ok, e := rt.deleteElement(withStack[k], rt.internString(name))
 					if e != nil {
 						thrown = e
