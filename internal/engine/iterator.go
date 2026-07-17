@@ -184,9 +184,12 @@ func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) Value {
 				case "next":
 					return rt.resolvedPromise(rt.genResult(mkundef(), true)), nil
 				case "throw":
-					// A missing sync `throw`: close the sync iterator, then reject with a
-					// TypeError (protocol violation).
-					rt.iteratorClose(syncIt)
+					// A missing sync `throw`: close the sync iterator (a normal
+					// completion), then reject. If the close's return() itself throws,
+					// that error wins; otherwise it is a protocol-violation TypeError.
+					if ce := rt.iteratorCloseE(syncIt); ce != nil {
+						return rt.rejectedPromise(ce.Value), nil
+					}
 					return rt.rejectedPromise(rt.makeError(rt.errors.typeProto, "TypeError", "The iterator does not provide a 'throw' method")), nil
 				default: // return
 					return rt.resolvedPromise(rt.genResult(arg(args, 0), true)), nil
