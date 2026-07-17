@@ -56,6 +56,12 @@ type evalScope struct {
 	// EvalDeclarationInstantiation reports a SyntaxError.
 	paramArgsConflict bool
 
+	// inFieldInit marks a direct eval whose nearest non-arrow enclosing context is
+	// a class field initializer (which has no `arguments` binding). Per the
+	// "Additional Early Error Rules for Eval Inside Initializer", the eval body
+	// containing an `arguments` reference is a SyntaxError.
+	inFieldInit bool
+
 	// privateEnvs are the mangled private-name maps of the class bodies enclosing
 	// the eval site (innermost last), so a direct eval's `this.#x` resolves to the
 	// same per-class storage key the enclosing class uses (private-name identity).
@@ -165,6 +171,7 @@ func (c *compiler) captureEvalScope() *evalScope {
 		}
 	}
 	sc.paramArgsConflict = c.inParamExpr && !c.fn.isArrow
+	sc.inFieldInit = c.inClassFieldInitContext()
 	// Snapshot the enclosing class private environments in outermost-first order
 	// (each compiler's own stack is already outer-to-inner), so the eval compiler
 	// can mangle `#x` to the same key the declaring class uses.
@@ -176,6 +183,24 @@ func (c *compiler) captureEvalScope() *evalScope {
 		sc.privateEnvs = append(sc.privateEnvs, chain[i].classPrivateEnvs...)
 	}
 	return sc
+}
+
+// inClassFieldInitContext reports whether the eval call site's nearest non-arrow
+// enclosing function context is a class field initializer (which binds no
+// `arguments`). Arrow functions are transparent (they inherit `arguments`), and
+// a nested direct eval body inherits its caller's field-init context via the
+// borrowed scope.
+func (c *compiler) inClassFieldInitContext() bool {
+	for e := c; e != nil; e = e.enclosing {
+		if e.fn != nil && e.fn.isArrow {
+			continue // an arrow does not bind its own `arguments`
+		}
+		if e.isEval {
+			return e.borrowed != nil && e.borrowed.inFieldInit
+		}
+		return e.inFieldInit
+	}
+	return false
 }
 
 // topLevelFuncNames collects the names of top-level function declarations in an
@@ -459,6 +484,20 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 			ev, _ := rt.construct(rt.errors.syntaxErr,
 				[]Value{rt.newString("Cannot declare 'arguments' in this eval context")})
 			return mkundef(), &ThrowError{Value: ev, rt: rt}
+		}
+	}
+
+	// Additional Early Error Rules for Eval Inside Initializer: a direct eval in a
+	// class field initializer may not contain an `arguments` reference (the
+	// initializer establishes no `arguments` binding). This is a SyntaxError raised
+	// before the body executes.
+	if sc.inFieldInit {
+		for _, st := range prog.Args {
+			if nodeContainsArguments(st) {
+				ev, _ := rt.construct(rt.errors.syntaxErr,
+					[]Value{rt.newString("'arguments' is not allowed in a class field initializer eval")})
+				return mkundef(), &ThrowError{Value: ev, rt: rt}
+			}
 		}
 	}
 
