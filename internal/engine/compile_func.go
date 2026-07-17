@@ -950,6 +950,90 @@ func (c *compiler) compileNew(n *Node) {
 // OpTailCallMethod, which reuse the current frame). It returns false — so the
 // caller falls back to a normal call+return — for forms that are not eligible:
 // spread arguments, optional chains, or super calls.
+// tailIsCall reports whether n's tail position holds an ordinary call, following
+// the tail positions of an expression: the right operand of && / ||, both arms
+// of a ?:, and the last operand of a comma sequence.
+func tailIsCall(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	switch {
+	case n.Kind == NCall:
+		return true
+	case n.Kind == NBinary && (n.Op == TokLand || n.Op == TokLor):
+		return tailIsCall(n.Right)
+	case n.Kind == NTernary:
+		return tailIsCall(n.Left) || tailIsCall(n.Right)
+	case n.Kind == NSequence:
+		return tailIsCall(n.Right)
+	}
+	return false
+}
+
+// compileTailReturn compiles `return n` as a proper tail call when n's tail
+// position is a call, threading through the short-circuit right operand of
+// && / || (`return a && f(x)` tail-calls f). Non-tail branches emit an ordinary
+// return. Returns false when n has no tail-position call, so the caller compiles
+// an ordinary return instead.
+func (c *compiler) compileTailReturn(n *Node) bool {
+	if !tailIsCall(n) {
+		return false
+	}
+	switch {
+	case n.Kind == NCall:
+		if c.compileTailCall(n) {
+			return true
+		}
+		// A call the tail-call lowering rejects (spread / optional / eval / super):
+		// fall back to an ordinary evaluate-and-return.
+		c.compileExpr(n)
+		c.emit(OpReturn)
+		return true
+	case n.Kind == NBinary && n.Op == TokLand:
+		c.compileExpr(n.Left)
+		c.emit(OpDup)
+		jmp := c.emitJump(OpJmpFalse)
+		c.emit(OpPop)
+		c.compileTailReturn(n.Right) // truthy: the tail position
+		c.patchJump(jmp)
+		c.emit(OpReturn) // falsy: return the short-circuit (left) value
+		return true
+	case n.Kind == NBinary && n.Op == TokLor:
+		c.compileExpr(n.Left)
+		c.emit(OpDup)
+		jmp := c.emitJump(OpJmpTrue)
+		c.emit(OpPop)
+		c.compileTailReturn(n.Right)
+		c.patchJump(jmp)
+		c.emit(OpReturn)
+		return true
+	case n.Kind == NTernary:
+		// `c ? x : y`: both arms are in tail position.
+		c.compileExpr(n.Cond)
+		elseJump := c.emitJump(OpJmpFalse)
+		c.compileTailBranch(n.Left)
+		c.patchJump(elseJump)
+		c.compileTailBranch(n.Right)
+		return true
+	case n.Kind == NSequence:
+		// `a, b`: only b is in tail position (a is evaluated and discarded).
+		c.compileExpr(n.Left)
+		c.emit(OpPop)
+		c.compileTailBranch(n.Right)
+		return true
+	}
+	return false
+}
+
+// compileTailBranch compiles one tail-position sub-expression, as a tail call
+// when it holds one, otherwise as an ordinary evaluate-and-return.
+func (c *compiler) compileTailBranch(n *Node) {
+	if !c.compileTailReturn(n) {
+		c.compileExpr(n)
+		c.emit(OpReturn)
+	}
+}
+
 func (c *compiler) compileTailCall(n *Node) bool {
 	if hasSpread(n.Args) || containsOptional(n) {
 		return false

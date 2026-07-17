@@ -673,7 +673,7 @@ func (c *compiler) compileStmt(n *Node) {
 		// in a generator/async body) reuses the current frame instead of recursing.
 		if c.fn.isStrict && c.tryDepth == 0 && !c.fn.isGenerator && !c.fn.isAsync &&
 			!c.fn.isClassCtor && // a ctor's return value goes through the [[Construct]] result rule
-			n.Right != nil && n.Right.Kind == NCall && c.compileTailCall(n.Right) {
+			n.Right != nil && c.compileTailReturn(n.Right) {
 			return
 		}
 		if n.Right != nil {
