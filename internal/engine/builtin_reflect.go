@@ -47,6 +47,13 @@ func (rt *Runtime) ownDescOf(o *object, pk Value) ownDesc {
 // reflectSet implements OrdinarySet(target, key, val, receiver) returning whether
 // the write took effect (Reflect.set's boolean), honoring the receiver.
 func (rt *Runtime) reflectSet(target, key, val, receiver Value) (bool, *ThrowError) {
+	// [[Set]] on a typed array with itself as the receiver is the integer-indexed
+	// exotic behavior (setElementR): a canonical numeric index writes an element or
+	// is a silent no-op — never an OrdinarySet prototype walk that could reach an
+	// inherited accessor. Named keys are handled ordinarily by setElementR too.
+	if target.Type() == TTypedArray && target == receiver {
+		return rt.setElementR(target, key, val)
+	}
 	pk, e := rt.toPropertyKey(key)
 	if e != nil {
 		return false, e
