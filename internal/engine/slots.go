@@ -49,6 +49,7 @@ const (
 	slotMatchallDone
 	slotRawJSON          // a JSON.rawJSON object's [[RawJSON]] text (a String)
 	slotImmutableBuffer  // marks an ArrayBuffer's [[ArrayBufferIsImmutable]] slot
+	slotWeakRefTarget    // a WeakRef's [[WeakRefTarget]] (also its brand)
 	slotMax             = 255
 )
 

@@ -21,10 +21,13 @@ func (rt *Runtime) initWeakRefBuiltin() {
 	po := rt.objPtr(proto)
 	rt.defMethod(po, "deref", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil {
+		// Brand check: a WeakRef instance carries [[WeakRefTarget]] (always an object
+		// or symbol, never undefined); an ordinary object (or a differently-boxed one
+		// like a String wrapper) has the slot unset, which reads back as undefined.
+		if o == nil || o.getSlot(slotWeakRefTarget).IsUndefined() {
 			return mkundef(), rt.typeError("WeakRef.prototype.deref called on incompatible receiver")
 		}
-		return o.boxed, nil
+		return o.getSlot(slotWeakRefTarget), nil
 	})
 	ctor := rt.newNativeFunc("WeakRef", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
@@ -36,6 +39,7 @@ func (rt *Runtime) initWeakRefBuiltin() {
 			return mkundef(), rt.typeError("WeakRef: target must be an object or symbol")
 		}
 		o.boxed = target
+		o.setSlot(slotWeakRefTarget, target) // [[WeakRefTarget]] + brand for deref
 		pr, e := rt.newTargetProtoE(proto)
 		if e != nil {
 			return mkundef(), e
