@@ -939,6 +939,11 @@ func (p *parser) parsePrimary() *Node {
 		p.consume()
 		n := p.mk(NAwait)
 		n.Right = p.parseUnary()
+		// `await x` is a UnaryExpression, so it may not be the base of an
+		// un-parenthesized `**` (`await x ** y` needs `(await x) ** y`).
+		if p.rejectExpAfterUnary() {
+			return p.mk(NEmpty)
+		}
 		return n
 	case TokSuper:
 		p.consume()
