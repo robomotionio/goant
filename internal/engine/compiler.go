@@ -1239,6 +1239,21 @@ func (c *compiler) compileDelete(n *Node) {
 		c.emit(OpDelete)
 		return
 	}
+	// `undefined` is an IdentifierReference to a (non-configurable) property of the
+	// global object, not a literal keyword, so `delete undefined` deletes through
+	// the global and yields false. goant parses bare `undefined` as NUndef, so
+	// handle it here rather than letting it fall to the `delete <literal>` → true
+	// case below. A local `var undefined` shadow (sloppy) resolves to false too.
+	if target != nil && target.Kind == NUndef && c.withDepth == 0 {
+		if c.resolveLocal("undefined") >= 0 || c.resolveUpvalue("undefined") >= 0 {
+			c.emit(OpFalse)
+			return
+		}
+		c.emit(OpGlobal)
+		c.emitConst(c.rt.internString("undefined"))
+		c.emit(OpDelete)
+		return
+	}
 	// `delete x` inside a `with`: the name may be a with-object property, which is
 	// deleted from that object; otherwise it falls back to a global-object delete.
 	if target != nil && target.Kind == NIdent && c.withDepth > 0 {
