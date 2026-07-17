@@ -187,6 +187,70 @@ func (c *compiler) compileSuperMemberAssign(n *Node) {
 	c.emit(OpPutSuperVal)  // [receiver, base, key, val] -> val
 }
 
+// compileSuperMemberCompound compiles a compound (`super.x op= v`) or logical
+// (`super.x &&=/||=/??= v`) assignment to a super property. The Super Reference
+// (receiver = this, base = home-proto, and the computed key) is evaluated once
+// and reused for the read (OpGetSuperVal) and the write (OpPutSuperVal), so a
+// getter/setter and a key's ToPropertyKey each run exactly once.
+func (c *compiler) compileSuperMemberCompound(n *Node) {
+	member := n.Left
+	computed := member.Flags&1 != 0
+	recvSlot := c.tempLocal()
+	c.emitSuperThis()
+	c.emitOpU16(OpPutLocal, uint16(recvSlot))
+	baseSlot := c.tempLocal()
+	if !c.emitSuperBase() {
+		c.syntaxErrorf("'super' keyword unexpected here")
+		return
+	}
+	c.emitOpU16(OpPutLocal, uint16(baseSlot))
+	keySlot := -1
+	if computed {
+		keySlot = c.tempLocal()
+		c.compileExpr(member.Right)
+		c.emit(OpToPropkey) // ToPropertyKey once, reused by read and write
+		c.emitOpU16(OpPutLocal, uint16(keySlot))
+	}
+	pushRef := func() { // [receiver, base, key]
+		c.emitOpU16(OpGetLocal, uint16(recvSlot))
+		c.emitOpU16(OpGetLocal, uint16(baseSlot))
+		if computed {
+			c.emitOpU16(OpGetLocal, uint16(keySlot))
+		} else {
+			c.emitConst(c.rt.internString(member.Right.Str))
+		}
+	}
+	if jmpOp, isLogical := logicalAssignJmp(n.Op); isLogical {
+		pushRef()
+		c.emit(OpGetSuperVal) // [old]
+		c.emit(OpDup)
+		skip := c.emitJump(jmpOp) // short-circuit: leave [old]
+		c.emit(OpPop)
+		c.compileExpr(n.Right)
+		vSlot := c.tempLocal()
+		c.emitOpU16(OpPutLocal, uint16(vSlot))
+		pushRef()
+		c.emitOpU16(OpGetLocal, uint16(vSlot))
+		c.emit(OpPutSuperVal) // [rhs]
+		c.patchJump(skip)
+		return
+	}
+	op, ok := compoundOpcode(n.Op)
+	if !ok {
+		c.errorf("unsupported compound super assignment %v (slice)", n.Op)
+		return
+	}
+	pushRef()
+	c.emit(OpGetSuperVal)   // [old]
+	c.compileExpr(n.Right)  // [old, rhs]
+	c.emit(op)              // [new]
+	vSlot := c.tempLocal()
+	c.emitOpU16(OpPutLocal, uint16(vSlot))
+	pushRef()
+	c.emitOpU16(OpGetLocal, uint16(vSlot))
+	c.emit(OpPutSuperVal) // [new]
+}
+
 // tempLocal allocates a fresh anonymous local slot.
 func (c *compiler) tempLocal() int { return c.addLocal("*tmp*", false) }
 
@@ -227,8 +291,13 @@ func (c *compiler) compileMemberAssign(n *Node) {
 	computed := member.Flags&1 != 0
 
 	// `super.x = v` / `super[k] = v` (plain assignment): a Super Reference write.
-	if n.Op == TokAssign && member.Left != nil && member.Left.Kind == NIdent && member.Left.Str == "super" {
-		c.compileSuperMemberAssign(n)
+	if member.Left != nil && member.Left.Kind == NIdent && member.Left.Str == "super" {
+		if n.Op == TokAssign {
+			c.compileSuperMemberAssign(n)
+		} else {
+			// Compound (`super.x += v`) or logical (`super.x ??= v`) assignment.
+			c.compileSuperMemberCompound(n)
+		}
 		return
 	}
 
@@ -316,9 +385,70 @@ func (c *compiler) compileMemberAssign(n *Node) {
 	// new value already on stack (from SetLocal above)
 }
 
+// compileSuperMemberUpdate compiles `super.x++` / `--super[k]`: the Super
+// Reference is evaluated once and reused for the read and the write; the result
+// is the new value (prefix) or the numeric old value (postfix).
+func (c *compiler) compileSuperMemberUpdate(n *Node) {
+	member := n.Right
+	computed := member.Flags&1 != 0
+	prefix := n.Flags == 1
+	incOp := OpInc
+	if n.Op == TokPostDec {
+		incOp = OpDec
+	}
+	recvSlot := c.tempLocal()
+	c.emitSuperThis()
+	c.emitOpU16(OpPutLocal, uint16(recvSlot))
+	baseSlot := c.tempLocal()
+	if !c.emitSuperBase() {
+		c.syntaxErrorf("'super' keyword unexpected here")
+		return
+	}
+	c.emitOpU16(OpPutLocal, uint16(baseSlot))
+	keySlot := -1
+	if computed {
+		keySlot = c.tempLocal()
+		c.compileExpr(member.Right)
+		c.emit(OpToPropkey)
+		c.emitOpU16(OpPutLocal, uint16(keySlot))
+	}
+	pushRef := func() {
+		c.emitOpU16(OpGetLocal, uint16(recvSlot))
+		c.emitOpU16(OpGetLocal, uint16(baseSlot))
+		if computed {
+			c.emitOpU16(OpGetLocal, uint16(keySlot))
+		} else {
+			c.emitConst(c.rt.internString(member.Right.Str))
+		}
+	}
+	oldSlot := c.tempLocal()
+	pushRef()
+	c.emit(OpGetSuperVal)
+	c.emit(OpNeg) // ToNumeric(old): -(-x) preserves BigInt/fp
+	c.emit(OpNeg)
+	c.emitOpU16(OpPutLocal, uint16(oldSlot))
+	newSlot := c.tempLocal()
+	c.emitOpU16(OpGetLocal, uint16(oldSlot))
+	c.emit(incOp)
+	c.emitOpU16(OpPutLocal, uint16(newSlot))
+	pushRef()
+	c.emitOpU16(OpGetLocal, uint16(newSlot))
+	c.emit(OpPutSuperVal) // [new]
+	c.emit(OpPop)         // discard; the update's value is old (postfix) or new (prefix)
+	if prefix {
+		c.emitOpU16(OpGetLocal, uint16(newSlot))
+	} else {
+		c.emitOpU16(OpGetLocal, uint16(oldSlot))
+	}
+}
+
 // compileMemberUpdate compiles obj.x++/--/++obj.x on a member target.
 func (c *compiler) compileMemberUpdate(n *Node) {
 	member := n.Right
+	if member.Left != nil && member.Left.Kind == NIdent && member.Left.Str == "super" {
+		c.compileSuperMemberUpdate(n)
+		return
+	}
 	computed := member.Flags&1 != 0
 	prefix := n.Flags == 1
 	incOp := OpInc
