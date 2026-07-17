@@ -287,28 +287,6 @@ func (c *compiler) compileForOf(n *Node) {
 // compileForAwaitOf lowers `for await (v of src)` to a lazy loop that awaits
 // each iter.next() result (GetAsyncIterator + repeated await). Only valid inside
 // an async function/generator (OpAwait suspends the coroutine).
-// emitAsyncIterClose emits AsyncIteratorClose for the iterator in iterSlot: read
-// its `return` method and, when it is not undefined/null, call it and await the
-// result (a present but non-callable method surfaces as the call's TypeError).
-// Leaves the stack unchanged. Used by the for-await-of finally so an abrupt
-// completion (break/return/throw) closes the async iterator.
-func (c *compiler) emitAsyncIterClose(iterSlot int) {
-	c.emitOpU16(OpGetLocal, uint16(iterSlot))
-	c.emitFieldOp(OpGetField2, "return") // [iter, return]
-	c.emit(OpDup)                        // [iter, return, return] (OpJmpNotNullish pops one)
-	callIt := c.emitJump(OpJmpNotNullish)
-	// return is undefined/null: discard [iter, return] and skip the close.
-	c.emit(OpPop)
-	c.emit(OpPop)
-	done := c.emitJump(OpJmp)
-	c.patchJump(callIt) // [iter, return]
-	c.emit(OpCallMethod)
-	c.emitU16(0)    // [promise]
-	c.emit(OpAwait) // [result]
-	c.emit(OpPop)
-	c.patchJump(done)
-}
-
 func (c *compiler) compileForAwaitOf(n *Node) {
 	c.checkForHeadDecl(n.Left, n.Body)
 	c.resetCompletion()
@@ -372,15 +350,20 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	c.emit(OpTryPop)
 	c.unwindPop()
 
-	// finally: AsyncIteratorClose when needsClose is set, then resume the pending
+	// finally: close the iterator when needsClose is set, then resume the pending
 	// completion. Entered on normal/break fall-through and, via unwind, on
-	// throw/return/labelled-jump.
+	// throw/return/labelled-jump. OpIterClose (as for the sync for-of) invokes
+	// return() and — crucially — suppresses its own abrupt result when the pending
+	// completion is itself a throw, so a poisoned return does not mask the thrown
+	// error. (It does not Await the async return()'s promise; a rejection from that
+	// promise is not surfaced — a minor deviation from AsyncIteratorClose.)
 	c.patchJump(tryJump)
 	finallyJump := c.emitJump(OpFinally)
 	c.unwindPush(unwFinallyBody)
 	c.emitOpU16(OpGetLocal, uint16(closeSlot))
 	skipClose := c.emitJump(OpJmpFalse)
-	c.emitAsyncIterClose(iterSlot)
+	c.emitOpU16(OpGetLocal, uint16(iterSlot))
+	c.emit(OpIterClose)
 	c.patchJump(skipClose)
 	c.unwindPop()
 	c.emit(OpFinallyRet)
