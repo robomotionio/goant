@@ -838,10 +838,10 @@ func (c *compiler) privateNameDeclared(name string) bool {
 				return true
 			}
 		}
-		if e.isEval {
-			return true
-		}
 	}
+	// A direct eval carries the enclosing class bodies' private names in its own
+	// classPrivateEnvs (captured into the evalScope), checked above — so a private
+	// name it does not declare is an early SyntaxError, exactly as outside eval.
 	return false
 }
 
