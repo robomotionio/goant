@@ -1076,6 +1076,24 @@ func (c *compiler) compileClass(n *Node) {
 		}
 		// Class field with a value (not a method): m.Right is an expression.
 		if m.Right != nil && m.Right.Kind != NFunc {
+			if m.Flags&fnStatic != 0 {
+				// A static field initializer is evaluated with this = the class F, so
+				// `this` (and arrows capturing it) see the constructor. Wrap it in a
+				// class-body function invoked with the constructor as receiver, like a
+				// static block. NamedEvaluation still names an anonymous value from key.
+				nameAnonExpr(m.Right, name)
+				initFn := &Node{Kind: NFunc, Flags: fnClassBody, Body: &Node{Kind: NBlock, Args: []*Node{{Kind: NReturn, Right: m.Right}}}}
+				c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // [ctor]  (define target)
+				c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // [ctor, this]
+				c.pendingStaticSuper = true
+				c.pendingClassDerived = n.Left != nil
+				c.compileFunc(initFn)   // [ctor, this, initFn]
+				c.emit(OpCallMethod)    // [ctor, value]
+				c.emitU16(0)
+				c.emitDefineField(name) // ctor[name] = value -> [ctor]
+				c.emit(OpPop)
+				continue
+			}
 			c.emitOpU16(OpGetLocal, uint16(target))
 			c.compileExpr(m.Right)
 			c.emitDefineField(name) // enumerable field
