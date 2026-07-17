@@ -1337,14 +1337,20 @@ func (rt *Runtime) arrIterNext(this Value) (Value, *ThrowError) {
 	case iterKeys:
 		return rt.genResult(mknum(float64(idx)), false), nil
 	case iterEntries:
-		el, _ := rt.getElement(st.src, mknum(float64(idx)))
+		el, e := rt.getElement(st.src, mknum(float64(idx)))
+		if e != nil {
+			return mkundef(), e
+		}
 		pair := rt.newArray()
 		po := rt.objPtr(pair)
 		rt.arraySet(po, 0, mknum(float64(idx)))
 		rt.arraySet(po, 1, el)
 		return rt.genResult(pair, false), nil
 	default:
-		el, _ := rt.getElement(st.src, mknum(float64(idx)))
+		el, e := rt.getElement(st.src, mknum(float64(idx)))
+		if e != nil {
+			return mkundef(), e
+		}
 		return rt.genResult(el, false), nil
 	}
 }
