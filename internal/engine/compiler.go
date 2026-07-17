@@ -1440,6 +1440,13 @@ func (c *compiler) compileAssign(n *Node) {
 		return
 	}
 	if n.Left != nil && n.Left.Kind == NCall {
+		// A CallExpression target of a LOGICAL assignment (&&= ||= ??=) is an early
+		// SyntaxError: the web-compat tolerance that turns `a() = b` / `a() += b`
+		// into a runtime reference error does not extend to logical assignment.
+		if _, isLogical := logicalAssignJmp(n.Op); isLogical {
+			c.syntaxErrorf("Invalid left-hand side in assignment")
+			return
+		}
 		// Annex B web-compat (sloppy): a CallExpression assignment target evaluates
 		// the call (the "reference") and then throws a ReferenceError before the RHS
 		// is evaluated or the target coerced — a plain `=` reaches PutValue, and a
