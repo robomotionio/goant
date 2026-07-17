@@ -768,31 +768,39 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		thisElems := rt.setElements(s)
-		thisKeys := rt.keySet(thisElems)
-		// Drain other's keys (deduped); result = this-not-in-other ++ other-not-in-this.
-		otherKeys := map[string]bool{}
-		var otherOnly []Value
+		// resultSetData starts as a copy of this set's elements (taken after
+		// GetSetRecord). Each key drained from other toggles membership against both
+		// the result and the LIVE this set — other's keys iterator may add to or
+		// delete from this set, and those mutations are observed (SetDataHas).
+		var result []Value
+		resultKeys := map[string]bool{}
+		for _, el := range rt.setElements(s) {
+			result = append(result, el)
+			resultKeys[rt.canonicalKey(el)] = true
+		}
 		if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
 			ck := rt.canonicalKey(v)
-			if !otherKeys[ck] {
-				otherKeys[ck] = true
-				if !thisKeys[ck] {
-					otherOnly = append(otherOnly, v)
+			inResult := resultKeys[ck]
+			_, inThis := s.index[ck] // live membership in this set
+			if inThis {
+				if inResult {
+					resultKeys[ck] = false
+					for i, el := range result {
+						if rt.canonicalKey(el) == ck {
+							result = append(result[:i], result[i+1:]...)
+							break
+						}
+					}
 				}
+			} else if !inResult {
+				result = append(result, v)
+				resultKeys[ck] = true
 			}
 			return false, nil
 		}); e != nil {
 			return mkundef(), e
 		}
-		var out []Value
-		for _, el := range thisElems {
-			if !otherKeys[rt.canonicalKey(el)] {
-				out = append(out, el)
-			}
-		}
-		out = append(out, otherOnly...)
-		return rt.newSetFrom(out), nil
+		return rt.newSetFrom(result), nil
 	})
 	rt.defMethod(po, "isSubsetOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		s, e := rt.collOf(this, true)
