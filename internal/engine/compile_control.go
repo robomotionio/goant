@@ -287,6 +287,28 @@ func (c *compiler) compileForOf(n *Node) {
 // compileForAwaitOf lowers `for await (v of src)` to a lazy loop that awaits
 // each iter.next() result (GetAsyncIterator + repeated await). Only valid inside
 // an async function/generator (OpAwait suspends the coroutine).
+// emitAsyncIterClose emits AsyncIteratorClose for the iterator in iterSlot: read
+// its `return` method and, when it is not undefined/null, call it and await the
+// result (a present but non-callable method surfaces as the call's TypeError).
+// Leaves the stack unchanged. Used by the for-await-of finally so an abrupt
+// completion (break/return/throw) closes the async iterator.
+func (c *compiler) emitAsyncIterClose(iterSlot int) {
+	c.emitOpU16(OpGetLocal, uint16(iterSlot))
+	c.emitFieldOp(OpGetField2, "return") // [iter, return]
+	c.emit(OpDup)                        // [iter, return, return] (OpJmpNotNullish pops one)
+	callIt := c.emitJump(OpJmpNotNullish)
+	// return is undefined/null: discard [iter, return] and skip the close.
+	c.emit(OpPop)
+	c.emit(OpPop)
+	done := c.emitJump(OpJmp)
+	c.patchJump(callIt) // [iter, return]
+	c.emit(OpCallMethod)
+	c.emitU16(0)    // [promise]
+	c.emit(OpAwait) // [result]
+	c.emit(OpPop)
+	c.patchJump(done)
+}
+
 func (c *compiler) compileForAwaitOf(n *Node) {
 	c.checkForHeadDecl(n.Left, n.Body)
 	c.resetCompletion()
@@ -305,9 +327,18 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	iterSlot := c.addLocal("*fai*", false)
 	c.emitOpU16(OpPutLocal, uint16(iterSlot))
 	resSlot := c.addLocal("*far*", false)
+	// needsClose flag: an abrupt completion (break/return/throw) out of the body
+	// closes the iterator; stepping (await next(), the done/value reads) and normal
+	// exhaustion do not. Mirrors compileForOf, with an async close in the finally.
+	closeSlot := c.addLocal("*fac*", false)
+
+	tryJump := c.emitJump(OpTryPushFinally)
+	c.unwindPush(unwTryFinally)
 
 	l := c.pushLoop(c.consumeLabel(), false)
 	condStart := len(c.fn.code)
+	c.emit(OpFalse)
+	c.emitOpU16(OpPutLocal, uint16(closeSlot))
 	// result = await iter.next()
 	c.emitOpU16(OpGetLocal, uint16(iterSlot))
 	c.emitFieldOp(OpGetField2, "next") // [iter, next]
@@ -315,14 +346,16 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	c.emitU16(0)    // [promise]
 	c.emit(OpAwait) // [result]
 	c.emitOpU16(OpPutLocal, uint16(resSlot))
-	// if result.done break
+	// if result.done: exit without closing (already exhausted)
 	c.emitOpU16(OpGetLocal, uint16(resSlot))
 	c.emitFieldOp(OpGetField, "done")
-	exit := c.emitJump(OpJmpTrue)
-	l.breaks = append(l.breaks, exit)
+	exhausted := c.emitJump(OpJmpTrue)
 	// v = result.value
 	c.emitOpU16(OpGetLocal, uint16(resSlot))
 	c.emitFieldOp(OpGetField, "value")
+	// The step succeeded: the binding and body now run under close protection.
+	c.emit(OpTrue)
+	c.emitOpU16(OpPutLocal, uint16(closeSlot))
 	store()
 
 	c.compileStmt(n.Body)
@@ -333,7 +366,26 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	c.emit(OpJmp)
 	c.emitU32(uint32(condStart))
 
+	// Normal exhaustion and a plain break both land here; closeSlot decides.
+	c.patchJump(exhausted)
 	c.popLoop()
+	c.emit(OpTryPop)
+	c.unwindPop()
+
+	// finally: AsyncIteratorClose when needsClose is set, then resume the pending
+	// completion. Entered on normal/break fall-through and, via unwind, on
+	// throw/return/labelled-jump.
+	c.patchJump(tryJump)
+	finallyJump := c.emitJump(OpFinally)
+	c.unwindPush(unwFinallyBody)
+	c.emitOpU16(OpGetLocal, uint16(closeSlot))
+	skipClose := c.emitJump(OpJmpFalse)
+	c.emitAsyncIterClose(iterSlot)
+	c.patchJump(skipClose)
+	c.unwindPop()
+	c.emit(OpFinallyRet)
+	c.patchJump(finallyJump)
+
 	c.scopeDepth--
 	c.popBlockScope()
 }
