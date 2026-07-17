@@ -539,6 +539,19 @@ func (c *compiler) forInStore(left *Node) (func(), []int) {
 		// for (obj.p of …). The head is a destructuring/member assignment to
 		// existing references, evaluated fresh each iteration.
 		return func() { c.destructureTarget(left, varAssign) }, nil
+	case left.Kind == NCall && !c.fn.isStrict:
+		// Annex B web-compat: a CallExpression for-in/of head is a runtime
+		// ReferenceError. Each iteration discards the iteration value, evaluates the
+		// call for its side effects, and throws before the value is bound/coerced.
+		return func() {
+			c.emit(OpPop)       // discard the iteration value
+			c.compileExpr(left) // evaluate the call
+			c.emit(OpPop)
+			idx := c.constant(c.rt.internString("Invalid assignment target"))
+			c.emit(OpThrowError)
+			c.emitU32(uint32(idx))
+			c.emitByte(1) // ReferenceError
+		}, nil
 	default:
 		return nil, nil
 	}
