@@ -70,6 +70,16 @@ func translateAnnexBEscapes(src string) string {
 		switch n := rs[i+1]; n {
 		case 'A', 'Z', 'z', 'G':
 			b.WriteRune(n)
+		case 'p', 'P':
+			// In a non-Unicode pattern a bare \p / \P (not a \p{…} property escape) is
+			// an identity escape — the literal letter — not the incomplete property
+			// escape regexp2 would reject.
+			if i+2 < len(rs) && rs[i+2] == '{' {
+				b.WriteRune('\\')
+				b.WriteRune(n)
+			} else {
+				b.WriteRune(n)
+			}
 		case 'c':
 			if i+2 < len(rs) && isASCIILetter(rs[i+2]) {
 				b.WriteString(`\c`)
