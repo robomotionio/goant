@@ -152,6 +152,12 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if err := validateDuplicateGroupNames(pattern); err != nil {
 		return nil, fmt.Errorf("invalid regular expression: %v", err)
 	}
+	// The `v` flag imposes stricter ClassSetExpression early errors than `u`.
+	if r.UnicodeSets {
+		if err := validateVModeClasses(pattern); err != nil {
+			return nil, fmt.Errorf("invalid regular expression: %v", err)
+		}
+	}
 	// An empty pattern matches the empty string; ECMAScript spells it (?:).
 	src := pattern
 	// Annex B identity escapes: outside Unicode mode, `\A \Z \z \G` are literal

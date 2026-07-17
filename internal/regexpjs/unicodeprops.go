@@ -151,6 +151,115 @@ func expandCaseFold(pattern string) string {
 // translateVFlagSets rewrites a top-level `v`-flag character class that uses a
 // set operation (A&&B intersection, A--B difference) into a plain code-point
 // class. Operands may be \p{…}, a nested […] class, or a char/range.
+// isVModeReservedDoublePunct reports whether c is a punctuator whose doubled form
+// (`&&`, `!!`, `##`, `$$`, `%%`, `**`, `++`, `,,`, `..`, `::`, `;;`, `<<`, `==`,
+// `>>`, `??`, `@@`, `^^`, ``` `` ```, `~~`) is a ClassSetReservedDoublePunctuator
+// — forbidden as a literal inside a `v`-mode character class.
+func isVModeReservedDoublePunct(c rune) bool {
+	switch c {
+	case '&', '!', '#', '$', '%', '*', '+', ',', '.', ':', ';', '<', '=', '>', '?', '@', '^', '~', '`':
+		return true
+	}
+	return false
+}
+
+// validateVModeClasses enforces the `v`-flag (unicodeSets) ClassSetExpression
+// early errors that regexp2 does not: an unescaped ClassSetSyntaxCharacter
+// (`( ) { } / |`, and a `-` outside a range) may not appear as a literal, and a
+// ClassSetReservedDoublePunctuator (`&&`, `!!`, `##`, …) is forbidden where a
+// class-set operand is expected (`&&`/`--` remain valid as set operators between
+// operands). These patterns are all valid under the plain `u` flag, so the check
+// only runs for `v`.
+func validateVModeClasses(pattern string) error {
+	rs := []rune(pattern)
+	i := 0
+	for i < len(rs) {
+		if rs[i] == '\\' {
+			i += 2 // skip an escape at the top level (outside any class)
+			continue
+		}
+		if rs[i] == '[' {
+			next, err := validateVModeClassBody(rs, i)
+			if err != nil {
+				return err
+			}
+			i = next
+			continue
+		}
+		i++
+	}
+	return nil
+}
+
+// validateVModeClassBody validates a single `[…]` class (rs[start] == '[') and
+// returns the index just past its closing ']'.
+func validateVModeClassBody(rs []rune, start int) (int, error) {
+	i := start + 1
+	if i < len(rs) && rs[i] == '^' {
+		i++
+	}
+	prevOperand := false // a ClassSetOperand precedes the current position
+	for i < len(rs) {
+		c := rs[i]
+		switch {
+		case c == ']':
+			return i + 1, nil
+		case c == '\\':
+			// An escape is a ClassSetOperand. Consume the brace-delimited escapes
+			// `\p{…}` / `\P{…}` / `\q{…}` / `\u{…}` wholesale so their braces are not
+			// read as syntax characters.
+			if i+2 < len(rs) && (rs[i+1] == 'p' || rs[i+1] == 'P' || rs[i+1] == 'q' || rs[i+1] == 'u') && rs[i+2] == '{' {
+				j := i + 3
+				for j < len(rs) && rs[j] != '}' {
+					j++
+				}
+				if j >= len(rs) {
+					return 0, fmt.Errorf("unterminated %c-escape in character class", rs[i+1])
+				}
+				i = j + 1
+			} else {
+				i += 2
+			}
+			prevOperand = true
+		case c == '[':
+			n, err := validateVModeClassBody(rs, i)
+			if err != nil {
+				return 0, err
+			}
+			i = n
+			prevOperand = true
+		case c == '&' && i+1 < len(rs) && rs[i+1] == '&':
+			if !prevOperand {
+				return 0, fmt.Errorf("`&&` with no left operand in v-mode class")
+			}
+			i += 2
+			prevOperand = false
+		case c == '-' && i+1 < len(rs) && rs[i+1] == '-':
+			if !prevOperand {
+				return 0, fmt.Errorf("`--` with no left operand in v-mode class")
+			}
+			i += 2
+			prevOperand = false
+		case i+1 < len(rs) && rs[i+1] == c && isVModeReservedDoublePunct(c):
+			return 0, fmt.Errorf("reserved double punctuator `%c%c` in v-mode class", c, c)
+		case c == '(' || c == ')' || c == '{' || c == '}' || c == '/' || c == '|':
+			return 0, fmt.Errorf("unescaped `%c` must be escaped in a v-mode class", c)
+		case c == '-':
+			// A `-` is legal only as a range operator between two ClassSetCharacters;
+			// a leading `-` (no left operand) is an error, e.g. `[-]`.
+			if !prevOperand {
+				return 0, fmt.Errorf("unescaped `-` must be escaped in a v-mode class")
+			}
+			i++
+			prevOperand = false
+		default:
+			i++
+			prevOperand = true
+		}
+	}
+	return 0, fmt.Errorf("unterminated character class")
+}
+
 func translateVFlagSets(pattern string) (string, error) {
 	rs := []rune(pattern)
 	var out strings.Builder
