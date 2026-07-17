@@ -523,6 +523,11 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 			if e != nil {
 				return mkundef(), e
 			}
+			// AllocateTypedArrayBuffer(len) precedes element copying: an excessive
+			// length is a RangeError up front, not a 2^53-iteration element loop.
+			if n > maxByteLen/size {
+				return mkundef(), rt.rangeError("Invalid typed array length")
+			}
 			for i := 0; i < n; i++ {
 				el, e := rt.getElement(a0, mknum(float64(i)))
 				if e != nil {
