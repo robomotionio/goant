@@ -1644,9 +1644,12 @@ func (p *parser) parseObject() *Node {
 			if prop.Flags&fnComputed == 0 && prop.Left != nil &&
 				(prop.Left.Kind == NIdent || prop.Left.Kind == NString) &&
 				prop.Left.Str == "__proto__" {
+				// Two `__proto__:` data properties are an error in an object literal,
+				// but the same syntax is a valid destructuring pattern (they are
+				// ordinary AssignmentProperties there). Defer the error: flag the node
+				// and let compileObject reject it only if it stays a literal.
 				if protoSet {
-					p.errorf("Duplicate __proto__ fields are not allowed in object literals")
-					return n
+					n.Flags |= nodeDupProto
 				}
 				protoSet = true
 			}

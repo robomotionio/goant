@@ -13,6 +13,13 @@ func (c *compiler) compileObject(n *Node) {
 		c.syntaxErrorf("Invalid shorthand property initializer")
 		return
 	}
+	// Two `__proto__:` data properties are a SyntaxError in an actual object literal
+	// (the parser deferred the error here so the same syntax stays valid when the
+	// cover grammar is reinterpreted as a destructuring pattern).
+	if n.Flags&nodeDupProto != 0 {
+		c.syntaxErrorf("Duplicate __proto__ fields are not allowed in object literals")
+		return
+	}
 	c.emit(OpObject)
 	for _, prop := range n.Args {
 		if prop.Kind == NSpread {
