@@ -423,18 +423,17 @@ func (p *parser) parseStmtList(out *[]*Node, stopAtRBrace, directiveCtx bool) {
 		if stmt == nil {
 			continue
 		}
-		// An EmptyStatement (or any non-string ExpressionStatement) is not part of
-		// the Directive Prologue, so it ends it: a `use strict` that follows a `;`
-		// is an ordinary string statement, not a directive.
-		if !canBeExpressionStatement(stmt) {
+		// The Directive Prologue is the leading run of string-literal
+		// ExpressionStatements. A non-string statement — including an EmptyStatement
+		// (`;`) — ends it. A non-"use strict" string directive (e.g. `"a";`) stays in
+		// the prologue, so a `"use strict"` that follows it is still recognized.
+		if stmt.Kind != NString || !canBeExpressionStatement(stmt) {
 			inDirective = false
 			continue
 		}
 		if isUseStrict(stmt) {
 			p.lx.strict = true
-			continue
 		}
-		inDirective = false
 	}
 	p.lx.strict = savedStrict
 }
