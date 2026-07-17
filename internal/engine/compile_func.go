@@ -1149,10 +1149,15 @@ func (c *compiler) compileCall(n *Node) {
 	}
 
 	// Direct eval: `eval(src)` with the intrinsic `eval` still bound runs in the
-	// caller's scope. Emit OpEval (which verifies the callee at run time). A
-	// spread argument list falls through to an ordinary call.
-	if !spread && c.isDirectEvalCall(n) {
-		c.compileDirectEval(n)
+	// caller's scope. Emit OpEval (which verifies the callee at run time). A spread
+	// argument list is still a direct eval — `eval(...iter)` spreads the iterator
+	// (consuming it fully) and evaluates its first element.
+	if c.isDirectEvalCall(n) {
+		if spread {
+			c.compileDirectEvalSpread(n)
+		} else {
+			c.compileDirectEval(n)
+		}
 		return
 	}
 

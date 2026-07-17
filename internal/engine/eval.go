@@ -322,6 +322,24 @@ func (c *compiler) compileDirectEval(n *Node) {
 	c.emitU16(uint16(len(n.Args)))
 }
 
+// compileDirectEvalSpread emits a direct eval whose argument list contains a
+// spread (`eval(...iter)`): build the full argument array (which iterates the
+// spread source to completion), then hand OpEval that array's first element (or
+// undefined when empty) — eval only consumes its first argument.
+func (c *compiler) compileDirectEvalSpread(n *Node) {
+	sc := c.captureEvalScope()
+	idx := len(c.fn.evalScopes)
+	c.fn.evalScopes = append(c.fn.evalScopes, sc)
+
+	c.compileExpr(n.Left)      // callee (the `eval` reference), verified at run time
+	c.buildSpreadArray(n.Args) // [callee, argsArray]
+	c.compileNumberLiteral(0)  // [callee, argsArray, 0]
+	c.emit(OpGetElem)          // [callee, argsArray[0] | undefined]
+	c.emit(OpEval)
+	c.emitU16(uint16(idx))
+	c.emitU16(1)
+}
+
 // resolveBorrowed resolves name against the caller bindings snapshotted for a
 // direct eval body, adding it as an upvalue of the eval function on first use and
 // returning that upvalue index (or -1). The eval compiler's upvalues are made up
