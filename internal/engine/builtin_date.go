@@ -316,19 +316,31 @@ func (rt *Runtime) initDateBuiltin() {
 		if math.IsNaN(cur.Number()) {
 			t = msToTime(0)
 		}
-		y := rt.intArg(args, 0)
-		if y >= 0 && y <= 99 {
-			y += 1900
+		// y = ToNumber(year) (called exactly once, after reading the date value; may
+		// throw). A NaN/infinite year — or one outside the representable range —
+		// makes the date NaN.
+		y, e := rt.toNumber(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
 		}
-		nt := time.Date(y, t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+		yi := math.Trunc(y) // ToIntegerOrInfinity
+		yyyy := yi
+		if yi >= 0 && yi <= 99 {
+			yyyy = 1900 + yi
+		}
+		if math.IsNaN(y) || math.Abs(yyyy) > 1e6 {
+			rt.setDateMs(this, math.NaN())
+			return mknum(math.NaN()), nil
+		}
+		nt := time.Date(int(yyyy), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
 		ms := timeClip(float64(nt.UnixMilli()))
 		rt.setDateMs(this, ms)
 		return mknum(ms), nil
 	})
-	rt.defMethod(proto, "toGMTString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		utc, _ := rt.getField(this, "toUTCString")
-		return rt.callValue(utc, this, nil)
-	})
+	// Date.prototype.toGMTString is the very same function object as toUTCString.
+	if utc, ok := proto.getOwn("toUTCString"); ok {
+		proto.defineOwn("toGMTString", utc, attrWritable|attrConfigurable)
+	}
 
 	rt.defMethod(proto, "toJSON", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		// tv = ToPrimitive(O, number); a non-finite time serializes as null, then
