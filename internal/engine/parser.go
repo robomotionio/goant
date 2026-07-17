@@ -1588,7 +1588,11 @@ func (p *parser) parseObject() *Node {
 			p.consume()
 		} else if p.tok() == TokAsync {
 			la := p.la()
-			if la != TokColon && la != TokLParen && la != TokComma && la != TokRBrace {
+			// `async [no LineTerminator here] MethodDefinition`: a line terminator
+			// after `async` makes it an ordinary property name, not the async
+			// modifier (`{ async \n foo(){} }` is then a missing-comma SyntaxError).
+			if la != TokColon && la != TokLParen && la != TokComma && la != TokRBrace &&
+				!p.lookaheadCrossesLineTerminator() {
 				p.consume()
 				prop.Flags |= fnAsync
 				p.next()
