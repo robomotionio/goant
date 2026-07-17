@@ -60,6 +60,10 @@ func (c *compiler) compileObject(n *Node) {
 			// inherited setter (e.g. __proto__) that OpPutElem would trigger.
 			c.emit(OpDup)
 			c.compileExpr(prop.Left) // computed key
+			// ToPropertyKey once, before the value is evaluated (spec ordering), so a
+			// key object's toString is not re-run by both OpSetNameComp (the function
+			// name) and OpDefineMethodComp (the property key).
+			c.emit(OpToPropkey)
 			c.compileExpr(prop.Right)
 			// NamedEvaluation: an anonymous function/class value takes its name from
 			// the computed key ("[desc]" for a symbol key).
