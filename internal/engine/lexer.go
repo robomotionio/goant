@@ -286,7 +286,11 @@ done:
 		if p+3 < end && code[p] == '<' && code[p+1] == '!' && code[p+2] == '-' && code[p+3] == '-' {
 			p = l.skipHTMLLineComment(p+4, end, &sawNL)
 		} else if p+2 < end && code[p] == '-' && code[p+1] == '-' && code[p+2] == '>' &&
-			htmlCloseAtLineStart(code, p) {
+			(sawNL || htmlCloseAtLineStart(code, p)) {
+			// A `-->` HTML close comment must follow a LineTerminatorSequence and then
+			// only whitespace / delimited comments. sawNL covers a preceding multiline
+			// comment that itself contained a newline (`/* … \n … */-->`), which
+			// htmlCloseAtLineStart (scanning raw text) misses.
 			p = l.skipHTMLLineComment(p+3, end, &sawNL)
 		} else {
 			break
