@@ -274,10 +274,36 @@ func (rt *Runtime) bigIntBinaryOp(op Opcode, x, y *big.Int) (Value, *ThrowError)
 		r.Or(x, y)
 	case OpBxor:
 		r.Xor(x, y)
-	case OpShl:
-		r.Lsh(x, uint(y.Int64()))
-	case OpShr:
-		r.Rsh(x, uint(y.Int64()))
+	case OpShl, OpShr:
+		// BigInt shifts: a negative shift count reverses the direction
+		// (x << -n === x >> n, x >> -n === x << n), so uint(y.Int64()) on a
+		// negative count would be a huge (wrong) amount.
+		n := y
+		left := op == OpShl
+		if n.Sign() < 0 {
+			n = new(big.Int).Neg(n)
+			left = !left
+		}
+		if !n.IsInt64() {
+			// A shift count too large for a machine word: a left shift of a nonzero
+			// value overflows the representable range; any right shift (or 0 << n)
+			// collapses to 0 or -1 (arithmetic, floor).
+			if left {
+				if x.Sign() == 0 {
+					return rt.newBigInt(big.NewInt(0)), nil
+				}
+				return mkundef(), rt.rangeError("Maximum BigInt size exceeded")
+			}
+			if x.Sign() < 0 {
+				return rt.newBigInt(big.NewInt(-1)), nil
+			}
+			return rt.newBigInt(big.NewInt(0)), nil
+		}
+		if left {
+			r.Lsh(x, uint(n.Int64()))
+		} else {
+			r.Rsh(x, uint(n.Int64()))
+		}
 	default:
 		return mkundef(), rt.typeError("unsupported BigInt operation")
 	}

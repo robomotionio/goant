@@ -2092,14 +2092,14 @@ func (rt *Runtime) abstractEquals(a, b Value) bool {
 		n, ok := stringToBigInt(string(rt.strBytes(a)))
 		return ok && rt.bigIntVal(b).Cmp(n) == 0
 	}
-	// object vs primitive (number/string/symbol): ToPrimitive the object side,
-	// then re-compare (ES abstract equality steps 10-11).
-	if a.IsObjectType() && (tb == TNum || tb == TStr || tb == TSymbol) {
+	// object vs primitive (number/string/bigint/symbol): ToPrimitive the object
+	// side, then re-compare (ES abstract equality steps 10-11).
+	if a.IsObjectType() && (tb == TNum || tb == TStr || tb == TBigInt || tb == TSymbol) {
 		if pa, e := rt.toPrimitive(a, ""); e == nil {
 			return rt.abstractEquals(pa, b)
 		}
 	}
-	if b.IsObjectType() && (ta == TNum || ta == TStr || ta == TSymbol) {
+	if b.IsObjectType() && (ta == TNum || ta == TStr || ta == TBigInt || ta == TSymbol) {
 		if pb, e := rt.toPrimitive(b, ""); e == nil {
 			return rt.abstractEquals(a, pb)
 		}
