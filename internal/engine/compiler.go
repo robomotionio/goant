@@ -1053,6 +1053,11 @@ func (c *compiler) compileExpr(n *Node) {
 			c.emit(OpUndef)
 		}
 		c.emit(OpImport)
+	case NSpread:
+		// A spread element (`...x`) is only valid inside an array literal, argument
+		// list, or object literal (all handled before reaching here). Anywhere else
+		// — e.g. `...x => x`, a bare `...x` expression — it is a SyntaxError.
+		c.syntaxErrorf("Unexpected token '...'")
 	default:
 		c.errorf("unsupported expression kind %v (slice)", n.Kind)
 	}
