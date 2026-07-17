@@ -681,11 +681,24 @@ func (rt *Runtime) initArrayBuiltin() {
 		return rt.newStringBytes(out), nil
 	})
 	rt.defMethod(proto, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		joinFn, _ := rt.getField(this, "join")
-		if rt.isCallable(joinFn) {
-			return rt.callValue(joinFn, this, nil)
+		// array = ToObject(this); func = Get(array, "join"); if not callable, func is
+		// %Object.prototype.toString%. So toString.call(true) → "[object Boolean]".
+		obj, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
 		}
-		return rt.internString("[object Array]"), nil
+		joinFn, e := rt.getField(obj, "join")
+		if e != nil {
+			return mkundef(), e
+		}
+		if rt.isCallable(joinFn) {
+			return rt.callValue(joinFn, obj, nil)
+		}
+		tag, e := rt.objectToStringTag(obj)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.internString(tag), nil
 	})
 
 	rt.defMethod(proto, "indexOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
