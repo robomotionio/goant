@@ -221,29 +221,37 @@ func (rt *Runtime) initAnnexBRegExp() {
 	proto := rt.objPtr(rt.regexpProto)
 	rt.defMethod(proto, "compile", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil {
-			return mkundef(), rt.typeError("RegExp.prototype.compile on incompatible receiver")
+		// RequireInternalSlot(O, [[RegExpMatcher]]); and legacy features are enabled
+		// only for a direct %RegExp% instance, not a subclass instance (approximated
+		// by its [[Prototype]] being %RegExp.prototype%). Both cases are a TypeError.
+		if o == nil || o.regex == nil || o.proto != rt.regexpProto {
+			return mkundef(), rt.typeError("RegExp.prototype.compile called on an incompatible receiver")
 		}
-		pattern := ""
-		if p := arg(args, 0); !p.IsUndefined() {
-			if po := rt.objPtr(p); po != nil && po.regex != nil {
-				sv, _ := rt.getField(p, "source")
-				pattern = string(rt.strBytes(sv))
-			} else {
+		var pattern, flags string
+		p := arg(args, 0)
+		if po := rt.objPtr(p); po != nil && po.regex != nil {
+			// The pattern is a RegExp: its [[OriginalSource]]/[[OriginalFlags]] are
+			// adopted and a supplied flags argument is a TypeError.
+			if !arg(args, 1).IsUndefined() {
+				return mkundef(), rt.typeError("RegExp.prototype.compile: flags may not be supplied when the pattern is a RegExp")
+			}
+			pattern = po.regex.Source
+			flags = po.regex.Flags
+		} else {
+			if !p.IsUndefined() {
 				pv, e := rt.toStringValue(p)
 				if e != nil {
 					return mkundef(), e
 				}
 				pattern = string(rt.strBytes(pv))
 			}
-		}
-		flags := ""
-		if f := arg(args, 1); !f.IsUndefined() {
-			fv, e := rt.toStringValue(f)
-			if e != nil {
-				return mkundef(), e
+			if f := arg(args, 1); !f.IsUndefined() {
+				fv, e := rt.toStringValue(f)
+				if e != nil {
+					return mkundef(), e
+				}
+				flags = string(rt.strBytes(fv))
 			}
-			flags = string(rt.strBytes(fv))
 		}
 		nv, e := rt.newRegExp(pattern, flags)
 		if e != nil {
@@ -257,7 +265,10 @@ func (rt *Runtime) initAnnexBRegExp() {
 				o.defineOwn(k, v, 0)
 			}
 		}
-		o.defineOwn("lastIndex", mknum(0), attrWritable)
+		// Set(O, "lastIndex", 0, true): a non-writable lastIndex makes this a TypeError.
+		if e := rt.setLastIndexOrThrow(this, 0); e != nil {
+			return mkundef(), e
+		}
 		return this, nil
 	})
 }
