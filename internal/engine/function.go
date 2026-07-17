@@ -58,6 +58,12 @@ func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 		// constructor) whose [[Prototype]] is %AsyncGeneratorPrototype% — mirroring a
 		// sync generator, so `g.prototype`'s chain reaches %AsyncIteratorPrototype%.
 		obj.defineOwn("prototype", rt.newObject(rt.asyncGenProto), attrWritable)
+	} else if fn.isGenerator && fn.isMethod {
+		// A sync generator method (concise `*m(){}`, no [[Construct]]) still has its
+		// own writable, non-enumerable, non-configurable .prototype whose
+		// [[Prototype]] is %GeneratorPrototype% — like a generator function, minus the
+		// "constructor" back-reference.
+		obj.defineOwn("prototype", rt.newObject(rt.genProto), attrWritable)
 	}
 	return fnVal
 }
