@@ -1476,6 +1476,13 @@ func (p *parser) parseObjectKey(prop *Node) {
 	case p.tok() == TokNumber:
 		p.consume()
 		prop.Left = mkNum(tod(p.tval()))
+	case p.tok() == TokBigInt:
+		// A BigInt literal key (`{1n: v}`, `1n(){}`) names the property by its
+		// BigInt::toString — the decimal digits — handled in propKeyName.
+		n := p.mk(NBigInt)
+		n.Str = p.tokStr()
+		prop.Left = n
+		p.consume()
 	case p.tok() == TokString:
 		prop.Left = p.mkStringFromTok()
 		p.consume()
@@ -1589,6 +1596,13 @@ func (p *parser) parseObject() *Node {
 		} else if p.tok() == TokNumber {
 			p.consume()
 			prop.Left = mkNum(tod(p.tval()))
+		} else if p.tok() == TokBigInt {
+			// A BigInt literal key (`{1n: v}`) names the property by its
+			// BigInt::toString (decimal digits); propKeyName performs the conversion.
+			bi := p.mk(NBigInt)
+			bi.Str = p.tokStr()
+			prop.Left = bi
+			p.consume()
 		} else if p.tok() == TokString {
 			prop.Left = p.mkStringFromTok()
 			p.consume()
@@ -2402,6 +2416,13 @@ func (p *parser) parseClass() *Node {
 			p.consume()
 		} else if p.tok() == TokNumber {
 			method.Left = mkNum(tod(p.tval()))
+			p.consume()
+		} else if p.tok() == TokBigInt {
+			// A BigInt literal class-element key (`class C { 1n(){} }`) names the
+			// member by its BigInt::toString (decimal); propKeyName converts it.
+			bi := p.mk(NBigInt)
+			bi.Str = p.tokStr()
+			method.Left = bi
 			p.consume()
 		} else {
 			method.Left = p.mkIdentFromTok()

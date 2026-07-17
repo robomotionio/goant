@@ -221,7 +221,9 @@ func (rt *Runtime) initBigIntBuiltin() {
 
 // compileBigIntLiteral emits a constant for a `123n` literal (handling 0x/0o/0b
 // prefixes and numeric separators; the lexer already validated the digits).
-func (c *compiler) compileBigIntLiteral(lit string) {
+// parseBigIntLiteral decodes a BigInt literal (`1n`, `0x10n`, `1_000n`, …) to its
+// integer value, honoring the 0x/0o/0b radix prefixes and digit separators.
+func parseBigIntLiteral(lit string) (*big.Int, bool) {
 	s := strings.TrimSuffix(lit, "n")
 	s = strings.ReplaceAll(s, "_", "")
 	base := 10
@@ -235,7 +237,11 @@ func (c *compiler) compileBigIntLiteral(lit string) {
 			base, s = 2, s[2:]
 		}
 	}
-	v, ok := new(big.Int).SetString(s, base)
+	return new(big.Int).SetString(s, base)
+}
+
+func (c *compiler) compileBigIntLiteral(lit string) {
+	v, ok := parseBigIntLiteral(lit)
 	if !ok {
 		c.errorf("invalid BigInt literal '%s'", lit)
 		return

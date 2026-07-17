@@ -375,6 +375,12 @@ func propKeyName(key *Node) (string, bool) {
 		return key.Str, true
 	case NNumber:
 		return numberToString(key.Num), true
+	case NBigInt:
+		// A BigInt literal property key is its ToString: the decimal digits, so
+		// `{1n: v}` names property "1" (BigInt::toString, radix 10).
+		if v, ok := parseBigIntLiteral(key.Str); ok {
+			return v.String(), true
+		}
 	}
 	return "", false
 }
