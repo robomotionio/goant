@@ -737,6 +737,9 @@ func blockHasUsing(stmts []*Node) bool {
 // goant's existing try/finally limitation.
 func (c *compiler) compileBlockWithUsing(n *Node) {
 	c.scopeDepth++
+	// A block with a `using` declaration still enforces the same lexical
+	// redeclaration early errors as an ordinary block (`{ using f = …; var f; }`).
+	c.checkBlockDeclConflicts(n.Args, true)
 	c.hoistFunctions(n.Args, true)
 
 	c.emit(OpArray)

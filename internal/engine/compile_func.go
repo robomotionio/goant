@@ -285,7 +285,11 @@ func (c *compiler) checkBlockDeclConflicts(list []*Node, blockScope bool) {
 			for _, decl := range stmt.Args {
 				collectPatternNames(decl.Left, &names)
 			}
-			if stmt.VarKind == VarLet || stmt.VarKind == VarConst {
+			if stmt.VarKind == VarLet || stmt.VarKind == VarConst ||
+				stmt.VarKind == VarUsing || stmt.VarKind == VarAwaitUsing {
+				// `using` / `await using` bindings are block-scoped lexical names, so
+				// they collide with a same-named var/let/const/using (`{ using f = …;
+				// var f; }` is a redeclaration SyntaxError).
 				for _, nm := range names {
 					addLexical(nm)
 				}
