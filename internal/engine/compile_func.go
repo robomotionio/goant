@@ -585,10 +585,10 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	// function nested in strict code, inherited via c.fn.isStrict).
 	if !c.fn.isStrict && n.Body != nil && n.Body.Kind == NBlock {
 		for _, s := range n.Body.Args {
-			if s == nil || s.Kind == NEmpty {
+			if s == nil {
 				continue
 			}
-			if s.Kind != NString {
+			if s.Kind != NString { // a non-string statement (incl. `;`) ends the prologue
 				break
 			}
 			if s.Str == "use strict" && s.Flags&fnStrHadEscape == 0 {

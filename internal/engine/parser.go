@@ -420,9 +420,12 @@ func (p *parser) parseStmtList(out *[]*Node, stopAtRBrace, directiveCtx bool) {
 		if !inDirective {
 			continue
 		}
-		if stmt == nil || stmt.Kind == NEmpty {
+		if stmt == nil {
 			continue
 		}
+		// An EmptyStatement (or any non-string ExpressionStatement) is not part of
+		// the Directive Prologue, so it ends it: a `use strict` that follows a `;`
+		// is an ordinary string statement, not a directive.
 		if !canBeExpressionStatement(stmt) {
 			inDirective = false
 			continue

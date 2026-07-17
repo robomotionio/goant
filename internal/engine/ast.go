@@ -207,11 +207,11 @@ func bodyHasUseStrict(body *Node) bool {
 		return false
 	}
 	for _, stmt := range body.Args {
-		if stmt == nil || stmt.Kind == NEmpty {
+		if stmt == nil {
 			continue
 		}
 		if stmt.Kind != NString {
-			return false // prologue ended
+			return false // prologue ended (a non-string statement, incl. an EmptyStatement)
 		}
 		if isUseStrict(stmt) {
 			return true
@@ -412,13 +412,14 @@ func referencesNewTarget(n *Node) bool {
 }
 
 // programIsStrict reports whether the program's directive prologue contains a
-// "use strict" directive (empty statements are transparent, matching ant).
+// "use strict" directive. A non-string statement — including an EmptyStatement
+// (`;`) — is not part of the prologue and ends it.
 func programIsStrict(program *Node) bool {
 	if program == nil {
 		return false
 	}
 	for _, stmt := range program.Args {
-		if stmt == nil || stmt.Kind == NEmpty {
+		if stmt == nil {
 			continue
 		}
 		if stmt.Kind != NString {
