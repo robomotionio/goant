@@ -1166,6 +1166,13 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 				return rt.rejectDefine("Cannot define property: array length is not writable")
 			}
 			if writable && enumerable && configurable {
+				// A prior non-default definition of this index lives as a named shape
+				// slot that shadows fast element storage; drop it so the all-default
+				// fast element is the property observed (otherwise a redefine of a
+				// configurable index would keep the stale named descriptor).
+				if o.shape.lookupInterned(name) >= 0 {
+					o.deleteOwn(name)
+				}
 				rt.arraySet(o, idx, val)
 				return nil
 			}
