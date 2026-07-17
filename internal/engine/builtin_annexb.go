@@ -175,6 +175,9 @@ func (rt *Runtime) initAnnexBString() {
 			length = 1
 		}
 		rt.defMethod(proto, name, length, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			if this.IsNullish() { // RequireObjectCoercible before ToString(this)
+				return mkundef(), rt.typeError("String.prototype." + name + " called on null or undefined")
+			}
 			s, e := rt.toStringValue(this)
 			if e != nil {
 				return mkundef(), e
