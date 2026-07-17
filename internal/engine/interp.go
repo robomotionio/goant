@@ -1229,11 +1229,21 @@ restart:
 			ip++
 		case OpEq:
 			b, a := pop(), pop()
-			push(mkbool(rt.abstractEquals(a, b)))
+			r, e := rt.abstractEquals(a, b)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(mkbool(r))
 			ip++
 		case OpNe:
 			b, a := pop(), pop()
-			push(mkbool(!rt.abstractEquals(a, b)))
+			r, e := rt.abstractEquals(a, b)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(mkbool(!r))
 			ip++
 		case OpSeq:
 			b, a := pop(), pop()
@@ -2160,21 +2170,21 @@ func cmpBigIntNumber(bi *big.Int, n float64) (int, bool) {
 	return new(big.Float).SetInt(bi).Cmp(big.NewFloat(n)), true
 }
 
-func (rt *Runtime) abstractEquals(a, b Value) bool {
+func (rt *Runtime) abstractEquals(a, b Value) (bool, *ThrowError) {
 	ta, tb := a.Type(), b.Type()
 	if ta == tb {
-		return rt.strictEquals(a, b)
+		return rt.strictEquals(a, b), nil
 	}
 	// null == undefined
 	if (ta == TNull && tb == TUndef) || (ta == TUndef && tb == TNull) {
-		return true
+		return true, nil
 	}
 	// number == string
 	if ta == TNum && tb == TStr {
-		return a.Number() == stringToNumber(string(rt.strBytes(b)))
+		return a.Number() == stringToNumber(string(rt.strBytes(b))), nil
 	}
 	if ta == TStr && tb == TNum {
-		return stringToNumber(string(rt.strBytes(a))) == b.Number()
+		return stringToNumber(string(rt.strBytes(a))) == b.Number(), nil
 	}
 	// boolean coerces to number, then re-compare
 	if ta == TBool {
@@ -2186,34 +2196,39 @@ func (rt *Runtime) abstractEquals(a, b Value) bool {
 	// BigInt vs Number: equal iff the Number is the BigInt's exact (integer) value.
 	if ta == TBigInt && tb == TNum {
 		cmp, ok := cmpBigIntNumber(rt.bigIntVal(a), b.Number())
-		return ok && cmp == 0
+		return ok && cmp == 0, nil
 	}
 	if ta == TNum && tb == TBigInt {
 		cmp, ok := cmpBigIntNumber(rt.bigIntVal(b), a.Number())
-		return ok && cmp == 0
+		return ok && cmp == 0, nil
 	}
 	// BigInt vs String: parse the string as a BigInt (invalid → not equal).
 	if ta == TBigInt && tb == TStr {
 		n, ok := stringToBigInt(string(rt.strBytes(b)))
-		return ok && rt.bigIntVal(a).Cmp(n) == 0
+		return ok && rt.bigIntVal(a).Cmp(n) == 0, nil
 	}
 	if ta == TStr && tb == TBigInt {
 		n, ok := stringToBigInt(string(rt.strBytes(a)))
-		return ok && rt.bigIntVal(b).Cmp(n) == 0
+		return ok && rt.bigIntVal(b).Cmp(n) == 0, nil
 	}
 	// object vs primitive (number/string/bigint/symbol): ToPrimitive the object
-	// side, then re-compare (ES abstract equality steps 10-11).
-	if a.IsObjectType() && (tb == TNum || tb == TStr || tb == TBigInt || tb == TSymbol) {
-		if pa, e := rt.toPrimitive(a, ""); e == nil {
-			return rt.abstractEquals(pa, b)
+	// side, then re-compare (ES abstract equality steps 10-11). A throw from
+	// ToPrimitive (e.g. a valueOf/@@toPrimitive that throws) propagates.
+	if a.IsObjectLike() && (tb == TNum || tb == TStr || tb == TBigInt || tb == TSymbol) {
+		pa, e := rt.toPrimitive(a, "")
+		if e != nil {
+			return false, e
 		}
+		return rt.abstractEquals(pa, b)
 	}
-	if b.IsObjectType() && (ta == TNum || ta == TStr || ta == TBigInt || ta == TSymbol) {
-		if pb, e := rt.toPrimitive(b, ""); e == nil {
-			return rt.abstractEquals(a, pb)
+	if b.IsObjectLike() && (ta == TNum || ta == TStr || ta == TBigInt || ta == TSymbol) {
+		pb, e := rt.toPrimitive(b, "")
+		if e != nil {
+			return false, e
 		}
+		return rt.abstractEquals(a, pb)
 	}
-	return false
+	return false, nil
 }
 
 func boolToNum(v Value) float64 {
