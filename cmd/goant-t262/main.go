@@ -443,7 +443,10 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 // (global-scope) eval; global is the global object (indirect eval's `this`);
 // detachArrayBuffer uses the engine's transferring ArrayBuffer.prototype.transfer;
 // gc is a no-op. createRealm/agent are unsupported (their tests are not covered).
-const host262JS = "var $262 = { global: (0, eval)(\"this\"), evalScript: function (s) { return (0, eval)(s); }, gc: function () {}, detachArrayBuffer: function (b) { try { b.transfer(); } catch (e) {} } };\n"
+// $262.global uses globalThis rather than (0,eval)("this") so the harness does
+// not reference `eval` at the script's top level — a test that declares
+// `let eval` would otherwise put that reference in its temporal dead zone.
+const host262JS = "var $262 = { global: globalThis, evalScript: function (s) { return (0, eval)(s); }, gc: function () {}, detachArrayBuffer: function (b) { try { b.transfer(); } catch (e) {} } };\n"
 
 func (m meta) variants() []string {
 	switch {
