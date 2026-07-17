@@ -63,6 +63,11 @@ type parser struct {
 	// declaration). A FunctionExpression's name is [~Yield, ~Await], so `yield`/
 	// `await` are valid there even inside an enclosing generator/async function.
 	pendingFuncExpr bool
+	// usingAllowed reports whether a `using` / `await using` declaration is a legal
+	// statement at the current position. It is true inside a Block, function body,
+	// or class static block, and false at the top level of a Script and directly
+	// within a CaseClause/DefaultClause StatementList (a Module top level allows it).
+	usingAllowed bool
 }
 
 // Parse tokenizes and parses src into an AST (N_PROGRAM root node).
@@ -76,6 +81,9 @@ func parseMode(filename, src string, strict, module bool) (*Node, error) {
 	// A Module's top level is an async context: `await` is the await operator
 	// (top-level await), reset to identifier inside any nested non-async function.
 	p.inAsync = module
+	// A `using` declaration is illegal directly at the top level of a Script (but
+	// legal at a Module top level, and in any Block/function body below).
+	p.usingAllowed = module
 	program := p.mk(NProgram)
 	p.parseStmtList(&program.Args, false, true)
 	if p.err != nil {
@@ -421,6 +429,11 @@ func (p *parser) parseStmtList(out *[]*Node, stopAtRBrace, directiveCtx bool) {
 func (p *parser) parseBlock(directiveCtx bool) *Node {
 	p.expect(TokLBrace)
 	block := p.mk(NBlock)
+	// A Block (and a function body / class static block, which parse through here)
+	// is a legal position for a `using` declaration regardless of the outer context.
+	savedUsing := p.usingAllowed
+	p.usingAllowed = true
+	defer func() { p.usingAllowed = savedUsing }()
 	p.parseStmtList(&block.Args, true, directiveCtx)
 	if p.hasErr() {
 		return block
@@ -2512,11 +2525,23 @@ func (p *parser) parseVarDecl(kind VarKind, allowUninitConst bool) *Node {
 	for {
 		p.next()
 		decl := p.mk(NVarDecl)
+		usingKind := kind == VarUsing || kind == VarAwaitUsing
 		switch p.tok() {
 		case TokLBracket:
+			// `using`/`await using` bind only BindingIdentifiers — an array or object
+			// binding pattern is a SyntaxError, even after a valid identifier binding
+			// (`using x = null, [] = null`).
+			if usingKind {
+				p.errorf("'using' declarations may not have a binding pattern")
+				return v
+			}
 			decl.Left = p.parseArray()
 			p.validateArrayPattern(decl.Left)
 		case TokLBrace:
+			if usingKind {
+				p.errorf("'using' declarations may not have a binding pattern")
+				return v
+			}
 			decl.Left = p.parseObject()
 			p.validateObjectPattern(decl.Left)
 		case TokErr:
@@ -2882,6 +2907,10 @@ func (p *parser) parseStmt() *Node {
 	p.next()
 
 	if p.tok() == TokUsing && p.usingBeginsDeclaration() {
+		if !p.usingAllowed {
+			p.errorf("'using' declarations are not allowed in this position")
+			return p.mk(NEmpty)
+		}
 		p.consume()
 		n := p.parseVarDecl(VarUsing, false)
 		p.semicolon()
@@ -2892,6 +2921,10 @@ func (p *parser) parseStmt() *Node {
 		p.consume()
 		p.next()
 		if p.tok() == TokUsing {
+			if !p.usingAllowed {
+				p.errorf("'await using' declarations are not allowed in this position")
+				return p.mk(NEmpty)
+			}
 			p.consume()
 			n := p.parseVarDecl(VarAwaitUsing, false)
 			p.semicolon()
@@ -3277,6 +3310,12 @@ func (p *parser) parseSwitch() *Node {
 		return p.mk(NEmpty)
 	}
 	p.consume()
+	// A `using` declaration directly within a CaseClause/DefaultClause StatementList
+	// is a Syntax Error (it must be wrapped in a Block); a nested block restores the
+	// permission via parseBlock.
+	savedUsing := p.usingAllowed
+	p.usingAllowed = false
+	defer func() { p.usingAllowed = savedUsing }()
 	sawDefault := false
 	for p.next() != TokRBrace && p.tok() != TokEOF {
 		c := p.mk(NCase)
