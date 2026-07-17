@@ -379,10 +379,25 @@ func validateUEscape(rs []rune, i int, inClass bool, groupCount int, named map[s
 		return 2, false, nil
 	case n == '0':
 		return 2, false, nil
-	case n == 'x' || n == 'u' || n == 'p' || n == 'P' || n == 'q':
-		// Consume a brace-delimited escape — `\u{…}`, `\p{…}`, `\P{…}`, `\q{…}` —
-		// wholesale so its `{` is not misread as a lone quantifier brace. `\uHHHH`
-		// / `\xHH` have no braces; their hex digits are left to regexp2.
+	case n == 'p' || n == 'P':
+		// A Unicode property escape MUST be brace-delimited in Unicode mode; `\pL`
+		// (regexp2's braceless .NET form) is a SyntaxError. It is also a
+		// CharacterClassEscape, so it may not be a ClassRange endpoint.
+		if i+2 >= len(rs) || rs[i+2] != '{' {
+			return 0, false, fmt.Errorf("`\\%c` must be `\\%c{…}` in unicode mode", n, n)
+		}
+		j := i + 3
+		for j < len(rs) && rs[j] != '}' {
+			j++
+		}
+		if j >= len(rs) {
+			return 0, false, fmt.Errorf("unterminated `\\%c{…}` escape in unicode mode", n)
+		}
+		return j - i + 1, true, nil
+	case n == 'x' || n == 'u' || n == 'q':
+		// Consume the brace-delimited escapes `\u{…}` / `\q{…}` wholesale so their
+		// `{` is not misread as a lone quantifier brace. `\uHHHH` / `\xHH` have no
+		// braces; their hex digits are left to regexp2.
 		if i+2 < len(rs) && rs[i+2] == '{' {
 			j := i + 3
 			for j < len(rs) && rs[j] != '}' {

@@ -492,6 +492,11 @@ func hexVal(rs []rune) uint32 {
 // a bare general category ("Lu"/"Letter"), a binary property ("White_Space"),
 // or a bare script ("Greek") — to a Unicode RangeTable.
 func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
+	// ECMAScript uses exact (not "loose") property matching: no surrounding or
+	// interior whitespace is permitted in a `\p{…}` name or value.
+	if strings.ContainsAny(name, " \t\n\r") {
+		return nil, false
+	}
 	if eq := strings.IndexByte(name, '='); eq >= 0 {
 		prop := strings.TrimSpace(name[:eq])
 		val := strings.TrimSpace(name[eq+1:])
