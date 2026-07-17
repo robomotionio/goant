@@ -214,7 +214,16 @@ func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) Value {
 			// value resolves) before re-wrapping it in an IteratorResult carrying the
 			// sync `done` flag. For next(), a rejecting value closes the sync iterator
 			// (closeOnRejection); for return() it does not.
-			valP := rt.resolvedPromise(val)
+			// valueWrapper = PromiseResolve(%Promise%, value): reading value.constructor
+			// may throw (a poisoned wrapper). If it does — and this is next() on a
+			// not-done result (closeOnRejection) — close the sync iterator, then reject.
+			valP, pe := rt.promiseResolve(rt.promiseCtor, val)
+			if pe != nil {
+				if method == "next" && !done {
+					rt.iteratorClose(syncIt)
+				}
+				return rt.rejectedPromise(pe.Value), nil
+			}
 			unwrap := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
 				return rt.genResult(arg(a, 0), done), nil
 			})
