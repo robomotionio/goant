@@ -359,7 +359,11 @@ restart:
 					}
 					push(uvv)
 				default: // global
-					v, _ := rt.getProp(rt.global, name)
+					v, ge := rt.getField(rt.global, name)
+					if ge != nil {
+						thrown = ge
+						goto unwind
+					}
 					push(v)
 				}
 			}
@@ -786,14 +790,25 @@ restart:
 				thrown = rt.referenceError(name + " is not defined")
 				goto unwind
 			}
-			v, _ := rt.getProp(rt.global, name)
+			// A global bound as an accessor property must invoke its getter (and
+			// propagate an abrupt getter completion), so read via the ordinary
+			// [[Get]], not the raw slot read getProp performs.
+			v, ge := rt.getField(rt.global, name)
+			if ge != nil {
+				thrown = ge
+				goto unwind
+			}
 			push(v)
 			ip += 7
 		case OpGetGlobalUndef:
 			// Lenient global read (typeof of a possibly-undeclared global): absent
 			// names yield undefined rather than a ReferenceError.
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
-			v, _ := rt.getProp(rt.global, name)
+			v, ge := rt.getField(rt.global, name)
+			if ge != nil {
+				thrown = ge
+				goto unwind
+			}
 			push(v)
 			ip += 7
 		case OpPutGlobal:
