@@ -1148,7 +1148,7 @@ func (rt *Runtime) initArrayBuiltin() {
 			// IsConcatSpreadable: @@isConcatSpreadable (via [[Get]]) overrides the
 			// default, which is IsArray(v).
 			spread := rt.isArrayValue(v)
-			if v.IsObjectType() && rt.symIsConcatSpreadable != 0 {
+			if v.IsObjectLike() && rt.symIsConcatSpreadable != 0 { // IsObjectLike so a typed array's @@isConcatSpreadable is honored
 				s, e := rt.getElement(v, rt.symIsConcatSpreadable)
 				if e != nil {
 					return e
