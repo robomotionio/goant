@@ -687,6 +687,20 @@ func isInstancePrivateMethod(m *Node) bool {
 	return m.Right != nil && m.Right.Kind == NFunc && m.Right.Flags&fnMethod != 0
 }
 
+// privMethodSlotName is the class-scope local that holds an instance private
+// method/accessor's SHARED function object. A private accessor may declare a
+// getter and a setter under the same name, so the slot is qualified by kind
+// (g/s/m) as well as the mangled private key to keep the two distinct.
+func (c *compiler) privMethodSlotName(m *Node) string {
+	kind := "m"
+	if m.Flags&fnGetter != 0 {
+		kind = "g"
+	} else if m.Flags&fnSetter != 0 {
+		kind = "s"
+	}
+	return "*pm*" + kind + c.privateKey(m.Left.Str)
+}
+
 // isInstanceMember reports whether m is installed per-instance (a field or a
 // private method/accessor) rather than on the prototype.
 func isInstanceMember(m *Node) bool {
@@ -709,28 +723,33 @@ func (c *compiler) emitInstanceFieldInit() {
 		}
 	}
 	// Pass 1: install private methods/accessors before any field initializer runs
-	// (so a field initializer may call them).
+	// (so a field initializer may call them). Each method function was created
+	// ONCE at class definition (see the shared-private-method loop in compileClass),
+	// so every instance's private environment receives the SAME function object —
+	// as the spec requires (a private method is not re-created per instance).
 	for _, m := range c.classFields {
 		if !isInstancePrivateMethod(m) {
 			continue
 		}
 		flags := byte(0)
-		prefix := ""
 		if m.Flags&fnGetter != 0 {
-			flags, prefix = 1, "get "
+			flags = 1
 		} else if m.Flags&fnSetter != 0 {
-			flags, prefix = 2, "set "
-		}
-		if m.Right.Str == "" {
-			m.Right.Str = prefix + m.Left.Str
-			m.Right.Flags |= fnInferredName
+			flags = 2
 		}
 		loadThis()
-		c.compileFunc(m.Right)
+		pmName := c.privMethodSlotName(m)
+		if slot := c.resolveLocal(pmName); slot >= 0 {
+			c.emitOpU16(OpGetLocal, uint16(slot))
+		} else if uvi := c.resolveUpvalue(pmName); uvi >= 0 {
+			c.emitOpU16(OpGetUpval, uint16(uvi))
+		} else {
+			c.emit(OpUndef) // unreachable: the slot is always declared in compileClass
+		}
 		idx := c.constant(c.rt.internString(c.privateKey(m.Left.Str)))
 		c.emit(OpDefineMethod)
 		c.emitU32(uint32(idx))
-		c.emitByte(flags)
+		c.emitByte(flags | 8) // bit 3: function already homed at creation; skip setMethodHome
 		c.emit(OpPop)
 	}
 	// Pass 2: initialize fields in source order.
@@ -944,6 +963,15 @@ func (c *compiler) compileClass(n *Node) {
 	c.pendingClassFields = instanceFields
 	c.pendingClassDerived = n.Left != nil
 
+	// Declare a class-scope slot for each instance private method's SHARED function
+	// (populated below, once the prototype exists) so the constructor captures it
+	// as an upvalue and installs the same function object on every instance.
+	for _, m := range instanceFields {
+		if isInstancePrivateMethod(m) {
+			c.addLocal(c.privMethodSlotName(m), false)
+		}
+	}
+
 	c.compileFunc(ctorFn) // [ctor]
 	c.emitOpU16(OpPutLocal, uint16(ctorSlot))
 
@@ -1078,6 +1106,33 @@ func (c *compiler) compileClass(n *Node) {
 		c.emitU32(uint32(idx))
 		c.emitByte(flags)
 		c.emit(OpPop)
+	}
+
+	// Create each instance private method's SHARED function exactly once, with its
+	// [[HomeObject]] set to the prototype, and store it in the class-scope slot the
+	// constructor captures. Installing this one function object on every instance
+	// (in emitInstanceFieldInit) gives all instances the same private method — the
+	// spec creates it once at class definition, not per construction.
+	for _, m := range instanceFields {
+		if !isInstancePrivateMethod(m) {
+			continue
+		}
+		if m.Right.Str == "" {
+			prefix := ""
+			if m.Flags&fnGetter != 0 {
+				prefix = "get "
+			} else if m.Flags&fnSetter != 0 {
+				prefix = "set "
+			}
+			m.Right.Str = prefix + m.Left.Str
+			m.Right.Flags |= fnInferredName
+		}
+		c.emitOpU16(OpGetLocal, uint16(protoSlot)) // [proto]
+		c.compileFunc(m.Right)                     // [proto, func]
+		c.emit(OpSetHomeObj)                       // [proto, func] (func.[[HomeObject]] = proto)
+		slot := c.resolveLocal(c.privMethodSlotName(m))
+		c.emitOpU16(OpPutLocal, uint16(slot)) // [proto]
+		c.emit(OpPop)                         // []
 	}
 
 	// Now that all members (including computed keys) are defined, initialize the

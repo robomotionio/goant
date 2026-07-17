@@ -602,10 +602,13 @@ restart:
 		case OpDefineMethod:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			flags := code[ip+5]
-			enumerable := flags&4 != 0 // bit 4: object-literal accessor (enumerable)
+			enumerable := flags&4 != 0 // bit 2: object-literal accessor (enumerable)
+			shared := flags&8 != 0     // bit 3: shared private method, already homed
 			flags &= 3
 			accFn := pop()
-			rt.setMethodHome(accFn, peek()) // [[HomeObject]] for a super-using method
+			if !shared {
+				rt.setMethodHome(accFn, peek()) // [[HomeObject]] for a super-using method
+			}
 			if isPrivateKey(name) {
 				if o := rt.objPtr(peek()); o != nil {
 					switch flags {
