@@ -556,6 +556,22 @@ func (c *compiler) declareVar(name string, isConst bool) int {
 	return c.addLocal(name, isConst)
 }
 
+// resolveFunctionVar finds a function-scoped (non-block-scoped) local by name,
+// skipping any intervening block-scoped binding (let/const/class or a catch
+// parameter) that shadows it. The Annex B.3.3/B.3.4 block-function var update
+// targets the function's variable environment, so a `catch (f)` parameter must
+// not intercept the write to the outer `var f`.
+func (c *compiler) resolveFunctionVar(name string) int {
+	for i := len(c.locals) - 1; i >= 0; i-- {
+		lv := c.locals[i]
+		if lv.dead || lv.blockScoped || lv.name != name {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
 // ---- statements ----
 
 func (c *compiler) compileStmts(list []*Node) {

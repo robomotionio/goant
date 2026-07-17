@@ -76,6 +76,15 @@ func (c *compiler) hoistFunctions(list []*Node, blockScoped bool) {
 			// error).
 			slot := c.declareLexical(fn.Str, false)
 			c.emitOpU16(OpPutLocal, uint16(slot))
+		} else if blockScoped {
+			// Annex B.3.3: the block function updates the function-scope var (created
+			// by hoisting), targeting it past any intervening catch parameter of the
+			// same name rather than the nearest binding bindDeclared would pick.
+			if slot := c.resolveFunctionVar(fn.Str); slot >= 0 {
+				c.emitOpU16(OpPutLocal, uint16(slot))
+			} else {
+				c.bindDeclared(fn.Str)
+			}
 		} else {
 			c.bindDeclared(fn.Str)
 		}
@@ -171,8 +180,9 @@ func (c *compiler) compileIfBranch(n *Node) {
 		// The B.3.4 assignment targets the enclosing var-scope binding (the one
 		// declareAnnexBName created), not an intervening catch parameter: a simple
 		// catch parameter may coexist with the var, so `try{}catch(f){if(1)function
-		// f(){}}` updates the outer/global `f`, leaving the catch parameter alone.
-		if slot := c.resolveLocal(n.Str); slot >= 0 && !c.locals[slot].catchParam {
+		// f(){}}` updates the outer function-scope (or global) `f`, leaving the catch
+		// parameter alone. resolveFunctionVar skips the catch param to find that var.
+		if slot := c.resolveFunctionVar(n.Str); slot >= 0 {
 			c.emitOpU16(OpPutLocal, uint16(slot))
 		} else if uv := c.resolveUpvalue(n.Str); uv >= 0 {
 			c.emitOpU16(OpPutUpval, uint16(uv))
