@@ -330,8 +330,27 @@ restart:
 				}
 			}
 			if !found {
-				v, _ := rt.getProp(rt.global, name)
-				push(v)
+				// No with-object binds the name: fall back to the lexical resolution
+				// the compiler baked into the spare operand bytes (kind@ip+7, index@ip+5).
+				switch code[ip+7] {
+				case 1: // local slot
+					lv := locals[readU16(code, ip+5)]
+					if lv.IsEmpty() {
+						thrown = rt.referenceError("Cannot access a lexical binding before initialization")
+						goto unwind
+					}
+					push(lv)
+				case 2: // upvalue
+					uvv := cl.upvalues[readU16(code, ip+5)].get()
+					if uvv.IsEmpty() {
+						thrown = rt.referenceError("Cannot access a lexical binding before initialization")
+						goto unwind
+					}
+					push(uvv)
+				default: // global
+					v, _ := rt.getProp(rt.global, name)
+					push(v)
+				}
 			}
 			ip += 8
 		case OpWithPutVar:
@@ -354,7 +373,15 @@ restart:
 				}
 			}
 			if !stored {
-				rt.setProp(rt.global, name, val)
+				// Fall back to the compiler's lexical resolution (see OpWithGetVar).
+				switch code[ip+7] {
+				case 1: // local slot
+					locals[readU16(code, ip+5)] = val
+				case 2: // upvalue
+					cl.upvalues[readU16(code, ip+5)].set(val)
+				default: // global
+					rt.setProp(rt.global, name, val)
+				}
 			}
 			ip += 8
 		case OpSpecialObj:

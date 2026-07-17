@@ -1006,16 +1006,19 @@ func (c *compiler) compileNumberLiteral(d float64) {
 }
 
 func (c *compiler) compileIdentLoad(n *Node) {
+	// Inside a `with`, every unqualified name is resolved dynamically against the
+	// with-object(s) first (emitWithVar carries the lexical fallback), so a local
+	// or upvalue of the same name can be shadowed by a with-object property.
+	if c.withDepth > 0 {
+		c.emitWithVar(OpWithGetVar, n.Str)
+		return
+	}
 	if slot := c.resolveLocal(n.Str); slot >= 0 {
 		c.emitOpU16(OpGetLocal, uint16(slot))
 		return
 	}
 	if uv := c.resolveUpvalue(n.Str); uv >= 0 {
 		c.emitOpU16(OpGetUpval, uint16(uv))
-		return
-	}
-	if c.withDepth > 0 {
-		c.emitWithVar(OpWithGetVar, n.Str)
 		return
 	}
 	c.emitGlobalGet(n.Str)
@@ -1037,10 +1040,22 @@ func (c *compiler) compileWith(n *Node) {
 // matching the generated size).
 func (c *compiler) emitWithVar(op Opcode, name string) {
 	idx := c.constant(c.rt.internString(name))
+	// A `with` name access checks the with-object(s) first at run time; when none
+	// binds the name it falls back to the ordinary lexical resolution. Encode that
+	// fallback in the spare operand bytes: kind 1 = local slot, 2 = upvalue index,
+	// 0 = global. Without it, a name that is also a local/upvalue would resolve to
+	// that binding statically and the with-object could never shadow it.
+	var fbKind byte
+	var fbIdx int
+	if slot := c.resolveLocal(name); slot >= 0 {
+		fbKind, fbIdx = 1, slot
+	} else if uv := c.resolveUpvalue(name); uv >= 0 {
+		fbKind, fbIdx = 2, uv
+	}
 	c.emit(op)
 	c.emitU32(uint32(idx))
-	c.emitU16(0)
-	c.emitByte(0)
+	c.emitU16(uint16(fbIdx))
+	c.emitByte(fbKind)
 }
 
 func (c *compiler) compileBinary(n *Node) {
@@ -1212,6 +1227,8 @@ func (c *compiler) compileUpdate(n *Node) {
 
 	load := func() {
 		switch {
+		case c.withDepth > 0:
+			c.emitWithVar(OpWithGetVar, name)
 		case slot >= 0:
 			c.emitOpU16(OpGetLocal, uint16(slot))
 		case uv >= 0:
@@ -1222,6 +1239,9 @@ func (c *compiler) compileUpdate(n *Node) {
 	}
 	storeKeep := func() { // leaves the stored value on the stack
 		switch {
+		case c.withDepth > 0:
+			c.emit(OpDup)
+			c.emitWithVar(OpWithPutVar, name)
 		case slot >= 0:
 			c.emitOpU16(OpSetLocal, uint16(slot))
 		case uv >= 0:
@@ -1233,6 +1253,8 @@ func (c *compiler) compileUpdate(n *Node) {
 	}
 	storeConsume := func() { // consumes the stored value
 		switch {
+		case c.withDepth > 0:
+			c.emitWithVar(OpWithPutVar, name)
 		case slot >= 0:
 			c.emitOpU16(OpPutLocal, uint16(slot))
 		case uv >= 0:
@@ -1349,17 +1371,25 @@ func (c *compiler) compileAssign(n *Node) {
 
 	loadVar := func() {
 		switch {
+		case c.withDepth > 0:
+			c.emitWithVar(OpWithGetVar, name)
 		case slot >= 0:
 			c.emitOpU16(OpGetLocal, uint16(slot))
 		case uv >= 0:
 			c.emitOpU16(OpGetUpval, uint16(uv))
-		case c.withDepth > 0:
-			c.emitWithVar(OpWithGetVar, name)
 		default:
 			c.emitGlobalGet(name)
 		}
 	}
 	storeVar := func() {
+		// Inside a `with`, the store is routed to the with-object(s) first (with a
+		// lexical fallback baked into emitWithVar), so a same-named local/upvalue can
+		// be shadowed by a with-object property.
+		if c.withDepth > 0 {
+			c.emit(OpDup)
+			c.emitWithVar(OpWithPutVar, name)
+			return
+		}
 		// Assignment to a const binding always throws a TypeError (in strict and
 		// sloppy code alike). The value stays on the stack (assignment is an expr).
 		if slot >= 0 && c.locals[slot].isConst {
@@ -1416,12 +1446,12 @@ func (c *compiler) compileAssign(n *Node) {
 			return
 		}
 		switch {
+		case c.withDepth > 0:
+			c.emitWithVar(OpWithGetVar, name)
 		case slot >= 0:
 			c.emitOpU16(OpGetLocal, uint16(slot))
 		case uv >= 0:
 			c.emitOpU16(OpGetUpval, uint16(uv))
-		case c.withDepth > 0:
-			c.emitWithVar(OpWithGetVar, name)
 		default:
 			c.emitGlobalGet(name)
 		}
@@ -1429,6 +1459,15 @@ func (c *compiler) compileAssign(n *Node) {
 		c.emit(op)
 	}
 
+	// Inside a `with`, route the store to the with-object(s) first (emitWithVar
+	// carries the lexical fallback), so a with-object property shadows a same-named
+	// local/upvalue. The value produced above stays on the stack (assignment is an
+	// expression) via the OpDup below.
+	if c.withDepth > 0 {
+		c.emit(OpDup)
+		c.emitWithVar(OpWithPutVar, name)
+		return
+	}
 	// Assignment to a const binding always throws a TypeError — whether it is a
 	// local or a const captured from an enclosing scope.
 	if slot >= 0 && c.locals[slot].isConst {
