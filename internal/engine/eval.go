@@ -177,6 +177,12 @@ func (c *compiler) captureEvalScope() *evalScope {
 		sc.paramNames = c.paramNames
 	}
 	sc.inFieldInit = c.inClassFieldInitContext()
+	if sc.inFieldInit {
+		// A class field initializer is invoked (not constructed), so new.target is
+		// permitted in a direct eval there and evaluates to undefined (the value is
+		// overridden when the eval frame is entered).
+		sc.newTargetAllowed = true
+	}
 	// Snapshot the enclosing class private environments in outermost-first order
 	// (each compiler's own stack is already outer-to-inner), so the eval compiler
 	// can mangle `#x` to the same key the declaring class uses.
@@ -534,6 +540,9 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 
 	// Thread the caller's new.target into the eval frame (a non-arrow function
 	// direct eval sees its new.target; OpSpecialObj kind 2 reads the frame value).
+	if sc.inFieldInit {
+		newTarget = mkundef() // a field initializer is called, not constructed
+	}
 	rt.pendingNewTarget = newTarget
 	return rt.runFrame(fn, evalCl, mkundef(), thisVal, nil)
 }
