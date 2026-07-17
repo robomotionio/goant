@@ -429,6 +429,32 @@ func (c *compiler) hoistLexicals(list []*Node) {
 // (NAssignPat / `x = d`) and rest elements are unwrapped to their target;
 // member targets (which appear only in destructuring *assignment*, never a
 // let/const declaration) bind no name and are skipped.
+// paramsBindArguments reports whether any parameter binds the name "arguments".
+// Such a parameter suppresses the arguments object (FunctionDeclarationInstantiation
+// step: argumentsObjectNeeded is false when "arguments" is a parameter name).
+func paramsBindArguments(params []*Node) bool {
+	var names []string
+	for _, p := range params {
+		if p == nil {
+			continue
+		}
+		target := p
+		switch {
+		case p.Kind == NRest || p.Kind == NSpread:
+			target = p.Right
+		case p.Kind == NAssignPat || (p.Kind == NAssign && p.Op == TokAssign):
+			target = p.Left
+		}
+		collectPatternNames(target, &names)
+	}
+	for _, nm := range names {
+		if nm == "arguments" {
+			return true
+		}
+	}
+	return false
+}
+
 func collectPatternNames(pattern *Node, out *[]string) {
 	if pattern == nil {
 		return
@@ -772,7 +798,8 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	// If a non-arrow function references `arguments` — in its body or a parameter
 	// default (evaluated after the arguments object exists) — bind it at entry,
 	// before the defaults run.
-	if n.Flags&fnArrow == 0 && (referencesArguments(n.Body) || paramsReferenceArguments(n.Args)) {
+	if n.Flags&fnArrow == 0 && (referencesArguments(n.Body) || paramsReferenceArguments(n.Args)) &&
+		!paramsBindArguments(n.Args) {
 		slot := c.declareVar("arguments", false)
 		c.emit(OpSpecialObj)
 		c.emitByte(0)
