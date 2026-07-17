@@ -382,6 +382,12 @@ func (c *compiler) bindDeclName(name string, kind VarKind) {
 // binding (local/upvalue/with/global), consuming it. Used for destructuring
 // assignment leaves.
 func (c *compiler) compileIdentStore(name string) {
+	// A private name is never a valid assignment target (`for (#x in obj)`,
+	// `[#x] = …`); the only legal use is `#x in obj`, handled in compileBinary.
+	if len(name) > 0 && name[0] == '#' {
+		c.syntaxErrorf("Private field '%s' may not be an assignment target", name)
+		return
+	}
 	if slot := c.resolveLocal(name); slot >= 0 {
 		// Assignment to a const binding throws a TypeError (strict & sloppy),
 		// mirroring compileAssign's storeVar. Consume the value first so the

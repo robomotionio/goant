@@ -1098,6 +1098,14 @@ func (c *compiler) nameIsWithRouted(name string) bool {
 }
 
 func (c *compiler) compileIdentLoad(n *Node) {
+	// A private name is a valid primary only as the left operand of `#x in obj`
+	// (handled in compileBinary before the operand reaches here). Reaching this
+	// point means `#x` was used in some other expression position (`y in #x`,
+	// `(#x)`, `for (#x in …)`), which is a SyntaxError.
+	if len(n.Str) > 0 && n.Str[0] == '#' {
+		c.syntaxErrorf("Private field '%s' must be used as `%s in obj`", n.Str, n.Str)
+		return
+	}
 	// Inside a `with`, every unqualified name is resolved dynamically against the
 	// with-object(s) first (emitWithVar carries the lexical fallback), so a local
 	// or upvalue of the same name can be shadowed by a with-object property.

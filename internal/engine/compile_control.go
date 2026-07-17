@@ -580,6 +580,11 @@ func (c *compiler) forInStore(left *Node) (func(), []int) {
 			return func() { c.emitOpU16(OpPutLocal, uint16(slot)) }, lexSlots
 		}
 	case left.Kind == NIdent:
+		// A private name is not a valid for-in/of assignment target.
+		if len(left.Str) > 0 && left.Str[0] == '#' {
+			c.syntaxErrorf("Private field '%s' may not be a for-in/of target", left.Str)
+			return nil, nil
+		}
 		name = left.Str
 	case left.Kind == NArray || left.Kind == NObject || left.Kind == NMember:
 		// Assignment target with no declaration: for ([a,b] of …), for ({x} of …),
