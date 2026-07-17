@@ -803,11 +803,18 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		thisElems := rt.setElements(s)
-		if float64(len(thisElems)) > rec.size {
+		if float64(len(rt.setElements(s))) > rec.size {
 			return mkfalse(), nil
 		}
-		for _, el := range thisElems {
+		// Iterate this set's [[SetData]] live by index (skipping tombstoned slots),
+		// bounded by the length captured up front: rec.[[Has]] may delete elements
+		// from this set, and a deleted element must not be visited (SetDataIndex).
+		thisSize := len(s.keys)
+		for index := 0; index < thisSize && index < len(s.keys); index++ {
+			el := s.keys[index]
+			if el.IsEmpty() {
+				continue
+			}
 			in, e := rt.recordHas(rec, el)
 			if e != nil {
 				return mkundef(), e
@@ -854,7 +861,14 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		}
 		thisElems := rt.setElements(s)
 		if float64(len(thisElems)) <= rec.size {
-			for _, el := range thisElems {
+			// Iterate this set's [[SetData]] live by index: rec.[[Has]] may delete
+			// elements from this set, and a deleted element must not be visited.
+			thisSize := len(s.keys)
+			for index := 0; index < thisSize && index < len(s.keys); index++ {
+				el := s.keys[index]
+				if el.IsEmpty() {
+					continue
+				}
 				in, e := rt.recordHas(rec, el)
 				if e != nil {
 					return mkundef(), e
