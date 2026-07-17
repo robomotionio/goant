@@ -878,46 +878,37 @@ func (rt *Runtime) propKeyString(key Value) (string, *ThrowError) {
 // copyDataProps copies src's own enumerable properties (array indices, string
 // keys, and symbol keys) into target, invoking getters (object spread / rest).
 func (rt *Runtime) copyDataProps(target, src Value) *ThrowError {
+	// CopyDataProperties (7.3.25): ToObject(source), then for each own key in
+	// [[OwnPropertyKeys]] order, if [[GetOwnProperty]] reports it enumerable,
+	// CreateDataPropertyOrThrow(target, key, ? Get(source, key)). Every step goes
+	// through the ordinary object internal methods so a Proxy source dispatches
+	// its ownKeys / getOwnPropertyDescriptor / get traps (a primitive string
+	// boxes to a wrapper whose enumerable own keys are its character indices).
 	if src.IsNullish() {
 		return nil
 	}
-	so := rt.objPtr(src)
-	if so == nil {
-		// Primitive (e.g. string): spread its indexed characters.
-		if src.IsString() {
-			n := utf16Len(rt.strBytes(src))
-			for i := 0; i < n; i++ {
-				v, _ := rt.getElement(src, mknum(float64(i)))
-				rt.setElement(target, mknum(float64(i)), v)
-			}
-		}
-		return nil
+	from, e := rt.toObjectValue(src)
+	if e != nil {
+		return e
 	}
-	if src.Type() == TArr {
-		for i := uint32(0); i < so.arrLen; i++ {
-			if int(i) < len(so.arr) && !so.arr[i].IsEmpty() {
-				rt.setElement(target, mknum(float64(i)), so.arr[i])
-			}
-		}
+	keys, e := rt.ownKeyValues(from)
+	if e != nil {
+		return e
 	}
-	for _, k := range so.ownKeysEnumerable() {
-		v, e := rt.getField(src, k)
+	for _, key := range keys {
+		enum, exists, e := rt.ownKeyEnumerable(from, key)
 		if e != nil {
 			return e
 		}
-		if e := rt.setField(target, k, v); e != nil {
+		if !exists || !enum {
+			continue
+		}
+		v, e := rt.getElement(from, key)
+		if e != nil {
 			return e
 		}
-	}
-	for _, off := range so.ownSymbolKeys() {
-		if d := so.ownDescriptorSym(off); d.exists && d.enumerable {
-			v, e := rt.getFieldSymbol(src, off)
-			if e != nil {
-				return e
-			}
-			if o := rt.objPtr(target); o != nil {
-				o.defineOwnSymbol(off, v, attrDefault)
-			}
+		if e := rt.createDataProperty(target, key, v); e != nil {
+			return e
 		}
 	}
 	return nil
