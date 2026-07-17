@@ -360,11 +360,20 @@ func (p *parser) mkStringFromTok() *Node {
 	// A directive's Use Strict form must match the RAW source `use strict`; any
 	// escape sequence or line continuation (both start with a backslash) makes the
 	// raw text differ from the cooked value, so it is not a Use Strict Directive.
+	// A LegacyOctalEscapeSequence / NonOctalDecimalEscapeSequence (`\1`–`\9`, or
+	// `\0` immediately followed by a digit) additionally makes the literal illegal
+	// in strict code — recorded for the directive-prologue early error.
 	for i := 0; i < len(raw); i++ {
-		if raw[i] == '\\' {
-			n.Flags |= fnStrHadEscape
-			break
+		if raw[i] != '\\' || i+1 >= len(raw) {
+			continue
 		}
+		n.Flags |= fnStrHadEscape
+		if c := raw[i+1]; c >= '1' && c <= '9' {
+			n.Flags |= fnStrLegacyOctal
+		} else if c == '0' && i+2 < len(raw) && raw[i+2] >= '0' && raw[i+2] <= '9' {
+			n.Flags |= fnStrLegacyOctal
+		}
+		i++ // skip the escaped character so `\\1` is not misread as `\1`
 	}
 	return n
 }
@@ -433,6 +442,18 @@ func (p *parser) parseStmtList(out *[]*Node, stopAtRBrace, directiveCtx bool) {
 		}
 		if isUseStrict(stmt) {
 			p.lx.strict = true
+			// A "use strict" directive makes the whole function strict, including any
+			// earlier prologue string. A prologue string before it that used a legacy
+			// octal / non-octal decimal escape is now an illegal strict string literal.
+			for _, prior := range *out {
+				if prior.Kind == NString && prior.Flags&fnStrLegacyOctal != 0 {
+					p.errorf("Octal escape sequences are not allowed in strict mode")
+					break
+				}
+			}
+			if p.hasErr() {
+				break
+			}
 		}
 	}
 	p.lx.strict = savedStrict

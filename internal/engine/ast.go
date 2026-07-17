@@ -119,6 +119,7 @@ const (
 	nodeRestComma     = 1 << 21 // an array literal whose rest element is followed by a comma (invalid as a binding/assignment pattern)
 	nodeHasCoverInit  = 1 << 22 // an object literal with a CoverInitializedName (`{x = 1}`) — valid only when reinterpreted as a destructuring pattern
 	fnStrHadEscape    = 1 << 23 // a string literal whose raw text contained a backslash (escape or line continuation), so it cannot be a Use Strict Directive
+	fnStrLegacyOctal  = 1 << 24 // a string literal whose raw text contained a LegacyOctalEscapeSequence or NonOctalDecimalEscapeSequence (\1–\9, \0 followed by a digit) — a Syntax Error in strict code
 )
 
 // Export flags (ant ast.h EX_*).
