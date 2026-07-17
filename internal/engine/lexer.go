@@ -342,11 +342,13 @@ func htmlCloseAtLineStart(code string, p int) bool {
 			p--
 			continue
 		}
-		// Annex B leniency (as common engines accept): a contiguous `-->` after an
-		// opener/separator can never be a `--` decrement (its operand would be `>`),
-		// so it is treated as an HTML close comment rather than a syntax error.
+		// A `-->` SingleLineHTMLCloseComment is recognized only at the start of a
+		// line. As Annex B leniency (matching common engines), a `-->` directly after
+		// an opening bracket is also taken as a comment — its `--` could not be a
+		// decrement there. A statement separator (`;`, `,`) does NOT get this leniency:
+		// `;-->` is a token sequence and a SyntaxError.
 		switch c {
-		case '{', '(', '[', ';', ',':
+		case '{', '(', '[':
 			return true
 		}
 		return false
