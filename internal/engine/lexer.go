@@ -209,13 +209,11 @@ func (l *lexer) skipToNext(n int) (int, bool) {
 	sawNL := false
 	p := n
 
-	// hashbang at very start
+	// hashbang at very start: runs to the next LineTerminator (LF, CR, or the
+	// UTF-8 LS/PS sequences), which the main whitespace loop below then consumes
+	// (setting sawNL) — so a multi-byte LS/PS terminator is handled uniformly.
 	if p == 0 && end >= 2 && code[0] == '#' && code[1] == '!' {
-		for p += 2; p < end && code[p] != '\n'; p++ {
-		}
-		if p < end {
-			sawNL = true
-			p++
+		for p += 2; p < end && !isSingleByteLineTerm(code[p]) && !isLSorPS(code, p, end); p++ {
 		}
 	}
 
@@ -260,7 +258,9 @@ func (l *lexer) skipToNext(n int) (int, bool) {
 						closed = true
 						break
 					}
-					if code[p] == '\n' {
+					// A MultiLineComment containing any LineTerminator (LF, CR, or the
+					// LS/PS sequences) counts as a LineTerminator for ASI.
+					if code[p] == '\n' || code[p] == '\r' || (code[p] >= 0x80 && isLSorPS(code, p, end)) {
 						sawNL = true
 					}
 					p++
