@@ -619,6 +619,12 @@ func (p *parser) parseMemberSuffix(left *Node, la Token) *Node {
 		mem := p.mk(NMember)
 		mem.Left = left
 		if p.tok() == TokHash {
+			// SuperProperty is `super.IdentifierName` / `super[Expression]` only: a
+			// private name after `super.` (`super.#x`) is an early SyntaxError.
+			if left != nil && left.Kind == NIdent && left.Str == "super" {
+				p.errorf("a private member cannot be accessed via 'super'")
+				return p.mk(NEmpty)
+			}
 			if !p.privateNameAdjacent() || !isPrivateIdentLikeTok(p.tok()) {
 				p.errorf("private field name expected")
 				return p.mk(NEmpty)
