@@ -29,6 +29,7 @@ type evalBinding struct {
 	kind      evalBindKind
 	slot      int  // caller local slot (evalBindLocal) or upvalue index (evalBindUpval)
 	isConst   bool
+	selfName  bool // a named function expression's immutable self-reference (reassignment: strict TypeError / sloppy no-op)
 	isLexical bool // a let/const/class binding — an eval `var` may not shadow it
 }
 
@@ -125,14 +126,14 @@ func (c *compiler) captureEvalScope() *evalScope {
 			continue
 		}
 		seen[lv.name] = true
-		sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindLocal, slot: i, isConst: lv.isConst, isLexical: lv.blockScoped})
+		sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindLocal, slot: i, isConst: lv.isConst, selfName: lv.selfName, isLexical: lv.blockScoped})
 	}
 	for i, u := range c.upvalues {
 		if seen[u.name] || !borrowableName(u.name) {
 			continue
 		}
 		seen[u.name] = true
-		sc.bindings = append(sc.bindings, evalBinding{name: u.name, kind: evalBindUpval, slot: i, isConst: u.isConst})
+		sc.bindings = append(sc.bindings, evalBinding{name: u.name, kind: evalBindUpval, slot: i, isConst: u.isConst, selfName: u.selfName})
 	}
 	// Enclosing-scope locals the eval may reach: force each into this function's
 	// upvalue chain (creating the transitive captures) and borrow it as an upvalue.
@@ -144,7 +145,7 @@ func (c *compiler) captureEvalScope() *evalScope {
 			}
 			seen[lv.name] = true
 			if uv := c.resolveUpvalue(lv.name); uv >= 0 {
-				sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindUpval, slot: uv, isConst: c.upvalues[uv].isConst, isLexical: lv.blockScoped})
+				sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindUpval, slot: uv, isConst: c.upvalues[uv].isConst, selfName: c.upvalues[uv].selfName, isLexical: lv.blockScoped})
 			}
 		}
 	}
@@ -314,10 +315,11 @@ func (c *compiler) resolveBorrowed(name string) int {
 	for _, b := range c.borrowed.bindings {
 		if b.name == name {
 			c.upvalues = append(c.upvalues, upvalDesc{
-				index:   b.slot,
-				isLocal: b.kind == evalBindLocal,
-				isConst: b.isConst,
-				name:    name,
+				index:    b.slot,
+				isLocal:  b.kind == evalBindLocal,
+				isConst:  b.isConst,
+				selfName: b.selfName,
+				name:     name,
 			})
 			return len(c.upvalues) - 1
 		}
