@@ -2986,7 +2986,11 @@ func (p *parser) parseStmt() *Node {
 		saved := p.lx.save()
 		p.consume()
 		p.next()
-		if p.tok() == TokUsing {
+		if p.tok() == TokUsing && p.usingBeginsDeclaration() {
+			// `await using` is a declaration only when `using` is immediately (no
+			// LineTerminator) followed by a BindingIdentifier — not `[` (so
+			// `await using[0]` is indexing) and not across a newline (so
+			// `await using\nlet = 1` is `await using;` then `let = 1`).
 			if !p.usingAllowed {
 				p.errorf("'await using' declarations are not allowed in this position")
 				return p.mk(NEmpty)
