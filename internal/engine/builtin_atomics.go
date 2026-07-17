@@ -1,5 +1,7 @@
 package engine
 
+import "math"
+
 // SharedArrayBuffer + Atomics (ant modules/atomics.c). goant is single-threaded,
 // so a SharedArrayBuffer is an ordinary byte buffer and the Atomics operations
 // are plain (non-interleaved) read-modify-writes over an integer TypedArray view.
@@ -127,6 +129,18 @@ func (rt *Runtime) initAtomics() {
 	})
 	rt.defMethod(ao, "notify", 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return mknum(0), nil
+	})
+	// Atomics.pause([iterationNumber]): a spin-loop hint. iterationNumber, if
+	// present, must be an integral Number; the operation itself is a no-op here
+	// (goant is single-threaded) and returns undefined.
+	rt.defMethod(ao, "pause", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if n := arg(args, 0); !n.IsUndefined() {
+			v := n.Number()
+			if !n.IsNumber() || math.IsNaN(v) || math.IsInf(v, 0) || v != math.Trunc(v) {
+				return mkundef(), rt.typeError("Atomics.pause: iterationNumber must be an integral Number")
+			}
+		}
+		return mkundef(), nil
 	})
 	rt.setStringTag(atomics, "Atomics")
 	rt.defGlobal("Atomics", atomics)
