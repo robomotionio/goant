@@ -225,6 +225,213 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 	return out.String(), reverse, kinds, nil
 }
 
+// isRegexSyntaxChar reports whether c is a SyntaxCharacter: one whose sole
+// IdentityEscape form (`\c`) is legal in Unicode mode.
+func isRegexSyntaxChar(c rune) bool {
+	switch c {
+	case '^', '$', '\\', '.', '*', '+', '?', '(', ')', '[', ']', '{', '}', '|':
+		return true
+	}
+	return false
+}
+
+// isClassEscapeLetter reports whether c introduces a CharacterClassEscape
+// (`\d \D \s \S \w \W`), which may not stand as an endpoint of a ClassRange.
+func isClassEscapeLetter(c rune) bool {
+	switch c {
+	case 'd', 'D', 's', 'S', 'w', 'W':
+		return true
+	}
+	return false
+}
+
+// isQuantifierBrace reports whether rs[i] == '{' begins a valid quantifier
+// `{n}` / `{n,}` / `{n,m}`. In Unicode mode a `{` that does not is an error.
+func isQuantifierBrace(rs []rune, i int) bool {
+	j := i + 1
+	digits := 0
+	for j < len(rs) && rs[j] >= '0' && rs[j] <= '9' {
+		j++
+		digits++
+	}
+	if digits == 0 {
+		return false
+	}
+	if j < len(rs) && rs[j] == ',' {
+		j++
+		for j < len(rs) && rs[j] >= '0' && rs[j] <= '9' {
+			j++
+		}
+	}
+	return j < len(rs) && rs[j] == '}'
+}
+
+// validateUnicodePattern enforces the Unicode-mode (`u`/`v`) Pattern early errors
+// that Annex B permits under the plain grammar but Unicode mode forbids, and that
+// regexp2 does not report: an unrecognized IdentityEscape (`\M`, `\a`, `\c` not
+// followed by a control letter), a decimal escape or named backreference to a
+// group that does not exist, a lone `{` that is not a quantifier, and a
+// ClassRange with a CharacterClassEscape endpoint (`[\d-a]`). It runs only in
+// Unicode mode, where these are all SyntaxErrors.
+func validateUnicodePattern(pattern string, unicodeSets bool) error {
+	rs := []rune(pattern)
+
+	// Pass 1: count capturing groups and collect named-group names, so a
+	// backreference can be checked against what actually exists.
+	groupCount := 0
+	named := map[string]bool{}
+	inClass := false
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' {
+			i++
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			continue
+		}
+		switch {
+		case c == '[':
+			inClass = true
+		case c == '(' && !(i+1 < len(rs) && rs[i+1] == '?'):
+			groupCount++
+		case c == '(' && i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
+			!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')):
+			groupCount++
+			if name, end, err := decodeGroupName(rs, i+3); err == nil {
+				named[name] = true
+				i = end
+			}
+		}
+	}
+
+	// Pass 2: validate escapes, the lone-`{` quantifier rule, and class ranges.
+	inClass = false
+	prevClassEsc := false // previous class atom was a CharacterClassEscape
+	haveLeft := false     // a left ClassAtom exists (a range may follow)
+	for i := 0; i < len(rs); {
+		c := rs[i]
+		if c == '\\' {
+			adv, classEsc, err := validateUEscape(rs, i, inClass, groupCount, named)
+			if err != nil {
+				return err
+			}
+			if inClass {
+				prevClassEsc = classEsc
+				haveLeft = true
+			}
+			i += adv
+			continue
+		}
+		if !inClass {
+			switch {
+			case c == '[':
+				inClass = true
+				prevClassEsc = false
+				haveLeft = false
+			case c == '{' && !isQuantifierBrace(rs, i):
+				return fmt.Errorf("lone `{` is not a valid quantifier in unicode mode")
+			}
+			i++
+			continue
+		}
+		// Inside a character class.
+		switch {
+		case c == ']':
+			inClass = false
+		case c == '-' && !unicodeSets && haveLeft && i+1 < len(rs) && rs[i+1] != ']':
+			// A ClassRange `left - right`: neither endpoint may be a class escape.
+			// (Only in plain `u` mode; under `v`, `--` is the set-difference operator
+			// and class contents are checked by validateVModeClasses.)
+			if prevClassEsc {
+				return fmt.Errorf("invalid class range with a character-class-escape endpoint")
+			}
+			if rs[i+1] == '\\' && i+2 < len(rs) && isClassEscapeLetter(rs[i+2]) {
+				return fmt.Errorf("invalid class range with a character-class-escape endpoint")
+			}
+			haveLeft = false
+			prevClassEsc = false
+		default:
+			haveLeft = true
+			prevClassEsc = false
+		}
+		i++
+	}
+	return nil
+}
+
+// validateUEscape validates the escape at rs[i] ('\\') in Unicode mode, returning
+// the number of runes it spans and whether it is a CharacterClassEscape.
+func validateUEscape(rs []rune, i int, inClass bool, groupCount int, named map[string]bool) (adv int, classEsc bool, err error) {
+	if i+1 >= len(rs) {
+		return 0, false, fmt.Errorf("trailing backslash in regular expression")
+	}
+	n := rs[i+1]
+	switch {
+	case isClassEscapeLetter(n):
+		return 2, true, nil
+	case n == 'b' || n == 'B' || n == 'f' || n == 'n' || n == 'r' || n == 't' || n == 'v':
+		return 2, false, nil
+	case isRegexSyntaxChar(n) || n == '/' || n == '-':
+		return 2, false, nil
+	case n == '0':
+		return 2, false, nil
+	case n == 'x' || n == 'u' || n == 'p' || n == 'P' || n == 'q':
+		// Consume a brace-delimited escape — `\u{…}`, `\p{…}`, `\P{…}`, `\q{…}` —
+		// wholesale so its `{` is not misread as a lone quantifier brace. `\uHHHH`
+		// / `\xHH` have no braces; their hex digits are left to regexp2.
+		if i+2 < len(rs) && rs[i+2] == '{' {
+			j := i + 3
+			for j < len(rs) && rs[j] != '}' {
+				j++
+			}
+			if j >= len(rs) {
+				return 0, false, fmt.Errorf("unterminated `\\%c{…}` escape in unicode mode", n)
+			}
+			return j - i + 1, false, nil
+		}
+		return 2, false, nil
+	case n == 'c':
+		if i+2 < len(rs) && isASCIILetter(rs[i+2]) {
+			return 3, false, nil
+		}
+		return 0, false, fmt.Errorf("invalid `\\c` control escape in unicode mode")
+	case n == 'k':
+		if inClass {
+			return 2, false, nil // no named backreference inside a class; stay lenient
+		}
+		if i+2 >= len(rs) || rs[i+2] != '<' {
+			return 0, false, fmt.Errorf("`\\k` must name a group in unicode mode")
+		}
+		name, end, e := decodeGroupName(rs, i+3)
+		if e != nil {
+			return 0, false, fmt.Errorf("incomplete `\\k` group name in unicode mode")
+		}
+		if name == "" || !named[name] {
+			return 0, false, fmt.Errorf("`\\k` references an undefined group name")
+		}
+		return end - i + 1, false, nil
+	case n >= '1' && n <= '9':
+		if inClass {
+			return 2, false, nil // a decimal escape in a class is left to regexp2
+		}
+		j, val := i+1, 0
+		for j < len(rs) && rs[j] >= '0' && rs[j] <= '9' {
+			val = val*10 + int(rs[j]-'0')
+			j++
+		}
+		if val > groupCount {
+			return 0, false, fmt.Errorf("backreference \\%d to a nonexistent group in unicode mode", val)
+		}
+		return j - i, false, nil
+	default:
+		return 0, false, fmt.Errorf("invalid identity escape `\\%c` in unicode mode", n)
+	}
+}
+
 // validateModifierGroups checks ECMAScript inline modifier groups — `(?flags:…)`
 // and `(?flags-flags:…)` from the Pattern Modifiers proposal — for the early
 // errors the grammar imposes: every flag is one of i, m, s; no flag repeats

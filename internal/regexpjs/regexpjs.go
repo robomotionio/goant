@@ -152,6 +152,14 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if err := validateDuplicateGroupNames(pattern); err != nil {
 		return nil, fmt.Errorf("invalid regular expression: %v", err)
 	}
+	// Unicode mode (`u`/`v`) forbids Annex B leniencies — unrecognized identity
+	// escapes, backreferences to nonexistent groups, a lone `{`, class ranges with
+	// a class-escape endpoint — that regexp2 would otherwise accept.
+	if r.Unicode {
+		if err := validateUnicodePattern(pattern, r.UnicodeSets); err != nil {
+			return nil, fmt.Errorf("invalid regular expression: %v", err)
+		}
+	}
 	// The `v` flag imposes stricter ClassSetExpression early errors than `u`.
 	if r.UnicodeSets {
 		if err := validateVModeClasses(pattern); err != nil {
