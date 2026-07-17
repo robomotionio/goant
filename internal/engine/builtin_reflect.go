@@ -197,7 +197,12 @@ func (rt *Runtime) initReflectBuiltin() {
 		if has, isCanon := rt.typedArrayCanonicalHas(arg(args, 0), name); isCanon {
 			return mkbool(has), nil // integer-indexed exotic [[HasProperty]]
 		}
-		return mkbool(rt.hasProp(arg(args, 0), name)), nil
+		// hasPropE so a Proxy [[HasProperty]] trap's abrupt completion propagates.
+		has, he := rt.hasPropE(arg(args, 0), name)
+		if he != nil {
+			return mkundef(), he
+		}
+		return mkbool(has), nil
 	})
 	rt.defMethod(ro, "deleteProperty", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		target := arg(args, 0)

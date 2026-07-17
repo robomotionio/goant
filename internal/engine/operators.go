@@ -235,7 +235,9 @@ func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
 	if has, isCanon := rt.typedArrayCanonicalHas(obj, name); isCanon {
 		return has, nil // integer-indexed exotic [[HasProperty]]: no prototype walk
 	}
-	return rt.hasProp(obj, name), nil
+	// hasPropE (not hasProp) so a Proxy [[HasProperty]] trap's abrupt completion in
+	// the prototype chain propagates out of the `in` operator.
+	return rt.hasPropE(obj, name)
 }
 
 // ordinaryHasInstance implements OrdinaryHasInstance(C, O): a non-callable C is
