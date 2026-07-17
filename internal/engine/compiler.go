@@ -812,7 +812,16 @@ func (c *compiler) compileVarDecl(n *Node) {
 		if asGlobal {
 			if decl.Right != nil {
 				c.compileExpr(decl.Right)
-				c.emitGlobalPut(name)
+				// The initializer assignment resolves the name to the nearest binding:
+				// a block-scoped local shadowing it (e.g. a catch parameter) takes
+				// precedence over the global var binding — Annex B.3.5:
+				// `catch (e) { var e = … }` assigns to the catch parameter, leaving the
+				// outer/global `e` untouched.
+				if slot := c.resolveLocal(name); slot >= 0 {
+					c.emitOpU16(OpPutLocal, uint16(slot))
+				} else {
+					c.emitGlobalPut(name)
+				}
 			}
 			// A bare `var x;` at top level leaves any existing global intact.
 			continue
