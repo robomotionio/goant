@@ -1251,6 +1251,15 @@ func (c *compiler) compileUpdate(n *Node) {
 		c.compileMemberUpdate(n)
 		return
 	}
+	if target != nil && target.Kind == NCall {
+		// Annex B web-compat (sloppy): a CallExpression update target evaluates the
+		// call and then throws a ReferenceError — GetValue on the non-reference
+		// throws before the value is coerced to a number.
+		c.compileExpr(target)
+		c.emit(OpPop)
+		c.emitCallTargetRefError()
+		return
+	}
 	if target == nil || target.Kind != NIdent {
 		c.errorf("only identifier increment/decrement is supported (slice)")
 		return
@@ -1383,6 +1392,17 @@ func (c *compiler) emitConstAssignError() {
 	c.emitByte(0) // TypeError
 }
 
+// emitCallTargetRefError throws the runtime ReferenceError for a sloppy-mode
+// CallExpression assignment/update target (Annex B web-compat), after the target
+// and any operand have already been evaluated for their side effects.
+func (c *compiler) emitCallTargetRefError() {
+	c.emit(OpUndef) // nominal expression value (preempted by the throw below)
+	idx := c.constant(c.rt.internString("Invalid assignment target"))
+	c.emit(OpThrowError)
+	c.emitU32(uint32(idx))
+	c.emitByte(1) // ReferenceError
+}
+
 func (c *compiler) compileAssign(n *Node) {
 	// Destructuring assignment: [a,b]=rhs / ({x}=rhs). Yields the RHS value.
 	if n.Op == TokAssign && n.Left != nil && (n.Left.Kind == NArray || n.Left.Kind == NObject) {
@@ -1393,6 +1413,17 @@ func (c *compiler) compileAssign(n *Node) {
 	}
 	if n.Left != nil && n.Left.Kind == NMember {
 		c.compileMemberAssign(n)
+		return
+	}
+	if n.Left != nil && n.Left.Kind == NCall {
+		// Annex B web-compat (sloppy): a CallExpression assignment target evaluates
+		// the call (the "reference") and then throws a ReferenceError before the RHS
+		// is evaluated or the target coerced — a plain `=` reaches PutValue, and a
+		// compound assignment's GetValue on the non-reference throws, both before the
+		// right-hand side runs.
+		c.compileExpr(n.Left) // evaluate the call for its side effects
+		c.emit(OpPop)
+		c.emitCallTargetRefError()
 		return
 	}
 	// Assignment to a non-reference literal (undefined/null/this/true/…) is a

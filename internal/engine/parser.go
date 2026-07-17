@@ -1753,7 +1753,7 @@ func (p *parser) parsePostfix() *Node {
 		return p.mk(NEmpty)
 	}
 	if (la == TokPostInc || la == TokPostDec) && !p.hadNewline() {
-		if !isValidAssignTarget(n, true) { // ++/-- need a simple assignment target
+		if !isValidAssignTarget(n, true) && !(n.Kind == NCall && !p.lx.strict) { // ++/-- need a simple assignment target
 			p.errorf("Invalid left-hand side expression in postfix operation")
 			return p.mk(NEmpty)
 		}
@@ -1804,7 +1804,7 @@ func (p *parser) parseUnary() *Node {
 	if la == TokPostInc || la == TokPostDec {
 		p.consume()
 		target := p.parseUnary()
-		if !isValidAssignTarget(target, true) { // ++/-- need a simple assignment target
+		if !isValidAssignTarget(target, true) && !(target.Kind == NCall && !p.lx.strict) { // ++/-- need a simple assignment target
 			p.errorf("Invalid left-hand side expression in prefix operation")
 			return p.mk(NEmpty)
 		}
@@ -1995,8 +1995,9 @@ func (p *parser) parseAssign() *Node {
 		// The target must be a valid AssignmentTarget: an identifier or member
 		// reference, or (for plain `=`) an array/object destructuring pattern.
 		// Anything else (a literal, call, `this`, binary/update expression, …) is
-		// an early SyntaxError.
-		if !isValidAssignTarget(left, op != TokAssign) {
+		// an early SyntaxError — except a CallExpression in sloppy code, which the
+		// Annex B web-compat semantics defer to a runtime ReferenceError.
+		if !isValidAssignTarget(left, op != TokAssign) && !(left.Kind == NCall && !p.lx.strict) {
 			p.errorf("Invalid left-hand side in assignment")
 			return p.mk(NEmpty)
 		}
