@@ -322,6 +322,11 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	c.emit(OpForAwaitOf) // source -> asyncIter
 	iterSlot := c.addLocal("*fai*", false)
 	c.emitOpU16(OpPutLocal, uint16(iterSlot))
+	// GetAsyncIterator reads `next` once (part of the Iterator Record); cache it.
+	nextSlot := c.addLocal("*fan*", false)
+	c.emitOpU16(OpGetLocal, uint16(iterSlot))
+	c.emitFieldOp(OpGetField, "next")
+	c.emitOpU16(OpPutLocal, uint16(nextSlot))
 	resSlot := c.addLocal("*far*", false)
 	// needsClose flag: an abrupt completion (break/return/throw) out of the body
 	// closes the iterator; stepping (await next(), the done/value reads) and normal
@@ -335,9 +340,9 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	condStart := len(c.fn.code)
 	c.emit(OpFalse)
 	c.emitOpU16(OpPutLocal, uint16(closeSlot))
-	// result = await iter.next()
+	// result = await Call(nextMethod, iter) — the cached next.
 	c.emitOpU16(OpGetLocal, uint16(iterSlot))
-	c.emitFieldOp(OpGetField2, "next") // [iter, next]
+	c.emitOpU16(OpGetLocal, uint16(nextSlot)) // [iter, next]
 	c.emit(OpCallMethod)
 	c.emitU16(0)    // [promise]
 	c.emit(OpAwait) // [result]
