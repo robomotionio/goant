@@ -167,7 +167,14 @@ func (rt *Runtime) initAnnexBString() {
 
 	// HTML wrapper methods (String.prototype.anchor etc.).
 	htmlMethod := func(name, tag, attr string) {
-		rt.defMethod(proto, name, 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// Only the attribute-taking wrappers (anchor/link/fontcolor/fontsize) have a
+		// formal parameter; the plain tag wrappers (big/bold/…) take none, so their
+		// .length is 0.
+		length := 0
+		if attr != "" {
+			length = 1
+		}
+		rt.defMethod(proto, name, length, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			s, e := rt.toStringValue(this)
 			if e != nil {
 				return mkundef(), e
