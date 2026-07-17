@@ -219,6 +219,12 @@ func (c *compiler) compileForOf(n *Node) {
 	c.emitByte(0)      // Size-2 opcode: unused inline operand
 	iterSlot := c.addLocal("*foi*", false)
 	c.emitOpU16(OpPutLocal, uint16(iterSlot))
+	// GetIterator reads `next` exactly once (it is part of the Iterator Record);
+	// cache it so a later iteration cannot observe a re-read of iterator.next.
+	nextSlot := c.addLocal("*fon*", false)
+	c.emitOpU16(OpGetLocal, uint16(iterSlot))
+	c.emitFieldOp(OpGetField, "next")
+	c.emitOpU16(OpPutLocal, uint16(nextSlot))
 	resSlot := c.addLocal("*for*", false)
 	// needsClose gates IteratorClose. It is cleared while the iterator is being
 	// stepped — a throw from next(), a done/value getter, etc. must NOT close the
@@ -241,9 +247,9 @@ func (c *compiler) compileForOf(n *Node) {
 	// value) is not covered — those throwing propagates without a close.
 	c.emit(OpFalse)
 	c.emitOpU16(OpPutLocal, uint16(closeSlot))
-	// result = iter.next()
+	// result = Call(nextMethod, iter) — the cached next, receiver = the iterator.
 	c.emitOpU16(OpGetLocal, uint16(iterSlot))
-	c.emitFieldOp(OpGetField2, "next") // [iter, next]
+	c.emitOpU16(OpGetLocal, uint16(nextSlot)) // [iter, next]
 	c.emit(OpCallMethod)
 	c.emitU16(0) // [result]
 	c.emitOpU16(OpPutLocal, uint16(resSlot))
