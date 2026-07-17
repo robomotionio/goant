@@ -783,6 +783,10 @@ func (c *compiler) compileVarDecl(n *Node) {
 				return
 			}
 			slot := c.declareLexical(decl.Left.Str, false)
+			// TDZ: the binding is dead until its initializer completes, so a
+			// self-reference in the initializer (`using x = x`) is a ReferenceError.
+			c.emit(OpEmpty)
+			c.emitOpU16(OpPutLocal, uint16(slot))
 			c.emitOpU16(OpGetLocal, uint16(c.usingStack)) // entries
 			if decl.Right != nil {
 				// NamedEvaluation: `using x = () => {}` names the anonymous value "x".
