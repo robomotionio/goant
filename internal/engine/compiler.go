@@ -768,6 +768,8 @@ func (c *compiler) compileVarDecl(n *Node) {
 			slot := c.declareLexical(decl.Left.Str, false)
 			c.emitOpU16(OpGetLocal, uint16(c.usingStack)) // entries
 			if decl.Right != nil {
+				// NamedEvaluation: `using x = () => {}` names the anonymous value "x".
+				nameAnonExpr(decl.Right, decl.Left.Str)
 				c.compileExpr(decl.Right)
 			} else {
 				c.emit(OpUndef)
