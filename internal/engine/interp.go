@@ -311,6 +311,11 @@ restart:
 			ip++
 		case OpWithGetVar:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			// Reference mode (high bit of the fallback-kind byte): also push the
+			// resolved base beneath the value, so a paired OpWithPutVar can write
+			// back to the same base (compound assignment; see emitWithVarRef).
+			refMode := code[ip+7]&0x80 != 0
+			fbKind := code[ip+7] & 0x7f
 			found := false
 			for k := len(withStack) - 1; k >= 0; k-- {
 				has, e := rt.hasPropE(withStack[k], name)
@@ -324,15 +329,21 @@ restart:
 						thrown = e
 						goto unwind
 					}
+					if refMode {
+						push(withStack[k]) // base
+					}
 					push(v)
 					found = true
 					break
 				}
 			}
 			if !found {
+				if refMode {
+					push(tEmpty) // base marker: use the lexical fallback on write
+				}
 				// No with-object binds the name: fall back to the lexical resolution
 				// the compiler baked into the spare operand bytes (kind@ip+7, index@ip+5).
-				switch code[ip+7] {
+				switch fbKind {
 				case 1: // local slot
 					lv := locals[readU16(code, ip+5)]
 					if lv.IsEmpty() {
@@ -355,7 +366,32 @@ restart:
 			ip += 8
 		case OpWithPutVar:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			refMode := code[ip+7]&0x80 != 0
+			fbKind := code[ip+7] & 0x7f
 			val := pop()
+			if refMode {
+				// Reference mode: write to the base captured by the paired
+				// OpWithGetVar (compound assignment). tEmpty means "use the lexical
+				// fallback". The assignment value is left on the stack (it is an
+				// expression).
+				base := pop()
+				if base.IsEmpty() {
+					switch fbKind {
+					case 1:
+						locals[readU16(code, ip+5)] = val
+					case 2:
+						cl.upvalues[readU16(code, ip+5)].set(val)
+					default:
+						rt.setProp(rt.global, name, val)
+					}
+				} else if e := rt.setField(base, name, val); e != nil {
+					thrown = e
+					goto unwind
+				}
+				push(val)
+				ip += 8
+				continue
+			}
 			stored := false
 			for k := len(withStack) - 1; k >= 0; k-- {
 				has, e := rt.hasPropE(withStack[k], name)
@@ -374,7 +410,7 @@ restart:
 			}
 			if !stored {
 				// Fall back to the compiler's lexical resolution (see OpWithGetVar).
-				switch code[ip+7] {
+				switch fbKind {
 				case 1: // local slot
 					locals[readU16(code, ip+5)] = val
 				case 2: // upvalue

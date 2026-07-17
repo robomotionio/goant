@@ -1058,6 +1058,27 @@ func (c *compiler) emitWithVar(op Opcode, name string) {
 	c.emitByte(fbKind)
 }
 
+// emitWithVarRef emits a with-scoped access in *reference* mode (fallback-kind
+// high bit 0x80): OpWithGetVar pushes the resolved base object (or the tEmpty
+// marker for the lexical fallback) beneath the value, and OpWithPutVar consumes
+// that same base to write back — so a compound assignment reuses one Reference
+// across its read and write, as PutValue requires even when a getter deletes the
+// binding in between.
+func (c *compiler) emitWithVarRef(op Opcode, name string) {
+	idx := c.constant(c.rt.internString(name))
+	var fbKind byte = 0x80
+	var fbIdx int
+	if slot := c.resolveLocal(name); slot >= 0 {
+		fbKind, fbIdx = 0x80|1, slot
+	} else if uv := c.resolveUpvalue(name); uv >= 0 {
+		fbKind, fbIdx = 0x80|2, uv
+	}
+	c.emit(op)
+	c.emitU32(uint32(idx))
+	c.emitU16(uint16(fbIdx))
+	c.emitByte(fbKind)
+}
+
 func (c *compiler) compileBinary(n *Node) {
 	// Private brand check `#x in obj`: the LHS is a private name, keyed as its
 	// string form rather than loaded as a variable.
@@ -1445,9 +1466,18 @@ func (c *compiler) compileAssign(n *Node) {
 			c.errorf("unsupported compound assignment %v (slice)", n.Op)
 			return
 		}
+		if c.withDepth > 0 {
+			// Base-caching compound assignment inside `with`: resolve the reference
+			// once (ref mode) so the read and the write target the same base, per
+			// PutValue — even when a with-object getter deletes the binding between
+			// the read and the write.
+			c.emitWithVarRef(OpWithGetVar, name) // [base, oldval]
+			c.compileExpr(n.Right)               // [base, oldval, rhs]
+			c.emit(op)                           // [base, result]
+			c.emitWithVarRef(OpWithPutVar, name) // [result]
+			return
+		}
 		switch {
-		case c.withDepth > 0:
-			c.emitWithVar(OpWithGetVar, name)
 		case slot >= 0:
 			c.emitOpU16(OpGetLocal, uint16(slot))
 		case uv >= 0:
@@ -1459,10 +1489,11 @@ func (c *compiler) compileAssign(n *Node) {
 		c.emit(op)
 	}
 
-	// Inside a `with`, route the store to the with-object(s) first (emitWithVar
-	// carries the lexical fallback), so a with-object property shadows a same-named
-	// local/upvalue. The value produced above stays on the stack (assignment is an
-	// expression) via the OpDup below.
+	// Inside a `with`, route a plain assignment to the with-object(s) first
+	// (emitWithVar carries the lexical fallback), so a with-object property shadows
+	// a same-named local/upvalue. The value produced above stays on the stack
+	// (assignment is an expression) via the OpDup below. (A compound assignment
+	// inside `with` was already handled above via the base-caching ref path.)
 	if c.withDepth > 0 {
 		c.emit(OpDup)
 		c.emitWithVar(OpWithPutVar, name)
