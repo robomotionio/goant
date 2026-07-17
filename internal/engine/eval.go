@@ -50,11 +50,13 @@ type evalScope struct {
 	// rather than on the global object).
 	inFunction bool
 
-	// paramArgsConflict marks a direct eval in the parameter-expression scope of a
-	// non-arrow function, where the parameter environment binds `arguments`. A
-	// var declaration of `arguments` in the eval body then conflicts:
-	// EvalDeclarationInstantiation reports a SyntaxError.
-	paramArgsConflict bool
+	// paramNames is the set of formal-parameter names bound in the parameter
+	// environment of a direct eval in a parameter-expression scope (and, for a
+	// non-arrow function, `arguments`). A var declaration in the eval body that
+	// duplicates one of them conflicts with the parameter binding:
+	// EvalDeclarationInstantiation reports a SyntaxError. nil when the eval is not
+	// in a parameter-expression scope.
+	paramNames map[string]bool
 
 	// inFieldInit marks a direct eval whose nearest non-arrow enclosing context is
 	// a class field initializer (which has no `arguments` binding). Per the
@@ -170,7 +172,9 @@ func (c *compiler) captureEvalScope() *evalScope {
 			break
 		}
 	}
-	sc.paramArgsConflict = c.inParamExpr && !c.fn.isArrow
+	if c.inParamExpr {
+		sc.paramNames = c.paramNames
+	}
 	sc.inFieldInit = c.inClassFieldInitContext()
 	// Snapshot the enclosing class private environments in outermost-first order
 	// (each compiler's own stack is already outer-to-inner), so the eval compiler
@@ -478,12 +482,13 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 	// EvalDeclarationInstantiation: a `var arguments` (or a function named
 	// `arguments`) in a non-arrow function's parameter-expression scope conflicts
 	// with the parameter environment's `arguments` binding — a SyntaxError.
-	if sc.paramArgsConflict {
-		names := evalVarDeclaredNames(prog.Args)
-		if names["arguments"] {
-			ev, _ := rt.construct(rt.errors.syntaxErr,
-				[]Value{rt.newString("Cannot declare 'arguments' in this eval context")})
-			return mkundef(), &ThrowError{Value: ev, rt: rt}
+	if sc.paramNames != nil {
+		for name := range evalVarDeclaredNames(prog.Args) {
+			if sc.paramNames[name] {
+				ev, _ := rt.construct(rt.errors.syntaxErr,
+					[]Value{rt.newString("Cannot declare '" + name + "' in this eval context (it names a parameter)")})
+				return mkundef(), &ThrowError{Value: ev, rt: rt}
+			}
 		}
 	}
 
