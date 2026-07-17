@@ -441,7 +441,10 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 	size := taKinds[kind].size
 	a0 := arg(args, 0)
 	switch {
-	case a0.IsNumber() || a0.IsUndefined():
+	case !a0.IsObjectType() && a0.Type() != TTypedArray:
+		// A non-object first argument (or none) is a length: ToIndex(firstArg). A
+		// Symbol or BigInt first argument throws in ToNumber/ToIndex rather than
+		// being mistaken for an (empty) array-like source.
 		n, e := rt.toIndex(a0)
 		if e != nil {
 			return mkundef(), e
@@ -497,18 +500,34 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 		}
 		o.ta = ta
 	default:
-		// Iterable or array-like source: copy element-wise.
+		// Object source (22.2.5.1.3): read @@iterator via GetMethod (a present but
+		// non-callable iterator is a TypeError). A defined iterator drives
+		// list-initialization; otherwise a0 is an array-like whose length and
+		// elements are read through [[Get]] (propagating a throwing getter).
 		var items []Value
-		if rt.isIterable(a0) {
+		usingIter, e := rt.getFieldSymbol(a0, rt.symIterator.handle())
+		if e != nil {
+			return mkundef(), e
+		}
+		if !usingIter.IsUndefined() && !usingIter.IsNull() {
+			if !rt.isCallable(usingIter) {
+				return mkundef(), rt.typeError("TypedArray source is not iterable: its Symbol.iterator is not a function")
+			}
 			it, e := rt.iterableValues(a0)
 			if e != nil {
 				return mkundef(), e
 			}
 			items = it
-		} else if src := rt.objPtr(a0); src != nil {
-			n, _ := rt.lengthOf(a0)
+		} else {
+			n, e := rt.lengthOf(a0)
+			if e != nil {
+				return mkundef(), e
+			}
 			for i := 0; i < n; i++ {
-				el, _ := rt.getElement(a0, mknum(float64(i)))
+				el, e := rt.getElement(a0, mknum(float64(i)))
+				if e != nil {
+					return mkundef(), e
+				}
 				items = append(items, el)
 			}
 		}
