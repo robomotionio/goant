@@ -70,20 +70,39 @@ func (o *object) definePrivateField(name string, v Value) bool {
 }
 
 // definePrivateMethod adds a private method (a shared function installed in the
-// object's private environment).
-func (o *object) definePrivateMethod(name string, fn Value) {
+// object's private environment). It reports false (a TypeError to the caller) if
+// a private element of that name already exists — a private method may be
+// installed on a given object only once (e.g. a return-overridden constructor
+// re-run on the same object).
+func (o *object) definePrivateMethod(name string, fn Value) bool {
+	if o.findPriv(name) != nil {
+		return false
+	}
 	o.priv = append(o.priv, privElem{name: name, kind: privMethod, value: fn})
+	return true
 }
 
-// definePrivateAccessor adds (or completes) a private get/set accessor pair.
-func (o *object) definePrivateAccessor(name string, fn Value, isGetter bool) {
-	if e := o.findPriv(name); e != nil && e.kind == privAccessor {
+// definePrivateAccessor adds — or, during a single instance's initialization,
+// completes — a private get/set accessor pair. It reports false (a TypeError)
+// when the half being installed is already present (a second initialization of
+// the same object) or the name is bound to a non-accessor element.
+func (o *object) definePrivateAccessor(name string, fn Value, isGetter bool) bool {
+	if e := o.findPriv(name); e != nil {
+		if e.kind != privAccessor {
+			return false
+		}
 		if isGetter {
+			if !e.getter.IsUndefined() {
+				return false
+			}
 			e.getter = fn
 		} else {
+			if !e.setter.IsUndefined() {
+				return false
+			}
 			e.setter = fn
 		}
-		return
+		return true
 	}
 	pe := privElem{name: name, kind: privAccessor, getter: mkundef(), setter: mkundef()}
 	if isGetter {
@@ -92,6 +111,7 @@ func (o *object) definePrivateAccessor(name string, fn Value, isGetter bool) {
 		pe.setter = fn
 	}
 	o.priv = append(o.priv, pe)
+	return true
 }
 
 // getPrivate implements a private member read `obj.#name`: a brand check

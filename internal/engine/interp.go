@@ -710,13 +710,18 @@ restart:
 			}
 			if isPrivateKey(name) {
 				if o := rt.objPtr(peek()); o != nil {
+					ok := true
 					switch flags {
 					case 1:
-						o.definePrivateAccessor(name, accFn, true)
+						ok = o.definePrivateAccessor(name, accFn, true)
 					case 2:
-						o.definePrivateAccessor(name, accFn, false)
+						ok = o.definePrivateAccessor(name, accFn, false)
 					default:
-						o.definePrivateMethod(name, accFn)
+						ok = o.definePrivateMethod(name, accFn)
+					}
+					if !ok {
+						thrown = rt.typeError("Cannot install private method " + privDisplay(name) + " twice on the same object")
+						goto unwind
 					}
 				}
 				ip += 6
