@@ -143,7 +143,9 @@ func isUnicodeIDStart(r rune) bool {
 	if unicode.In(r, unicode.Lu, unicode.Ll, unicode.Lt, unicode.Lm, unicode.Lo, unicode.Nl) {
 		return true
 	}
-	return isOtherIDStart(r)
+	// idStartExt carries the ID_Start additions from Unicode 15.1/16.0, which Go's
+	// bundled (15.0) category tables above do not yet include.
+	return isOtherIDStart(r) || unicode.Is(idStartExt, r)
 }
 
 func isUnicodeIDContinue(r rune) bool {
@@ -156,7 +158,8 @@ func isUnicodeIDContinue(r rune) bool {
 	if unicode.In(r, unicode.Mn, unicode.Mc, unicode.Nd, unicode.Pc) {
 		return true
 	}
-	return isOtherIDContinue(r)
+	// idContinueExt carries the ID_Continue additions from Unicode 15.1/16.0.
+	return isOtherIDContinue(r) || unicode.Is(idContinueExt, r)
 }
 
 // isOtherIDStart / isOtherIDContinue implement Unicode's Other_ID_Start and
