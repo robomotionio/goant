@@ -367,6 +367,21 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 			}
 		}
 	}
+	if obj.Type() == TTypedArray {
+		// Integer-indexed exotic [[Get]]: a canonical numeric index string that does
+		// not address a live element (the array-index fast path above returned any
+		// in-bounds element) yields undefined WITHOUT consulting the prototype chain.
+		// A number key is always canonical; a string key must round-trip through
+		// CanonicalNumericIndexString ("-0"/"1.5"/"-1"/out-of-range qualify, "1e1"
+		// or "length" do not — those remain ordinary named lookups).
+		isCanon := key.IsNumber()
+		if !isCanon && key.IsString() {
+			_, isCanon = canonicalNumericIndex(string(rt.strBytes(key)))
+		}
+		if isCanon {
+			return mkundef(), nil
+		}
+	}
 	name, e := rt.propKeyString(key)
 	if e != nil {
 		return mkundef(), e
