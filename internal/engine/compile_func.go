@@ -958,7 +958,7 @@ func tailIsCall(n *Node) bool {
 		return false
 	}
 	switch {
-	case n.Kind == NCall:
+	case n.Kind == NCall, n.Kind == NTaggedTemplate:
 		return true
 	case n.Kind == NBinary && (n.Op == TokLand || n.Op == TokLor):
 		return tailIsCall(n.Right)
@@ -980,6 +980,9 @@ func (c *compiler) compileTailReturn(n *Node) bool {
 		return false
 	}
 	switch {
+	case n.Kind == NTaggedTemplate:
+		c.compileTaggedTemplate(n, true) // frame-reusing TAIL_CALL / TAIL_CALL_METHOD
+		return true
 	case n.Kind == NCall:
 		if c.compileTailCall(n) {
 			return true

@@ -1404,7 +1404,7 @@ func (c *compiler) compileChainCall(n *Node, bail *[]int) {
 	c.emitU16(uint16(len(n.Args)))
 }
 
-func (c *compiler) compileTaggedTemplate(n *Node) {
+func (c *compiler) compileTaggedTemplate(n *Node, tail bool) {
 	segs := n.Right.Args
 	// Build the frozen template-strings array (with frozen .raw) once, at compile
 	// time, and store it as a constant: the same object is passed on every
@@ -1427,15 +1427,41 @@ func (c *compiler) compileTaggedTemplate(n *Node) {
 	c.rt.sealObject(raw, true)
 	c.rt.sealObject(cooked, true)
 
-	// tag(strings, ...substitutions)
-	c.compileExpr(n.Left)
+	// tag(strings, ...substitutions). A member tag (obj.tag`...`) is a MemberCall,
+	// so it is invoked with this = obj (OpCallMethod); a plain tag with this =
+	// undefined (OpCall). In a return's tail position, tail is set and the frame is
+	// reused via TAIL_CALL / TAIL_CALL_METHOD.
+	member := n.Left
+	isMember := member != nil && member.Kind == NMember &&
+		!(member.Left != nil && member.Left.Kind == NIdent && member.Left.Str == "super")
+	if isMember {
+		c.compileExpr(member.Left) // [this]
+		if member.Flags&1 != 0 {   // computed key
+			c.emit(OpDup)
+			c.compileExpr(member.Right)
+			c.emit(OpGetElem)
+		} else {
+			c.emitFieldOp(OpGetField2, member.Right.Str) // [this, fn]
+		}
+	} else {
+		c.compileExpr(n.Left) // [fn]
+	}
 	c.emitConst(cooked)
 	nsubs := 0
 	for i := 1; i < len(segs); i += 2 {
 		c.compileExpr(segs[i])
 		nsubs++
 	}
-	c.emit(OpCall)
+	switch {
+	case tail && isMember:
+		c.emit(OpTailCallMethod)
+	case tail:
+		c.emit(OpTailCall)
+	case isMember:
+		c.emit(OpCallMethod)
+	default:
+		c.emit(OpCall)
+	}
 	c.emitU16(uint16(1 + nsubs))
 }
 

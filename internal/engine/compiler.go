@@ -972,7 +972,7 @@ func (c *compiler) compileExpr(n *Node) {
 	case NTemplate:
 		c.compileTemplate(n)
 	case NTaggedTemplate:
-		c.compileTaggedTemplate(n)
+		c.compileTaggedTemplate(n, false)
 	case NTypeof:
 		// `typeof x` where x is a bare (possibly-undeclared) global must not throw:
 		// read it leniently so an absent binding yields "undefined".
