@@ -1091,7 +1091,11 @@ restart:
 			push(mkbool(res))
 			ip += 3
 		case OpBnot:
-			a := pop()
+			a, e := rt.toNumeric(pop())
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
 			if a.Type() == TBigInt {
 				// BigInt::bitwiseNOT: ~x = -(x + 1).
 				push(rt.newBigInt(new(big.Int).Not(rt.bigIntVal(a))))
@@ -1857,7 +1861,33 @@ func (rt *Runtime) jsArith(op Opcode, a, b Value) (Value, *ThrowError) {
 	return mkundef(), rt.typeError("bad arithmetic op")
 }
 
+// toNumeric implements ToNumeric(value): ToPrimitive with hint number, then keep
+// a BigInt or coerce the primitive to a Number. Bitwise and arithmetic operators
+// apply it to each operand BEFORE dispatching the BigInt-vs-Number path, so an
+// object whose valueOf/@@toPrimitive yields a BigInt is not misread as a mix.
+func (rt *Runtime) toNumeric(v Value) (Value, *ThrowError) {
+	p, e := rt.toPrimitive(v, "number")
+	if e != nil {
+		return mkundef(), e
+	}
+	if p.Type() == TBigInt {
+		return p, nil
+	}
+	n, e := rt.toNumber(p)
+	if e != nil {
+		return mkundef(), e
+	}
+	return mknum(n), nil
+}
+
 func (rt *Runtime) jsBitwise(op Opcode, a, b Value) (Value, *ThrowError) {
+	var e *ThrowError
+	if a, e = rt.toNumeric(a); e != nil {
+		return mkundef(), e
+	}
+	if b, e = rt.toNumeric(b); e != nil {
+		return mkundef(), e
+	}
 	if a.Type() == TBigInt || b.Type() == TBigInt {
 		if a.Type() != TBigInt || b.Type() != TBigInt {
 			return mkundef(), rt.typeError("Cannot mix BigInt and other types, use explicit conversions")
