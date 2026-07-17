@@ -14,7 +14,10 @@ func (rt *Runtime) ownDescOf(o *object, pk Value) ownDesc {
 	if pk.IsSymbol() {
 		return o.ownDescriptorSym(pk.handle())
 	}
-	name := string(rt.strBytes(pk))
+	// pk may be a non-string primitive (e.g. a numeric index — ToPropertyKey only
+	// stringifies object keys), so normalize it to its property-key string rather
+	// than reading raw string bytes off a number.
+	name, _ := rt.propKeyString(pk)
 	if idx, ok := canonicalIndex(name); ok {
 		switch {
 		case o.ta != nil:
@@ -180,7 +183,11 @@ func (rt *Runtime) initReflectBuiltin() {
 		if pk.IsSymbol() {
 			return mkbool(rt.hasFieldSymbol(arg(args, 0), pk.handle())), nil
 		}
-		return mkbool(rt.hasProp(arg(args, 0), string(rt.strBytes(pk)))), nil
+		name, ne := rt.propKeyString(pk)
+		if ne != nil {
+			return mkundef(), ne
+		}
+		return mkbool(rt.hasProp(arg(args, 0), name)), nil
 	})
 	rt.defMethod(ro, "deleteProperty", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		target := arg(args, 0)
