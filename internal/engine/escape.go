@@ -161,6 +161,35 @@ func cookString(tok string) string {
 // cookTemplateSegment decodes a template cooked segment over in[start:end]
 // (ant decode_template_segment). Returns the cooked string and whether it is a
 // valid cooked value (invalid → undefined cooked, e.g. bad \u or octal).
+// normalizeCRLF converts each LineTerminatorSequence (a CRLF pair or a lone CR)
+// to a single LF, as a template's raw value (TRV) requires. (The cooked value TV
+// is normalized inline in cookTemplateSegment.) A `\r` escape sequence — the two
+// bytes '\\','r' — is unaffected; only an actual CR byte (0x0D) is a terminator.
+func normalizeCRLF(s string) string {
+	cr := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\r' {
+			cr = i
+			break
+		}
+	}
+	if cr < 0 {
+		return s
+	}
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\r' {
+			out = append(out, '\n')
+			if i+1 < len(s) && s[i+1] == '\n' {
+				i++
+			}
+			continue
+		}
+		out = append(out, s[i])
+	}
+	return string(out)
+}
+
 func cookTemplateSegment(in string, start, end int) (string, bool) {
 	if end <= start {
 		return "", true

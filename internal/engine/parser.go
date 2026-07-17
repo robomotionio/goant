@@ -1020,7 +1020,7 @@ func (p *parser) parseTemplate() *Node {
 		}
 		s := p.mk(NString)
 		s.Flags |= fnTemplateSegment
-		s.Aux = in[base+segStart : base+i]
+		s.Aux = normalizeCRLF(in[base+segStart : base+i])
 		cooked, valid := cookTemplateSegment(in, base+segStart, base+i)
 		if valid {
 			s.Str = cooked
