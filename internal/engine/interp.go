@@ -683,6 +683,16 @@ restart:
 						thrown = rt.typeError("Cannot initialize private field " + privDisplay(name) + " twice on the same object")
 						goto unwind
 					}
+				} else if o.proxy != nil || !o.flags.extensible {
+					// A field / object-literal property is installed with
+					// CreateDataPropertyOrThrow. For a Proxy receiver this must fire the
+					// defineProperty trap, and for a non-extensible/frozen target adding
+					// (or redefining a non-configurable) property throws — route through
+					// the full [[DefineOwnProperty]] rather than the fast slot write.
+					if e := rt.createDataProperty(peek(), rt.internString(name), val); e != nil {
+						thrown = e
+						goto unwind
+					}
 				} else {
 					o.defineOwn(name, val, attrDefault)
 				}
