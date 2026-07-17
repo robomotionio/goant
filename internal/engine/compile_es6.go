@@ -758,10 +758,22 @@ func (c *compiler) emitInstanceFieldInit() {
 			continue
 		}
 		if m.Flags&fnComputed != 0 {
-			// [this] [key] [value] — computed key (evaluated per-instance; a v1
-			// simplification of the once-at-definition rule).
+			// [this] [key] [value]. The computed key was evaluated ONCE at class
+			// definition into a class-scope slot (captured here as an upvalue); read
+			// it rather than re-evaluating the key expression per instance.
 			loadThis()
-			c.compileExpr(m.Left)
+			if i, ok := c.fieldKeys[m]; ok {
+				name := fieldKeySlotName(i)
+				if slot := c.resolveLocal(name); slot >= 0 {
+					c.emitOpU16(OpGetLocal, uint16(slot))
+				} else if uv := c.resolveUpvalue(name); uv >= 0 {
+					c.emitOpU16(OpGetUpval, uint16(uv))
+				} else {
+					c.compileExpr(m.Left) // unreachable: the slot is declared in compileClass
+				}
+			} else {
+				c.compileExpr(m.Left)
+			}
 			if m.Right == nil {
 				c.emit(OpUndef)
 			} else {
@@ -858,6 +870,10 @@ func (c *compiler) privateKey(name string) string {
 	}
 	return name
 }
+
+// fieldKeySlotName is the class-scope local name holding the i-th computed
+// instance-field's pre-evaluated property key.
+func fieldKeySlotName(i int) string { return "*fk" + strconv.Itoa(i) + "*" }
 
 func (c *compiler) compileClass(n *Node) {
 	ctorSlot := c.tempLocal()
@@ -972,6 +988,23 @@ func (c *compiler) compileClass(n *Node) {
 		}
 	}
 
+	// A computed instance-field key is evaluated ONCE at class definition (in
+	// source order, in the element loop below), not per instance. Declare a
+	// class-scope slot for each so the constructor captures it as an upvalue and
+	// emitInstanceFieldInit reads the pre-evaluated key. (Static-field keys already
+	// evaluate once, in the element loop.)
+	var computedFieldKeys map[*Node]int
+	for i, m := range instanceFields {
+		if isInstanceFieldMember(m) && m.Flags&fnComputed != 0 {
+			if computedFieldKeys == nil {
+				computedFieldKeys = map[*Node]int{}
+			}
+			computedFieldKeys[m] = i
+			c.addLocal(fieldKeySlotName(i), false)
+		}
+	}
+	c.pendingFieldKeys = computedFieldKeys // handed to the constructor by compileFunc
+
 	c.compileFunc(ctorFn) // [ctor]
 	c.emitOpU16(OpPutLocal, uint16(ctorSlot))
 
@@ -1022,6 +1055,14 @@ func (c *compiler) compileClass(n *Node) {
 		// Instance fields and private methods/accessors are installed per-instance
 		// by the constructor, not defined here on the prototype.
 		if isInstanceMember(m) {
+			// Evaluate a computed instance-field key ONCE, here, in source order
+			// (interleaved with static-field keys), into its class-scope slot; the
+			// constructor reads it per instance instead of re-evaluating.
+			if i, ok := computedFieldKeys[m]; ok {
+				c.compileExpr(m.Left)
+				c.emit(OpToPropkey)
+				c.emitOpU16(OpPutLocal, uint16(c.resolveLocal(fieldKeySlotName(i))))
+			}
 			continue
 		}
 		if m.Left != nil && m.Left.Kind == NIdent && m.Left.Str == "constructor" && m.Flags&fnStatic == 0 {

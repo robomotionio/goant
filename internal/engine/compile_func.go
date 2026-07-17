@@ -555,10 +555,12 @@ func (c *compiler) compileFunc(n *Node) {
 	// inherits them).
 	child.classFields = c.pendingClassFields
 	child.classDerived = c.pendingClassDerived
+	child.fieldKeys = c.pendingFieldKeys
 	child.fn.isDerivedCtor = child.classDerived && child.fn.isClassCtor
 	child.staticSuper = c.pendingStaticSuper
 	c.pendingClassFields = nil
 	c.pendingClassDerived = false
+	c.pendingFieldKeys = nil
 	c.pendingStaticSuper = false
 	child.compileFunctionBody(n)
 	if child.err != nil {

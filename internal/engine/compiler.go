@@ -93,6 +93,15 @@ type compiler struct {
 	pendingClassFields  []*Node
 	pendingClassDerived bool
 
+	// fieldKeys maps a computed instance-field member node to the class-scope local
+	// slot ("*fkN*") holding its property key, which compileClass evaluates ONCE at
+	// class definition (in source order). The constructor captures the slot as an
+	// upvalue so emitInstanceFieldInit reads the pre-evaluated key rather than
+	// re-evaluating the key expression per instance. pendingFieldKeys hands the map
+	// to the constructor's child compiler.
+	fieldKeys        map[*Node]int
+	pendingFieldKeys map[*Node]int
+
 	// staticSuper marks a static method / static block / static field initializer:
 	// its home object is the constructor, so `super.x` reads from the parent
 	// constructor (*superctor*) rather than the parent prototype (*superproto*).
