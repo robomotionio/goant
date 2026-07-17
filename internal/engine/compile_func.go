@@ -861,7 +861,42 @@ func (c *compiler) compileFunctionBody(n *Node) {
 			c.emit(OpYield)
 			c.emit(OpPop)
 		}
+		// A `using`/`await using` at the top level of the function body disposes its
+		// resources when the body's declarative environment is torn down (function
+		// return / fall-through / throw), the same scaffolding a nested block uses.
+		bodyUsing := blockHasUsing(n.Body.Args)
+		var usingStackLocal, usingErrLocal, usingCatch, usingEnd int
+		savedUsingStack := c.usingStack
+		if bodyUsing {
+			c.emit(OpArray)
+			c.emitU16(0)
+			usingStackLocal = c.addLocal("*using*", false)
+			c.emitOpU16(OpPutLocal, uint16(usingStackLocal))
+			usingErrLocal = c.addLocal("*usingerr*", false)
+			c.usingStack = usingStackLocal
+			usingCatch = c.emitJump(OpTryPush)
+		}
 		c.compileStmts(n.Body.Args)
+		if bodyUsing {
+			// Normal completion (fall-through): dispose, then re-thread into the
+			// function's implicit-return handling below.
+			c.emit(OpTryPop)
+			c.emitOpU16(OpGetLocal, uint16(usingStackLocal))
+			c.emit(OpUsingDispose)
+			c.emit(OpPop)
+			usingEnd = c.emitJump(OpJmp)
+			// Abrupt completion (throw): dispose-suppressed and re-throw.
+			c.patchJump(usingCatch)
+			c.emit(OpCatch)
+			c.emitU32(0)
+			c.emitOpU16(OpPutLocal, uint16(usingErrLocal))
+			c.emitOpU16(OpGetLocal, uint16(usingStackLocal))
+			c.emitOpU16(OpGetLocal, uint16(usingErrLocal))
+			c.emit(OpUsingDisposeSuppressed)
+			c.emit(OpThrow)
+			c.patchJump(usingEnd)
+			c.usingStack = savedUsingStack
+		}
 		// A class constructor's implicit completion returns its (possibly
 		// super-rebound) `this`, so subclassing an exotic native yields the object
 		// super() constructed rather than the pre-allocated ordinary one.
