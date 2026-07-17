@@ -165,11 +165,6 @@ func (rt *Runtime) newGenerator(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 	if fn.isAsync && rt.asyncGenProto != 0 {
 		proto = rt.asyncGenProto
 	}
-	if fnVal.IsObjectType() {
-		if p, e := rt.getField(fnVal, "prototype"); e == nil && p.IsObjectType() {
-			proto = p
-		}
-	}
 	v := rt.newObject(proto)
 	o := rt.objPtr(v)
 	o.gen = rt.newGenState(fn, cl, fnVal, thisVal, args)
@@ -181,6 +176,15 @@ func (rt *Runtime) newGenerator(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 	// resume). The tEmpty sentinel value marks the barrier yield.
 	if m := rt.genDrive(o.gen, genNext, mkundef()); m.err != nil {
 		return mkundef(), m.err
+	}
+	// OrdinaryCreateFromConstructor reads the function's .prototype AFTER
+	// FunctionDeclarationInstantiation, so a parameter default that mutates
+	// fn.prototype is observed (the generator inherits from the current value, or
+	// the intrinsic %GeneratorPrototype% when it is no longer an object).
+	if fnVal.IsObjectType() {
+		if p, e := rt.getField(fnVal, "prototype"); e == nil && p.IsObjectType() {
+			o.proto = p
+		}
 	}
 	return v, nil
 }
