@@ -288,7 +288,15 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 	if perr == nil && p.IsObjectType() {
 		proto = p
 	}
-	thisObj := rt.newObject(proto)
+	// OrdinaryCreateFromConstructor: an ordinary [[Construct]] whose
+	// newTarget.prototype is not an object (`F.prototype = 1`) gives the instance
+	// %Object.prototype%, not a null prototype. (pendingNewTargetProto keeps the raw
+	// result so a native constructor still falls back to its own intrinsic default.)
+	thisProto := proto
+	if !thisProto.IsObjectType() {
+		thisProto = rt.objectProto
+	}
+	thisObj := rt.newObject(thisProto)
 	rt.pendingNewTarget = newTarget
 	savedNTProto, savedNTErr := rt.pendingNewTargetProto, rt.pendingNewTargetProtoErr
 	rt.pendingNewTargetProto, rt.pendingNewTargetProtoErr = proto, perr
