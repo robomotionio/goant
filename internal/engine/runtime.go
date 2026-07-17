@@ -49,6 +49,14 @@ type Runtime struct {
 	regexpProto           Value
 	regexpCtor            Value  // %RegExp% constructor (SpeciesConstructor default)
 	regexpLastMatch       string // RegExp.lastMatch (Annex B legacy static)
+	// Remaining Annex B legacy RegExp static state, updated on every successful
+	// built-in match (RegExp.input/$_, lastParen/$+, leftContext/$`,
+	// rightContext/$', and $1…$9).
+	regexpInput        string
+	regexpLastParen    string
+	regexpLeftContext  string
+	regexpRightContext string
+	regexpParen        [9]string
 	mapProto              Value
 	setProto              Value
 	symbolProto           Value

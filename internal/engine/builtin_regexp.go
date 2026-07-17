@@ -175,12 +175,6 @@ func (rt *Runtime) initRegExpBuiltin() {
 	cobj := rt.objPtr(ctor)
 	cobj.defineOwn("prototype", proto, 0)
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
-	// Legacy static properties RegExp.$1 … RegExp.$9 (Annex B). They exist as
-	// configurable data properties (updated on match is not required for the
-	// existence-only conformance check).
-	for i := 1; i <= 9; i++ {
-		cobj.defineOwn("$"+itoaSmall(i), rt.internString(""), attrConfigurable)
-	}
 	// RegExp.escape(S): escape a string for literal use in a pattern (ES2025).
 	rt.defMethod(cobj, "escape", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if arg(args, 0).Type() != TStr {
@@ -188,11 +182,48 @@ func (rt *Runtime) initRegExpBuiltin() {
 		}
 		return rt.newString(regExpEscape(string(rt.strBytes(arg(args, 0))))), nil
 	})
-	// RegExp.lastMatch (Annex B legacy static): the last matched substring.
-	cobj.defineAccessor("lastMatch", rt.newNativeFunc("get lastMatch", 0,
-		func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			return rt.newString(rt.regexpLastMatch), nil
-		}), mkundef(), true, false, attrConfigurable)
+	// Annex B legacy static RegExp properties: accessor properties on the RegExp
+	// constructor, non-enumerable + configurable, whose getter/setter throw a
+	// TypeError unless the receiver is %RegExp% itself. `input`/`$_` also has a
+	// setter; the rest (lastMatch, lastParen, leftContext, rightContext, $1…$9)
+	// are get-only.
+	legacyGet := func(get func() string) Value {
+		return rt.newNativeFunc("get", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			if this != rt.regexpCtor {
+				return mkundef(), rt.typeError("RegExp legacy static property getter requires the RegExp constructor as receiver")
+			}
+			return rt.newString(get()), nil
+		})
+	}
+	defLegacyGet := func(names []string, get func() string) {
+		g := legacyGet(get)
+		for _, n := range names {
+			cobj.defineAccessor(n, g, mkundef(), true, false, attrConfigurable)
+		}
+	}
+	inputGet := legacyGet(func() string { return rt.regexpInput })
+	inputSet := rt.newNativeFunc("set", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if this != rt.regexpCtor {
+			return mkundef(), rt.typeError("RegExp legacy static property setter requires the RegExp constructor as receiver")
+		}
+		s, e := rt.toStringValue(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		rt.regexpInput = string(rt.strBytes(s))
+		return mkundef(), nil
+	})
+	for _, n := range []string{"input", "$_"} {
+		cobj.defineAccessor(n, inputGet, inputSet, true, true, attrConfigurable)
+	}
+	defLegacyGet([]string{"lastMatch", "$&"}, func() string { return rt.regexpLastMatch })
+	defLegacyGet([]string{"lastParen", "$+"}, func() string { return rt.regexpLastParen })
+	defLegacyGet([]string{"leftContext", "$`"}, func() string { return rt.regexpLeftContext })
+	defLegacyGet([]string{"rightContext", "$'"}, func() string { return rt.regexpRightContext })
+	for i := 1; i <= 9; i++ {
+		idx := i - 1
+		cobj.defineAccessor("$"+itoaSmall(i), legacyGet(func() string { return rt.regexpParen[idx] }), mkundef(), true, false, attrConfigurable)
+	}
 	rt.defSpeciesGetter(ctor)
 	rt.regexpCtor = ctor
 	rt.defGlobal("RegExp", ctor)
@@ -701,6 +732,36 @@ func (rt *Runtime) setLastIndexOrThrow(this Value, n float64) *ThrowError {
 	return nil
 }
 
+// updateLegacyRegExpState records the Annex B legacy RegExp static state after a
+// successful built-in match: RegExp.input/$_, lastMatch/$&, lastParen/$+,
+// leftContext/$`, rightContext/$', and $1…$9. input is the subject as runes and
+// m the match (rune offsets).
+func (rt *Runtime) updateLegacyRegExpState(input []rune, m *regexpjs.Match) {
+	rt.regexpInput = string(input)
+	rt.regexpLastMatch = m.Groups[0].Value
+	for i := 0; i < 9; i++ {
+		if i+1 < len(m.Groups) && m.Groups[i+1].Index >= 0 {
+			rt.regexpParen[i] = m.Groups[i+1].Value
+		} else {
+			rt.regexpParen[i] = ""
+		}
+	}
+	rt.regexpLastParen = ""
+	for i := len(m.Groups) - 1; i >= 1; i-- {
+		if m.Groups[i].Index >= 0 {
+			rt.regexpLastParen = m.Groups[i].Value
+			break
+		}
+	}
+	start, end := m.Index, m.Index+m.Groups[0].Length
+	if start >= 0 && start <= len(input) {
+		rt.regexpLeftContext = string(input[:start])
+	}
+	if end >= 0 && end <= len(input) {
+		rt.regexpRightContext = string(input[end:])
+	}
+}
+
 func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	o := rt.objPtr(this)
 	if o == nil || o.regex == nil {
@@ -762,7 +823,7 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 		}
 	}
 	if len(m.Groups) > 0 {
-		rt.regexpLastMatch = m.Groups[0].Value // RegExp.lastMatch (Annex B)
+		rt.updateLegacyRegExpState(input, m) // RegExp.lastMatch/input/$1…$9 (Annex B)
 	}
 
 	res := rt.newArray()
