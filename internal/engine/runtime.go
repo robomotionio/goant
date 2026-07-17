@@ -71,6 +71,7 @@ type Runtime struct {
 	mapIterProto          Value // %MapIteratorPrototype%
 	setIterProto          Value // %SetIteratorPrototype%
 	stringIterProto       Value // %StringIteratorPrototype%
+	regexpStrIterProto    Value // %RegExpStringIteratorPrototype%
 	asyncFunctionProto    Value // %AsyncFunction.prototype%
 	generatorFuncProto    Value // %GeneratorFunction.prototype%
 	asyncGeneratorFnProto Value
@@ -114,6 +115,11 @@ type Runtime struct {
 	// strIterStates holds the iteration state of String iterator objects (a
 	// code-point snapshot + index) for a shared %StringIteratorPrototype%.next.
 	strIterStates map[*object]*strIterState
+
+	// regexpStrIterStates holds the iteration state of RegExp String iterator
+	// objects (the matcher, the string, the global/unicode flags, and done) for a
+	// shared %RegExpStringIteratorPrototype%.next that steps RegExpExec lazily.
+	regexpStrIterStates map[*object]*regexpStrIterState
 
 	// Well-known symbols and the Symbol.for registry.
 	symbolCounter         uint64

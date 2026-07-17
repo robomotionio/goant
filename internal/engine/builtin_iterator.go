@@ -28,6 +28,14 @@ func (rt *Runtime) initIteratorProto() {
 	rt.mapIterProto = mk("Map Iterator")
 	rt.setIterProto = mk("Set Iterator")
 	rt.stringIterProto = mk("String Iterator")
+	rt.regexpStrIterProto = mk("RegExp String Iterator")
+
+	// %RegExpStringIteratorPrototype%.next (22.2.9.2.1) is a shared method that
+	// reads the receiver's iteration state (missing-brand check) and steps the
+	// matcher lazily via the abstract RegExpExec so a user exec / Proxy is honored.
+	rt.defMethod(rt.objPtr(rt.regexpStrIterProto), "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.regexpStrIterNext(this)
+	})
 
 	// %SetIteratorPrototype%.next / %MapIteratorPrototype%.next are shared methods
 	// (length 0, name "next") that read the receiver's iteration state and enforce

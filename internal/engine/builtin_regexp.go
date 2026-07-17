@@ -424,15 +424,17 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		liN, e := rt.toNumber(li)
+		liN, e := rt.toLengthClamped(li)
 		if e != nil {
 			return mkundef(), e
 		}
-		start := 0
-		if liN > 0 {
-			start = int(liN)
+		if e := rt.setField(matcher, "lastIndex", mknum(liN)); e != nil {
+			return mkundef(), e
 		}
-		return rt.regexpMatchAllIterator(matcher, sv, start), nil
+		flagsStr := string(rt.strBytes(flagsS))
+		global := strings.ContainsRune(flagsStr, 'g')
+		unicode := strings.ContainsRune(flagsStr, 'u') || strings.ContainsRune(flagsStr, 'v')
+		return rt.createRegExpStringIterator(matcher, sv, global, unicode), nil
 	})
 }
 
@@ -546,44 +548,84 @@ func (rt *Runtime) isRegExp(v Value) (bool, *ThrowError) {
 	return o != nil && o.regex != nil, nil
 }
 
-// regexpMatchAllIterator eagerly collects each match of reObj against s starting
-// at startPos into a match-result array (with index/input), then returns an
-// iterator over them (a non-global RegExp yields at most one).
-func (rt *Runtime) regexpMatchAllIterator(reObj, s Value, startPos int) Value {
-	re := rt.objPtr(reObj).regex
-	input := []rune(string(rt.strBytes(s)))
-	var results []Value
-	pos := startPos
-	if pos < 0 {
-		pos = 0
+// regexpStrIterState is the internal state of a RegExp String iterator
+// (%RegExpStringIterator% instance): the matcher R, the subject string S, the
+// global/unicode flags, and whether it is exhausted. Held in
+// rt.regexpStrIterStates keyed by the iterator object so a shared
+// %RegExpStringIteratorPrototype%.next reads it and the brand check works.
+type regexpStrIterState struct {
+	r       Value
+	s       Value
+	global  bool
+	unicode bool
+	done    bool
+}
+
+// createRegExpStringIterator implements CreateRegExpStringIterator (22.2.9.1):
+// it builds a RegExp String iterator over matcher R and string S. Matches are
+// produced lazily (per next() call) via the abstract RegExpExec, so a matcher
+// with a user-supplied exec (or a Proxy) is honored.
+func (rt *Runtime) createRegExpStringIterator(r, s Value, global, unicode bool) Value {
+	v := rt.newObject(rt.regexpStrIterProto)
+	if rt.regexpStrIterStates == nil {
+		rt.regexpStrIterStates = map[*object]*regexpStrIterState{}
 	}
-	for pos <= len(input) {
-		m, err := re.Exec(input, pos)
-		if err != nil || m == nil {
-			break
-		}
-		res := rt.newArray()
-		ro := rt.objPtr(res)
-		for i, g := range m.Groups {
-			if g.Index < 0 && i > 0 {
-				rt.arraySet(ro, uint32(i), mkundef())
-			} else {
-				rt.arraySet(ro, uint32(i), rt.newString(g.Value))
-			}
-		}
-		ro.defineOwn("index", mknum(float64(m.Index)), attrDefault)
-		ro.defineOwn("input", s, attrDefault)
-		results = append(results, res)
-		if !re.Global {
-			break
-		}
-		adv := m.Index + m.Groups[0].Length
-		if adv <= pos {
-			adv = pos + 1
-		}
-		pos = adv
+	rt.regexpStrIterStates[rt.objPtr(v)] = &regexpStrIterState{r: r, s: s, global: global, unicode: unicode}
+	return v
+}
+
+// regexpStrIterNext is the shared %RegExpStringIteratorPrototype%.next: it reads
+// the receiver's iteration state (a TypeError if absent — the missing-brand
+// check) and yields the next match, driving RegExpExec so custom exec methods
+// and lastIndex updates are observable (22.2.9.2.1).
+func (rt *Runtime) regexpStrIterNext(this Value) (Value, *ThrowError) {
+	if !this.IsObjectType() {
+		return mkundef(), rt.typeError("RegExp String Iterator.prototype.next called on a non-object")
 	}
-	return rt.sliceIterator(results)
+	st := rt.regexpStrIterStates[rt.objPtr(this)]
+	if st == nil {
+		return mkundef(), rt.typeError("RegExp String Iterator.prototype.next called on an incompatible receiver")
+	}
+	if st.done {
+		return rt.genResult(mkundef(), true), nil
+	}
+	match, e := rt.abstractRegExpExec(st.r, st.s)
+	if e != nil {
+		return mkundef(), e
+	}
+	if match.IsNull() {
+		st.done = true
+		return rt.genResult(mkundef(), true), nil
+	}
+	if !st.global {
+		st.done = true
+		return rt.genResult(match, false), nil
+	}
+	// Global: an empty match must advance the matcher's lastIndex, or the next
+	// step would match at the same position forever.
+	m0, e := rt.getElement(match, mknum(0))
+	if e != nil {
+		return mkundef(), e
+	}
+	matchStr, e := rt.toStringValue(m0)
+	if e != nil {
+		return mkundef(), e
+	}
+	if utf16Len(rt.strBytes(matchStr)) == 0 {
+		li, e := rt.getField(st.r, "lastIndex")
+		if e != nil {
+			return mkundef(), e
+		}
+		thisIndex, e := rt.toLengthClamped(li)
+		if e != nil {
+			return mkundef(), e
+		}
+		nextIndex := rt.advanceStringIndex(st.s, thisIndex, st.unicode)
+		if e := rt.setField(st.r, "lastIndex", mknum(nextIndex)); e != nil {
+			return mkundef(), e
+		}
+	}
+	return rt.genResult(match, false), nil
 }
 
 // advanceStringIndex implements AdvanceStringIndex (22.2.7.3): +1, or +2 when
