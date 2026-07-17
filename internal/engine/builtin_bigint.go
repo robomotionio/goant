@@ -59,6 +59,12 @@ func stringToBigInt(s string) (*big.Int, bool) {
 	if s == "" {
 		return nil, false
 	}
+	// Go's SetString is more lenient than ES StringToBigInt: it accepts a leading
+	// sign (so "++0" survives the single strip above) and "_" digit separators.
+	// Neither is a valid StringNumericLiteral for a BigInt, so reject them.
+	if strings.ContainsAny(s, "+-_") {
+		return nil, false
+	}
 	v, ok := new(big.Int).SetString(s, base)
 	if !ok {
 		return nil, false

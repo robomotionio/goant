@@ -859,18 +859,17 @@ restart:
 			push(v)
 			ip++
 		case OpNeg:
-			a := pop()
+			a, e := rt.toNumeric(pop())
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
 			if a.Type() == TBigInt {
 				push(rt.newBigInt(new(big.Int).Neg(rt.bigIntVal(a))))
 				ip++
 				break
 			}
-			n, e := rt.toNumber(a)
-			if e != nil {
-				thrown = e
-				goto unwind
-			}
-			push(mknum(-n))
+			push(mknum(-a.Number()))
 			ip++
 		case OpUplus:
 			a := pop()
