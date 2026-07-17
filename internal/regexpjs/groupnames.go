@@ -226,6 +226,75 @@ func validateModifierGroups(src string) error {
 	return nil
 }
 
+// validateQuantifiedAssertions rejects a quantifier applied to a lookaround
+// assertion where ECMAScript forbids it: a lookbehind `(?<=…)` / `(?<!…)` is
+// never quantifiable, and in Unicode (`u`/`v`) mode a lookahead `(?=…)` / `(?!…)`
+// is not quantifiable either (in a non-Unicode pattern a quantified lookahead is
+// permitted by Annex B). regexp2 accepts all of these, so they are caught here.
+func validateQuantifiedAssertions(src string, unicode bool) error {
+	rs := []rune(src)
+	// assertKind per open paren: 0 = ordinary/other, 1 = lookbehind, 2 = lookahead.
+	var stack []int
+	inClass := false
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' {
+			i++ // skip the escaped rune
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+		case '(':
+			kind := 0
+			if i+2 < len(rs) && rs[i+1] == '?' {
+				if rs[i+2] == '=' || rs[i+2] == '!' {
+					kind = 2 // lookahead
+				} else if rs[i+2] == '<' && i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!') {
+					kind = 1 // lookbehind
+				}
+			}
+			stack = append(stack, kind)
+		case ')':
+			if len(stack) == 0 {
+				continue // unbalanced; let regexp2 report it
+			}
+			kind := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if kind != 0 && quantifierFollows(rs, i+1) {
+				if kind == 1 {
+					return fmt.Errorf("lookbehind assertion is not quantifiable")
+				}
+				if unicode {
+					return fmt.Errorf("lookahead assertion is not quantifiable in unicode mode")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// quantifierFollows reports whether the token at rs[j] begins a quantifier: one
+// of `*`, `+`, `?`, or a `{` that starts a `{n…}` bound.
+func quantifierFollows(rs []rune, j int) bool {
+	if j >= len(rs) {
+		return false
+	}
+	switch rs[j] {
+	case '*', '+', '?':
+		return true
+	case '{':
+		return j+1 < len(rs) && rs[j+1] >= '0' && rs[j+1] <= '9'
+	}
+	return false
+}
+
 // decodeGroupName reads a group name starting at rs[start] up to the closing '>',
 // decoding \u{HHHH} / \uHHHH escapes to their code points, and returns the decoded
 // name and the index of the '>'.

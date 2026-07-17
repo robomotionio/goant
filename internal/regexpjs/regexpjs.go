@@ -132,6 +132,11 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if err := validateModifierGroups(pattern); err != nil {
 		return nil, fmt.Errorf("invalid regular expression: %v", err)
 	}
+	// A quantifier on a lookbehind (any mode) or on a lookahead (Unicode mode) is
+	// an early error the .NET engine would otherwise accept.
+	if err := validateQuantifiedAssertions(pattern, r.Unicode); err != nil {
+		return nil, fmt.Errorf("invalid regular expression: %v", err)
+	}
 	// An empty pattern matches the empty string; ECMAScript spells it (?:).
 	src := pattern
 	// Annex B identity escapes: outside Unicode mode, `\A \Z \z \G` are literal
