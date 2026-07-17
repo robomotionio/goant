@@ -1114,7 +1114,14 @@ func (c *compiler) compileClass(n *Node) {
 			} else {
 				c.compileExpr(m.Right)
 			}
-			c.emit(OpPutElem)
+			// A class field is installed with CreateDataPropertyOrThrow (a
+			// [[DefineOwnProperty]], not a [[Set]]), so a static computed field named
+			// "prototype" — a non-configurable own property of the constructor — throws
+			// a TypeError rather than silently failing. DEFINE_METHOD_COMP flags=3 is
+			// exactly that enumerable-own-data-property define.
+			c.emit(OpDefineMethodComp)
+			c.emitByte(3)
+			c.emit(OpPop)
 			continue
 		}
 		name, ok := propKeyName(m.Left)
