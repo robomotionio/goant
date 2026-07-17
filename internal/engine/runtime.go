@@ -223,6 +223,12 @@ type closure struct {
 	// (set when the method is defined on its object); a super-property lookup
 	// starts at home's [[Prototype]]. Unset (0) for every other function.
 	home Value
+	// capturedWith is the `with`-object scope chain captured when a function
+	// defined lexically inside a `with` block was created; the function's frame
+	// seeds its withStack from this so free names still resolve against those
+	// objects when the function is later called (outside the with). nil for the
+	// common case of a function not nested in a with.
+	capturedWith []Value
 }
 
 // macrotask is a pending timer callback (setTimeout/setInterval). goant has no

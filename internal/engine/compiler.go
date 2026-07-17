@@ -79,6 +79,14 @@ type compiler struct {
 	// globals must resolve dynamically against the with-object chain.
 	withDepth int
 
+	// inheritedWith is set when compiling a function nested (lexically) inside a
+	// `with` block. Unlike withDepth (the with-object is innermost, shadowing even
+	// this function's own bindings), an inherited with-object sits *outside* this
+	// function's scope: the function's own locals win, but any free name still
+	// resolves against the captured with-objects before the enclosing scope. The
+	// closure snapshots that scope chain at creation (see capturesWith / OpClosure).
+	inheritedWith bool
+
 	// inFieldInit is set while compiling an instance field initializer, whose
 	// evaluation context has new.target === undefined even though the code is
 	// emitted inline in the constructor (which does have a new.target).
@@ -1007,7 +1015,7 @@ func (c *compiler) compileExpr(n *Node) {
 		// `typeof x` where x is a bare (possibly-undeclared) global must not throw:
 		// read it leniently so an absent binding yields "undefined".
 		if r := n.Right; r != nil && r.Kind == NIdent &&
-			c.resolveLocal(r.Str) < 0 && c.resolveUpvalue(r.Str) < 0 && c.withDepth == 0 {
+			c.resolveLocal(r.Str) < 0 && c.resolveUpvalue(r.Str) < 0 && !c.nameIsWithRouted(r.Str) {
 			idx := c.constant(c.rt.internString(r.Str))
 			c.emit(OpGetGlobalUndef)
 			c.emitU32(uint32(idx))
@@ -1060,11 +1068,23 @@ func (c *compiler) compileNumberLiteral(d float64) {
 	c.emitConst(mknum(d))
 }
 
+// nameIsWithRouted reports whether a name reference must be resolved dynamically
+// against the with-object chain. Directly inside a `with` block (withDepth > 0)
+// the with-object is innermost, so every name routes. In a function nested inside
+// a `with` (inheritedWith), the function's own locals are innermost and win — only
+// a free name (not a local of this function) routes against the captured objects.
+func (c *compiler) nameIsWithRouted(name string) bool {
+	if c.withDepth > 0 {
+		return true
+	}
+	return c.inheritedWith && c.resolveLocal(name) < 0
+}
+
 func (c *compiler) compileIdentLoad(n *Node) {
 	// Inside a `with`, every unqualified name is resolved dynamically against the
 	// with-object(s) first (emitWithVar carries the lexical fallback), so a local
 	// or upvalue of the same name can be shadowed by a with-object property.
-	if c.withDepth > 0 {
+	if c.nameIsWithRouted(n.Str) {
 		c.emitWithVar(OpWithGetVar, n.Str)
 		return
 	}
@@ -1258,7 +1278,7 @@ func (c *compiler) compileDelete(n *Node) {
 	// global-object property (an implicit global) can. Resolve it: a binding
 	// yields false; otherwise delete through the global object, whose
 	// configurability decides the result (var/function → false, implicit → true).
-	if target != nil && target.Kind == NIdent && c.withDepth == 0 {
+	if target != nil && target.Kind == NIdent && !c.nameIsWithRouted(target.Str) {
 		name := target.Str
 		if c.resolveLocal(name) >= 0 || c.resolveUpvalue(name) >= 0 {
 			c.emit(OpFalse)
@@ -1286,7 +1306,7 @@ func (c *compiler) compileDelete(n *Node) {
 	}
 	// `delete x` inside a `with`: the name may be a with-object property, which is
 	// deleted from that object; otherwise it falls back to a global-object delete.
-	if target != nil && target.Kind == NIdent && c.withDepth > 0 {
+	if target != nil && target.Kind == NIdent && c.nameIsWithRouted(target.Str) {
 		idx := c.constant(c.rt.internString(target.Str))
 		c.emit(OpWithDelVar)
 		c.emitU32(uint32(idx))
@@ -1335,7 +1355,7 @@ func (c *compiler) compileUpdate(n *Node) {
 
 	load := func() {
 		switch {
-		case c.withDepth > 0:
+		case c.nameIsWithRouted(name):
 			c.emitWithVar(OpWithGetVar, name)
 		case slot >= 0:
 			c.emitOpU16(OpGetLocal, uint16(slot))
@@ -1347,7 +1367,7 @@ func (c *compiler) compileUpdate(n *Node) {
 	}
 	storeKeep := func() { // leaves the stored value on the stack
 		switch {
-		case c.withDepth > 0:
+		case c.nameIsWithRouted(name):
 			c.emit(OpDup)
 			c.emitWithVar(OpWithPutVar, name)
 		case slot >= 0:
@@ -1361,7 +1381,7 @@ func (c *compiler) compileUpdate(n *Node) {
 	}
 	storeConsume := func() { // consumes the stored value
 		switch {
-		case c.withDepth > 0:
+		case c.nameIsWithRouted(name):
 			c.emitWithVar(OpWithPutVar, name)
 		case slot >= 0:
 			c.emitOpU16(OpPutLocal, uint16(slot))
@@ -1508,7 +1528,7 @@ func (c *compiler) compileAssign(n *Node) {
 
 	loadVar := func() {
 		switch {
-		case c.withDepth > 0:
+		case c.nameIsWithRouted(name):
 			c.emitWithVar(OpWithGetVar, name)
 		case slot >= 0:
 			c.emitOpU16(OpGetLocal, uint16(slot))
@@ -1522,7 +1542,7 @@ func (c *compiler) compileAssign(n *Node) {
 		// Inside a `with`, the store is routed to the with-object(s) first (with a
 		// lexical fallback baked into emitWithVar), so a same-named local/upvalue can
 		// be shadowed by a with-object property.
-		if c.withDepth > 0 {
+		if c.nameIsWithRouted(name) {
 			c.emit(OpDup)
 			c.emitWithVar(OpWithPutVar, name)
 			return
@@ -1582,7 +1602,7 @@ func (c *compiler) compileAssign(n *Node) {
 			c.errorf("unsupported compound assignment %v (slice)", n.Op)
 			return
 		}
-		if c.withDepth > 0 {
+		if c.nameIsWithRouted(name) {
 			// Base-caching compound assignment inside `with`: resolve the reference
 			// once (ref mode) so the read and the write target the same base, per
 			// PutValue — even when a with-object getter deletes the binding between
@@ -1610,7 +1630,7 @@ func (c *compiler) compileAssign(n *Node) {
 	// a same-named local/upvalue. The value produced above stays on the stack
 	// (assignment is an expression) via the OpDup below. (A compound assignment
 	// inside `with` was already handled above via the base-caching ref path.)
-	if c.withDepth > 0 {
+	if c.nameIsWithRouted(name) {
 		c.emit(OpDup)
 		c.emitWithVar(OpWithPutVar, name)
 		return

@@ -400,6 +400,13 @@ func (c *compiler) compileIdentStore(name string) {
 		c.emitOpU16(OpPutLocal, uint16(slot))
 		return
 	}
+	// In a function nested inside a `with`, a captured with-object sits outside
+	// this function's own scope but before the enclosing scope, so a free name
+	// (not one of our locals, handled above) routes to it ahead of any upvalue.
+	if c.inheritedWith {
+		c.emitWithVar(OpWithPutVar, name)
+		return
+	}
 	switch {
 	case c.resolveUpvalue(name) >= 0:
 		uv := c.resolveUpvalue(name)

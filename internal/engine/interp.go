@@ -195,7 +195,14 @@ restart:
 	openUpvals = nil
 	handlers = nil
 	pendingThrow = mkundef()
-	withStack = nil
+	// A function defined lexically inside a `with` seeds its scope chain from the
+	// with-objects captured when its closure was created, so free names still
+	// resolve against them (its bytecode reads them via OpWithGetVar).
+	if cl != nil && len(cl.capturedWith) > 0 {
+		withStack = append([]Value(nil), cl.capturedWith...)
+	} else {
+		withStack = nil
+	}
 	ip = 0
 
 	for {
@@ -393,7 +400,17 @@ restart:
 					case 2:
 						cl.upvalues[readU16(code, ip+5)].set(val)
 					default:
-						rt.setProp(rt.global, name, val)
+						// A strict assignment to a name bound by no with-object and no
+						// lexical binding is a ReferenceError (assignment to an undeclared
+						// global), matching OpPutGlobal.
+						if fn.isStrict && !rt.hasProp(rt.global, name) {
+							thrown = rt.referenceError(name + " is not defined")
+							goto unwind
+						}
+						if !rt.setProp(rt.global, name, val) && fn.isStrict {
+							thrown = rt.typeError("Cannot assign to read only property '" + name + "'")
+							goto unwind
+						}
 					}
 				} else if e := rt.setField(base, name, val); e != nil {
 					thrown = e
@@ -427,7 +444,17 @@ restart:
 				case 2: // upvalue
 					cl.upvalues[readU16(code, ip+5)].set(val)
 				default: // global
-					rt.setProp(rt.global, name, val)
+					// Strict assignment to an undeclared global is a ReferenceError
+					// (matches OpPutGlobal); this surfaces when a strict function nested
+					// in a `with` writes a name the with-object no longer binds.
+					if fn.isStrict && !rt.hasProp(rt.global, name) {
+						thrown = rt.referenceError(name + " is not defined")
+						goto unwind
+					}
+					if !rt.setProp(rt.global, name, val) && fn.isStrict {
+						thrown = rt.typeError("Cannot assign to read only property '" + name + "'")
+						goto unwind
+					}
 				}
 			}
 			ip += 8
@@ -1460,7 +1487,16 @@ restart:
 					upvals[i] = cl.upvalues[d.index]
 				}
 			}
-			push(rt.newFunction(child, upvals))
+			fv := rt.newFunction(child, upvals)
+			// A function compiled inside a `with` captures the current with-object
+			// scope chain so its free names resolve against those objects when it is
+			// later invoked (its bytecode uses OpWithGetVar for them).
+			if child.capturesWith && len(withStack) > 0 {
+				if ncl := rt.closureOf(fv); ncl != nil {
+					ncl.capturedWith = append([]Value(nil), withStack...)
+				}
+			}
+			push(fv)
 			ip += 5
 
 		case OpCall:

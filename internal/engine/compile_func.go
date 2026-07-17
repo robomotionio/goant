@@ -553,6 +553,10 @@ func (c *compiler) compileFunc(n *Node) {
 	// Hand a class constructor its instance-field initializers (set by
 	// compileClass immediately before this call; cleared so no other function
 	// inherits them).
+	// A function nested (lexically) inside a `with` block resolves its free names
+	// against the captured with-objects; propagate that through further nesting.
+	child.inheritedWith = c.withDepth > 0 || c.inheritedWith
+	child.fn.capturesWith = child.inheritedWith
 	child.classFields = c.pendingClassFields
 	child.classDerived = c.pendingClassDerived
 	child.fieldKeys = c.pendingFieldKeys

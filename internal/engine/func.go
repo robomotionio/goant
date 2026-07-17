@@ -55,6 +55,11 @@ type svFunc struct {
 	// can start the lookup at the home object's prototype.
 	usesSuper bool
 
+	// capturesWith marks a function compiled lexically inside a `with` block: its
+	// free names are emitted as OpWithGetVar/OpWithPutVar, and its closure snapshots
+	// the enclosing with-object scope chain at creation (see OpClosure).
+	capturesWith bool
+
 	// isDerivedCtor marks a derived class constructor: `this` starts in its TDZ
 	// (thisSlot holds tEmpty until super() binds it), and OpReturn enforces
 	// GetThisBinding / the object-or-undefined return-value rule.
