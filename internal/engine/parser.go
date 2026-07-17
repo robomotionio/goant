@@ -2024,6 +2024,10 @@ func (p *parser) parseAssign() *Node {
 		fn.Flags = fnArrow
 		fn.SrcOff = left.SrcOff
 		if left.Kind == NIdent {
+			// A single unparenthesized arrow parameter is a BindingIdentifier, so it
+			// may not be a reserved word (`enum => 1`) or a strict/context-reserved
+			// name — the parenthesized form is validated separately.
+			p.strictCheckBindingIdent(left.Str)
 			fn.Args = append(fn.Args, left)
 		} else if left.Kind == NUndef && left.Flags&fnParen == 0 {
 			// `undefined => …` — a single unparenthesized `undefined` parameter.
