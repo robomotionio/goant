@@ -830,6 +830,11 @@ func (c *compiler) compileVarDecl(n *Node) {
 				// outer/global `e` untouched.
 				if slot := c.resolveLocal(name); slot >= 0 {
 					c.emitOpU16(OpPutLocal, uint16(slot))
+				} else if c.withDepth > 0 {
+					// Inside `with(obj)`: the initializer assignment goes through the
+					// object environment — if obj binds the name it writes there,
+					// otherwise it falls back to the global var binding.
+					c.emitWithVar(OpWithPutVar, name)
 				} else {
 					c.emitGlobalPut(name)
 				}
@@ -838,7 +843,8 @@ func (c *compiler) compileVarDecl(n *Node) {
 			continue
 		}
 		var slot int
-		if n.VarKind == VarLet || n.VarKind == VarConst {
+		isLexical := n.VarKind == VarLet || n.VarKind == VarConst
+		if isLexical {
 			// Reuse the slot pre-declared by hoistLexicals (leaving the binding in
 			// TDZ until this store) when present; else declare it now.
 			if s := c.lexicalAtCurrentDepth(name); s >= 0 {
@@ -848,6 +854,19 @@ func (c *compiler) compileVarDecl(n *Node) {
 			}
 		} else {
 			slot = c.declareVar(name, false)
+		}
+		// A `var` initializer inside a `with` block assigns through the object
+		// environment: if the with-object binds the name the write lands there,
+		// otherwise it falls back to this hoisted function-scope slot (emitWithVar
+		// encodes the slot as the local fallback). `let`/`const` are the block's own
+		// bindings and are never shadowed by the with-object.
+		if !isLexical && c.withDepth > 0 {
+			if decl.Right == nil {
+				continue // bare `var x;` is declaration-only — no assignment
+			}
+			c.compileExpr(decl.Right)
+			c.emitWithVar(OpWithPutVar, name)
+			continue
 		}
 		if decl.Right != nil {
 			c.compileExpr(decl.Right)
