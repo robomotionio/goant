@@ -304,7 +304,14 @@ restart:
 			push(v)
 			ip++
 		case OpEnterWith:
-			withStack = append(withStack, pop())
+			// `with (expr)` binds ToObject(expr): null/undefined throw a TypeError,
+			// and a primitive is wrapped so property lookups resolve on the wrapper.
+			obj, e := rt.toObjectValue(pop())
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			withStack = append(withStack, obj)
 			ip++
 		case OpExitWith:
 			withStack = withStack[:len(withStack)-1]
