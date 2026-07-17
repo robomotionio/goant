@@ -1214,7 +1214,15 @@ func (c *compiler) compileDelete(n *Node) {
 		c.emit(OpDelete)
 		return
 	}
-	// `delete 1`, `delete this`, or an unqualified name inside `with` → true.
+	// `delete x` inside a `with`: the name may be a with-object property, which is
+	// deleted from that object; otherwise it falls back to a global-object delete.
+	if target != nil && target.Kind == NIdent && c.withDepth > 0 {
+		idx := c.constant(c.rt.internString(target.Str))
+		c.emit(OpWithDelVar)
+		c.emitU32(uint32(idx))
+		return
+	}
+	// `delete 1`, `delete this`, etc. → true.
 	c.emit(OpTrue)
 }
 

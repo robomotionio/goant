@@ -420,6 +420,38 @@ restart:
 				}
 			}
 			ip += 8
+		case OpWithDelVar:
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			done := false
+			for k := len(withStack) - 1; k >= 0; k-- {
+				has, e := rt.hasPropE(withStack[k], name)
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				if has && !rt.isUnscopable(withStack[k], name) {
+					ok, e := rt.deleteElement(withStack[k], rt.internString(name))
+					if e != nil {
+						thrown = e
+						goto unwind
+					}
+					push(mkbool(ok))
+					done = true
+					break
+				}
+			}
+			if !done {
+				// Not bound by a with-object: fall back to a global-object delete (a
+				// declared var/function is non-configurable → false, an implicit global
+				// or absent name → true).
+				ok, e := rt.deleteElement(rt.global, rt.internString(name))
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				push(mkbool(ok))
+			}
+			ip += 5
 		case OpSpecialObj:
 			kind := code[ip+1]
 			switch kind {
