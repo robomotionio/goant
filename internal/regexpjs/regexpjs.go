@@ -147,6 +147,11 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if err := validateQuantifiedAssertions(pattern, r.Unicode); err != nil {
 		return nil, fmt.Errorf("invalid regular expression: %v", err)
 	}
+	// Two named capture groups may share a name only across separate alternatives;
+	// a same-alternative duplicate is an early error.
+	if err := validateDuplicateGroupNames(pattern); err != nil {
+		return nil, fmt.Errorf("invalid regular expression: %v", err)
+	}
 	// An empty pattern matches the empty string; ECMAScript spells it (?:).
 	src := pattern
 	// Annex B identity escapes: outside Unicode mode, `\A \Z \z \G` are literal

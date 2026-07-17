@@ -32,6 +32,83 @@ func isValidGroupName(name string) bool {
 	return true
 }
 
+// validateDuplicateGroupNames enforces the ECMAScript early error that forbids
+// two named capture groups sharing a name unless they sit in separate
+// alternatives of a Disjunction (where at most one can ever match). The
+// duplicate-named-groups proposal (ES2025) permits `(?<a>x)|(?<a>y)` but still
+// rejects `(?<a>x)(?<a>y)`; regexp2 gives every group a unique internal name and
+// so never reports either, so the conflict is detected here.
+//
+// Each group is tagged with its alternation path: the vector of branch indices
+// of every enclosing group level (and the top level), where a `|` advances the
+// branch index of the current level. Two same-named groups are in separate
+// alternatives iff their paths diverge — differ in branch index — at some shared
+// level; if neither ever diverges from the other, both can match and it is an
+// error.
+func validateDuplicateGroupNames(src string) error {
+	rs := []rune(src)
+	type def struct {
+		name string
+		path []int
+	}
+	var defs []def
+	stack := []int{0} // branch index per open level; index 0 is the top level
+	inClass := false
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' {
+			i++ // skip the escaped rune
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+		case '|':
+			stack[len(stack)-1]++
+		case '(':
+			if i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
+				!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
+				if name, _, err := decodeGroupName(rs, i+3); err == nil {
+					path := make([]int, len(stack))
+					copy(path, stack)
+					defs = append(defs, def{name, path})
+				}
+			}
+			stack = append(stack, 0) // this group opens a fresh alternation scope
+		case ')':
+			if len(stack) > 1 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	for a := 0; a < len(defs); a++ {
+		for b := a + 1; b < len(defs); b++ {
+			if defs[a].name == defs[b].name && !pathsDiverge(defs[a].path, defs[b].path) {
+				return fmt.Errorf("duplicate capture group name '%s'", defs[a].name)
+			}
+		}
+	}
+	return nil
+}
+
+// pathsDiverge reports whether two alternation paths choose different branches at
+// some shared level (meaning the two groups are in separate alternatives).
+func pathsDiverge(p1, p2 []int) bool {
+	n := min(len(p1), len(p2))
+	for i := range n {
+		if p1[i] != p2[i] {
+			return true
+		}
+	}
+	return false
+}
+
 // translateGroupNames rewrites every named capture group `(?<name>…)` and named
 // backreference `\k<name>` to a safe internal name (`__gN`) that regexp2 accepts,
 // returning the rewritten source plus a map from the internal name back to the
