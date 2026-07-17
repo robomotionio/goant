@@ -118,6 +118,7 @@ const (
 	fnFuncExpr        = 1 << 20 // a function expression (immutable self-name binding)
 	nodeRestComma     = 1 << 21 // an array literal whose rest element is followed by a comma (invalid as a binding/assignment pattern)
 	nodeHasCoverInit  = 1 << 22 // an object literal with a CoverInitializedName (`{x = 1}`) — valid only when reinterpreted as a destructuring pattern
+	fnStrHadEscape    = 1 << 23 // a string literal whose raw text contained a backslash (escape or line continuation), so it cannot be a Use Strict Directive
 )
 
 // Export flags (ant ast.h EX_*).
@@ -196,7 +197,7 @@ func canBeExpressionStatement(n *Node) bool {
 // isUseStrict reports whether stmt is a "use strict" directive
 // (ant sv_ast_is_use_strict, matching its cooked-string comparison).
 func isUseStrict(n *Node) bool {
-	return n != nil && n.Kind == NString && n.Str == "use strict"
+	return n != nil && n.Kind == NString && n.Str == "use strict" && n.Flags&fnStrHadEscape == 0
 }
 
 // bodyHasUseStrict reports whether a function body's directive prologue contains
@@ -423,7 +424,7 @@ func programIsStrict(program *Node) bool {
 		if stmt.Kind != NString {
 			return false
 		}
-		if stmt.Str == "use strict" {
+		if stmt.Str == "use strict" && stmt.Flags&fnStrHadEscape == 0 {
 			return true
 		}
 	}

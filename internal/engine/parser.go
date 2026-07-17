@@ -355,7 +355,17 @@ func (p *parser) mkPrivateIdentFromTok() *Node {
 
 func (p *parser) mkStringFromTok() *Node {
 	n := p.mk(NString)
-	n.Str = cookString(p.tokStr())
+	raw := p.tokStr()
+	n.Str = cookString(raw)
+	// A directive's Use Strict form must match the RAW source `use strict`; any
+	// escape sequence or line continuation (both start with a backslash) makes the
+	// raw text differ from the cooked value, so it is not a Use Strict Directive.
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == '\\' {
+			n.Flags |= fnStrHadEscape
+			break
+		}
+	}
 	return n
 }
 

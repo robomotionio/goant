@@ -591,7 +591,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 			if s.Kind != NString {
 				break
 			}
-			if s.Str == "use strict" {
+			if s.Str == "use strict" && s.Flags&fnStrHadEscape == 0 {
 				c.fn.isStrict = true
 				break
 			}
