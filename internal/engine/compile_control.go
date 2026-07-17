@@ -104,6 +104,18 @@ func (c *compiler) compileDoWhile(n *Node) {
 }
 
 func (c *compiler) compileFor(n *Node) {
+	// `for (using x = r; cond; update) body`: the head's resources bind once in the
+	// for-statement's scope and dispose when the whole statement completes. Lower it
+	// to `{ using x = r; for (; cond; update) body }` so the block's using-scope
+	// drives disposal. A pending label flows through to the inner (real) loop, so
+	// `continue`/`break label` still target it.
+	if n.Init != nil && n.Init.Kind == NVar &&
+		(n.Init.VarKind == VarUsing || n.Init.VarKind == VarAwaitUsing) {
+		innerFor := &Node{Kind: NFor, Cond: n.Cond, Update: n.Update, Body: n.Body}
+		block := &Node{Kind: NBlock, Args: []*Node{n.Init, innerFor}}
+		c.compileStmt(block)
+		return
+	}
 	c.checkForHeadDecl(n.Init, n.Body)
 	c.resetCompletion()
 	c.scopeDepth++
