@@ -425,20 +425,33 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		n := utf16Len(b)
-		start := rt.intArg(args, 0)
-		if start < 0 {
-			start = max(n+start, 0)
+		size := utf16Len(b)
+		// ToIntegerOrInfinity(start) and, if present, (length) — a throwing valueOf
+		// on either argument propagates.
+		intStart, e := rt.toIntegerOrInfinity(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
 		}
-		length := n - start
+		end := math.Inf(1) // length defaults to +Infinity (to end of string)
 		if !arg(args, 1).IsUndefined() {
-			length = rt.intArg(args, 1)
+			if end, e = rt.toIntegerOrInfinity(arg(args, 1)); e != nil {
+				return mkundef(), e
+			}
 		}
-		if length < 0 || start >= n {
+		var start int
+		switch {
+		case math.IsInf(intStart, -1):
+			start = 0
+		case intStart < 0:
+			start = int(math.Max(float64(size)+intStart, 0))
+		default:
+			start = int(math.Min(intStart, float64(size)))
+		}
+		resultLen := math.Max(math.Min(end, float64(size-start)), 0)
+		if resultLen <= 0 {
 			return rt.internString(""), nil
 		}
-		end := min(start+length, n)
-		bs, be := utf16RangeToByteRange(b, start, end)
+		bs, be := utf16RangeToByteRange(b, start, start+int(resultLen))
 		return rt.newStringBytes(append([]byte{}, b[bs:be]...)), nil
 	})
 	rt.defMethod(proto, "localeCompare", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

@@ -185,7 +185,10 @@ func (rt *Runtime) initAnnexBString() {
 			text := string(rt.strBytes(s))
 			open := "<" + tag
 			if attr != "" {
-				av, _ := rt.toStringValue(arg(args, 0))
+				av, ae := rt.toStringValue(arg(args, 0))
+				if ae != nil { // a throwing ToString on the attribute value propagates
+					return mkundef(), ae
+				}
 				a := string(rt.strBytes(av))
 				// Annex B escapes only double quotes in the attribute value.
 				esc := ""
