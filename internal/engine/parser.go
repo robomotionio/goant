@@ -3031,6 +3031,19 @@ func (p *parser) parseStmt() *Node {
 			if !declStart {
 				break // `let` is an identifier: fall to the expression statement
 			}
+		} else if !p.lx.strict {
+			// At the statement level in sloppy mode, `let` begins a LexicalDeclaration
+			// only when followed by a BindingIdentifier, `[`, or `{`; otherwise it is
+			// an identifier ExpressionStatement (`let = 5`, `let;`, `let.foo`, `let++`).
+			// (A line terminator is irrelevant here — `let` is not a restricted
+			// production — so `let\nx = 1` is still `let x = 1`. In strict mode `let`
+			// is reserved, so a non-declaration follow routes to parseVarDecl's error.)
+			la := p.la()
+			if la != TokLBracket && la != TokLBrace && la != TokIdentifier &&
+				!isContextualIdentTok(la) && la != TokLet && la != TokYield &&
+				la != TokAwait && la != TokStatic {
+				break // `let` is an identifier: fall to the expression statement
+			}
 		}
 		p.consume()
 		n := p.parseVarDecl(VarLet, false)
