@@ -12,24 +12,10 @@ import (
 // ES property syntax. Properties Go's unicode package cannot resolve (e.g. Emoji
 // data, scripts newer than the toolchain's Unicode version) yield an error, so
 // the regex simply fails to compile as it did before.
-// stringProperties are the `v`-flag "properties of strings" that expand to a
-// fixed sub-pattern (only the finite ones are modelled; RGI emoji sequences need
-// the full emoji-sequence data set).
-// The RGI_Emoji pattern matches any well-formed emoji sequence \u2014 a flag (two
-// regional indicators), or an emoji base (with optional skin-tone modifier, VS16,
-// and tag subtags) followed by ZWJ-joined emoji units. This is an approximation
-// of the curated RGI set that suffices for the positive-only conformance checks.
-const (
-	riClass   = `[\u{1F1E6}-\u{1F1FF}]`
-	emodClass = `[\u{1F3FB}-\u{1F3FF}]`
-	emojiUnit = `\p{Emoji}` + emodClass + `?\uFE0F?`
-)
-
-var stringProperties = map[string]string{
-	"Emoji_Keycap_Sequence": "(?:[#*0-9]\uFE0F\u20E3)",
-	"RGI_Emoji": `(?:` + riClass + riClass + `|` +
-		emojiUnit + `(?:[\u{E0020}-\u{E007F}]+)?(?:\u200D` + emojiUnit + `)*)`,
-}
+// The `v`-flag "properties of strings" (Basic_Emoji, RGI_Emoji, and the RGI
+// sequence sets) are resolved from the generated u17StringProperties table,
+// which holds a regexp2 alternation of every literal code-point sequence each
+// property matches (see unicode17_gen.go / tools/genunicode).
 
 func translateUnicodeProps(pattern string, unicodeSets bool) (string, error) {
 	var out strings.Builder
@@ -45,7 +31,7 @@ func translateUnicodeProps(pattern string, unicodeSets bool) (string, error) {
 				}
 				name := pattern[i+3 : i+3+rel]
 				if unicodeSets && !inClass && n == 'p' {
-					if pat, ok := stringProperties[name]; ok {
+					if pat, ok := u17StringProperties[name]; ok {
 						out.WriteString(pat)
 						i += 3 + rel + 1
 						continue
