@@ -390,12 +390,8 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 
 	// A Module runs in the Module goal (implicitly strict, this===undefined) and
 	// cannot be concatenated with the script harness; the harness is instead run
-	// as a script prelude sharing the realm. Static imports need linking (not yet
-	// implemented), so those are still skipped.
+	// as a script prelude sharing the realm.
 	if m.isModule {
-		if moduleNeedsLinking(string(src)) {
-			return result{rel, outSkip, "module (needs linking)"}
-		}
 		var pre strings.Builder
 		pre.WriteString(harness["assert.js"])
 		pre.WriteByte('\n')
@@ -410,13 +406,15 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 			pre.WriteString(h)
 			pre.WriteByte('\n')
 		}
-		preFile, modFile := scratch+".prelude.js", scratch+".module.mjs"
+		preFile := scratch + ".prelude.js"
 		if err := os.WriteFile(preFile, []byte(pre.String()), 0o644); err != nil {
 			return result{rel, outFail, "write: " + err.Error()}
 		}
-		if err := os.WriteFile(modFile, src, 0o644); err != nil {
-			return result{rel, outFail, "write: " + err.Error()}
-		}
+		// The module source is used verbatim (unlike a script, which is
+		// concatenated with the harness), so the test file itself is handed to the
+		// runner: its import specifiers must resolve against the real test
+		// directory to find the sibling _FIXTURE modules.
+		modFile := path
 		// Flags must precede the positional file (flag parsing stops at the first
 		// non-flag argument).
 		ex := execRunnerArgs(runner, []string{"-module", "-prelude", preFile, modFile}, timeout)

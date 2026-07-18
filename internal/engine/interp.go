@@ -101,6 +101,14 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		return u
 	}
 	closeAll := func() {
+		// A module frame's locals ARE the module environment, and the record keeps
+		// the slice alive past this frame. Closing would copy each captured binding
+		// into its own cell, so a later write through a closure (an exported
+		// function mutating an exported `let`) would no longer be visible to
+		// importers — exactly the live-binding semantics modules require.
+		if fn.moduleExports != nil {
+			return
+		}
 		for _, u := range openUpvals {
 			u.closeUp()
 		}
@@ -191,6 +199,13 @@ restart:
 		if i < len(args) {
 			locals[i] = args[i]
 		}
+	}
+	// A module body hands its locals slice to the record being evaluated: those
+	// slots *are* the module environment, so importers holding the slice see the
+	// bindings live. Claimed here, at frame entry, before any nested import runs.
+	if rt.pendingModule != nil && rt.pendingModule.fn == fn {
+		rt.pendingModule.locals = locals
+		rt.pendingModule = nil
 	}
 	openUpvals = nil
 	handlers = nil
@@ -1163,15 +1178,39 @@ restart:
 			// Dynamic import(specifier, options). The specifier is coerced to a
 			// string; import() never throws synchronously — a bad specifier or an
 			// (as yet) unsupported module load rejects the returned promise instead.
-			pop() // options / import attributes (unused pending a module loader)
+			pop() // options / import attributes (not yet honoured)
 			specifier := pop()
 			if spec, e := rt.toStringValue(specifier); e != nil {
 				push(rt.rejectedPromise(e.Value))
+			} else if ns, le := rt.importModuleNamespace(string(rt.strBytes(spec)), fn.filename); le != nil {
+				push(rt.rejectedPromise(le.Value))
 			} else {
-				_ = spec
-				push(rt.rejectedPromise(rt.typeError("dynamic module import is not supported").Value))
+				push(rt.resolvedPromise(ns))
 			}
 			ip++
+		case OpImportSync:
+			// Static import: load the requested module and leave its namespace
+			// object on the stack for the importing frame to keep in a local.
+			spec := pop()
+			ns, e := rt.importModuleNamespace(string(rt.strBytes(spec)), fn.filename)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(ns)
+			ip++
+		case OpImportNamed:
+			// Read one binding out of a namespace object. This runs on every
+			// reference to an imported name, which is what keeps the binding live.
+			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			ns := pop()
+			v, e := rt.getField(ns, name)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(v)
+			ip += 5
 		case OpDelete:
 			key := pop()
 			obj := pop()

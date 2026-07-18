@@ -68,6 +68,12 @@ type compiler struct {
 	// isModule marks Module compilation (strict, top-level this undefined).
 	isModule bool
 
+	// importBindings maps a locally-bound imported name to the hidden local
+	// holding the source module's namespace object plus the export to read from
+	// it. Every *reference* compiles to that read, which is what makes an import
+	// a live binding rather than a copy.
+	importBindings map[string]importBinding
+
 	// completionSlot holds the running script/eval completion value.
 	completionSlot int
 
@@ -384,10 +390,10 @@ func unwrapModuleStmts(stmts []*Node) []*Node {
 func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, isModule bool) (*svFunc, error) {
 	strict := prog.Flags&fnParseStrict != 0 || isModule
 	c := &compiler{
-		rt:         rt,
-		isScript:   true,
-		isEval:     isEval,
-		isModule:   isModule,
+		rt:       rt,
+		isScript: true,
+		isEval:   isEval,
+		isModule: isModule,
 		// A sloppy indirect eval runs in global scope, so its `var`/function
 		// declarations bind on the global object (a strict eval keeps its own
 		// variable environment; a direct eval sets this via its own compile path).
@@ -400,6 +406,7 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 	// A Module's export/import declarations are validated (ExportEntries static
 	// semantics) then lowered to their inner declarations before hoisting so the
 	// ordinary declaration machinery applies.
+	var moduleStmts []*Node
 	if isModule {
 		if e := validateModuleLexicalConflicts(prog.Args); e != nil {
 			return nil, e
@@ -407,6 +414,7 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		if e := validateModuleExports(prog.Args); e != nil {
 			return nil, e
 		}
+		moduleStmts = prog.Args // keep the declarations; the export table needs them
 		prog.Args = unwrapModuleStmts(prog.Args)
 	}
 	// Reserve slot 0 for the completion value.
@@ -439,6 +447,7 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 				c.addLocal(name, false)
 			}
 		}
+		c.emitImportPrologue(moduleStmts)
 	} else if !c.isEval {
 		names := map[string]bool{}
 		collectVarFuncNames(prog.Args, names)
@@ -468,6 +477,17 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 	c.compileStmts(prog.Args)
 	if c.err != nil {
 		return nil, c.err
+	}
+	if isModule {
+		// Resolve each export to the top-level slot holding it, while the module
+		// scope is still open.
+		c.fn.moduleExports = map[string]int{}
+		for exported, local := range moduleExportEntries(moduleStmts) {
+			if slot := c.resolveLocal(local); slot >= 0 {
+				c.fn.moduleExports[exported] = slot
+			}
+		}
+		c.fn.moduleStarFrom = moduleStarSpecifiers(moduleStmts)
 	}
 	// Return the completion value.
 	c.emitOpU16(OpGetLocal, uint16(c.completionSlot))
@@ -1104,6 +1124,12 @@ func (c *compiler) compileIdentLoad(n *Node) {
 	// `(#x)`, `for (#x in …)`), which is a SyntaxError.
 	if len(n.Str) > 0 && n.Str[0] == '#' {
 		c.syntaxErrorf("Private field '%s' must be used as `%s in obj`", n.Str, n.Str)
+		return
+	}
+	// An imported name is not a local: it reads through the source module's
+	// namespace so the binding stays live.
+	if b, ok := c.lookupImport(n.Str); ok {
+		c.compileImportRead(b)
 		return
 	}
 	// Inside a `with`, every unqualified name is resolved dynamically against the

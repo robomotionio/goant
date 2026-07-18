@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"math"
+	"path/filepath"
 )
 
 // Runtime is a single JavaScript isolate — the Go analogue of ant's ant_t
@@ -42,25 +43,25 @@ type Runtime struct {
 	importMeta Value
 
 	// Core prototype objects (ant isolate proto fields).
-	objectProto           Value
-	functionProto         Value
-	arrayProto            Value
-	stringProto           Value
-	numberProto           Value
-	bigintProto           Value
-	booleanProto          Value
-	errorProto            Value
-	regexpProto           Value
-	regexpCtor            Value  // %RegExp% constructor (SpeciesConstructor default)
-	regexpLastMatch       string // RegExp.lastMatch (Annex B legacy static)
+	objectProto     Value
+	functionProto   Value
+	arrayProto      Value
+	stringProto     Value
+	numberProto     Value
+	bigintProto     Value
+	booleanProto    Value
+	errorProto      Value
+	regexpProto     Value
+	regexpCtor      Value  // %RegExp% constructor (SpeciesConstructor default)
+	regexpLastMatch string // RegExp.lastMatch (Annex B legacy static)
 	// Remaining Annex B legacy RegExp static state, updated on every successful
 	// built-in match (RegExp.input/$_, lastParen/$+, leftContext/$`,
 	// rightContext/$', and $1…$9).
-	regexpInput        string
-	regexpLastParen    string
-	regexpLeftContext  string
-	regexpRightContext string
-	regexpParen        [9]string
+	regexpInput           string
+	regexpLastParen       string
+	regexpLeftContext     string
+	regexpRightContext    string
+	regexpParen           [9]string
 	mapProto              Value
 	setProto              Value
 	symbolProto           Value
@@ -133,13 +134,14 @@ type Runtime struct {
 	indexedProtoIntercept bool
 
 	// Well-known symbols and the Symbol.for registry.
-	symbolCounter         uint64
-	symbolRegistry        map[string]Value
-	symIterator           Value
-	symAsyncIterator      Value
-	symHasInstance        Value
-	symToPrimitive        Value
-	symToStringTag        Value
+	symbolCounter    uint64
+	symbolRegistry   map[string]Value
+	symIterator      Value
+	symAsyncIterator Value
+	symHasInstance   Value
+	symToPrimitive   Value
+	symToStringTag   Value
+
 	symMatch              Value
 	symMatchAll           Value
 	symReplace            Value
@@ -150,6 +152,14 @@ type Runtime struct {
 	symUnscopables        Value
 	symDispose            Value
 	symAsyncDispose       Value
+
+	// modules is the module registry, keyed by resolved absolute path; moduleDir
+	// is the directory specifiers resolve against at the entry point.
+	modules   map[string]*moduleRecord
+	moduleDir string
+	// pendingModule is the record whose body is about to start; runFrame hands
+	// it the frame's locals slice so importers keep a live view of its bindings.
+	pendingModule *moduleRecord
 
 	// errors holds the NativeError constructors/prototypes for internal throws.
 	errors errorCtors
@@ -426,6 +436,11 @@ func (rt *Runtime) RunString(filename, src string) (Value, error) {
 // their globals are visible. Static imports are not yet linked.
 func (rt *Runtime) RunModule(filename, src string) (Value, error) {
 	rt.filename = filename
+	if abs, aerr := filepath.Abs(filename); aerr == nil {
+		filename = abs
+	}
+	// Bare specifiers resolve against the entry module's directory.
+	rt.moduleDir = filepath.Dir(filename)
 	prog, err := parseMode(filename, src, true, true) // a Module: strict + module goal
 	if err != nil {
 		return mkundef(), err
@@ -434,13 +449,22 @@ func (rt *Runtime) RunModule(filename, src string) (Value, error) {
 	if err != nil {
 		return mkundef(), err
 	}
-	// A Module evaluates asynchronously: run its body as an async coroutine (so
-	// top-level await suspends) and drive the loop until its completion promise
-	// settles; a rejection is the module's evaluation error.
-	promise := rt.runAsync(fn, nil, mkundef(), mkundef(), nil)
-	rt.runEventLoop()
-	if po := rt.objPtr(promise); po != nil && po.promise != nil && po.promise.state == 2 { // rejected
-		return mkundef(), &ThrowError{Value: po.promise.value, rt: rt}
+	// The entry point is a module record like any other, registered under its own
+	// path so that a module importing it (directly or through a cycle) shares this
+	// instance rather than loading a second copy.
+	m := &moduleRecord{path: filename, fn: fn, exports: fn.moduleExports, starFrom: fn.moduleStarFrom}
+	if m.exports == nil {
+		m.exports = map[string]int{}
+	}
+	if rt.modules == nil {
+		rt.modules = map[string]*moduleRecord{}
+	}
+	rt.modules[filename] = m
+	// A Module evaluates asynchronously: its body runs as an async coroutine (so
+	// top-level await suspends) and the loop is driven until the completion
+	// promise settles; a rejection is the module's evaluation error.
+	if e := rt.evaluateModule(m); e != nil {
+		return mkundef(), e
 	}
 	if err == nil {
 		if p, e := rt.getField(rt.global, "__asyncTestPending"); e == nil && rt.toBoolean(p) {
