@@ -53,6 +53,25 @@ func coalesce(rs []rng) []rng {
 	return out
 }
 
+// complement returns the ranges in [0, 0x10FFFF] not covered by rs.
+func complement(rs []rng) []rng {
+	c := coalesce(rs)
+	var out []rng
+	next := rune(0)
+	for _, r := range c {
+		if r.lo > next {
+			out = append(out, rng{next, r.lo - 1})
+		}
+		if r.hi+1 > next {
+			next = r.hi + 1
+		}
+	}
+	if next <= 0x10FFFF {
+		out = append(out, rng{next, 0x10FFFF})
+	}
+	return out
+}
+
 // parseCodePoints parses "AAAA" or "AAAA..BBBB" into a range.
 func parseCodePoints(s string) (rng, error) {
 	s = strings.TrimSpace(s)
@@ -164,15 +183,30 @@ func main() {
 		scripts.add(c[1], r)
 	}))
 
-	// --- Script value aliases (sc: short code → full name) ---
-	scAlias := map[string]string{} // short/any alias → full
+	// --- Value aliases (from PropertyValueAliases.txt) ---
+	// Every alias column maps to the canonical name: for scripts the long name
+	// (column 3, matching Scripts.txt), for general categories the short code
+	// (column 2, matching u17Categories' keys). Deprecated aliases (Qaac→Coptic,
+	// Qaai→Inherited) and the punctuation-style ones (cntrl, digit, punct) live in
+	// the trailing columns, so all of them must be captured.
+	scAlias := map[string]string{}  // any script alias → full name
+	catAlias := map[string]string{} // any gc alias → short code
 	must(forEachDataLine(p(*ucd, "PropertyValueAliases.txt"), func(c []string) {
-		if len(c) < 3 || c[0] != "sc" {
+		if len(c) < 3 {
 			return
 		}
-		short, full := c[1], c[2]
-		scAlias[short] = full
-		scAlias[full] = full
+		switch c[0] {
+		case "sc":
+			full := c[2]
+			for _, a := range c[1:] {
+				scAlias[a] = full
+			}
+		case "gc":
+			short := c[1]
+			for _, a := range c[1:] {
+				catAlias[a] = short
+			}
+		}
 	}))
 
 	// --- Script_Extensions (ScriptExtensions.txt + Scripts default) ---
@@ -207,6 +241,19 @@ func main() {
 			}
 		}
 	}
+	// Script=Unknown (Zzzz) covers every code point with no assigned script — the
+	// complement of the union of all script ranges. A code point outside
+	// ScriptExtensions.txt (all of these are) has scx == {Script}, so scx=Unknown
+	// is the same set.
+	var allScript []rng
+	for _, rs := range scripts {
+		allScript = append(allScript, rs...)
+	}
+	unknown := complement(allScript)
+	scripts["Unknown"] = unknown
+	scx["Unknown"] = unknown
+	scAlias["Zzzz"] = "Unknown"
+	scAlias["Unknown"] = "Unknown"
 
 	// --- Binary properties ---
 	bin := propData{}
@@ -290,6 +337,7 @@ func main() {
 	emitMap(&b, "u17ScriptExtensions", scx)
 	emitMap(&b, "u17Binary", bin)
 	emitStrMap(&b, "u17ScriptAlias", scAlias)
+	emitStrMap(&b, "u17CategoryAlias", catAlias)
 
 	src, err := format.Source(b.Bytes())
 	if err != nil {

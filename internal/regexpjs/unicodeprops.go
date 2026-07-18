@@ -549,7 +549,7 @@ func lookupCategory17(val string) (*unicode.RangeTable, bool) {
 	if rt, ok := u17Categories[val]; ok {
 		return rt, true
 	}
-	if short, ok := categoryAliases[val]; ok {
+	if short, ok := u17CategoryAlias[val]; ok {
 		if rt, ok := u17Categories[short]; ok {
 			return rt, true
 		}
@@ -610,45 +610,76 @@ func sortInts(a []int) {
 	}
 }
 
-var categoryAliases = map[string]string{
-	"Letter": "L", "Cased_Letter": "LC", "Uppercase_Letter": "Lu",
-	"Lowercase_Letter": "Ll", "Titlecase_Letter": "Lt", "Modifier_Letter": "Lm",
-	"Other_Letter": "Lo", "Mark": "M", "Nonspacing_Mark": "Mn",
-	"Spacing_Mark": "Mc", "Enclosing_Mark": "Me", "Number": "N",
-	"Decimal_Number": "Nd", "Letter_Number": "Nl", "Other_Number": "No",
-	"Punctuation": "P", "Connector_Punctuation": "Pc", "Dash_Punctuation": "Pd",
-	"Open_Punctuation": "Ps", "Close_Punctuation": "Pe", "Initial_Punctuation": "Pi",
-	"Final_Punctuation": "Pf", "Other_Punctuation": "Po", "Symbol": "S",
-	"Math_Symbol": "Sm", "Currency_Symbol": "Sc", "Modifier_Symbol": "Sk",
-	"Other_Symbol": "So", "Separator": "Z", "Space_Separator": "Zs",
-	"Line_Separator": "Zl", "Paragraph_Separator": "Zp", "Other": "C",
-	"Control": "Cc", "Format": "Cf", "Surrogate": "Cs", "Private_Use": "Co",
-	"Unassigned": "Cn",
-}
-
 // rangeTableToClass renders a RangeTable as a regexp2 character class. When
 // inClass is true the ranges are emitted bare (no surrounding brackets) so they
-// can be spliced into an existing [...] class. Negated escapes are only handled
-// outside a class.
+// can be spliced into an existing [...] class; a negated `\P{…}` spliced into a
+// class emits the complement ranges directly, since `[^…]` cannot be nested.
 func rangeTableToClass(rt *unicode.RangeTable, negate, inClass bool) string {
 	var b strings.Builder
-	if !inClass {
+	if inClass {
 		if negate {
-			b.WriteString("[^")
+			writeComplementRanges(&b, rt)
 		} else {
-			b.WriteByte('[')
+			writeTableRanges(&b, rt)
+		}
+		return b.String()
+	}
+	if negate {
+		b.WriteString("[^")
+	} else {
+		b.WriteByte('[')
+	}
+	writeTableRanges(&b, rt)
+	b.WriteByte(']')
+	return b.String()
+}
+
+func writeTableRanges(b *strings.Builder, rt *unicode.RangeTable) {
+	for _, r := range rt.R16 {
+		writeClassRange(b, uint32(r.Lo), uint32(r.Hi), uint32(r.Stride))
+	}
+	for _, r := range rt.R32 {
+		writeClassRange(b, r.Lo, r.Hi, r.Stride)
+	}
+}
+
+// writeComplementRanges emits the gaps of rt within [0, 0x10FFFF] as bare class
+// ranges — the code points a negated `\P{…}` matches.
+func writeComplementRanges(b *strings.Builder, rt *unicode.RangeTable) {
+	var pairs [][2]uint32
+	add := func(lo, hi, stride uint32) {
+		if stride <= 1 {
+			pairs = append(pairs, [2]uint32{lo, hi})
+			return
+		}
+		for c := lo; c <= hi; c += stride {
+			pairs = append(pairs, [2]uint32{c, c})
 		}
 	}
 	for _, r := range rt.R16 {
-		writeClassRange(&b, uint32(r.Lo), uint32(r.Hi), uint32(r.Stride))
+		add(uint32(r.Lo), uint32(r.Hi), uint32(r.Stride))
 	}
 	for _, r := range rt.R32 {
-		writeClassRange(&b, r.Lo, r.Hi, r.Stride)
+		add(r.Lo, r.Hi, r.Stride)
 	}
-	if !inClass {
-		b.WriteByte(']')
+	// Insertion sort by low bound (range counts are modest).
+	for i := 1; i < len(pairs); i++ {
+		for j := i; j > 0 && pairs[j-1][0] > pairs[j][0]; j-- {
+			pairs[j-1], pairs[j] = pairs[j], pairs[j-1]
+		}
 	}
-	return b.String()
+	var next uint32
+	for _, p := range pairs {
+		if p[0] > next {
+			writeClassRange(b, next, p[0]-1, 1)
+		}
+		if p[1]+1 > next {
+			next = p[1] + 1
+		}
+	}
+	if next <= 0x10FFFF {
+		writeClassRange(b, next, 0x10FFFF, 1)
+	}
 }
 
 // esc renders a code point as a regexp2-accepted escape: \uXXXX for the BMP,
