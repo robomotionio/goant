@@ -371,10 +371,12 @@ func unwrapModuleStmts(stmts []*Node) []*Node {
 				if (d.Kind == NFunc || d.Kind == NClass) && d.Str != "" {
 					out = append(out, d) // named default declaration: hoist it
 				} else {
-					// Anonymous func/class or an expression: evaluate for side
-					// effects (the *default* binding is not observable without links).
+					// An anonymous function/class or an expression is bound to the
+					// synthetic name "*default*", which the export table points at.
+					// Without this the value was evaluated and thrown away, so the
+					// module had no `default` export at all.
 					d.Flags |= fnParen
-					out = append(out, d)
+					out = append(out, mkDefaultBinding(d))
 				}
 			}
 			// export { … } / export … from / export * → no local binding to emit.

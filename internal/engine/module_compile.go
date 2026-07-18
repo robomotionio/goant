@@ -89,10 +89,13 @@ func moduleExportEntries(stmts []*Node) map[string]string {
 		}
 		switch {
 		case s.Flags&exDefault != 0:
-			if d := s.Left; d != nil && (d.Kind == NFunc || d.Kind == NClass) && d.Str != "" {
+			// An inferred name (NamedEvaluation gave an anonymous default the name
+			// "default") is not a binding, so it still goes through the synthetic one.
+			if d := s.Left; d != nil && (d.Kind == NFunc || d.Kind == NClass) &&
+				d.Str != "" && d.Flags&fnInferredName == 0 {
 				out["default"] = d.Str
 			} else {
-				out["default"] = "*default*"
+				out["default"] = moduleDefaultName
 			}
 		case s.Flags&exDecl != 0:
 			names := map[string]bool{}
@@ -178,4 +181,19 @@ func (c *compiler) lookupImport(name string) (importBinding, bool) {
 func (c *compiler) isImportName(name string) bool {
 	_, ok := c.lookupImport(name)
 	return ok
+}
+
+// moduleDefaultName is the synthetic binding an anonymous `export default` gets;
+// it cannot collide with a real name because it is not a valid identifier.
+const moduleDefaultName = "*default*"
+
+// mkDefaultBinding wraps an anonymous `export default <expr>` in a declaration
+// of moduleDefaultName, so the value is stored where the export table looks.
+func mkDefaultBinding(expr *Node) *Node {
+	// NamedEvaluation gives an anonymous default export the name "default", not
+	// the synthetic binding name. Applying it here wins, because the declaration's
+	// own inference only names an expression that is still unnamed.
+	nameAnonExpr(expr, "default")
+	decl := &Node{Kind: NVarDecl, Left: mkIdent(moduleDefaultName), Right: expr}
+	return &Node{Kind: NVar, VarKind: VarLet, Args: []*Node{decl}}
 }
