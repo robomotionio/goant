@@ -672,14 +672,17 @@ func nonEmptySource(p string) string {
 		return "(?:)"
 	}
 	var b strings.Builder
-	rs := []rune(p)
-	for i := 0; i < len(rs); i++ {
-		switch c := rs[i]; c {
+	// Scan bytes, not runes: the pattern is WTF-8 and may hold a lone surrogate,
+	// which a []rune round-trip would replace with U+FFFD. Every character that
+	// needs escaping is ASCII except U+2028/U+2029, matched by their exact bytes;
+	// everything else is copied verbatim.
+	for i := 0; i < len(p); i++ {
+		switch c := p[i]; c {
 		case '\\': // keep an escape sequence intact (do not re-escape its operand)
 			b.WriteByte('\\')
-			if i+1 < len(rs) {
+			if i+1 < len(p) {
 				i++
-				b.WriteRune(rs[i])
+				b.WriteByte(p[i]) // continuation bytes fall through to default
 			}
 		case '/':
 			b.WriteString("\\/")
@@ -687,12 +690,18 @@ func nonEmptySource(p string) string {
 			b.WriteString("\\n")
 		case '\r':
 			b.WriteString("\\r")
-		case ' ':
-			b.WriteString("\\u2028")
-		case ' ':
-			b.WriteString("\\u2029")
 		default:
-			b.WriteRune(c)
+			// U+2028 (E2 80 A8) / U+2029 (E2 80 A9) are LineTerminators too.
+			if c == 0xE2 && i+2 < len(p) && p[i+1] == 0x80 && (p[i+2] == 0xA8 || p[i+2] == 0xA9) {
+				if p[i+2] == 0xA8 {
+					b.WriteString("\\u2028")
+				} else {
+					b.WriteString("\\u2029")
+				}
+				i += 2
+				continue
+			}
+			b.WriteByte(c)
 		}
 	}
 	return b.String()
