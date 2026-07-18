@@ -172,3 +172,10 @@ func (c *compiler) lookupImport(name string) (importBinding, bool) {
 	}
 	return importBinding{}, false
 }
+
+// isImportName reports whether a name is bound by a static import in this
+// module (or an enclosing one, for a nested function).
+func (c *compiler) isImportName(name string) bool {
+	_, ok := c.lookupImport(name)
+	return ok
+}

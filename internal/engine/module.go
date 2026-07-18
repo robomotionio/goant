@@ -39,17 +39,18 @@ type moduleRecord struct {
 	evalErr   *ThrowError
 }
 
-// exportValue reads an export's current value, or undefined before evaluation
-// assigns it (a binding in its temporal dead zone reads as undefined here; the
-// namespace object is the only observer and ES only requires a throw for a `let`
-// accessed before initialisation, which the local slot cannot distinguish).
+// exportValue reads an export's current value. A lexical binding that has not
+// been initialised yet holds the empty Value — its temporal dead zone — which
+// callers surface as a ReferenceError rather than undefined.
 func (m *moduleRecord) exportValue(name string) (Value, bool) {
 	slot, ok := m.exports[name]
 	if !ok {
 		return mkundef(), false
 	}
 	if slot < 0 || slot >= len(m.locals) {
-		return mkundef(), true
+		// The module's frame has not started yet (it is a dependency in a cycle, or
+		// evaluation has not reached it): every binding is still uninitialised.
+		return tEmpty, true
 	}
 	return m.locals[slot], true
 }
@@ -366,12 +367,17 @@ func (rt *Runtime) moduleNamespace(m *moduleRecord) Value {
 		if ambiguous || !target.found() {
 			continue // an ambiguous name is simply absent from the namespace
 		}
-		t := target
+		t, exported := target, name
 		get := rt.newNativeFunc("get "+name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			if t.namespaceOf != nil {
 				return rt.moduleNamespace(t.namespaceOf), nil
 			}
 			v, _ := t.owner.exportValue(t.localName)
+			if v.IsEmpty() {
+				// The binding exists on the namespace but is still in its temporal
+				// dead zone: the property is observable, reading it is not.
+				return mkundef(), rt.referenceError("Cannot access '" + exported + "' before initialization")
+			}
 			return v, nil
 		})
 		// Enumerable, so Object.keys lists it; no setter, so a write is a no-op

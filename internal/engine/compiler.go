@@ -1047,7 +1047,10 @@ func (c *compiler) compileExpr(n *Node) {
 	case NTypeof:
 		// `typeof x` where x is a bare (possibly-undeclared) global must not throw:
 		// read it leniently so an absent binding yields "undefined".
-		if r := n.Right; r != nil && r.Kind == NIdent &&
+		// The lenient path is only for a name with no binding at all. An imported
+		// name IS declared, so it must go through the normal read — a binding still
+		// in its temporal dead zone has to throw, not report "undefined".
+		if r := n.Right; r != nil && r.Kind == NIdent && !c.isImportName(r.Str) &&
 			c.resolveLocal(r.Str) < 0 && c.resolveUpvalue(r.Str) < 0 && !c.nameIsWithRouted(r.Str) {
 			idx := c.constant(c.rt.internString(r.Str))
 			c.emit(OpGetGlobalUndef)
