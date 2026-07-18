@@ -3,8 +3,10 @@
 // dlclark/regexp2 (which supports an ECMAScript mode directly). Flags g/y and
 // lastIndex handling live at the JS level; i/m/s/u map to regexp2 options.
 //
-// Position semantics: regexp2 operates on Go runes. For BMP text a rune index
-// equals a UTF-16 index; astral-aware indexing is a later refinement.
+// Position semantics: subjects are passed in — and all offsets reported back —
+// as UTF-16 code units, the domain ECMAScript indexes strings in. A `u`/`v`
+// pattern matches whole code points, so Exec recodes such a subject and maps the
+// resulting offsets back (see Exec).
 package regexpjs
 
 import (
@@ -127,6 +129,81 @@ func runesToWTF8(rs []rune) string {
 		b.WriteRune(c)
 	}
 	return b.String()
+}
+
+// translateDot rewrites `.` into an explicit class. ECMAScript's dot excludes
+// every LineTerminator — \r and the two Unicode separators as well as \n —
+// whereas regexp2's excludes only \n, and with `s` it matches everything. It is
+// spelled out rather than left to regexp2's Singleline option because an inline
+// `(?s:…)` / `(?-s:…)` modifier group changes dotAll for its body only, so the
+// state is tracked down the group nesting as the pattern is scanned.
+func translateDot(src string, dotAll bool) string {
+	if !strings.ContainsRune(src, '.') {
+		return src
+	}
+	const notLineTerminator = `[^\n\r\u2028\u2029]`
+	rs := []rune(src)
+	var b strings.Builder
+	b.Grow(len(src))
+	stack := []bool{dotAll}
+	cur := func() bool { return stack[len(stack)-1] }
+	inClass := 0
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		switch {
+		case c == '\\' && i+1 < len(rs):
+			b.WriteRune(c)
+			b.WriteRune(rs[i+1])
+			i++
+			continue
+		case c == '[':
+			inClass++
+		case c == ']':
+			if inClass > 0 {
+				inClass--
+			}
+		case inClass > 0:
+			// A '.' inside a class is a literal; nothing here needs tracking.
+		case c == '(':
+			stack = append(stack, modifiedDotAll(rs, i, cur()))
+		case c == ')':
+			if len(stack) > 1 {
+				stack = stack[:len(stack)-1]
+			}
+		case c == '.':
+			if cur() {
+				b.WriteString(`[\s\S]`)
+			} else {
+				b.WriteString(notLineTerminator)
+			}
+			continue
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
+}
+
+// modifiedDotAll returns the dotAll state inside the group opening at rs[i],
+// applying the add/remove flags of an inline `(?ims-ims:` modifier group.
+func modifiedDotAll(rs []rune, i int, outer bool) bool {
+	if i+1 >= len(rs) || rs[i+1] != '?' {
+		return outer
+	}
+	add := true
+	for j := i + 2; j < len(rs); j++ {
+		switch rs[j] {
+		case 'i', 'm':
+		case 's':
+			outer = add
+		case '-':
+			add = false
+		case ':':
+			return outer
+		default:
+			return outer // not a modifier group: (?: (?= (?! (?<name> …
+		}
+	}
+	return outer
 }
 
 // splitAstralLiterals rewrites every literal astral code point in a pattern as
@@ -273,6 +350,7 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if !r.Unicode {
 		src = splitAstralLiterals(src)
 	}
+	src = translateDot(src, r.DotAll)
 	if src == "" {
 		src = "(?:)"
 	}

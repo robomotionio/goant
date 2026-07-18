@@ -21,7 +21,9 @@ func regExpEscape(s string) string {
 	const punct = ",-=<>#&!%:;@~'`\"" + " "
 	var b strings.Builder
 	first := true
-	for _, c := range s {
+	// Decoded WTF-8-aware: ranging over the Go string would turn each lone
+	// surrogate into U+FFFD instead of escaping it below.
+	for _, c := range wtf8ToRunes([]byte(s)) {
 		if first && ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
 			fmt.Fprintf(&b, "\\x%02x", c)
 			first = false
@@ -42,6 +44,11 @@ func regExpEscape(s string) string {
 			b.WriteString("\\f")
 		case c == '\r':
 			b.WriteString("\\r")
+		case c >= 0xD800 && c <= 0xDFFF:
+			// A lone surrogate is not well-formed on its own, so it is escaped
+			// rather than emitted (a surrogate pair decodes to one astral code
+			// point and never reaches here).
+			fmt.Fprintf(&b, "\\u%04x", c)
 		case strings.ContainsRune(punct, c) || c == 0xA0 || c == 0xFEFF ||
 			c == 0x2028 || c == 0x2029 || unicode.IsSpace(c):
 			if c <= 0xFF {
