@@ -358,7 +358,11 @@ func (c *compiler) bindDeclName(name string, kind VarKind) {
 		c.compileIdentStore(name)
 		return
 	}
-	if kind == VarVar && c.isScript && !c.isEval {
+	// A Module's top-level `var` is a frame local, not a global-object property
+	// (same condition as compileVarDecl's asGlobal). Without the isModule guard a
+	// destructuring `var` in a module stored to the global — which, module code
+	// being strict, threw ReferenceError for the undeclared name.
+	if kind == VarVar && c.isScript && !c.isEval && !c.isModule {
 		c.emitGlobalPut(name)
 		return
 	}
