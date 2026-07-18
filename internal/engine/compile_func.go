@@ -782,15 +782,16 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	// `var` (both of which reuse the slot here) SHADOWS it with a mutable binding —
 	// skip the self-name entirely in that case (`function g(g){}`,
 	// `function g(){ var g }`). A body `let`/`const` shadows via a fresh slot.
+	// Only a function EXPRESSION gets this binding. A declaration's name is the
+	// mutable binding in the ENCLOSING scope, and giving the body its own slot for
+	// it shadowed that: `function f(){ f = 2 } f()` left the outer f untouched,
+	// and an exported function reassigning its own name never updated the export.
 	if n.Str != "" && n.Flags&fnArrow == 0 && n.Flags&fnInferredName == 0 &&
-		!functionSelfNameShadowed(n) {
+		n.Flags&fnFuncExpr != 0 && !functionSelfNameShadowed(n) {
 		slot := c.declareVar(n.Str, false)
-		// A named function EXPRESSION's self-reference is immutable (assigning to it
-		// is a strict-mode TypeError, a sloppy no-op); a declaration's name is the
-		// mutable outer binding.
-		if n.Flags&fnFuncExpr != 0 {
-			c.locals[slot].selfName = true
-		}
+		// A named function expression's self-reference is immutable: assigning to
+		// it is a strict-mode TypeError and a sloppy no-op.
+		c.locals[slot].selfName = true
 		c.emit(OpSpecialObj)
 		c.emitByte(1) // current function value
 		c.emitOpU16(OpPutLocal, uint16(slot))
