@@ -489,8 +489,10 @@ func hexVal(rs []rune) uint32 {
 }
 
 // resolveUnicodeProperty maps an ES property name — "Script=Greek", "gc=Lu",
-// a bare general category ("Lu"/"Letter"), a binary property ("White_Space"),
-// or a bare script ("Greek") — to a Unicode RangeTable.
+// a bare general category ("Lu"/"Letter"), or a binary property ("White_Space")
+// — to a Unicode RangeTable. The property data comes from the generated
+// Unicode 17.0.0 tables (unicode17_gen.go), which Test262's property-escapes
+// tests target; the Go toolchain's bundled unicode package lags that version.
 func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
 	// ECMAScript uses exact (not "loose") property matching: no surrounding or
 	// interior whitespace is permitted in a `\p{…}` name or value.
@@ -498,20 +500,15 @@ func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
 		return nil, false
 	}
 	if eq := strings.IndexByte(name, '='); eq >= 0 {
-		prop := strings.TrimSpace(name[:eq])
-		val := strings.TrimSpace(name[eq+1:])
+		prop := name[:eq]
+		val := name[eq+1:]
 		switch prop {
-		case "Script", "sc", "Script_Extensions", "scx":
-			if full, ok := scriptAliases[val]; ok {
-				val = full // ISO 15924 alias (e.g. "Grek") -> Go's full script name
-			}
-			if rt, ok := unicode.Scripts[val]; ok {
-				return rt, true
-			}
-			rt, ok := supplementaryScripts[val]
-			return rt, ok
+		case "Script", "sc":
+			return lookupScript17(val, u17Scripts)
+		case "Script_Extensions", "scx":
+			return lookupScript17(val, u17ScriptExtensions)
 		case "General_Category", "gc":
-			return lookupCategory(val)
+			return lookupCategory17(val)
 		}
 		return nil, false
 	}
@@ -521,26 +518,41 @@ func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
 	case "Any":
 		return &unicode.RangeTable{R16: []unicode.Range16{{0x0, 0xFFFF, 1}}, R32: []unicode.Range32{{0x10000, 0x10FFFF, 1}}}, true
 	case "Assigned":
-		return unicode.Categories["L"], true // approximation, unused by the corpus
+		return u17Assigned, true
 	}
 	// A lone \p{name} is valid only for a General_Category value or an
-	// ECMAScript-permitted binary property (Go's unicode.Properties also holds
-	// Other_*/Hyphen/… which ES rejects, and a bare script name is not a valid
-	// lone property).
-	if rt, ok := lookupCategory(name); ok {
+	// ECMAScript-permitted binary property. A bare script name is not a valid
+	// lone property; esBinaryProperties gates out Go names ES rejects.
+	if rt, ok := lookupCategory17(name); ok {
 		return rt, true
 	}
 	if canon, ok := esBinaryProperties[name]; ok {
-		if canon == "Unified_Ideograph" {
-			return mergeTables(unicode.Properties["Unified_Ideograph"], supplementaryUnifiedIdeograph), true
-		}
-		if rt, ok := emojiProperties[canon]; ok {
+		rt, ok := u17Binary[canon]
+		return rt, ok
+	}
+	return nil, false
+}
+
+// lookupScript17 resolves a Script or Script_Extensions value, accepting an ISO
+// 15924 alias (e.g. "Grek") or the full name (e.g. "Greek").
+func lookupScript17(val string, m map[string]*unicode.RangeTable) (*unicode.RangeTable, bool) {
+	if full, ok := u17ScriptAlias[val]; ok {
+		val = full
+	}
+	rt, ok := m[val]
+	return rt, ok
+}
+
+// lookupCategory17 resolves a general-category value by its abbreviated name
+// (Lu), its group name (L), or its ES long alias (Uppercase_Letter).
+func lookupCategory17(val string) (*unicode.RangeTable, bool) {
+	if rt, ok := u17Categories[val]; ok {
+		return rt, true
+	}
+	if short, ok := categoryAliases[val]; ok {
+		if rt, ok := u17Categories[short]; ok {
 			return rt, true
 		}
-		if rt, ok := unicode.Properties[canon]; ok {
-			return rt, true
-		}
-		return nil, false // valid ES property Go's stdlib (Unicode 15.0) lacks
 	}
 	return nil, false
 }
@@ -548,21 +560,6 @@ func resolveUnicodeProperty(name string) (*unicode.RangeTable, bool) {
 // codePointSet is a simple sorted set of code points used to evaluate the `v`
 // flag's class set operations (intersection &&, difference --, union).
 type codePointSet map[rune]bool
-
-// mergeTables concatenates two RangeTables' ranges (order is irrelevant for the
-// class-emission use here).
-func mergeTables(a, b *unicode.RangeTable) *unicode.RangeTable {
-	m := &unicode.RangeTable{}
-	if a != nil {
-		m.R16 = append(m.R16, a.R16...)
-		m.R32 = append(m.R32, a.R32...)
-	}
-	if b != nil {
-		m.R16 = append(m.R16, b.R16...)
-		m.R32 = append(m.R32, b.R32...)
-	}
-	return m
-}
 
 func setFromTable(rt *unicode.RangeTable) codePointSet {
 	s := codePointSet{}
@@ -611,20 +608,6 @@ func sortInts(a []int) {
 			a[j-1], a[j] = a[j], a[j-1]
 		}
 	}
-}
-
-// lookupCategory resolves a general-category value by its abbreviated name (Lu)
-// or its ES long alias (Uppercase_Letter).
-func lookupCategory(name string) (*unicode.RangeTable, bool) {
-	if rt, ok := unicode.Categories[name]; ok {
-		return rt, true
-	}
-	if short, ok := categoryAliases[name]; ok {
-		if rt, ok := unicode.Categories[short]; ok {
-			return rt, true
-		}
-	}
-	return nil, false
 }
 
 var categoryAliases = map[string]string{
