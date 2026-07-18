@@ -488,6 +488,7 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 			}
 		}
 		c.fn.moduleStarFrom = moduleStarSpecifiers(moduleStmts)
+		c.fn.moduleIndirect = moduleIndirectExports(moduleStmts)
 	}
 	// Return the completion value.
 	c.emitOpU16(OpGetLocal, uint16(c.completionSlot))

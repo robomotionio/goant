@@ -112,12 +112,50 @@ func moduleExportEntries(stmts []*Node) map[string]string {
 	return out
 }
 
+// indirectExport is an export forwarded from another module: `export { a as b }
+// from "m"` re-exports m's `a`, and `export * as ns from "m"` exports m's whole
+// namespace. Neither creates a local binding, so these are resolved through the
+// source module at run time.
+type indirectExport struct {
+	specifier  string
+	importName string // "*" for a namespace re-export
+}
+
+// moduleIndirectExports maps each re-exported name to where it comes from.
+func moduleIndirectExports(stmts []*Node) map[string]indirectExport {
+	out := map[string]indirectExport{}
+	for _, s := range stmts {
+		if s == nil || s.Kind != NExport || s.Flags&exFrom == 0 || s.Right == nil {
+			continue
+		}
+		spec := s.Right.Str
+		// `export * as ns from "m"` names the whole namespace; a bare `export *`
+		// has no name of its own and is handled as a star re-export instead.
+		if s.Flags&exStar != 0 {
+			if s.Flags&exNamespace != 0 && len(s.Args) > 0 && s.Args[0].Right != nil {
+				out[s.Args[0].Right.Str] = indirectExport{specifier: spec, importName: "*"}
+			}
+			continue
+		}
+		for _, spc := range s.Args {
+			if spc == nil || spc.Right == nil || spc.Left == nil {
+				continue
+			}
+			out[spc.Right.Str] = indirectExport{specifier: spec, importName: spc.Left.Str}
+		}
+	}
+	return out
+}
+
 // moduleStarSpecifiers lists the `export * from "…"` specifiers, whose exports
 // this module forwards.
 func moduleStarSpecifiers(stmts []*Node) []string {
 	var out []string
 	for _, s := range stmts {
-		if s != nil && s.Kind == NExport && s.Flags&exStar != 0 && s.Right != nil {
+		// `export * as ns from "m"` names m's namespace; it does NOT forward m's
+		// individual export names, so only a bare `export *` counts here.
+		if s != nil && s.Kind == NExport && s.Flags&exStar != 0 &&
+			s.Flags&exNamespace == 0 && s.Right != nil {
 			out = append(out, s.Right.Str)
 		}
 	}

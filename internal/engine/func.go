@@ -10,8 +10,8 @@ package engine
 type upvalDesc struct {
 	index    int
 	isLocal  bool
-	isConst  bool // captures a const binding — assigning through it throws a TypeError
-	selfName bool // captures a named-function-expression self-reference (immutable)
+	isConst  bool   // captures a const binding — assigning through it throws a TypeError
+	selfName bool   // captures a named-function-expression self-reference (immutable)
 	name     string // the captured binding's source name (for direct-eval scope capture)
 }
 
@@ -44,7 +44,8 @@ type svFunc struct {
 	moduleExports  map[string]int
 	moduleStarFrom []string
 	moduleImports  []moduleImport
-	isMethod    bool // concise method / getter / setter: no [[Construct]], no .prototype
+	moduleIndirect map[string]indirectExport
+	isMethod       bool // concise method / getter / setter: no [[Construct]], no .prototype
 	// isClassElement marks a class constructor / method / accessor / static block:
 	// its `super` resolves via the class's captured *superproto* / *superctor*
 	// bindings, distinguishing it from an object-literal method (whose super uses
