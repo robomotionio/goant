@@ -483,7 +483,9 @@ func (rt *Runtime) initRegExpAccessors() {
 	flagGetter("ignoreCase", 'i', func(re *regexpjs.Regexp) bool { return re.IgnoreCase })
 	flagGetter("multiline", 'm', func(re *regexpjs.Regexp) bool { return re.Multiline })
 	flagGetter("dotAll", 's', func(re *regexpjs.Regexp) bool { return re.DotAll })
-	flagGetter("unicode", 'u', func(re *regexpjs.Regexp) bool { return re.Unicode })
+	// `unicode` reports the literal `u` flag: `v` implies Unicode mode internally
+	// but must not make RegExp.prototype.unicode (or `flags`) report a `u`.
+	flagGetter("unicode", 'u', nil)
 	flagGetter("sticky", 'y', func(re *regexpjs.Regexp) bool { return re.Sticky })
 	flagGetter("hasIndices", 'd', nil)
 	flagGetter("unicodeSets", 'v', nil)
@@ -806,10 +808,10 @@ func (rt *Runtime) updateLegacyRegExpState(input []rune, m *regexpjs.Match) {
 	}
 	start, end := m.Index, m.Index+m.Groups[0].Length
 	if start >= 0 && start <= len(input) {
-		rt.regexpLeftContext = string(input[:start])
+		rt.regexpLeftContext = utf16RunesToString(input[:start])
 	}
 	if end >= 0 && end <= len(input) {
-		rt.regexpRightContext = string(input[end:])
+		rt.regexpRightContext = utf16RunesToString(input[end:])
 	}
 }
 
@@ -822,7 +824,7 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	if e != nil {
 		return mkundef(), e
 	}
-	input := wtf8ToRunes(rt.strBytes(s))
+	input := wtf8ToUTF16Runes(rt.strBytes(s))
 	re := o.regex
 
 	// lastIndex = ToLength(Get(R, "lastIndex")) — always read (observable via a
@@ -880,6 +882,9 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	res := rt.newArray()
 	ro := rt.objPtr(res)
 	groups := mkundef()
+	// Duplicate group names (legal across disjoint alternatives) share one
+	// `groups` property: the alternative that participated wins.
+	settled := map[string]bool{}
 	for i, g := range m.Groups {
 		missing := g.Index < 0 && i > 0
 		val := rt.newString(g.Value)
@@ -891,7 +896,10 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 			if groups.IsUndefined() {
 				groups = rt.newObject(mknull())
 			}
-			rt.objPtr(groups).defineOwn(g.Name, val, attrDefault)
+			if !settled[g.Name] {
+				rt.objPtr(groups).defineOwn(g.Name, val, attrDefault)
+				settled[g.Name] = !missing
+			}
 		}
 	}
 	ro.defineOwn("index", mknum(float64(m.Index)), attrDefault)
@@ -903,6 +911,7 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 		indices := rt.newArray()
 		io := rt.objPtr(indices)
 		idxGroups := mkundef()
+		idxSettled := map[string]bool{}
 		for i, g := range m.Groups {
 			pair := mkundef()
 			if g.Index >= 0 {
@@ -917,7 +926,10 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 				if idxGroups.IsUndefined() {
 					idxGroups = rt.newObject(mknull())
 				}
-				rt.objPtr(idxGroups).defineOwn(g.Name, pair, attrDefault)
+				if !idxSettled[g.Name] {
+					rt.objPtr(idxGroups).defineOwn(g.Name, pair, attrDefault)
+					idxSettled[g.Name] = g.Index >= 0
+				}
 			}
 		}
 		io.defineOwn("groups", idxGroups, attrDefault)
@@ -1319,7 +1331,7 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 	if e != nil {
 		return mkundef(), e
 	}
-	Srunes := wtf8ToRunes(rt.strBytes(sV))
+	Srunes := wtf8ToUTF16Runes(rt.strBytes(sV))
 	functional := rt.isCallable(repl)
 	replStr := ""
 	if !functional {
@@ -1421,7 +1433,7 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 		position := min(max(int(pos), 0), len(Srunes))
 		caps := make([]Value, nCaptures)
 		groups := make([]regexpjs.Group, nCaptures+1)
-		groups[0] = regexpjs.Group{Index: position, Length: len([]rune(matched)), Value: matched}
+		groups[0] = regexpjs.Group{Index: position, Length: utf16Len([]byte(matched)), Value: matched}
 		for i := 1; i <= nCaptures; i++ {
 			cv, e := rt.getElement(result, mknum(float64(i)))
 			if e != nil {
@@ -1488,13 +1500,13 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 			}
 		}
 		if position >= nextPos {
-			out.WriteString(string(Srunes[nextPos:position]))
+			out.WriteString(utf16RunesToString(Srunes[nextPos:position]))
 			out.WriteString(replacement)
-			nextPos = position + len([]rune(matched))
+			nextPos = position + utf16Len([]byte(matched))
 		}
 	}
 	if nextPos < len(Srunes) {
-		out.WriteString(string(Srunes[nextPos:]))
+		out.WriteString(utf16RunesToString(Srunes[nextPos:]))
 	}
 	return rt.newString(out.String()), nil
 }
@@ -1507,7 +1519,7 @@ func (rt *Runtime) regexpSymbolSplitGeneric(splitter, strVal, limitV Value, unic
 	if e != nil {
 		return mkundef(), e
 	}
-	S := wtf8ToRunes(rt.strBytes(sV))
+	S := wtf8ToUTF16Runes(rt.strBytes(sV))
 	res := rt.newArray()
 	ro := rt.objPtr(res)
 	lim := int64(1)<<32 - 1
@@ -1559,7 +1571,7 @@ func (rt *Runtime) regexpSymbolSplitGeneric(splitter, strVal, limitV Value, unic
 			q = int(rt.advanceStringIndex(sV, float64(q), unicode))
 			continue
 		}
-		pushSeg(rt.newString(string(S[p:q])))
+		pushSeg(rt.newString(utf16RunesToString(S[p:q])))
 		if int64(ro.arrLen) == lim {
 			return res, nil
 		}
@@ -1592,7 +1604,7 @@ func (rt *Runtime) regexpSymbolSplitGeneric(splitter, strVal, limitV Value, unic
 		p = end
 		q = p
 	}
-	pushSeg(rt.newString(string(S[p:])))
+	pushSeg(rt.newString(utf16RunesToString(S[p:])))
 	return res, nil
 }
 
@@ -1629,20 +1641,22 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 			return "", terr
 		}
 		var named map[string]string
+		settled := map[string]bool{}
 		for _, g := range groups {
-			if g.Name != "" && !allDigits(g.Name) {
+			if g.Name != "" && !allDigits(g.Name) && !settled[g.Name] {
 				if named == nil {
 					named = map[string]string{}
 				}
 				if g.Index >= 0 {
 					named[g.Name] = g.Value
+					settled[g.Name] = true
 				} else {
 					named[g.Name] = ""
 				}
 			}
 		}
 		hasNamed, lookup := namedFromMap(named)
-		return rt.expandReplacement(string(rt.strBytes(rs)), match, index, wtf8ToRunes(rt.strBytes(s)), groups, hasNamed, lookup)
+		return rt.expandReplacement(string(rt.strBytes(rs)), match, index, wtf8ToUTF16Runes(rt.strBytes(s)), groups, hasNamed, lookup)
 	}
 
 	o := rt.objPtr(pattern)
@@ -1658,7 +1672,7 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 			if err != nil || m == nil {
 				break
 			}
-			out.WriteString(string(input[pos:m.Index]))
+			out.WriteString(utf16RunesToString(input[pos:m.Index]))
 			rep, terr := replaceOne(m.Groups[0].Value, m.Groups, m.Index)
 			if terr != nil {
 				return mkundef(), terr
@@ -1680,7 +1694,7 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 			}
 		}
 		if pos <= len(input) {
-			out.WriteString(string(input[pos:]))
+			out.WriteString(utf16RunesToString(input[pos:]))
 		}
 		return rt.newString(out.String()), nil
 	}
@@ -1720,7 +1734,7 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 // captures (so "$<" stays literal); otherwise lookupNamed resolves each name to
 // its substitution (propagating a Get/ToString abrupt from a groups object).
 func (rt *Runtime) expandReplacement(tmpl, match string, position int, input []rune, groups []regexpjs.Group, hasNamed bool, lookupNamed func(string) (string, *ThrowError)) (string, *ThrowError) {
-	matchLen := len([]rune(match))
+	matchLen := utf16Len([]byte(match))
 	var out strings.Builder
 	for i := 0; i < len(tmpl); i++ {
 		if tmpl[i] != '$' || i+1 >= len(tmpl) {
@@ -1737,12 +1751,12 @@ func (rt *Runtime) expandReplacement(tmpl, match string, position int, input []r
 			i++
 		case c == '`':
 			if position >= 0 && position <= len(input) {
-				out.WriteString(string(input[:position]))
+				out.WriteString(utf16RunesToString(input[:position]))
 			}
 			i++
 		case c == '\'':
 			if end := position + matchLen; end >= 0 && end <= len(input) {
-				out.WriteString(string(input[end:]))
+				out.WriteString(utf16RunesToString(input[end:]))
 			}
 			i++
 		case c == '<' && hasNamed:
@@ -1803,7 +1817,7 @@ func (rt *Runtime) stringSplitRegexp(this Value, re *regexpjs.Regexp, limitV Val
 	if e != nil {
 		return mkundef(), e
 	}
-	input := wtf8ToRunes(rt.strBytes(s))
+	input := wtf8ToUTF16Runes(rt.strBytes(s))
 	res := rt.newArray()
 	ro := rt.objPtr(res)
 	// lim = (limit is undefined) ? 2^32-1 : ToUint32(limit); a throwing coercion
@@ -1840,7 +1854,7 @@ func (rt *Runtime) stringSplitRegexp(this Value, re *regexpjs.Regexp, limitV Val
 			pos = m.Index + 1
 			continue
 		}
-		rt.arraySet(ro, ro.arrLen, rt.newString(string(input[last:m.Index])))
+		rt.arraySet(ro, ro.arrLen, rt.newString(utf16RunesToString(input[last:m.Index])))
 		if int64(ro.arrLen) >= limit {
 			return res, nil
 		}
@@ -1858,7 +1872,7 @@ func (rt *Runtime) stringSplitRegexp(this Value, re *regexpjs.Regexp, limitV Val
 		last = end
 		pos = end
 	}
-	rt.arraySet(ro, ro.arrLen, rt.newString(string(input[last:])))
+	rt.arraySet(ro, ro.arrLen, rt.newString(utf16RunesToString(input[last:])))
 	return res, nil
 }
 

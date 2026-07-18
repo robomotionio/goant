@@ -136,6 +136,66 @@ func wtf8ToRunes(b []byte) []rune {
 	return runes
 }
 
+// wtf8ToUTF16Runes decodes a WTF-8 string into one rune per UTF-16 code unit,
+// splitting astral code points into their surrogate pair. ECMAScript indexes
+// strings in code units and a non-`u` regexp matches them one code unit at a
+// time, so this — not wtf8ToRunes — is the domain the RegExp engine works in.
+func wtf8ToUTF16Runes(b []byte) []rune {
+	if isASCIIBytes(b) {
+		runes := make([]rune, len(b))
+		for i, c := range b {
+			runes[i] = rune(c)
+		}
+		return runes
+	}
+	runes := make([]rune, 0, len(b))
+	for i := 0; i < len(b); {
+		slen, units, cp := wtf8Decode(b, i)
+		if slen <= 0 {
+			slen = 1
+		}
+		if units == 2 {
+			c := cp - 0x10000
+			runes = append(runes, rune(0xD800+(c>>10)), rune(0xDC00+c&0x3FF))
+		} else {
+			runes = append(runes, rune(cp))
+		}
+		i += slen
+	}
+	return runes
+}
+
+// utf16RunesToString re-encodes a UTF-16 code-unit rune slice (as produced by
+// wtf8ToUTF16Runes) as WTF-8: surrogate pairs recombine into astral code points
+// and unpaired surrogates survive as themselves. Plain string(rs) cannot be used
+// because Go maps every surrogate rune to U+FFFD.
+func utf16RunesToString(rs []rune) string {
+	ascii := true
+	for _, r := range rs {
+		if r >= 0x80 {
+			ascii = false
+			break
+		}
+	}
+	if ascii {
+		b := make([]byte, len(rs))
+		for i, r := range rs {
+			b[i] = byte(r)
+		}
+		return string(b)
+	}
+	out := make([]byte, 0, len(rs)*3)
+	for i := 0; i < len(rs); i++ {
+		cp := uint32(rs[i])
+		if cp >= 0xD800 && cp <= 0xDBFF && i+1 < len(rs) && rs[i+1] >= 0xDC00 && rs[i+1] <= 0xDFFF {
+			cp = 0x10000 + (cp-0xD800)<<10 + uint32(rs[i+1]) - 0xDC00
+			i++
+		}
+		out = wtf8Encode(out, cp)
+	}
+	return string(out)
+}
+
 func isASCIIBytes(b []byte) bool {
 	for _, c := range b {
 		if c >= 0x80 {

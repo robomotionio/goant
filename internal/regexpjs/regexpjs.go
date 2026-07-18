@@ -95,6 +95,59 @@ func translateAnnexBEscapes(src string) string {
 	return b.String()
 }
 
+// runesToWTF8 encodes runes as WTF-8: an adjacent surrogate pair (which only the
+// code-unit matching domain produces) combines into its astral code point, and a
+// lone surrogate keeps its raw 3-byte form instead of becoming U+FFFD.
+func runesToWTF8(rs []rune) string {
+	surrogate := false
+	for _, c := range rs {
+		if c >= 0xD800 && c <= 0xDFFF {
+			surrogate = true
+			break
+		}
+	}
+	if !surrogate {
+		return string(rs)
+	}
+	var b strings.Builder
+	b.Grow(len(rs))
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c >= 0xD800 && c <= 0xDBFF && i+1 < len(rs) && rs[i+1] >= 0xDC00 && rs[i+1] <= 0xDFFF {
+			b.WriteRune(0x10000 + (c-0xD800)<<10 + rs[i+1] - 0xDC00)
+			i++
+			continue
+		}
+		if c >= 0xD800 && c <= 0xDFFF {
+			b.WriteByte(byte(0xE0 | c>>12))
+			b.WriteByte(byte(0x80 | (c>>6)&0x3F))
+			b.WriteByte(byte(0x80 | c&0x3F))
+			continue
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
+}
+
+// splitAstralLiterals rewrites every literal astral code point in a pattern as
+// the two \uXXXX escapes for its surrogate pair.
+func splitAstralLiterals(src string) string {
+	if !strings.ContainsFunc(src, func(c rune) bool { return c > 0xFFFF }) {
+		return src
+	}
+	var b strings.Builder
+	b.Grow(len(src))
+	for _, c := range src {
+		if c > 0xFFFF {
+			v := c - 0x10000
+			fmt.Fprintf(&b, `\u%04X\u%04X`, 0xD800+(v>>10), 0xDC00+(v&0x3FF))
+			continue
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
+}
+
 func isASCIILetter(c rune) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
@@ -136,6 +189,11 @@ func Compile(pattern, flags string) (*Regexp, error) {
 		default:
 			return nil, fmt.Errorf("invalid regular expression flag '%c'", f)
 		}
+	}
+	// `u` and `v` select different pattern grammars, so they are mutually
+	// exclusive (RegExpInitialize step 2).
+	if seen['u'] && seen['v'] {
+		return nil, fmt.Errorf("invalid regular expression flags 'u' and 'v' are mutually exclusive")
 	}
 	// Inline modifier groups `(?ims-ims:…)` have grammar early errors regexp2's
 	// permissive .NET option syntax would not catch; reject the invalid ones here.
@@ -207,6 +265,14 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if r.Unicode && r.IgnoreCase {
 		src = expandCaseFold(src)
 	}
+	// Outside Unicode mode a pattern is a sequence of UTF-16 code units, so an
+	// astral literal stands for its surrogate pair — and the subject is matched
+	// in code units too. Spell the pair out so both sides agree. (In a class this
+	// is also what ES means: `[𐌀]` is the class of its two code units, and an
+	// astral ClassRange endpoint becomes the out-of-order range ES rejects.)
+	if !r.Unicode {
+		src = splitAstralLiterals(src)
+	}
 	if src == "" {
 		src = "(?:)"
 	}
@@ -218,9 +284,101 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	return r, nil
 }
 
-// Exec runs the regex against input starting at rune index start, returning the
-// first match (or nil if none). Sticky matches must begin exactly at start.
+// Exec runs the regex against input — the subject string as UTF-16 code units,
+// one rune per unit — starting at code-unit index start, and returns the first
+// match (or nil if none). Sticky matches must begin exactly at start. All
+// returned offsets are code-unit indices, matching ECMAScript string indexing.
 func (r *Regexp) Exec(input []rune, start int) (*Match, error) {
+	if start < 0 || start > len(input) {
+		return nil, nil
+	}
+	// A `u`/`v` pattern matches whole code points, so a subject holding surrogate
+	// pairs is recoded to code points for the match and the resulting offsets are
+	// mapped back to code units. Subjects without a pair (the common case, lone
+	// surrogates included) are already in both domains at once.
+	if r.Unicode && hasSurrogatePair(input) {
+		cps, units := toCodePoints(input)
+		m, err := r.exec(cps, cpIndexAt(units, start))
+		if err != nil || m == nil {
+			return m, err
+		}
+		remapToCodeUnits(m, units)
+		return m, nil
+	}
+	return r.exec(input, start)
+}
+
+// hasSurrogatePair reports whether input contains a high surrogate immediately
+// followed by a low one — the only case where code-unit and code-point indexing
+// of the subject diverge.
+func hasSurrogatePair(input []rune) bool {
+	for i := 0; i+1 < len(input); i++ {
+		if input[i] >= 0xD800 && input[i] <= 0xDBFF && input[i+1] >= 0xDC00 && input[i+1] <= 0xDFFF {
+			return true
+		}
+	}
+	return false
+}
+
+// toCodePoints converts UTF-16 code units to code points, also returning the
+// code-unit offset of each code point (plus a final entry for the end).
+func toCodePoints(input []rune) (cps []rune, units []int) {
+	cps = make([]rune, 0, len(input))
+	units = make([]int, 0, len(input)+1)
+	for i := 0; i < len(input); i++ {
+		units = append(units, i)
+		c := input[i]
+		if c >= 0xD800 && c <= 0xDBFF && i+1 < len(input) && input[i+1] >= 0xDC00 && input[i+1] <= 0xDFFF {
+			cps = append(cps, 0x10000+(c-0xD800)<<10+input[i+1]-0xDC00)
+			i++
+			continue
+		}
+		cps = append(cps, c)
+	}
+	units = append(units, len(input))
+	return cps, units
+}
+
+// cpIndexAt maps a code-unit offset to a code-point index, rounding an offset
+// that lands inside a surrogate pair down to the start of that pair.
+func cpIndexAt(units []int, unit int) int {
+	lo, hi := 0, len(units)-1
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if units[mid] <= unit {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
+}
+
+// remapToCodeUnits rewrites a match's code-point offsets as code-unit offsets.
+func remapToCodeUnits(m *Match, units []int) {
+	at := func(cp int) int {
+		if cp < 0 {
+			return cp
+		}
+		if cp >= len(units) {
+			return units[len(units)-1]
+		}
+		return units[cp]
+	}
+	m.Index = at(m.Index)
+	for i := range m.Groups {
+		g := &m.Groups[i]
+		if g.Index < 0 {
+			continue
+		}
+		end := at(g.Index + g.Length)
+		g.Index = at(g.Index)
+		g.Length = end - g.Index
+	}
+}
+
+// exec runs the compiled pattern over runes in its own matching domain.
+func (r *Regexp) exec(input []rune, start int) (*Match, error) {
 	if start < 0 || start > len(input) {
 		return nil, nil
 	}
@@ -244,7 +402,10 @@ func (r *Regexp) Exec(input []rune, start int) (*Match, error) {
 		if len(g.Captures) > 0 {
 			gg.Index = g.Index
 			gg.Length = g.Length
-			gg.Value = g.String()
+			// Not g.String(): Go's []rune->string conversion replaces every
+			// surrogate rune with U+FFFD, which would corrupt both the halves of
+			// a pair (non-Unicode mode) and a lone surrogate.
+			gg.Value = runesToWTF8(input[g.Index : g.Index+g.Length])
 		}
 		return gg
 	}

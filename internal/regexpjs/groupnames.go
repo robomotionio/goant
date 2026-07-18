@@ -151,7 +151,13 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 			}
 			in := "__g" + strconv.Itoa(counter)
 			counter++
-			names[name] = in
+			// ES2025 allows the same name on groups in disjoint alternatives.
+			// Each definition still needs its own internal name, or .NET would
+			// merge them into a single capture slot and drop a result element;
+			// backreferences resolve to the first definition.
+			if _, dup := names[name]; !dup {
+				names[name] = in
+			}
 			reverse[in] = name
 			i = end
 		}
@@ -165,6 +171,7 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 	// non-Unicode Annex-B literal, or a Unicode-mode error regexp2 will report).
 	var out strings.Builder
 	var kinds []bool // per capture group, in definition order: true=named
+	defCounter := 0  // named-group definitions seen, matching pass 1's numbering
 	inClass = false
 	for i := 0; i < len(rs); i++ {
 		c := rs[i]
@@ -206,10 +213,11 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 		if !inClass && c == '(' {
 			if i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
 				!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
-				name, end, _ := decodeGroupName(rs, i+3)
+				_, end, _ := decodeGroupName(rs, i+3)
 				kinds = append(kinds, true)
 				out.WriteString("(?<")
-				out.WriteString(names[name])
+				out.WriteString("__g" + strconv.Itoa(defCounter))
+				defCounter++
 				out.WriteByte('>')
 				i = end
 				continue
