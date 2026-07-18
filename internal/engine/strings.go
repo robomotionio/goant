@@ -110,6 +110,32 @@ func wtf8Decode(b []byte, i int) (slen, units int, cp uint32) {
 	return 1, 1, uint32(c)
 }
 
+// wtf8ToRunes decodes a WTF-8 string into its code points, preserving lone
+// surrogates as runes in [0xD800, 0xDFFF]. Unlike []rune(string(b)), which
+// replaces the invalid UTF-8 of a lone surrogate with U+FFFD (and splits it into
+// several runes), this yields exactly one rune per code point — which the RegExp
+// engine needs so `u`-mode patterns match lone surrogates as their own code
+// points (ES treats each as a distinct character).
+func wtf8ToRunes(b []byte) []rune {
+	if isASCIIBytes(b) {
+		runes := make([]rune, len(b))
+		for i, c := range b {
+			runes[i] = rune(c)
+		}
+		return runes
+	}
+	runes := make([]rune, 0, len(b))
+	for i := 0; i < len(b); {
+		slen, _, cp := wtf8Decode(b, i)
+		if slen <= 0 {
+			slen = 1
+		}
+		runes = append(runes, rune(cp))
+		i += slen
+	}
+	return runes
+}
+
 func isASCIIBytes(b []byte) bool {
 	for _, c := range b {
 		if c >= 0x80 {
