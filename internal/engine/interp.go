@@ -1097,6 +1097,18 @@ restart:
 			entries := pop()
 			push(rt.disposeEntries(entries, completion))
 			ip++
+		case OpToObject:
+			// ToObject: null/undefined throw a TypeError; an Object (including a
+			// TypedArray) is returned unchanged, so `ToObject(x) === x` is an
+			// allocation-free test for "x is already an Object" — a primitive yields a
+			// fresh wrapper and so compares unequal.
+			ov, oe := rt.toObjectValue(pop())
+			if oe != nil {
+				thrown = oe
+				goto unwind
+			}
+			push(ov)
+			ip++
 		case OpToPropkey:
 			// Coerce to a property key (ToPrimitive with hint "string"). Used by
 			// template substitution so `${obj}` prefers toString over valueOf, and

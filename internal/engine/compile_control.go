@@ -253,6 +253,19 @@ func (c *compiler) compileForOf(n *Node) {
 	c.emit(OpCallMethod)
 	c.emitU16(0) // [result]
 	c.emitOpU16(OpPutLocal, uint16(resSlot))
+	// IteratorNext: the result must be an Object, else a TypeError (otherwise a
+	// `next()` returning a primitive would read undefined `done`/`value` forever).
+	// ToObject returns an Object unchanged, so identity with the original is an
+	// allocation-free "is an Object" test; null/undefined throw inside ToObject.
+	c.emitOpU16(OpGetLocal, uint16(resSlot))
+	c.emit(OpDup)
+	c.emit(OpToObject)
+	c.emit(OpSeq)
+	resOK := c.emitJump(OpJmpTrue)
+	c.emit(OpThrowError)
+	c.emitU32(uint32(c.constant(c.rt.internString("iterator result is not an object"))))
+	c.emitByte(0) // TypeError
+	c.patchJump(resOK)
 	// if result.done: exit without closing (iterator already exhausted)
 	c.emitOpU16(OpGetLocal, uint16(resSlot))
 	c.emitFieldOp(OpGetField, "done")
