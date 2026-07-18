@@ -245,9 +245,20 @@ func isClassEscapeLetter(c rune) bool {
 	return false
 }
 
+// isHexRune reports whether c is a hexadecimal digit.
+func isHexRune(c rune) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
 // isQuantifierBrace reports whether rs[i] == '{' begins a valid quantifier
 // `{n}` / `{n,}` / `{n,m}`. In Unicode mode a `{` that does not is an error.
 func isQuantifierBrace(rs []rune, i int) bool {
+	return quantifierBraceEnd(rs, i) >= 0
+}
+
+// quantifierBraceEnd returns the index of the `}` closing a valid quantifier that
+// starts at rs[i] == '{', or -1 when rs[i] does not begin one.
+func quantifierBraceEnd(rs []rune, i int) int {
 	j := i + 1
 	digits := 0
 	for j < len(rs) && rs[j] >= '0' && rs[j] <= '9' {
@@ -255,7 +266,7 @@ func isQuantifierBrace(rs []rune, i int) bool {
 		digits++
 	}
 	if digits == 0 {
-		return false
+		return -1
 	}
 	if j < len(rs) && rs[j] == ',' {
 		j++
@@ -263,7 +274,10 @@ func isQuantifierBrace(rs []rune, i int) bool {
 			j++
 		}
 	}
-	return j < len(rs) && rs[j] == '}'
+	if j < len(rs) && rs[j] == '}' {
+		return j
+	}
+	return -1
 }
 
 // validateUnicodePattern enforces the Unicode-mode (`u`/`v`) Pattern early errors
@@ -309,39 +323,53 @@ func validateUnicodePattern(pattern string, unicodeSets bool) error {
 	}
 
 	// Pass 2: validate escapes, the lone-`{` quantifier rule, and class ranges.
-	inClass = false
+	// classDepth counts open `[`: a `v`-mode class nests (`[[a][b]]`), while under
+	// plain `u` a `[` inside a class is just a literal, so only `v` increments.
+	classDepth := 0
 	prevClassEsc := false // previous class atom was a CharacterClassEscape
 	haveLeft := false     // a left ClassAtom exists (a range may follow)
 	for i := 0; i < len(rs); {
 		c := rs[i]
 		if c == '\\' {
-			adv, classEsc, err := validateUEscape(rs, i, inClass, groupCount, named)
+			adv, classEsc, err := validateUEscape(rs, i, classDepth > 0, unicodeSets, groupCount, named)
 			if err != nil {
 				return err
 			}
-			if inClass {
+			if classDepth > 0 {
 				prevClassEsc = classEsc
 				haveLeft = true
 			}
 			i += adv
 			continue
 		}
-		if !inClass {
+		if classDepth == 0 {
 			switch {
 			case c == '[':
-				inClass = true
+				classDepth = 1
 				prevClassEsc = false
 				haveLeft = false
-			case c == '{' && !isQuantifierBrace(rs, i):
-				return fmt.Errorf("lone `{` is not a valid quantifier in unicode mode")
+			case c == '{':
+				end := quantifierBraceEnd(rs, i)
+				if end < 0 {
+					return fmt.Errorf("lone `{` is not a valid quantifier in unicode mode")
+				}
+				i = end // skip the whole `{n,m}`; the loop's i++ moves past `}`
+			case c == '}':
+				// A `}` not closing a quantifier must be escaped in unicode mode.
+				return fmt.Errorf("lone `}` must be escaped in unicode mode")
+			case c == ']':
+				// An unmatched `]` outside a class must be escaped in unicode mode.
+				return fmt.Errorf("lone `]` must be escaped in unicode mode")
 			}
 			i++
 			continue
 		}
 		// Inside a character class.
 		switch {
+		case c == '[' && unicodeSets:
+			classDepth++
 		case c == ']':
-			inClass = false
+			classDepth--
 		case c == '-' && !unicodeSets && haveLeft && i+1 < len(rs) && rs[i+1] != ']':
 			// A ClassRange `left - right`: neither endpoint may be a class escape.
 			// (Only in plain `u` mode; under `v`, `--` is the set-difference operator
@@ -365,7 +393,7 @@ func validateUnicodePattern(pattern string, unicodeSets bool) error {
 
 // validateUEscape validates the escape at rs[i] ('\\') in Unicode mode, returning
 // the number of runes it spans and whether it is a CharacterClassEscape.
-func validateUEscape(rs []rune, i int, inClass bool, groupCount int, named map[string]bool) (adv int, classEsc bool, err error) {
+func validateUEscape(rs []rune, i int, inClass, unicodeSets bool, groupCount int, named map[string]bool) (adv int, classEsc bool, err error) {
 	if i+1 >= len(rs) {
 		return 0, false, fmt.Errorf("trailing backslash in regular expression")
 	}
@@ -373,11 +401,30 @@ func validateUEscape(rs []rune, i int, inClass bool, groupCount int, named map[s
 	switch {
 	case isClassEscapeLetter(n):
 		return 2, true, nil
-	case n == 'b' || n == 'B' || n == 'f' || n == 'n' || n == 'r' || n == 't' || n == 'v':
+	case n == 'B':
+		// `\B` is a non-word-boundary assertion; inside a class it is not a valid
+		// ClassEscape (only `\b`, which means backspace there).
+		if inClass {
+			return 0, false, fmt.Errorf("invalid class escape `\\B` in unicode mode")
+		}
 		return 2, false, nil
-	case isRegexSyntaxChar(n) || n == '/' || n == '-':
+	case n == 'b' || n == 'f' || n == 'n' || n == 'r' || n == 't' || n == 'v':
 		return 2, false, nil
+	case isRegexSyntaxChar(n) || n == '/':
+		return 2, false, nil
+	case n == '-':
+		// `\-` is a ClassEscape, legal only inside a class; as an AtomEscape it is an
+		// invalid IdentityEscape in Unicode mode.
+		if inClass {
+			return 2, false, nil
+		}
+		return 0, false, fmt.Errorf("invalid identity escape `\\-` in unicode mode")
 	case n == '0':
+		// `\0` is NUL only when no decimal digit follows; `\00` / `\01` are
+		// LegacyOctalEscapeSequences, forbidden in Unicode mode.
+		if i+2 < len(rs) && rs[i+2] >= '0' && rs[i+2] <= '9' {
+			return 0, false, fmt.Errorf("legacy octal escape is not allowed in unicode mode")
+		}
 		return 2, false, nil
 	case n == 'p' || n == 'P':
 		// A Unicode property escape MUST be brace-delimited in Unicode mode; `\pL`
@@ -394,21 +441,42 @@ func validateUEscape(rs []rune, i int, inClass bool, groupCount int, named map[s
 			return 0, false, fmt.Errorf("unterminated `\\%c{…}` escape in unicode mode", n)
 		}
 		return j - i + 1, true, nil
-	case n == 'x' || n == 'u' || n == 'q':
-		// Consume the brace-delimited escapes `\u{…}` / `\q{…}` wholesale so their
-		// `{` is not misread as a lone quantifier brace. `\uHHHH` / `\xHH` have no
-		// braces; their hex digits are left to regexp2.
-		if i+2 < len(rs) && rs[i+2] == '{' {
+	case n == 'q':
+		// `\q{…}` is a ClassStringDisjunction: only inside a `v`-mode class.
+		if unicodeSets && inClass && i+2 < len(rs) && rs[i+2] == '{' {
 			j := i + 3
 			for j < len(rs) && rs[j] != '}' {
 				j++
 			}
 			if j >= len(rs) {
-				return 0, false, fmt.Errorf("unterminated `\\%c{…}` escape in unicode mode", n)
+				return 0, false, fmt.Errorf("unterminated `\\q{…}` escape")
 			}
 			return j - i + 1, false, nil
 		}
-		return 2, false, nil
+		return 0, false, fmt.Errorf("invalid identity escape `\\q` in unicode mode")
+	case n == 'u':
+		// RegExpUnicodeEscapeSequence: `\u{H+}` (consumed whole so its `{` is not
+		// misread as a quantifier brace) or exactly four hex digits.
+		if i+2 < len(rs) && rs[i+2] == '{' {
+			j := i + 3
+			for j < len(rs) && rs[j] != '}' {
+				j++
+			}
+			if j >= len(rs) || j == i+3 {
+				return 0, false, fmt.Errorf("invalid `\\u{…}` escape in unicode mode")
+			}
+			return j - i + 1, false, nil
+		}
+		if i+5 < len(rs) && isHexRune(rs[i+2]) && isHexRune(rs[i+3]) && isHexRune(rs[i+4]) && isHexRune(rs[i+5]) {
+			return 6, false, nil
+		}
+		return 0, false, fmt.Errorf("invalid `\\u` escape in unicode mode")
+	case n == 'x':
+		// HexEscapeSequence: exactly two hex digits.
+		if i+3 < len(rs) && isHexRune(rs[i+2]) && isHexRune(rs[i+3]) {
+			return 4, false, nil
+		}
+		return 0, false, fmt.Errorf("invalid `\\x` escape in unicode mode")
 	case n == 'c':
 		if i+2 < len(rs) && isASCIILetter(rs[i+2]) {
 			return 3, false, nil
@@ -416,7 +484,9 @@ func validateUEscape(rs []rune, i int, inClass bool, groupCount int, named map[s
 		return 0, false, fmt.Errorf("invalid `\\c` control escape in unicode mode")
 	case n == 'k':
 		if inClass {
-			return 2, false, nil // no named backreference inside a class; stay lenient
+			// `\k<name>` is a named backreference (an AtomEscape); it is not a valid
+			// ClassEscape, so `[\k]` is a SyntaxError in Unicode mode.
+			return 0, false, fmt.Errorf("invalid class escape `\\k` in unicode mode")
 		}
 		if i+2 >= len(rs) || rs[i+2] != '<' {
 			return 0, false, fmt.Errorf("`\\k` must name a group in unicode mode")
@@ -431,7 +501,8 @@ func validateUEscape(rs []rune, i int, inClass bool, groupCount int, named map[s
 		return end - i + 1, false, nil
 	case n >= '1' && n <= '9':
 		if inClass {
-			return 2, false, nil // a decimal escape in a class is left to regexp2
+			// A DecimalEscape is not a valid ClassEscape in Unicode mode (`[\1]`).
+			return 0, false, fmt.Errorf("invalid decimal escape in a unicode-mode class")
 		}
 		j, val := i+1, 0
 		for j < len(rs) && rs[j] >= '0' && rs[j] <= '9' {
