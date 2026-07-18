@@ -43,6 +43,7 @@ type svFunc struct {
 	// specifiers of `export * from` re-exports.
 	moduleExports  map[string]int
 	moduleStarFrom []string
+	moduleImports  []moduleImport
 	isMethod    bool // concise method / getter / setter: no [[Construct]], no .prototype
 	// isClassElement marks a class constructor / method / accessor / static block:
 	// its `super` resolves via the class's captured *superproto* / *superctor*

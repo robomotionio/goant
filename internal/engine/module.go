@@ -68,8 +68,8 @@ func (rt *Runtime) exportNames(m *moduleRecord, seen map[string]bool) []string {
 		names = append(names, n)
 	}
 	for _, spec := range m.starFrom {
-		dep, err := rt.loadModule(spec, m.path)
-		if err != nil {
+		dep, ok := rt.modules[rt.resolveSpecifier(spec, m.path)]
+		if !ok {
 			continue
 		}
 		// `export *` does not re-export `default`.
@@ -84,31 +84,41 @@ func (rt *Runtime) exportNames(m *moduleRecord, seen map[string]bool) []string {
 }
 
 // resolveExport finds the module that actually owns an export name, following
-// `export * from` chains.
-func (rt *Runtime) resolveExport(m *moduleRecord, name string, seen map[string]bool) (*moduleRecord, bool) {
+// `export * from` chains. Two star-exports providing the same name from
+// different modules make it ambiguous, which is a link error rather than an
+// arbitrary winner.
+func (rt *Runtime) resolveExport(m *moduleRecord, name string, seen map[string]bool) (owner *moduleRecord, ambiguous bool) {
 	if seen == nil {
 		seen = map[string]bool{}
 	}
 	if seen[m.path] {
-		return nil, false
+		return nil, false // a cycle contributes nothing
 	}
 	seen[m.path] = true
 	if _, ok := m.exports[name]; ok {
-		return m, true
+		return m, false
 	}
 	if name == "default" {
 		return nil, false // `export *` never forwards default
 	}
 	for _, spec := range m.starFrom {
-		dep, err := rt.loadModule(spec, m.path)
-		if err != nil {
+		dep, ok := rt.modules[rt.resolveSpecifier(spec, m.path)]
+		if !ok {
 			continue
 		}
-		if owner, ok := rt.resolveExport(dep, name, seen); ok {
-			return owner, true
+		found, amb := rt.resolveExport(dep, name, seen)
+		if amb {
+			return nil, true
 		}
+		if found == nil {
+			continue
+		}
+		if owner != nil && owner != found {
+			return nil, true
+		}
+		owner = found
 	}
-	return nil, false
+	return owner, false
 }
 
 // resolveSpecifier turns an import specifier into an absolute path, relative to
@@ -117,16 +127,41 @@ func (rt *Runtime) resolveSpecifier(spec, referrer string) string {
 	if filepath.IsAbs(spec) {
 		return filepath.Clean(spec)
 	}
+	// A specifier is relative to the importing *module*. The entry point may be a
+	// script (the harness concatenates those into a scratch file), whose path says
+	// nothing about where its imports live, so anything not in the registry falls
+	// back to the configured base directory.
 	base := rt.moduleDir
 	if referrer != "" {
-		base = filepath.Dir(referrer)
+		if _, isModule := rt.modules[referrer]; isModule {
+			base = filepath.Dir(referrer)
+		}
 	}
 	return filepath.Clean(filepath.Join(base, spec))
 }
 
-// loadModule resolves, compiles and evaluates a module, returning the cached
-// record on any later request for the same path.
+// loadModule runs the three module phases in order: instantiate (parse and
+// compile the whole graph), link (resolve every import), then evaluate. Linking
+// is separate because an unresolvable or ambiguous import is a SyntaxError that
+// must be raised *before* any module body runs.
 func (rt *Runtime) loadModule(spec, referrer string) (*moduleRecord, *ThrowError) {
+	m, e := rt.instantiateModule(spec, referrer)
+	if e != nil {
+		return nil, e
+	}
+	if se := rt.linkModule(m, map[string]bool{}); se != nil {
+		// Reaching here through import(): the rejection value is a SyntaxError.
+		return nil, rt.syntaxError(se.Msg)
+	}
+	if e := rt.evaluateModule(m); e != nil {
+		return nil, e
+	}
+	return m, nil
+}
+
+// instantiateModule parses and compiles a module and everything it requests,
+// registering each record before recursing so a cycle terminates.
+func (rt *Runtime) instantiateModule(spec, referrer string) (*moduleRecord, *ThrowError) {
 	path := rt.resolveSpecifier(spec, referrer)
 	if rt.modules == nil {
 		rt.modules = map[string]*moduleRecord{}
@@ -149,15 +184,78 @@ func (rt *Runtime) loadModule(spec, referrer string) (*moduleRecord, *ThrowError
 	if cerr != nil {
 		return nil, rt.syntaxError(cerr.Error())
 	}
+	m := newModuleRecord(path, fn)
+	rt.modules[path] = m
+	for _, req := range m.requestedSpecifiers() {
+		if _, e := rt.instantiateModule(req, path); e != nil {
+			return nil, e
+		}
+	}
+	return m, nil
+}
+
+// linkModule checks that every import in the graph names an export that exists
+// and is unambiguous.
+func (rt *Runtime) linkModule(m *moduleRecord, seen map[string]bool) *SyntaxError {
+	if seen[m.path] {
+		return nil
+	}
+	seen[m.path] = true
+	for _, imp := range m.fn.moduleImports {
+		dep, ok := rt.modules[rt.resolveSpecifier(imp.specifier, m.path)]
+		if !ok {
+			return &SyntaxError{Msg: "cannot resolve module '" + imp.specifier + "'"}
+		}
+		if imp.importName != "" { // a namespace import needs no named export
+			owner, ambiguous := rt.resolveExport(dep, imp.importName, nil)
+			if ambiguous {
+				return &SyntaxError{Msg: "ambiguous export '" + imp.importName + "' in '" + imp.specifier + "'"}
+			}
+			if owner == nil {
+				return &SyntaxError{Msg: "module '" + imp.specifier + "' has no export named '" + imp.importName + "'"}
+			}
+		}
+		if e := rt.linkModule(dep, seen); e != nil {
+			return e
+		}
+	}
+	for _, spec := range m.starFrom {
+		if dep, ok := rt.modules[rt.resolveSpecifier(spec, m.path)]; ok {
+			if e := rt.linkModule(dep, seen); e != nil {
+				return e
+			}
+		}
+	}
+	return nil
+}
+
+// newModuleRecord builds the record for a compiled module.
+func newModuleRecord(path string, fn *svFunc) *moduleRecord {
 	m := &moduleRecord{path: path, fn: fn, exports: fn.moduleExports, starFrom: fn.moduleStarFrom}
 	if m.exports == nil {
 		m.exports = map[string]int{}
 	}
-	rt.modules[path] = m
-	if e := rt.evaluateModule(m); e != nil {
-		return nil, e
+	return m
+}
+
+// requestedSpecifiers lists every module this one names, from both its imports
+// and its `export * from` re-exports.
+func (m *moduleRecord) requestedSpecifiers() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(s string) {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
 	}
-	return m, nil
+	for _, imp := range m.fn.moduleImports {
+		add(imp.specifier)
+	}
+	for _, s := range m.starFrom {
+		add(s)
+	}
+	return out
 }
 
 // evaluateModule runs a module body once. A module already being evaluated is a
@@ -196,9 +294,9 @@ func (rt *Runtime) moduleNamespace(m *moduleRecord) Value {
 	ns := rt.newObject(mknull())
 	no := rt.objPtr(ns)
 	for _, name := range rt.exportNames(m, nil) {
-		owner, ok := rt.resolveExport(m, name, nil)
-		if !ok {
-			continue
+		owner, ambiguous := rt.resolveExport(m, name, nil)
+		if ambiguous || owner == nil {
+			continue // an ambiguous name is simply absent from the namespace
 		}
 		n, o := name, owner
 		get := rt.newNativeFunc("get "+name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -227,3 +325,7 @@ func (rt *Runtime) importModuleNamespace(spec, referrer string) (Value, *ThrowEr
 	}
 	return rt.moduleNamespace(m), nil
 }
+
+// SetModuleBase sets the directory that import specifiers resolve against when
+// the importer is not itself a module (a script calling import()).
+func (rt *Runtime) SetModuleBase(dir string) { rt.moduleDir = dir }

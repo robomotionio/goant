@@ -23,6 +23,7 @@ func main() {
 		disasm  = flag.Bool("disasm", false, "disassemble compiled bytecode")
 		module  = flag.Bool("module", false, "run the file as a Module (strict, this===undefined)")
 		prelude = flag.String("prelude", "", "comma-separated script files to run (as scripts) before the module")
+		modBase = flag.String("module-base", "", "directory that import specifiers resolve against (for scripts using import())")
 	)
 	flag.Parse()
 
@@ -44,6 +45,9 @@ func main() {
 	}
 
 	rt := engine.New()
+	if *modBase != "" {
+		rt.SetModuleBase(*modBase)
+	}
 
 	switch {
 	case *parse:

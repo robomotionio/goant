@@ -4,6 +4,15 @@ package engine
 // requested module into a hidden local, and the export table that maps an
 // exported name to the top-level slot holding it.
 
+// moduleImport is one requested binding of a static import, kept so the link
+// phase can resolve it (and reject an unresolvable or ambiguous one) before the
+// module is evaluated.
+type moduleImport struct {
+	specifier  string
+	importName string // "" for `import * as ns`
+	local      string
+}
+
 // importBinding records where a locally-bound imported name reads from.
 type importBinding struct {
 	// modName is the hidden local holding the source module's namespace object.
@@ -43,6 +52,9 @@ func (c *compiler) emitImportPrologue(stmts []*Node) {
 				c.importBindings = map[string]importBinding{}
 			}
 			c.importBindings[sp.Right.Str] = b
+			c.fn.moduleImports = append(c.fn.moduleImports, moduleImport{
+				specifier: spec, importName: b.exportName, local: sp.Right.Str,
+			})
 		}
 	}
 }

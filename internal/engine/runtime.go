@@ -439,8 +439,11 @@ func (rt *Runtime) RunModule(filename, src string) (Value, error) {
 	if abs, aerr := filepath.Abs(filename); aerr == nil {
 		filename = abs
 	}
-	// Bare specifiers resolve against the entry module's directory.
-	rt.moduleDir = filepath.Dir(filename)
+	// Bare specifiers resolve against the entry module's directory, unless a base
+	// was configured explicitly.
+	if rt.moduleDir == "" {
+		rt.moduleDir = filepath.Dir(filename)
+	}
 	prog, err := parseMode(filename, src, true, true) // a Module: strict + module goal
 	if err != nil {
 		return mkundef(), err
@@ -452,14 +455,23 @@ func (rt *Runtime) RunModule(filename, src string) (Value, error) {
 	// The entry point is a module record like any other, registered under its own
 	// path so that a module importing it (directly or through a cycle) shares this
 	// instance rather than loading a second copy.
-	m := &moduleRecord{path: filename, fn: fn, exports: fn.moduleExports, starFrom: fn.moduleStarFrom}
-	if m.exports == nil {
-		m.exports = map[string]int{}
-	}
+	m := newModuleRecord(filename, fn)
 	if rt.modules == nil {
 		rt.modules = map[string]*moduleRecord{}
 	}
 	rt.modules[filename] = m
+	for _, req := range m.requestedSpecifiers() {
+		if _, e := rt.instantiateModule(req, filename); e != nil {
+			return mkundef(), e
+		}
+	}
+	if se := rt.linkModule(m, map[string]bool{}); se != nil {
+		// A resolution failure is an early error, not a thrown exception: no module
+		// body has run. Report it like a parse error so it stays distinguishable
+		// from a runtime throw.
+		se.Filename = filename
+		return mkundef(), se
+	}
 	// A Module evaluates asynchronously: its body runs as an async coroutine (so
 	// top-level await suspends) and the loop is driven until the completion
 	// promise settles; a rejection is the module's evaluation error.

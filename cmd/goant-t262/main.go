@@ -424,12 +424,16 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 		return result{rel, outPass, ""}
 	}
 
+	// A script is concatenated with the harness into a scratch file, so its path
+	// cannot locate the _FIXTURE modules an import() names: pass the test's own
+	// directory as the resolution base.
+	baseDir := filepath.Dir(path)
 	for _, variant := range m.variants() {
 		full := assemble(variant, m, string(src), harness, incSrc)
 		if err := os.WriteFile(scratch, []byte(full), 0o644); err != nil {
 			return result{rel, outFail, "write: " + err.Error()}
 		}
-		ex := execRunner(runner, scratch, timeout)
+		ex := execRunnerArgs(runner, []string{"-module-base", baseDir, scratch}, timeout)
 		if ok, reason := classify(m, ex); !ok {
 			return result{rel, outFail, variant + ": " + reason}
 		}
