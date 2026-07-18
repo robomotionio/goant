@@ -349,7 +349,7 @@ func validateUnicodePattern(pattern string, unicodeSets bool) error {
 			if prevClassEsc {
 				return fmt.Errorf("invalid class range with a character-class-escape endpoint")
 			}
-			if rs[i+1] == '\\' && i+2 < len(rs) && isClassEscapeLetter(rs[i+2]) {
+			if rs[i+1] == '\\' && i+2 < len(rs) && (isClassEscapeLetter(rs[i+2]) || rs[i+2] == 'p' || rs[i+2] == 'P') {
 				return fmt.Errorf("invalid class range with a character-class-escape endpoint")
 			}
 			haveLeft = false
