@@ -2686,9 +2686,7 @@ func (p *parser) parseImportStmt() *Node {
 	if p.next() == TokString {
 		spec := p.mkStringFromTok()
 		p.consume()
-		if p.next() == TokSemicolon {
-			p.consume()
-		}
+		p.semicolon()
 		decl.Right = spec
 		return decl
 	}
@@ -2761,9 +2759,7 @@ parseFrom:
 	spec := p.mkStringFromTok()
 	p.consume()
 	decl.Right = spec
-	if p.next() == TokSemicolon {
-		p.consume()
-	}
+	p.semicolon()
 	return decl
 }
 
@@ -2824,9 +2820,7 @@ func (p *parser) parseExportStmt() *Node {
 			return decl
 		}
 		decl.Left = p.parseAssign()
-		if p.next() == TokSemicolon {
-			p.consume()
-		}
+		p.semicolon()
 		return decl
 	}
 
@@ -2920,9 +2914,7 @@ func (p *parser) parseExportStmt() *Node {
 			decl.Flags |= exFrom
 			p.consume()
 		}
-		if p.next() == TokSemicolon {
-			p.consume()
-		}
+		p.semicolon()
 		return decl
 	}
 	if p.tok() == TokMul {
@@ -2947,9 +2939,7 @@ func (p *parser) parseExportStmt() *Node {
 		decl.Right = p.mkStringFromTok()
 		decl.Flags |= exFrom
 		p.consume()
-		if p.next() == TokSemicolon {
-			p.consume()
-		}
+		p.semicolon()
 		return decl
 	}
 	p.unexpected()

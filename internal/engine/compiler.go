@@ -1598,6 +1598,12 @@ func (c *compiler) compileAssign(n *Node) {
 			c.emitWithVar(OpWithPutVar, name)
 			return
 		}
+		// An imported binding is immutable: assigning to it throws a TypeError,
+		// exactly like a const.
+		if _, isImport := c.lookupImport(name); isImport {
+			c.emitConstAssignError()
+			return
+		}
 		// Assignment to a const binding always throws a TypeError (in strict and
 		// sloppy code alike). The value stays on the stack (assignment is an expr).
 		if slot >= 0 && c.locals[slot].isConst {
@@ -1684,6 +1690,11 @@ func (c *compiler) compileAssign(n *Node) {
 	if c.nameIsWithRouted(name) {
 		c.emit(OpDup)
 		c.emitWithVar(OpWithPutVar, name)
+		return
+	}
+	// An imported binding is immutable: assigning to it throws a TypeError.
+	if _, isImport := c.lookupImport(name); isImport {
+		c.emitConstAssignError()
 		return
 	}
 	// Assignment to a const binding always throws a TypeError — whether it is a

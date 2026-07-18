@@ -388,6 +388,13 @@ func (c *compiler) compileIdentStore(name string) {
 		c.syntaxErrorf("Private field '%s' may not be an assignment target", name)
 		return
 	}
+	// An imported binding is immutable: assigning to it throws a TypeError. The
+	// value is consumed first so the destructuring stack stays balanced.
+	if _, isImport := c.lookupImport(name); isImport {
+		c.emit(OpPop)
+		c.emitConstAssignError()
+		return
+	}
 	if slot := c.resolveLocal(name); slot >= 0 {
 		// Assignment to a const binding throws a TypeError (strict & sloppy),
 		// mirroring compileAssign's storeVar. Consume the value first so the
