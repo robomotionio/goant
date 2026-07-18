@@ -134,9 +134,6 @@ func expandCaseFold(pattern string) string {
 	return out.String()
 }
 
-// translateVFlagSets rewrites a top-level `v`-flag character class that uses a
-// set operation (A&&B intersection, A--B difference) into a plain code-point
-// class. Operands may be \p{…}, a nested […] class, or a char/range.
 // isVModeReservedDoublePunct reports whether c is a punctuator whose doubled form
 // (`&&`, `!!`, `##`, `$$`, `%%`, `**`, `++`, `,,`, `..`, `::`, `;;`, `<<`, `==`,
 // `>>`, `??`, `@@`, `^^`, ``` `` ```, `~~`) is a ClassSetReservedDoublePunctuator
@@ -246,6 +243,10 @@ func validateVModeClassBody(rs []rune, start int) (int, error) {
 	return 0, fmt.Errorf("unterminated character class")
 }
 
+// translateVFlagSets rewrites every `v`-flag character class into a plain
+// regexp2 sub-pattern by evaluating it as a ClassSetExpression (see classset.go)
+// — union, intersection (&&) and difference (--) over operands that may be
+// nested classes, \q{…} string disjunctions, property escapes, or characters.
 func translateVFlagSets(pattern string) (string, error) {
 	rs := []rune(pattern)
 	var out strings.Builder
@@ -257,205 +258,19 @@ func translateVFlagSets(pattern string) (string, error) {
 			continue
 		}
 		if rs[i] == '[' {
-			body, next := scanClassBody(rs, i)
-			if op, l, r, ok := splitSetOp(body); ok {
-				ls, e := operandSet(l)
-				if e != nil {
-					return "", e
-				}
-				rsSet, e := operandSet(r)
-				if e != nil {
-					return "", e
-				}
-				out.WriteString(setToClass(applySetOp(op, ls, rsSet)))
-			} else {
-				out.WriteString("[" + string(body) + "]")
+			p := &csParser{rs: rs, i: i}
+			set, err := p.nestedClass()
+			if err != nil {
+				return "", err
 			}
-			i = next
+			out.WriteString(set.pattern())
+			i = p.i
 			continue
 		}
 		out.WriteRune(rs[i])
 		i++
 	}
 	return out.String(), nil
-}
-
-// scanClassBody returns the contents between the '[' at start and its matching
-// ']' (honouring nesting and escapes), plus the index just past the ']'.
-func scanClassBody(rs []rune, start int) ([]rune, int) {
-	depth := 0
-	for i := start; i < len(rs); i++ {
-		switch rs[i] {
-		case '\\':
-			i++
-		case '[':
-			depth++
-		case ']':
-			depth--
-			if depth == 0 {
-				return rs[start+1 : i], i + 1
-			}
-		}
-	}
-	return rs[start+1:], len(rs)
-}
-
-// splitSetOp splits a class body on a single top-level && or -- operator.
-func splitSetOp(body []rune) (op string, left, right []rune, ok bool) {
-	depth := 0
-	for i := 0; i < len(body); i++ {
-		switch body[i] {
-		case '\\':
-			i++
-		case '[':
-			depth++
-		case ']':
-			depth--
-		default:
-			if depth == 0 && i+1 < len(body) {
-				if (body[i] == '&' && body[i+1] == '&') || (body[i] == '-' && body[i+1] == '-') {
-					return string(body[i : i+2]), body[:i], body[i+2:], true
-				}
-			}
-		}
-	}
-	return "", nil, nil, false
-}
-
-func applySetOp(op string, a, b codePointSet) codePointSet {
-	res := codePointSet{}
-	if op == "&&" {
-		for c := range a {
-			if b[c] {
-				res[c] = true
-			}
-		}
-	} else { // "--"
-		for c := range a {
-			if !b[c] {
-				res[c] = true
-			}
-		}
-	}
-	return res
-}
-
-// operandSet evaluates one set-expression operand to a code-point set.
-func operandSet(operand []rune) (codePointSet, error) {
-	s := strings.TrimSpace(string(operand))
-	if strings.HasPrefix(s, "[") {
-		body, _ := scanClassBody([]rune(s), 0)
-		if op, l, r, ok := splitSetOp(body); ok {
-			ls, e := operandSet(l)
-			if e != nil {
-				return nil, e
-			}
-			rs, e := operandSet(r)
-			if e != nil {
-				return nil, e
-			}
-			return applySetOp(op, ls, rs), nil
-		}
-		return classMembers(body)
-	}
-	if strings.HasPrefix(s, `\p{`) || strings.HasPrefix(s, `\P{`) {
-		name := s[3 : len(s)-1]
-		rt, ok := resolveUnicodeProperty(name)
-		if !ok {
-			return nil, fmt.Errorf("unknown unicode property `%s`", name)
-		}
-		set := setFromTable(rt)
-		if s[1] == 'P' {
-			neg := codePointSet{}
-			for c := rune(0); c <= 0x10FFFF; c++ {
-				if !set[c] {
-					neg[c] = true
-				}
-			}
-			return neg, nil
-		}
-		return set, nil
-	}
-	return classMembers([]rune(s))
-}
-
-// classMembers parses the plain contents of a character class (chars, ranges,
-// and \x/\u/\p escapes) into a code-point set.
-func classMembers(body []rune) (codePointSet, error) {
-	set := codePointSet{}
-	pts := []rune{}
-	for i := 0; i < len(body); {
-		c, adv, prop, e := classAtom(body, i)
-		if e != nil {
-			return nil, e
-		}
-		if prop != nil {
-			for k := range prop {
-				set[k] = true
-			}
-			i += adv
-			continue
-		}
-		if i+adv < len(body) && body[i+adv] == '-' && i+adv+1 < len(body) && body[i+adv+1] != ']' {
-			hi, adv2, _, e := classAtom(body, i+adv+1)
-			if e != nil {
-				return nil, e
-			}
-			for r := c; r <= hi; r++ {
-				set[r] = true
-			}
-			i += adv + 1 + adv2
-			continue
-		}
-		pts = append(pts, c)
-		set[c] = true
-		i += adv
-	}
-	return set, nil
-}
-
-// classAtom decodes one atom (a literal, an \xHH/\uHHHH/\u{…} escape, or a
-// \p{…} property) at body[i], returning the rune (or a property set) and how
-// many runes were consumed.
-func classAtom(body []rune, i int) (rune, int, codePointSet, error) {
-	c := body[i]
-	if c != '\\' || i+1 >= len(body) {
-		return c, 1, nil, nil
-	}
-	n := body[i+1]
-	switch n {
-	case 'x':
-		if i+3 < len(body) {
-			v := hexVal(body[i+2 : i+4])
-			return rune(v), 4, nil, nil
-		}
-	case 'u':
-		if i+2 < len(body) && body[i+2] == '{' {
-			end := i + 3
-			for end < len(body) && body[end] != '}' {
-				end++
-			}
-			return rune(hexVal(body[i+3 : end])), end - i + 1, nil, nil
-		}
-		if i+5 < len(body) {
-			return rune(hexVal(body[i+2 : i+6])), 6, nil, nil
-		}
-	case 'p', 'P':
-		if i+2 < len(body) && body[i+2] == '{' {
-			end := i + 3
-			for end < len(body) && body[end] != '}' {
-				end++
-			}
-			rt, ok := resolveUnicodeProperty(string(body[i+3 : end]))
-			if !ok {
-				return 0, 0, nil, fmt.Errorf("unknown unicode property")
-			}
-			return 0, end - i + 1, setFromTable(rt), nil
-		}
-	case '0':
-		return 0, 2, nil, nil
-	}
-	return n, 2, nil, nil
 }
 
 func hexVal(rs []rune) uint32 {
@@ -541,59 +356,6 @@ func lookupCategory17(val string) (*unicode.RangeTable, bool) {
 		}
 	}
 	return nil, false
-}
-
-// codePointSet is a simple sorted set of code points used to evaluate the `v`
-// flag's class set operations (intersection &&, difference --, union).
-type codePointSet map[rune]bool
-
-func setFromTable(rt *unicode.RangeTable) codePointSet {
-	s := codePointSet{}
-	for _, r := range rt.R16 {
-		for c := uint32(r.Lo); c <= uint32(r.Hi); c += uint32(r.Stride) {
-			s[rune(c)] = true
-		}
-	}
-	for _, r := range rt.R32 {
-		for c := r.Lo; c <= r.Hi; c += r.Stride {
-			s[rune(c)] = true
-		}
-	}
-	return s
-}
-
-// setToClass renders a code-point set as a regexp2 character class.
-func setToClass(s codePointSet) string {
-	// Collect and coalesce into ranges.
-	pts := make([]int, 0, len(s))
-	for c := range s {
-		pts = append(pts, int(c))
-	}
-	sortInts(pts)
-	var b strings.Builder
-	b.WriteByte('[')
-	for i := 0; i < len(pts); {
-		j := i
-		for j+1 < len(pts) && pts[j+1] == pts[j]+1 {
-			j++
-		}
-		if i == j {
-			b.WriteString(esc(uint32(pts[i])))
-		} else {
-			b.WriteString(esc(uint32(pts[i])) + "-" + esc(uint32(pts[j])))
-		}
-		i = j + 1
-	}
-	b.WriteByte(']')
-	return b.String()
-}
-
-func sortInts(a []int) {
-	for i := 1; i < len(a); i++ {
-		for j := i; j > 0 && a[j-1] > a[j]; j-- {
-			a[j-1], a[j] = a[j], a[j-1]
-		}
-	}
 }
 
 // rangeTableToClass renders a RangeTable as a regexp2 character class. When
