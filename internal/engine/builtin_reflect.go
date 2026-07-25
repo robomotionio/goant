@@ -140,15 +140,10 @@ func (rt *Runtime) setDataOnReceiver(receiver, pk, val Value) (bool, *ThrowError
 		}
 		return true, nil
 	}
-	// Proxy receiver: define a data property via its trap.
-	desc := rt.newPlainObject()
-	do := rt.objPtr(desc)
-	do.defineOwn("value", val, attrDefault)
-	do.defineOwn("writable", mktrue(), attrDefault)
-	do.defineOwn("enumerable", mktrue(), attrDefault)
-	do.defineOwn("configurable", mktrue(), attrDefault)
-	e := rt.proxyDefineProperty(ro.proxy, pk, desc)
-	return e == nil, e
+	// Proxy receiver: setOnReceiver performs the [[GetOwnProperty]] that
+	// OrdinarySetWithOwnDescriptor step 3 requires before defining — an
+	// observable trap this path used to skip, going straight to defineProperty.
+	return rt.setOnReceiver(receiver, pk, val)
 }
 
 func (rt *Runtime) initReflectBuiltin() {
