@@ -652,6 +652,7 @@ func (c *compiler) compileFunc(n *Node) {
 	// A function nested (lexically) inside a `with` block resolves its free names
 	// against the captured with-objects; propagate that through further nesting.
 	child.inheritedWith = c.withDepth > 0 || c.inheritedWith
+	child.realWith = c.withDepth > 0 || c.realWith
 	child.fn.capturesWith = child.inheritedWith
 	child.classFields = c.pendingClassFields
 	child.classDerived = c.pendingClassDerived
@@ -1121,6 +1122,13 @@ func (c *compiler) compileTailReturn(n *Node) bool {
 		return true
 	case n.Kind == NCall:
 		if c.compileTailCall(n) {
+			return true
+		}
+		// A direct eval is not a tail call, but the same call site IS one when the
+		// callee turns out not to be %eval%; mark it so OpEval can reuse the frame.
+		if c.isDirectEvalCall(n) && !hasSpread(n.Args) && !containsOptional(n) {
+			c.compileDirectEvalAt(n, true)
+			c.emit(OpReturn)
 			return true
 		}
 		// A call the tail-call lowering rejects (spread / optional / eval / super):

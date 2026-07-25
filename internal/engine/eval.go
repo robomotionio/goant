@@ -154,7 +154,10 @@ func (c *compiler) isDirectEvalCall(n *Node) bool {
 	if n.Left == nil || n.Left.Kind != NIdent || n.Left.Str != "eval" {
 		return false
 	}
-	if c.withDepth != 0 {
+	// A with-object may shadow `eval`, so a reference routed through one is not
+	// statically the intrinsic: goant treats it as an ordinary call (which, in tail
+	// position, is a proper tail call).
+	if c.withDepth != 0 || (c.realWith && c.resolveLocal("eval") < 0) {
 		return false
 	}
 	return c.resolveLocal("eval") < 0 && c.resolveUpvalue("eval") < 0
@@ -350,9 +353,21 @@ func borrowableName(name string) bool {
 // compileDirectEval emits a direct eval call site: the callee reference, the
 // argument list, then OpEval carrying the scope-snapshot index and argument count.
 func (c *compiler) compileDirectEval(n *Node) {
+	c.compileDirectEvalAt(n, false)
+}
+
+// compileDirectEvalAt emits a direct eval call site. `tail` marks a call in tail
+// position: a direct eval is never itself a tail call, but the SAME syntax is an
+// ordinary call when the callee turns out not to be %eval% at run time, and that
+// one is — so the flag rides in the scope index's high bit (evalTailFlag) for
+// OpEval to act on.
+func (c *compiler) compileDirectEvalAt(n *Node, tail bool) {
 	sc := c.captureEvalScope()
 	idx := len(c.fn.evalScopes)
 	c.fn.evalScopes = append(c.fn.evalScopes, sc)
+	if tail {
+		idx |= evalTailFlag
+	}
 
 	c.compileExpr(n.Left) // callee (the `eval` reference) — verified at run time
 	for _, arg := range n.Args {
@@ -362,6 +377,10 @@ func (c *compiler) compileDirectEval(n *Node) {
 	c.emitU16(uint16(idx))
 	c.emitU16(uint16(len(n.Args)))
 }
+
+// evalTailFlag marks an OpEval whose call site is in tail position. Scope
+// indices are per-function and small, so the high bit is free.
+const evalTailFlag = 0x8000
 
 // compileDirectEvalSpread emits a direct eval whose argument list contains a
 // spread (`eval(...iter)`): build the full argument array (which iterates the

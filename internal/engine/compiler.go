@@ -100,6 +100,12 @@ type compiler struct {
 	// closure snapshots that scope chain at creation (see capturesWith / OpClosure).
 	inheritedWith bool
 
+	// realWith narrows inheritedWith to the case that an actual `with` block
+	// encloses this function. The same routing is used for a function containing a
+	// direct eval (svFunc.dynamicVars), where `eval` itself is NOT dynamically
+	// scoped — only a real with-object could shadow it.
+	realWith bool
+
 	// inFieldInit is set while compiling an instance field initializer, whose
 	// evaluation context has new.target === undefined even though the code is
 	// emitted inline in the constructor (which does have a new.target).

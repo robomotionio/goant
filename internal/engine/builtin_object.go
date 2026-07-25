@@ -1194,6 +1194,19 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	// property (element reads fall back to it) but still extends the length.
 	if obj.Type() == TArr && !sym {
 		if name == "length" && !hasGet && !hasSet {
+			// Array exotic length [[DefineOwnProperty]]: ArraySetLength coerces the
+			// value (twice, observably) FIRST and only then defers to the ordinary
+			// algorithm. So a length that does not survive both coercions is a
+			// RangeError even when the descriptor is also invalid in other ways, and
+			// a valueOf that locks the length still runs both times.
+			newLen := o.arrLen
+			if hasVal {
+				nl, e := rt.arrayLengthValue(val)
+				if e != nil {
+					return e
+				}
+				newLen = nl
+			}
 			// "length" is always non-configurable and non-enumerable: a descriptor
 			// that would flip either attribute to true is rejected (a no-op false is
 			// fine). existing is all-false here, so the resolved booleans are true
@@ -1204,16 +1217,10 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 			if enumerable {
 				return rt.rejectDefine("Cannot redefine property: length")
 			}
-			// Array exotic length [[DefineOwnProperty]]: a non-writable length cannot
-			// be changed or made writable again; a value sets the length; writable:false
-			// locks it.
+			// A non-writable length cannot be changed or made writable again.
 			if o.flags.arrLenNonWritable {
-				if hasVal {
-					if nl, e := rt.toNumber(val); e != nil {
-						return e
-					} else if uint32(nl) != o.arrLen || float64(uint32(nl)) != nl {
-						return rt.rejectDefine("Cannot redefine property: length")
-					}
+				if hasVal && newLen != o.arrLen {
+					return rt.rejectDefine("Cannot redefine property: length")
 				}
 				if hasW && writable {
 					return rt.rejectDefine("Cannot redefine property: length")
@@ -1221,7 +1228,7 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 				return nil
 			}
 			if hasVal {
-				ok, e := rt.setArrayLength(obj, val)
+				ok, e := rt.setArrayLengthTo(obj, newLen)
 				if e != nil {
 					return e
 				}

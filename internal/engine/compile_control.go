@@ -908,7 +908,13 @@ func (c *compiler) compileFinallyBlock(body *Node) {
 		c.emitOpU16(OpGetLocal, uint16(c.completionSlot))
 		c.emitOpU16(OpPutLocal, uint16(saveSlot))
 	}
+	// The finally Block is in tail position when the TryStatement is: whatever
+	// completion it was entered with, a `return f()` here replaces it and leaves
+	// the function, so it is a proper tail call. (A tail call from an inner try's
+	// body is still excluded — tryDepth only drops back to the enclosing level.)
+	c.tryDepth--
 	c.compileStmt(body)
+	c.tryDepth++
 	if saveSlot >= 0 {
 		c.emitOpU16(OpGetLocal, uint16(saveSlot))
 		c.emitOpU16(OpPutLocal, uint16(c.completionSlot))
@@ -963,7 +969,12 @@ func (c *compiler) compileTry(n *Node) {
 		c.patchJump(tryJump)
 		catchTag := c.emitJump(OpCatch)
 		if hasCatch {
+			// With no finally, the try statement is over once the catch body runs, so
+			// its Block is in tail position: `catch (e) { return f() }` is a proper
+			// tail call. (With a finally it is not — that block still has to run.)
+			c.tryDepth--
 			c.compileCatchBody(n)
+			c.tryDepth++
 		} else {
 			c.emit(OpPop)
 		}

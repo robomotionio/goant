@@ -205,8 +205,10 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 		}
 	}
 	if obj.Type() == TArr && name == "length" {
-		// A non-writable length rejects any [[Set]] (OpPutField throws in strict
-		// mode / stays silent otherwise; mutators check the rejection explicitly).
+		// OrdinarySet reads the own descriptor BEFORE the value is coerced, so a
+		// length that is ALREADY non-writable refuses the assignment without ever
+		// running the coercion. (One that becomes non-writable DURING the coercion
+		// is caught inside setArrayLength instead.)
 		if o := rt.objPtr(obj); o != nil && o.flags.arrLenNonWritable {
 			return false, nil
 		}
@@ -806,14 +808,41 @@ func (rt *Runtime) arraySet(o *object, idx uint32, v Value) {
 // (no error) when a non-configurable index in [newLen, oldLen) blocks the shrink
 // (length is clamped just above it); an invalid length value is a RangeError.
 func (rt *Runtime) setArrayLength(obj Value, v Value) (bool, *ThrowError) {
-	n, e := rt.toNumber(v)
+	newLen, e := rt.arrayLengthValue(v)
 	if e != nil {
 		return false, e
 	}
-	newLen := uint32(n)
-	if float64(newLen) != n {
-		return false, rt.rangeError("Invalid array length")
+	// The coercion above is observable and precedes the writability check, so a
+	// valueOf that makes `length` non-writable still runs before the assignment
+	// is refused.
+	if o := rt.objPtr(obj); o != nil && o.flags.arrLenNonWritable {
+		return newLen == o.arrLen, nil
 	}
+	return rt.setArrayLengthTo(obj, newLen)
+}
+
+// arrayLengthValue is ArraySetLength steps 3-5: the value is coerced TWICE —
+// once by ToUint32 and once by ToNumber — and a length that does not survive
+// both identically is a RangeError. Both coercions are observable, so a valueOf
+// that mutates the array runs exactly twice and in this order.
+func (rt *Runtime) arrayLengthValue(v Value) (uint32, *ThrowError) {
+	newLen, e := rt.toUint32(v)
+	if e != nil {
+		return 0, e
+	}
+	numberLen, e := rt.toNumber(v)
+	if e != nil {
+		return 0, e
+	}
+	if float64(newLen) != numberLen {
+		return 0, rt.rangeError("Invalid array length")
+	}
+	return newLen, nil
+}
+
+// setArrayLengthTo applies an already-validated new length, shrinking the array
+// as far as its non-configurable elements allow.
+func (rt *Runtime) setArrayLengthTo(obj Value, newLen uint32) (bool, *ThrowError) {
 	o := rt.objPtr(obj)
 	if newLen >= o.arrLen {
 		o.arrLen = newLen

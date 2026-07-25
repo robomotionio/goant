@@ -410,7 +410,9 @@ func (rt *Runtime) arrayFromAsync(C, asyncItems, mapfn, thisArg Value) Value {
 }
 
 func (rt *Runtime) arrayFromCtor(this Value, length int) (Value, *ThrowError) {
-	if rt.isCallable(this) {
+	// ArrayCreate is used unless `this` is a CONSTRUCTOR: an ordinary callable
+	// (Array.of.call(Math.cos)) is not one, and Construct on it would throw.
+	if rt.isConstructorValue(this) {
 		v, e := rt.construct(this, []Value{mknum(float64(length))})
 		if e != nil {
 			return mkundef(), e
@@ -1446,6 +1448,13 @@ func (rt *Runtime) initArrayBuiltin() {
 	})
 
 	rt.defMethod(proto, "splice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// ToObject(this value) first: splice writes `length` back, which a primitive
+		// receiver would refuse.
+		o, e := rt.toObjectValue(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		this = o
 		n, e := rt.lengthOf(this)
 		if e != nil {
 			return mkundef(), e
@@ -1947,10 +1956,8 @@ func (rt *Runtime) initArrayBuiltin() {
 			if n < 0 || n != float64(uint32(n)) {
 				return mkundef(), rt.rangeError("Invalid array length")
 			}
-			ro.arr = make([]Value, uint32(n))
-			for i := range ro.arr {
-				ro.arr[i] = tEmpty
-			}
+			// The length is tracked without materializing holes, so `new
+			// Array(4294967295)` costs nothing; elements appear when written.
 			ro.arrLen = uint32(n)
 			return res, nil
 		}
@@ -1963,7 +1970,10 @@ func (rt *Runtime) initArrayBuiltin() {
 	cobj.defineOwn("prototype", rt.arrayProto, 0)
 	proto.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 	rt.defMethod(cobj, "isArray", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		return mkbool(rt.isArrayValue(arg(args, 0))), nil
+		// IsArray unwraps a proxy chain, and a REVOKED proxy in it is a TypeError
+		// rather than a plain false.
+		ok, e := rt.isArrayE(arg(args, 0))
+		return mkbool(ok), e
 	})
 	// Array.isTemplateObject: a template-strings object is a frozen array with a
 	// frozen own `raw` array (as produced for a tagged template). A plain or

@@ -1804,6 +1804,9 @@ restart:
 			// longer the intrinsic %eval% (the binding was reassigned), this is an
 			// ordinary call; otherwise evaluate the source string.
 			scopeIdx := int(readU16(code, ip+1))
+			// The high bit marks a call site in tail position (evalTailFlag).
+			evalTail := scopeIdx&evalTailFlag != 0
+			scopeIdx &^= evalTailFlag
 			argc := int(readU16(code, ip+3))
 			evalArgs := make([]Value, argc)
 			for i := argc - 1; i >= 0; i-- {
@@ -1816,6 +1819,18 @@ restart:
 			)
 			switch {
 			case rt.evalFn == 0 || callee != rt.evalFn:
+				// Not the intrinsic after all: an ordinary call, and in tail position a
+				// proper one — reuse this frame exactly as OpTailCall does.
+				if evalTail {
+					if o := rt.objPtr(callee); o != nil && o.native == nil && o.proxy == nil {
+						if cl2 := rt.closures.get(o.closure); cl2 != nil &&
+							!cl2.fn.isGenerator && !cl2.fn.isAsync && !cl2.fn.isClassCtor {
+							closeAll()
+							fn, cl, fnVal, thisVal, args = cl2.fn, cl2, callee, mkundef(), evalArgs
+							goto restart
+						}
+					}
+				}
 				ret, e = rt.callValue(callee, mkundef(), evalArgs)
 			case argc == 0:
 				ret = mkundef()
