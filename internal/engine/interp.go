@@ -1457,15 +1457,29 @@ restart:
 				var re *ThrowError
 				switch kind {
 				case genThrow:
-					throwFn, _ := rt.getField(inner, "throw")
+					throwFn, ge := rt.getField(inner, "throw")
+					if ge != nil {
+						thrown = ge
+						goto unwind
+					}
 					if !rt.isCallable(throwFn) {
-						rt.iteratorClose(inner)
+						// No `throw`: close the inner iterator with a NORMAL completion
+						// and only then report the protocol violation. The close is a
+						// `?` step, so an error it raises wins over the TypeError.
+						if ce := rt.iteratorCloseE(inner); ce != nil {
+							thrown = ce
+							goto unwind
+						}
 						thrown = rt.typeError("The iterator does not provide a 'throw' method")
 						goto unwind
 					}
 					result, re = rt.callValue(throwFn, inner, []Value{sent})
 				case genReturn:
-					returnFn, _ := rt.getField(inner, "return")
+					returnFn, ge := rt.getField(inner, "return")
+					if ge != nil {
+						thrown = ge
+						goto unwind
+					}
 					if !rt.isCallable(returnFn) {
 						// No return method: propagate the return, running any finally.
 						if fip, ok := doReturn(sent); ok {
@@ -1512,12 +1526,12 @@ restart:
 					thrown = de
 					goto unwind
 				}
-				value, ve := rt.getField(result, "value") // IteratorValue: ? Get(result, "value")
-				if ve != nil {
-					thrown = ve
-					goto unwind
-				}
 				if rt.toBoolean(doneV) {
+					value, ve := rt.getField(result, "value") // IteratorValue: ? Get(result, "value")
+					if ve != nil {
+						thrown = ve
+						goto unwind
+					}
 					if kind == genReturn {
 						// Inner honored return: propagate it, running any finally.
 						if fip, ok := doReturn(value); ok {
@@ -1531,7 +1545,22 @@ restart:
 					push(value)
 					break
 				}
-				resumed, inject := rt.suspend(value, false)
+				// Not done. A SYNC generator re-yields the inner result OBJECT
+				// unchanged (GeneratorYield(innerResult)) — its `value` is never read,
+				// and a missing `done` stays missing. An ASYNC generator instead reads
+				// the value and yields that (AsyncGeneratorYield(? IteratorValue(…))).
+				var resumed Value
+				var inject *genResume
+				if fn.isAsync {
+					value, ve := rt.getField(result, "value")
+					if ve != nil {
+						thrown = ve
+						goto unwind
+					}
+					resumed, inject = rt.suspend(value, false)
+				} else {
+					resumed, inject = rt.suspendRaw(result)
+				}
 				sent, kind = resumed, genNext
 				if inject != nil {
 					sent, kind = inject.val, inject.kind

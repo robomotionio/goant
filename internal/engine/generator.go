@@ -30,7 +30,12 @@ type genMsg struct {
 	value Value
 	done  bool
 	await bool
-	err   *ThrowError
+	// raw marks a yield whose value IS the IteratorResult object to hand back
+	// unchanged. A sync `yield*` re-yields the inner iterator's own result object
+	// (GeneratorYield(innerResult)), so its shape — including a missing `done` —
+	// is observable and must not be rebuilt.
+	raw bool
+	err *ThrowError
 }
 
 // genResume travels driver -> coroutine: how to resume the suspended point.
@@ -144,8 +149,18 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 // the driver and block until resumed. It returns the resume value or, for a
 // throw/return injection, signals the interpreter to unwind.
 func (rt *Runtime) suspend(value Value, isAwait bool) (resumed Value, inject *genResume) {
+	return rt.suspendMsg(genMsg{value: value, await: isAwait})
+}
+
+// suspendRaw suspends yielding a ready-made IteratorResult object, which the
+// driver returns to its caller unchanged (sync `yield*`).
+func (rt *Runtime) suspendRaw(result Value) (resumed Value, inject *genResume) {
+	return rt.suspendMsg(genMsg{value: result, raw: true})
+}
+
+func (rt *Runtime) suspendMsg(msg genMsg) (resumed Value, inject *genResume) {
 	g := rt.curGen
-	g.fromGen <- genMsg{value: value, await: isAwait, done: false}
+	g.fromGen <- msg
 	r := <-g.toGen
 	if r.kind == genNext {
 		return r.val, nil
@@ -214,6 +229,9 @@ func (rt *Runtime) initGeneratorBuiltin() {
 			if m.err != nil {
 				return mkundef(), m.err
 			}
+			if m.raw {
+				return m.value, nil
+			}
 			return rt.genResult(m.value, m.done), nil
 		}
 	}
@@ -230,6 +248,9 @@ func (rt *Runtime) initGeneratorBuiltin() {
 		m := rt.genDrive(o.gen, genReturn, arg(args, 0))
 		if m.err != nil {
 			return mkundef(), m.err
+		}
+		if m.raw {
+			return m.value, nil
 		}
 		return rt.genResult(m.value, m.done), nil
 	})
