@@ -1000,6 +1000,12 @@ func (c *compiler) compileVarDecl(n *Node) {
 			c.emitWithVar(OpWithPutVar, name)
 			continue
 		}
+		if decl.Right == nil && !isLexical {
+			// A bare `var x;` does not re-initialise an existing binding: the name was
+			// already created (as undefined) by FunctionDeclarationInstantiation, and
+			// a hoisted function declaration of the same name may have filled it.
+			continue
+		}
 		if decl.Right != nil {
 			c.compileExpr(decl.Right)
 		} else {

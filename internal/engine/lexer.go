@@ -844,6 +844,12 @@ func (l *lexer) scanString(off int, quote byte) {
 			}
 		}
 		skip := 2
+		if escChar == '\r' && escPos+2 < rem && buf[escPos+2] == '\n' {
+			// LineTerminatorSequence :: <CR><LF> is ONE terminator, so a line
+			// continuation before it consumes both bytes; leaving the LF behind
+			// would then be read as a raw newline in the literal.
+			skip = 3
+		}
 		if escChar == 'x' {
 			// \xHH requires exactly two hexadecimal digits.
 			if escPos+3 >= rem || !isXDigitByte(buf[escPos+2]) || !isXDigitByte(buf[escPos+3]) {

@@ -788,9 +788,19 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	var restParam *Node
 	restIndex := -1
 	paramCount := 0
+	// A sloppy function may repeat a simple parameter name; the repeats SHARE one
+	// binding, so each position has to copy its own argument in order for the last
+	// occurrence to win. dupParams records that, and paramCount then counts the
+	// distinct slots the frame prefill may fill.
+	dupParams := false
+	seenParam := map[string]bool{}
 	for i, p := range n.Args {
 		switch p.Kind {
 		case NIdent:
+			if seenParam[p.Str] {
+				dupParams = true
+			}
+			seenParam[p.Str] = true
 			slot := c.declareVar(p.Str, false)
 			ordered = append(ordered, orderedParam{slot, i, nil})
 			paramCount++
@@ -820,6 +830,9 @@ func (c *compiler) compileFunctionBody(n *Node) {
 			c.errorf("unsupported parameter form (slice)")
 			return
 		}
+	}
+	if dupParams {
+		paramCount = len(seenParam)
 	}
 	c.fn.paramCount = paramCount
 	// A mapped `arguments` needs formal i to own frame slot i: only a simple
@@ -947,6 +960,15 @@ func (c *compiler) compileFunctionBody(n *Node) {
 			c.emitOpU16(OpPutLocal, uint16(o.slot))
 		}
 	} else {
+		if dupParams {
+			// Repeated names share a slot, which the frame prefill can only fill once;
+			// copying each argument in source order gives the last occurrence.
+			for _, o := range ordered {
+				c.emit(OpGetArg)
+				c.emitU16(uint16(o.argIdx))
+				c.emitOpU16(OpPutLocal, uint16(o.slot))
+			}
+		}
 		for _, d := range defaults {
 			c.emitOpU16(OpGetLocal, uint16(d.slot))
 			c.emit(OpIsUndef)
@@ -972,8 +994,11 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		// Pre-declare all function-scoped var/function/class names as locals so
 		// that hoisted function bodies capture them as upvalues (their cells)
 		// rather than resolving to globals.
+		// In STRICT code a block-level function declaration binds only in its block,
+		// so it contributes no function-scope name: pre-declaring one would make a
+		// reference from outside the block resolve to undefined instead of throwing.
 		names := map[string]bool{}
-		collectVarFuncNames(n.Body.Args, names)
+		collectVarFuncNamesMode(n.Body.Args, names, c.fn.isStrict)
 		for name := range names {
 			if c.resolveLocal(name) < 0 {
 				c.addLocal(name, false)
