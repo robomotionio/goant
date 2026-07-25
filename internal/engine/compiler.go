@@ -323,6 +323,14 @@ func validateModuleExports(stmts []*Node) *SyntaxError {
 			continue
 		}
 		switch {
+		case s.Flags&exStar != 0:
+			// A bare `export *` forwards names that cannot be known here, but
+			// `export * as z from` names z itself and can collide.
+			if s.Flags&exNamespace != 0 && len(s.Args) > 0 && s.Args[0].Right != nil {
+				if e := add(s.Args[0].Right.Str); e != nil {
+					return e
+				}
+			}
 		case s.Flags&exDefault != 0:
 			if e := add("default"); e != nil {
 				return e

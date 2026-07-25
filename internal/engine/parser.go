@@ -2670,7 +2670,29 @@ func (p *parser) skipImportStmt() *Node {
 const (
 	importBindDefault   = 1 << 0
 	importBindNamespace = 1 << 1
+	// exportNameFromString marks a ModuleExportName written as a StringLiteral
+	// rather than an IdentifierName.
+	exportNameFromString = 1 << 2
 )
+
+// hasLoneSurrogate reports whether a cooked (WTF-8) string contains an unpaired
+// surrogate. cookString combines a valid pair into its astral code point, so any
+// remaining rune in D800..DFFF is by definition lone.
+func hasLoneSurrogate(s string) bool {
+	for _, r := range wtf8ToRunes([]byte(s)) {
+		if r >= 0xD800 && r <= 0xDFFF {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *parser) importDeclAddBinding(decl *Node, importName, localName string, hasImport bool, flags uint32) {
+	// An imported binding is a BindingIdentifier, and module code is always
+	// strict — so `import { eval }` / `import { x as arguments }` are early errors.
+	p.strictCheckBindingIdent(localName)
+	importDeclAddBinding(decl, importName, localName, hasImport, flags)
+}
 
 func importDeclAddBinding(decl *Node, importName, localName string, hasImport bool, flags uint32) {
 	spec := &Node{Kind: NImportSpec, Flags: flags}
@@ -2694,7 +2716,7 @@ func (p *parser) parseImportStmt() *Node {
 	if isIdentLikeTok(p.next()) {
 		sawClause = true
 		local := p.tokIdentStr()
-		importDeclAddBinding(decl, "default", local, true, importBindDefault)
+		p.importDeclAddBinding(decl, "default", local, true, importBindDefault)
 		p.consume()
 		if p.next() == TokComma {
 			p.consume()
@@ -2710,7 +2732,7 @@ func (p *parser) parseImportStmt() *Node {
 		if !isIdentLikeTok(p.tok()) {
 			return p.skipImportStmt()
 		}
-		importDeclAddBinding(decl, "", p.tokIdentStr(), false, importBindNamespace)
+		p.importDeclAddBinding(decl, "", p.tokIdentStr(), false, importBindNamespace)
 		p.consume()
 	} else if p.next() == TokLBrace {
 		sawClause = true
@@ -2737,7 +2759,7 @@ func (p *parser) parseImportStmt() *Node {
 				localName = p.tokIdentStr()
 				p.consume()
 			}
-			importDeclAddBinding(decl, importName, localName, true, 0)
+			p.importDeclAddBinding(decl, importName, localName, true, 0)
 			if p.next() == TokComma {
 				p.consume()
 				if p.next() == TokRBrace {
@@ -2768,6 +2790,12 @@ func (p *parser) parseExportName() *Node {
 	if p.tok() == TokString {
 		name := p.mk(NIdent)
 		name.Str = cookString(p.tokStr())
+		// A ModuleExportName spelled as a string must be well-formed UTF-16: a
+		// lone surrogate has no valid name to bind or resolve.
+		if hasLoneSurrogate(name.Str) {
+			p.errorf("Module export name must not contain a lone surrogate")
+		}
+		name.Flags |= exportNameFromString
 		p.consume()
 		return name
 	}
@@ -2913,6 +2941,16 @@ func (p *parser) parseExportStmt() *Node {
 			decl.Right = p.mkStringFromTok()
 			decl.Flags |= exFrom
 			p.consume()
+		} else {
+			// Without `from` the local name denotes a binding in this module, so it
+			// must be an IdentifierName; a string is only a name to look up in the
+			// module being re-exported from.
+			for _, spec := range decl.Args {
+				if spec != nil && spec.Left != nil && spec.Left.Flags&exportNameFromString != 0 {
+					p.errorf("A string may only name an export when re-exporting with `from`")
+					break
+				}
+			}
 		}
 		p.semicolon()
 		return decl
