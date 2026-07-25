@@ -58,6 +58,21 @@ func (rt *Runtime) reflectSet(target, key, val, receiver Value) (bool, *ThrowErr
 	if e != nil {
 		return false, e
 	}
+	// A DIFFERENT receiver still gets the exotic treatment for a canonical
+	// numeric index the target cannot address (fractional, negative, -0, out of
+	// range, detached): 10.4.5.5 step 1.b returns true having done nothing at
+	// all — no prototype walk to an inherited accessor, and nothing created on
+	// the receiver. A VALID index does fall through to the ordinary set below,
+	// which is why this cannot simply reuse the same-receiver branch.
+	if target.Type() == TTypedArray {
+		fidx, isNum := pk.Number(), pk.IsNumber()
+		if !isNum && pk.IsString() {
+			fidx, isNum = canonicalNumericIndex(string(rt.strBytes(pk)))
+		}
+		if isNum && !rt.isValidIntegerIndex(target, fidx) {
+			return true, nil
+		}
+	}
 	cur := target
 	for depth := 0; depth < maxProtoChainDepth; depth++ {
 		o := rt.objPtr(cur)
@@ -384,4 +399,15 @@ func (rt *Runtime) initReflectBuiltin() {
 
 	rt.setStringTag(reflect, "Reflect") // Reflect[@@toStringTag] === "Reflect"
 	rt.defGlobal("Reflect", reflect)
+}
+
+// isValidIntegerIndex is IsValidIntegerIndex(O, index): the index must be an
+// integral value addressing a live element of a non-detached typed array.
+func (rt *Runtime) isValidIntegerIndex(ta Value, fidx float64) bool {
+	o := rt.objPtr(ta)
+	if o == nil || o.ta == nil {
+		return false
+	}
+	idx, integral := integerIndex(fidx)
+	return integral && idx >= 0 && idx < rt.taLength(o)
 }
