@@ -365,6 +365,13 @@ restart:
 					unscoped = u
 				}
 				if has && !unscoped {
+					// GetBindingValue performs its OWN HasProperty (step 2) before the
+					// Get (step 4) — a second observable trap on a Proxy binding object,
+					// distinct from the one HasBinding just did.
+					if _, e := rt.hasPropE(withStack[k], name); e != nil {
+						thrown = e
+						goto unwind
+					}
 					v, e := rt.getField(withStack[k], name)
 					if e != nil {
 						thrown = e
