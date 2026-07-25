@@ -461,8 +461,13 @@ func (rt *Runtime) RunModule(filename, src string) (Value, error) {
 	}
 	rt.modules[filename] = m
 	for _, req := range m.requestedSpecifiers() {
-		if _, e := rt.instantiateModule(req, filename); e != nil {
+		_, se, e := rt.instantiateModule(req, filename)
+		if e != nil {
 			return mkundef(), e
+		}
+		if se != nil {
+			se.Filename = filename
+			return mkundef(), se
 		}
 	}
 	if se := rt.linkModule(m, map[string]bool{}); se != nil {

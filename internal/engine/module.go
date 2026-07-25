@@ -176,11 +176,14 @@ func (rt *Runtime) resolveSpecifier(spec, referrer string) string {
 // is separate because an unresolvable or ambiguous import is a SyntaxError that
 // must be raised *before* any module body runs.
 func (rt *Runtime) loadModule(spec, referrer string) (*moduleRecord, *ThrowError) {
-	m, e := rt.instantiateModule(spec, referrer)
+	m, se, e := rt.instantiateModule(spec, referrer)
 	if e != nil {
 		return nil, e
 	}
-	if se := rt.linkModule(m, map[string]bool{}); se != nil {
+	if se == nil {
+		se = rt.linkModule(m, map[string]bool{})
+	}
+	if se != nil {
 		// Reaching here through import(): the rejection value is a SyntaxError.
 		return nil, rt.syntaxError(se.Msg)
 	}
@@ -192,37 +195,43 @@ func (rt *Runtime) loadModule(spec, referrer string) (*moduleRecord, *ThrowError
 
 // instantiateModule parses and compiles a module and everything it requests,
 // registering each record before recursing so a cycle terminates.
-func (rt *Runtime) instantiateModule(spec, referrer string) (*moduleRecord, *ThrowError) {
+//
+// A dependency that will not parse is a malformed module graph, not a thrown
+// exception: no code has run, so it is returned as a *SyntaxError (an early
+// error) exactly like an unresolvable import. A specifier the host cannot find
+// is different — that is a load failure, and its TypeError is what a dynamic
+// import must reject with.
+func (rt *Runtime) instantiateModule(spec, referrer string) (*moduleRecord, *SyntaxError, *ThrowError) {
 	path := rt.resolveSpecifier(spec, referrer)
 	if rt.modules == nil {
 		rt.modules = map[string]*moduleRecord{}
 	}
 	if m, ok := rt.modules[path]; ok {
 		if m.status == modErrored {
-			return nil, m.evalErr
+			return nil, nil, m.evalErr
 		}
-		return m, nil
+		return m, nil, nil
 	}
 	src, err := os.ReadFile(path)
 	if err != nil {
-		return nil, rt.typeError("cannot resolve module '" + spec + "'")
+		return nil, nil, rt.typeError("cannot resolve module '" + spec + "'")
 	}
 	prog, perr := parseMode(path, string(src), true, true)
 	if perr != nil {
-		return nil, rt.syntaxError(perr.Error())
+		return nil, &SyntaxError{Msg: perr.Error()}, nil
 	}
 	fn, cerr := rt.CompileModule(prog, path, string(src))
 	if cerr != nil {
-		return nil, rt.syntaxError(cerr.Error())
+		return nil, &SyntaxError{Msg: cerr.Error()}, nil
 	}
 	m := newModuleRecord(path, fn)
 	rt.modules[path] = m
 	for _, req := range m.requestedSpecifiers() {
-		if _, e := rt.instantiateModule(req, path); e != nil {
-			return nil, e
+		if _, se, e := rt.instantiateModule(req, path); se != nil || e != nil {
+			return nil, se, e
 		}
 	}
-	return m, nil
+	return m, nil, nil
 }
 
 // linkModule checks that every import in the graph names an export that exists
@@ -232,6 +241,18 @@ func (rt *Runtime) linkModule(m *moduleRecord, seen map[string]bool) *SyntaxErro
 		return nil
 	}
 	seen[m.path] = true
+	// Every requested module is linked, including one imported purely for its
+	// side effects (`import "m"`), which binds nothing and so appears in no
+	// moduleImports entry.
+	for _, spec := range m.fn.moduleRequests {
+		dep, ok := rt.modules[rt.resolveSpecifier(spec, m.path)]
+		if !ok {
+			return &SyntaxError{Msg: "cannot resolve module '" + spec + "'"}
+		}
+		if e := rt.linkModule(dep, seen); e != nil {
+			return e
+		}
+	}
 	for _, imp := range m.fn.moduleImports {
 		dep, ok := rt.modules[rt.resolveSpecifier(imp.specifier, m.path)]
 		if !ok {
@@ -302,6 +323,9 @@ func (m *moduleRecord) requestedSpecifiers() []string {
 			seen[s] = true
 			out = append(out, s)
 		}
+	}
+	for _, spec := range m.fn.moduleRequests {
+		add(spec)
 	}
 	for _, imp := range m.fn.moduleImports {
 		add(imp.specifier)
@@ -406,3 +430,47 @@ func (rt *Runtime) importModuleNamespace(spec, referrer string) (Value, *ThrowEr
 // SetModuleBase sets the directory that import specifiers resolve against when
 // the importer is not itself a module (a script calling import()).
 func (rt *Runtime) SetModuleBase(dir string) { rt.moduleDir = dir }
+
+// validateImportOptions checks the second argument of a dynamic import against
+// the ImportCall algorithm. goant supports no module types, so any attribute the
+// host would have to honour is rejected rather than silently ignored — importing
+// `{ type: 'json' }` and getting a JavaScript module back would be worse than a
+// clear failure. All failures are TypeErrors, which import() turns into a
+// rejected promise.
+func (rt *Runtime) validateImportOptions(options Value) *ThrowError {
+	if options.IsUndefined() {
+		return nil
+	}
+	if !options.IsObjectLike() {
+		return rt.typeError("import() options must be an object")
+	}
+	attrs, e := rt.getField(options, "with")
+	if e != nil {
+		return e
+	}
+	if attrs.IsUndefined() {
+		return nil
+	}
+	if !attrs.IsObjectLike() {
+		return rt.typeError("import() 'with' must be an object")
+	}
+	keys, e := rt.enumerableOwnKeysE(attrs)
+	if e != nil {
+		return e
+	}
+	for _, k := range keys {
+		v, e := rt.getField(attrs, k)
+		if e != nil {
+			return e
+		}
+		if v.Type() != TStr {
+			return rt.typeError("import attribute '" + k + "' must be a string")
+		}
+		// "type" is the only attribute key the spec gives meaning to; every value
+		// of it names a module type goant cannot produce.
+		if k == "type" {
+			return rt.typeError("import attribute type '" + string(rt.strBytes(v)) + "' is not supported")
+		}
+	}
+	return nil
+}

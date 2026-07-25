@@ -288,8 +288,7 @@ var skipFeatures = map[string]bool{
 	"Atomics.waitAsync":          true,
 	"Temporal":                   true, // staged proposal, not implemented
 	"decorators":                 true,
-	"import-assertions":          true,
-	"import-attributes":          true,
+	"import-assertions":          true, // the withdrawn `assert {…}` spelling
 	"IsHTMLDDA":                  true,
 	"source-phase-imports":       true,
 	"source-phase-imports-typed": true,

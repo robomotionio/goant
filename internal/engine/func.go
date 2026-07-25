@@ -44,6 +44,7 @@ type svFunc struct {
 	moduleExports  map[string]int
 	moduleStarFrom []string
 	moduleImports  []moduleImport
+	moduleRequests []string // every specifier imported, bindings or not
 	moduleIndirect map[string]indirectExport
 	isMethod       bool // concise method / getter / setter: no [[Construct]], no .prototype
 	// isClassElement marks a class constructor / method / accessor / static block:

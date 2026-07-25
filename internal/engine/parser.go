@@ -2708,6 +2708,7 @@ func (p *parser) parseImportStmt() *Node {
 	if p.next() == TokString {
 		spec := p.mkStringFromTok()
 		p.consume()
+		p.parseWithClause()
 		p.semicolon()
 		decl.Right = spec
 		return decl
@@ -2781,6 +2782,7 @@ parseFrom:
 	spec := p.mkStringFromTok()
 	p.consume()
 	decl.Right = spec
+	p.parseWithClause()
 	p.semicolon()
 	return decl
 }
@@ -2941,6 +2943,7 @@ func (p *parser) parseExportStmt() *Node {
 			decl.Right = p.mkStringFromTok()
 			decl.Flags |= exFrom
 			p.consume()
+			p.parseWithClause()
 		} else {
 			// Without `from` the local name denotes a binding in this module, so it
 			// must be an IdentifierName; a string is only a name to look up in the
@@ -2977,6 +2980,7 @@ func (p *parser) parseExportStmt() *Node {
 		decl.Right = p.mkStringFromTok()
 		decl.Flags |= exFrom
 		p.consume()
+		p.parseWithClause()
 		p.semicolon()
 		return decl
 	}
@@ -3538,4 +3542,57 @@ func (p *parser) semicolon() {
 		return
 	}
 	p.errorf("Unexpected token %q; expected a semicolon or line terminator", p.tokStr())
+}
+
+// parseWithClause parses the import-attributes clause that may follow a module
+// specifier — `with { type: 'json', 'other-key': 'v', }` — attaching nothing to
+// the AST (goant honours no attribute type yet) but enforcing its grammar and
+// its one early error, a duplicate key. A line terminator before `with` is
+// allowed, and in a Module `with` can never start a statement (it is strict
+// code), so the keyword here is unambiguously this clause.
+func (p *parser) parseWithClause() {
+	if p.next() != TokWith {
+		return
+	}
+	p.consume()
+	if p.next() != TokLBrace {
+		p.unexpected()
+		return
+	}
+	p.consume()
+	seen := map[string]bool{}
+	for p.next() != TokRBrace && p.tok() != TokEOF {
+		var key string
+		switch {
+		case p.tok() == TokString:
+			key = cookString(p.tokStr())
+		case p.tok() >= TokIdentifier && p.tok() < TokIdentLikeEnd:
+			// Any IdentifierName, reserved words included (`with {if: ''}`).
+			key = p.tokIdentStr()
+		default:
+			p.unexpected()
+			return
+		}
+		if seen[key] {
+			p.errorf("Duplicate import attribute key '%s'", key)
+			return
+		}
+		seen[key] = true
+		p.consume()
+		if p.next() != TokColon {
+			p.unexpected()
+			return
+		}
+		p.consume()
+		if p.next() != TokString { // the value is always a StringLiteral
+			p.unexpected()
+			return
+		}
+		p.consume()
+		if p.next() != TokComma {
+			break
+		}
+		p.consume() // a trailing comma before `}` is allowed
+	}
+	p.expect(TokRBrace)
 }

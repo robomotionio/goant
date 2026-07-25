@@ -1178,14 +1178,19 @@ restart:
 			// Dynamic import(specifier, options). The specifier is coerced to a
 			// string; import() never throws synchronously — a bad specifier or an
 			// (as yet) unsupported module load rejects the returned promise instead.
-			pop() // options / import attributes (not yet honoured)
+			options := pop()
 			specifier := pop()
-			if spec, e := rt.toStringValue(specifier); e != nil {
+			switch spec, e := rt.toStringValue(specifier); {
+			case e != nil:
 				push(rt.rejectedPromise(e.Value))
-			} else if ns, le := rt.importModuleNamespace(string(rt.strBytes(spec)), fn.filename); le != nil {
-				push(rt.rejectedPromise(le.Value))
-			} else {
-				push(rt.resolvedPromise(ns))
+			default:
+				if oe := rt.validateImportOptions(options); oe != nil {
+					push(rt.rejectedPromise(oe.Value))
+				} else if ns, le := rt.importModuleNamespace(string(rt.strBytes(spec)), fn.filename); le != nil {
+					push(rt.rejectedPromise(le.Value))
+				} else {
+					push(rt.resolvedPromise(ns))
+				}
 			}
 			ip++
 		case OpImportSync:

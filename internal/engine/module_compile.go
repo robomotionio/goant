@@ -31,6 +31,11 @@ func (c *compiler) emitImportPrologue(stmts []*Node) {
 			continue
 		}
 		spec := s.Right.Str
+		// Recorded even when the declaration binds nothing (`import "m"` for its
+		// side effects only): the module is still a request, so it must be
+		// instantiated and linked with the rest of the graph rather than first
+		// appearing at run time.
+		c.fn.moduleRequests = append(c.fn.moduleRequests, spec)
 		modName := "*mod:" + spec + "*"
 		slot := c.addLocal(modName, false)
 		c.emit(OpConst)
