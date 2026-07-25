@@ -390,7 +390,7 @@ func parseEvalSource(filename, src string, strict bool, sc *evalScope) (*Node, e
 // caller scope. Free names resolve to caller bindings (captured as upvalues);
 // the eval's own let/const stay frame-local. strict is the eval's effective
 // strictness (caller strict or a "use strict" prologue).
-func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc *evalScope, strict bool) (*svFunc, error) {
+func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc *evalScope, strict bool, varObj Value) (*svFunc, error) {
 	c := &compiler{
 		rt:         rt,
 		isScript:   true,
@@ -408,6 +408,18 @@ func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc
 	// A direct eval sees the enclosing class private environments, so its `this.#x`
 	// mangles to the same per-class key the declaring class uses (privateKey).
 	c.classPrivateEnvs = sc.privateEnvs
+
+	// When the calling function carries a dynamic variable object, every free name
+	// in the eval body resolves against it (and the rest of the caller's with-chain)
+	// before the borrowed static bindings — that is how a `var` an earlier eval
+	// created becomes visible. A strict eval keeps its own declarations frame-local
+	// but still READS through the chain, so the routing applies either way.
+	dynVars := varObj.IsObjectType()
+	if dynVars {
+		c.inheritedWith = true
+		c.fn.evalVarObj = true
+		c.evalVarDynamic = !strict
+	}
 
 	c.completionSlot = c.addLocal("*completion*", false)
 	c.emit(OpUndef)
@@ -434,6 +446,15 @@ func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc
 			if c.evalVarGlobal {
 				if !g.hasOwn(name) {
 					g.defineOwn(name, mkundef(), attrWritable|attrEnumerable|attrConfigurable)
+				}
+				continue
+			}
+			// A sloppy function-scope eval creates the name in the CALLER's variable
+			// environment — CreateMutableBinding(name, true), so unlike a script's
+			// `var` the binding is deletable.
+			if dynVars && !strict {
+				if o := rt.objPtr(varObj); o != nil && !o.hasOwn(name) {
+					o.defineOwn(name, mkundef(), attrWritable|attrEnumerable|attrConfigurable)
 				}
 				continue
 			}
@@ -568,7 +589,11 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 		}
 	}
 
-	fn, cerr := rt.compileDirectEvalBody(prog, "<eval>", src, sc, evalStrict)
+	// The caller's dynamic scope, claimed here so a nested call made while
+	// compiling or running this eval cannot overwrite it.
+	varObj, callerWith := rt.callerVarObj, rt.callerWithStack
+
+	fn, cerr := rt.compileDirectEvalBody(prog, "<eval>", src, sc, evalStrict, varObj)
 	if cerr != nil {
 		ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(cerr.Error())})
 		return mkundef(), &ThrowError{Value: ev, rt: rt}
@@ -590,6 +615,12 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 	evalCl := &closure{fn: fn, upvalues: upvals}
 	if callerCl != nil {
 		evalCl.home = callerCl.home // object-literal method super in eval
+	}
+	if fn.evalVarObj {
+		// Run in the caller's dynamic scope: the same with-object chain (ending in
+		// its variable object), which the eval frame seeds from here.
+		evalCl.capturedWith = append([]Value(nil), callerWith...)
+		rt.pendingVarObj = varObj
 	}
 
 	// Thread the caller's new.target into the eval frame (a non-arrow function

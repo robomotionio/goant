@@ -72,6 +72,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		handlers     []tryHandler
 		pendingThrow Value
 		withStack    []Value
+		varObj       Value
 		newTarget    Value
 		thrown       *ThrowError
 		comp         completion
@@ -218,6 +219,22 @@ restart:
 	} else {
 		withStack = nil
 	}
+	// A function containing a direct eval carries a dynamic variable object: the
+	// eval's `var` declarations that name nothing this function declared are
+	// created on it, and this function's free names (compiled as with-routed
+	// accesses) find them there. It is innermost of the captured with-objects but
+	// outside this frame's own locals, and has a null prototype so nothing from
+	// Object.prototype can shadow an outer binding.
+	varObj = mkundef()
+	switch {
+	case fn.evalVarObj:
+		// Eval code adopts the caller's variable object (already in its captured
+		// with-chain); a direct eval nested here declares into the same one.
+		varObj, rt.pendingVarObj = rt.pendingVarObj, mkundef()
+	case fn.dynamicVars:
+		varObj = rt.newObject(mknull())
+		withStack = append(withStack, varObj)
+	}
 	ip = 0
 
 	for {
@@ -344,7 +361,10 @@ restart:
 			// resolved base beneath the value, so a paired OpWithPutVar can write
 			// back to the same base (compound assignment; see emitWithVarRef).
 			refMode := code[ip+7]&0x80 != 0
-			fbKind := code[ip+7] & 0x7f
+			// 0x40: a `typeof` read, whose global fallback yields undefined instead
+			// of throwing for an unresolvable reference.
+			lenient := code[ip+7]&0x40 != 0
+			fbKind := code[ip+7] & 0x3f
 			found := false
 			for k := len(withStack) - 1; k >= 0; k-- {
 				has, e := rt.hasPropE(withStack[k], name)
@@ -407,6 +427,12 @@ restart:
 					}
 					push(uvv)
 				default: // global
+					// GetValue on an unresolvable reference throws, exactly as a plain
+					// OpGetGlobal would; `typeof` marks itself lenient instead.
+					if !lenient && !rt.hasProp(rt.global, name) {
+						thrown = rt.referenceError(name + " is not defined")
+						goto unwind
+					}
 					v, ge := rt.getField(rt.global, name)
 					if ge != nil {
 						thrown = ge
@@ -1704,8 +1730,15 @@ restart:
 				if scopeIdx < len(fn.evalScopes) {
 					sc = fn.evalScopes[scopeIdx]
 				}
+				// Hand the eval this frame's dynamic scope: the with-objects it must
+				// resolve free names against, and the variable object its own `var`
+				// declarations create bindings on. Saved and restored so a nested eval
+				// (or a call made from the eval body) cannot see a stale chain.
+				savedVarObj, savedWithStack := rt.callerVarObj, rt.callerWithStack
+				rt.callerVarObj, rt.callerWithStack = varObj, withStack
 				ret, e = rt.performDirectEval(string(rt.strBytes(evalArgs[0])), sc, cl,
 					thisVal, newTarget, captureUpvalue)
+				rt.callerVarObj, rt.callerWithStack = savedVarObj, savedWithStack
 			}
 			if e != nil {
 				thrown = e

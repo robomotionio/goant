@@ -178,11 +178,17 @@ func (c *compiler) declareAnnexBName(name string) {
 	if c.annexBIfVarShadowed(name) {
 		return
 	}
-	if c.isScript {
+	if c.isScript && !c.evalVarDynamic {
 		g := c.rt.objPtr(c.rt.global)
 		if !g.hasOwn(name) {
 			g.defineOwn(name, mkundef(), attrWritable|attrEnumerable)
 		}
+		return
+	}
+	// A direct eval's B.3.4 name binds in the caller's variable environment; the
+	// binding itself was created by EvalDeclarationInstantiation, so there is
+	// nothing to declare here.
+	if c.evalVarDynamic {
 		return
 	}
 	if c.resolveLocal(name) >= 0 {
@@ -226,6 +232,10 @@ func (c *compiler) compileIfBranch(n *Node) {
 			c.emitOpU16(OpPutLocal, uint16(slot))
 		} else if uv := c.resolveUpvalue(n.Str); uv >= 0 {
 			c.emitOpU16(OpPutUpval, uint16(uv))
+		} else if c.evalVarDynamic {
+			// In a direct eval the var-scope binding lives on the caller's variable
+			// object, not on the global.
+			c.emitWithVar(OpWithPutVar, n.Str)
 		} else {
 			c.emitGlobalPut(n.Str)
 		}
@@ -566,6 +576,15 @@ func (c *compiler) bindDeclared(name string) {
 			c.emitGlobalPut(name)
 			return
 		}
+		// The caller's variable object already holds the name (created by
+		// EvalDeclarationInstantiation); store the function value there. The test is
+		// for a function-scope slot, not any slot: an Annex B.3.3 block function has
+		// a block-scoped binding of the same name, and its var-scope copy must not
+		// land back in that one.
+		if c.evalVarDynamic && c.resolveFunctionVar(name) < 0 {
+			c.emitWithVar(OpWithPutVar, name)
+			return
+		}
 		slot := c.declareVar(name, false)
 		c.emitOpU16(OpPutLocal, uint16(slot))
 		return
@@ -673,6 +692,24 @@ func (c *compiler) compileFunctionBody(n *Node) {
 				c.fn.isStrict = true
 				break
 			}
+		}
+	}
+
+	// A sloppy direct eval's `var` and function declarations bind in the calling
+	// function's variable environment, which has no compile-time slot for a name
+	// the function never mentions. Give such a function a dynamic variable object
+	// (allocated at frame entry) and route its free names through it, reusing the
+	// with-object machinery — the resolution rule is the same: check an object at
+	// run time, else fall back to the static binding. A STRICT eval has its own
+	// variable environment, so a strict function needs none of this.
+	if !c.fn.isStrict && !c.fn.dynamicVars {
+		has := nodeHasDirectEval(n.Body)
+		for _, p := range n.Args {
+			has = has || nodeHasDirectEval(p)
+		}
+		if has {
+			c.fn.dynamicVars = true
+			c.inheritedWith = true
 		}
 	}
 

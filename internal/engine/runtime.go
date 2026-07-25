@@ -184,6 +184,18 @@ type Runtime struct {
 	pendingNewTarget Value
 	activeNewTarget  Value
 
+	// callerVarObj / callerWithStack carry the dynamic scope of the frame that is
+	// running a direct eval: the caller's variable object (where the eval's `var`
+	// declarations create bindings, see svFunc.dynamicVars) and the with-object
+	// chain its free names resolve against. Set around the OpEval call only.
+	callerVarObj    Value
+	callerWithStack []Value
+
+	// pendingVarObj hands the caller's variable object to the eval frame about to
+	// run, so a direct eval nested inside eval code still reaches the variable
+	// environment of the function that started the chain.
+	pendingVarObj Value
+
 	// pendingNewTargetProto caches the [[Prototype]] that constructWithTarget
 	// already resolved from newTarget.prototype, so a native constructor's
 	// newTargetProto reuses it instead of performing a second observable [[Get]]

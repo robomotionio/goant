@@ -53,6 +53,13 @@ type compiler struct {
 	// declarations bind on the global object rather than as eval-frame locals.
 	evalVarGlobal bool
 
+	// evalVarDynamic marks a sloppy function-scope direct eval whose caller has a
+	// dynamic variable object (svFunc.dynamicVars): a `var` or hoisted function
+	// declaration naming nothing the caller already binds is created there at run
+	// time, so its store routes through the with-chain instead of taking an
+	// eval-frame local slot that the caller could never see.
+	evalVarDynamic bool
+
 	// inParamExpr is set while compiling a function's parameter default/destructuring
 	// expressions, whose evaluation scope is the parameter environment. A direct eval
 	// there in a non-arrow function may not var-declare `arguments` (the parameter
@@ -865,6 +872,15 @@ func (c *compiler) compileVarDecl(n *Node) {
 				}
 				continue
 			}
+			// A name the caller does not bind was created on its variable object by
+			// EvalDeclarationInstantiation; the initializer writes there.
+			if c.evalVarDynamic && c.resolveLocal(name) < 0 {
+				if decl.Right != nil {
+					c.compileExpr(decl.Right)
+					c.emitWithVar(OpWithPutVar, name)
+				}
+				continue
+			}
 		}
 		if asGlobal {
 			if decl.Right != nil {
@@ -1061,11 +1077,17 @@ func (c *compiler) compileExpr(n *Node) {
 		// name IS declared, so it must go through the normal read — a binding still
 		// in its temporal dead zone has to throw, not report "undefined".
 		if r := n.Right; r != nil && r.Kind == NIdent && !c.isImportName(r.Str) &&
-			c.resolveLocal(r.Str) < 0 && c.resolveUpvalue(r.Str) < 0 && !c.nameIsWithRouted(r.Str) {
-			idx := c.constant(c.rt.internString(r.Str))
-			c.emit(OpGetGlobalUndef)
-			c.emitU32(uint32(idx))
-			c.emitU16(0)
+			c.resolveLocal(r.Str) < 0 && c.resolveUpvalue(r.Str) < 0 {
+			if c.nameIsWithRouted(r.Str) {
+				// The name may still be bound by a with-object (or a variable object a
+				// direct eval wrote to); only the global fallback is lenient.
+				c.emitWithVarLenient(OpWithGetVar, r.Str)
+			} else {
+				idx := c.constant(c.rt.internString(r.Str))
+				c.emit(OpGetGlobalUndef)
+				c.emitU32(uint32(idx))
+				c.emitU16(0)
+			}
 		} else {
 			c.compileExpr(n.Right)
 		}
@@ -1131,6 +1153,23 @@ func (c *compiler) nameIsWithRouted(name string) bool {
 	return c.inheritedWith && c.resolveLocal(name) < 0
 }
 
+// storeKeepsStaticBinding reports whether a STORE to a with-routed name must
+// keep its static semantics anyway: the name is a const or a named function
+// expression's immutable self-reference. Routing would write through the
+// with-chain's lexical fallback, which cannot express "throw" or "silently
+// ignore". It applies only to an INHERITED chain (withDepth == 0), whose objects
+// sit outside this function and so can never legitimately shadow the binding;
+// directly inside a `with` the object is innermost and does shadow it.
+func (c *compiler) storeKeepsStaticBinding(slot, uv int) bool {
+	if c.withDepth > 0 {
+		return false
+	}
+	if slot >= 0 {
+		return c.locals[slot].isConst || c.locals[slot].selfName
+	}
+	return uv >= 0 && (c.upvalues[uv].isConst || c.upvalues[uv].selfName)
+}
+
 func (c *compiler) compileIdentLoad(n *Node) {
 	// A private name is a valid primary only as the left operand of `#x in obj`
 	// (handled in compileBinary before the operand reaches here). Reaching this
@@ -1179,6 +1218,17 @@ func (c *compiler) compileWith(n *Node) {
 // emitWithVar emits a with-scoped variable access (op + u32 name + 3 pad bytes,
 // matching the generated size).
 func (c *compiler) emitWithVar(op Opcode, name string) {
+	c.emitWithVarFlags(op, name, 0)
+}
+
+// emitWithVarLenient emits a with-scoped read whose global fallback yields
+// undefined instead of throwing (flag 0x40) — the `typeof` of a name that is
+// neither a local, an upvalue, nor a property of any with-object.
+func (c *compiler) emitWithVarLenient(op Opcode, name string) {
+	c.emitWithVarFlags(op, name, 0x40)
+}
+
+func (c *compiler) emitWithVarFlags(op Opcode, name string, flags byte) {
 	idx := c.constant(c.rt.internString(name))
 	// A `with` name access checks the with-object(s) first at run time; when none
 	// binds the name it falls back to the ordinary lexical resolution. Encode that
@@ -1195,7 +1245,7 @@ func (c *compiler) emitWithVar(op Opcode, name string) {
 	c.emit(op)
 	c.emitU32(uint32(idx))
 	c.emitU16(uint16(fbIdx))
-	c.emitByte(fbKind)
+	c.emitByte(fbKind | flags)
 }
 
 // emitWithVarRef emits a with-scoped access in *reference* mode (fallback-kind
@@ -1607,7 +1657,7 @@ func (c *compiler) compileAssign(n *Node) {
 		// Inside a `with`, the store is routed to the with-object(s) first (with a
 		// lexical fallback baked into emitWithVar), so a same-named local/upvalue can
 		// be shadowed by a with-object property.
-		if c.nameIsWithRouted(name) {
+		if c.nameIsWithRouted(name) && !c.storeKeepsStaticBinding(slot, uv) {
 			c.emit(OpDup)
 			c.emitWithVar(OpWithPutVar, name)
 			return
@@ -1673,7 +1723,7 @@ func (c *compiler) compileAssign(n *Node) {
 			c.errorf("unsupported compound assignment %v (slice)", n.Op)
 			return
 		}
-		if c.nameIsWithRouted(name) {
+		if c.nameIsWithRouted(name) && !c.storeKeepsStaticBinding(slot, uv) {
 			// Base-caching compound assignment inside `with`: resolve the reference
 			// once (ref mode) so the read and the write target the same base, per
 			// PutValue — even when a with-object getter deletes the binding between
@@ -1701,7 +1751,7 @@ func (c *compiler) compileAssign(n *Node) {
 	// a same-named local/upvalue. The value produced above stays on the stack
 	// (assignment is an expression) via the OpDup below. (A compound assignment
 	// inside `with` was already handled above via the base-caching ref path.)
-	if c.nameIsWithRouted(name) {
+	if c.nameIsWithRouted(name) && !c.storeKeepsStaticBinding(slot, uv) {
 		c.emit(OpDup)
 		c.emitWithVar(OpWithPutVar, name)
 		return

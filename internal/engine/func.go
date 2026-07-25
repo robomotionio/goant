@@ -68,6 +68,20 @@ type svFunc struct {
 	// the enclosing with-object scope chain at creation (see OpClosure).
 	capturesWith bool
 
+	// dynamicVars marks a sloppy function whose body (or parameter list) contains
+	// a direct eval. Such an eval creates its `var` bindings in THIS function's
+	// variable environment at run time, where no compile-time slot exists for
+	// them, so the frame gets a dynamic variable object at entry and the
+	// function's free names resolve against it first — the same routing a `with`
+	// uses (see nameIsWithRouted).
+	dynamicVars bool
+
+	// evalVarObj marks eval code compiled against a caller that has a dynamic
+	// variable object: the eval frame adopts that same object, so a direct eval
+	// nested inside this one still declares into the original function's variable
+	// environment rather than starting a fresh one.
+	evalVarObj bool
+
 	// capturesHome marks an arrow function that reads `super` inherited from an
 	// enclosing object-literal method: its closure takes that method's
 	// [[HomeObject]], since an arrow has none of its own.

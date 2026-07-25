@@ -582,6 +582,38 @@ func nodeContainsArguments(n *Node) bool {
 	return false
 }
 
+// nodeHasDirectEval reports whether a subtree contains a syntactic `eval(…)`
+// call in the SAME variable environment. Every function form — including an
+// arrow and a class field initializer — establishes its own variable
+// environment, so the walk stops at one: a direct eval nested there declares its
+// vars in that function's environment, not this one's.
+//
+// The test is deliberately syntactic and over-approximate (a local binding named
+// `eval` makes the call non-direct); a false positive only costs one object
+// allocation per call to a function that never uses it.
+func nodeHasDirectEval(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	if n.Kind == NFunc || n.Kind == NClass {
+		return false
+	}
+	if n.Kind == NCall && n.Left != nil && n.Left.Kind == NIdent && n.Left.Str == "eval" {
+		return true
+	}
+	for _, c := range []*Node{n.Left, n.Right, n.Cond, n.Body, n.Init, n.Update, n.CatchParam, n.CatchBody, n.FinallyBody} {
+		if nodeHasDirectEval(c) {
+			return true
+		}
+	}
+	for _, c := range n.Args {
+		if nodeHasDirectEval(c) {
+			return true
+		}
+	}
+	return false
+}
+
 // classFieldASI terminates a field definition: it consumes a following `;`, or
 // verifies that automatic semicolon insertion applies (a line terminator
 // precedes the next token, or it is `}` / end of input). A field followed on the
