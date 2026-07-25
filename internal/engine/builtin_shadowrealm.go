@@ -50,7 +50,7 @@ func (rt *Runtime) marshalIn(inner *Runtime, v Value) (Value, *ThrowError) {
 // wrapRealmFunction returns a function in rt that calls fn (which belongs to
 // other), marshalling arguments in and the result back out.
 func (rt *Runtime) wrapRealmFunction(other *Runtime, fn Value) Value {
-	return rt.newNativeFunc("wrapped", 0, func(rt *Runtime, _ Value, args []Value) (Value, *ThrowError) {
+	w := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, args []Value) (Value, *ThrowError) {
 		inner := make([]Value, 0, len(args))
 		for _, a := range args {
 			mv, e := rt.marshalIn(other, a)
@@ -67,6 +67,21 @@ func (rt *Runtime) wrapRealmFunction(other *Runtime, fn Value) Value {
 		}
 		return rt.marshalOut(other, res)
 	})
+	// A wrapped function copies the target's `length` and `name` — the only two
+	// of its properties that cross — as non-writable, configurable data.
+	if wo := rt.objPtr(w); wo != nil {
+		length := float64(0)
+		if lv, e := other.getField(fn, "length"); e == nil && lv.Type() == TNum && lv.Number() > 0 {
+			length = lv.Number()
+		}
+		name := ""
+		if nv, e := other.getField(fn, "name"); e == nil && nv.Type() == TStr {
+			name = string(other.strBytes(nv))
+		}
+		wo.defineOwn("length", mknum(length), attrConfigurable)
+		wo.defineOwn("name", rt.newString(name), attrConfigurable)
+	}
+	return w
 }
 
 func (rt *Runtime) initShadowRealmBuiltin() {
