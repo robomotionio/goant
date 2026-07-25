@@ -82,6 +82,26 @@ func (rt *Runtime) reflectSet(target, key, val, receiver Value) (bool, *ThrowErr
 		if o.proxy != nil {
 			return rt.proxySet(o.proxy, pk, val, receiver)
 		}
+		// A typed array reached ON THE CHAIN answers for a canonical numeric index
+		// with its own [[Set]], and the walk stops: when it is also the receiver the
+		// value is coerced and the write is discarded if unaddressable; when it is
+		// not, an unaddressable index is discarded outright and an addressable one
+		// creates the property on the receiver.
+		if cur != target && cur.Type() == TTypedArray && o.ta != nil {
+			fidx, isNum := pk.Number(), pk.IsNumber()
+			if !isNum && pk.IsString() {
+				fidx, isNum = canonicalNumericIndex(string(rt.strBytes(pk)))
+			}
+			if isNum {
+				if cur == receiver {
+					return rt.setElementR(cur, pk, val)
+				}
+				if !rt.isValidIntegerIndex(cur, fidx) {
+					return true, nil
+				}
+				break
+			}
+		}
 		d := rt.ownDescOf(o, pk)
 		if d.exists {
 			if d.isAccessor {

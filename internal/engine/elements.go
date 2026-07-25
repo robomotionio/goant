@@ -239,7 +239,12 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 					if idx, integral := integerIndex(fidx); !integral || idx < 0 || idx >= rt.taLength(o) {
 						return true, nil
 					}
-					break // addressable: ordinary create-on-receiver
+					// Addressable: the typed array's own [[GetOwnProperty]] answers with a
+					// writable data descriptor, so the write creates an own property on
+					// the RECEIVER and the walk stops here. Falling through to setProp
+					// would resume the chain and find an accessor further along — on
+					// %TypedArray%.prototype, say — which the spec never reaches.
+					return rt.setOnReceiver(obj, rt.internString(name), v)
 				}
 			}
 			if slot := o.shape.lookupInterned(name); slot >= 0 {

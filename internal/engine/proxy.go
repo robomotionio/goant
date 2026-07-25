@@ -182,12 +182,14 @@ func (rt *Runtime) ordinarySet(o, key, val, receiver Value) (bool, *ThrowError) 
 				return false, ke
 			}
 			if fidx, isNum := canonicalNumericIndex(name); isNum {
-				idx, integral := integerIndex(fidx)
-				if !integral || idx < 0 || idx >= rt.taLength(oo) {
-					return true, nil
-				}
+				// The typed array IS the receiver: IntegerIndexedElementSet coerces the
+				// value first and only then decides whether the index addresses an
+				// element, so even a discarded write runs the coercion exactly once.
 				if cur == receiver {
 					return rt.setElementR(cur, rt.internString(name), val)
+				}
+				if idx, integral := integerIndex(fidx); !integral || idx < 0 || idx >= rt.taLength(oo) {
+					return true, nil
 				}
 			}
 		}
@@ -266,7 +268,30 @@ func (rt *Runtime) setOnReceiver(receiver, key, val Value) (bool, *ThrowError) {
 		return rt.setElement(receiver, key, val) == nil, nil
 	}
 	name, _ := rt.propKeyString(key)
-	return rt.setProp(receiver, name, val), nil
+	// OrdinarySetWithOwnDescriptor's final step consults the RECEIVER's OWN
+	// property and nothing else: the prototype chain was already walked by the
+	// caller, and resuming it here would find (and wrongly invoke) an accessor
+	// further along — e.g. one on %TypedArray%.prototype, which the spec never
+	// reaches once the typed array itself answered for the index.
+	if slot := ro.shape.lookupInterned(name); slot >= 0 {
+		if ro.isAccessorSlot(uint32(slot)) {
+			return false, nil
+		}
+		if ro.shape.attrsAt(uint32(slot))&attrWritable == 0 {
+			return false, nil
+		}
+		ro.slotSet(uint32(slot), val)
+		return true, nil
+	}
+	// An array's / typed array's elements have no shape slot of their own; their
+	// exotic [[DefineOwnProperty]] handles the create-or-update.
+	if receiver.Type() == TArr || receiver.Type() == TTypedArray {
+		return rt.setElementR(receiver, rt.internString(name), val)
+	}
+	if !ro.flags.extensible {
+		return false, nil
+	}
+	return ro.defineOwn(name, val, attrDefault), nil
 }
 
 func (rt *Runtime) proxyHas(p *proxyState, key Value) (bool, *ThrowError) {
