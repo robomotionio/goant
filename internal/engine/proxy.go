@@ -173,6 +173,24 @@ func (rt *Runtime) ordinarySet(o, key, val, receiver Value) (bool, *ThrowError) 
 		if oo.proxy != nil {
 			return rt.proxySet(oo.proxy, key, val, receiver)
 		}
+		// A typed array answers with its own integer-indexed [[Set]] and the walk
+		// stops: an index it cannot address discards the write (10.4.5.5 step 1.b)
+		// rather than falling through to a defineProperty that rejects it.
+		if cur.Type() == TTypedArray && oo.ta != nil {
+			name, ke := rt.propKeyString(rt.toPropertyKeyValue(key))
+			if ke != nil {
+				return false, ke
+			}
+			if fidx, isNum := canonicalNumericIndex(name); isNum {
+				idx, integral := integerIndex(fidx)
+				if !integral || idx < 0 || idx >= rt.taLength(oo) {
+					return true, nil
+				}
+				if cur == receiver {
+					return rt.setElementR(cur, rt.internString(name), val)
+				}
+			}
+		}
 		if d, exists := rt.targetOwnDesc(cur, key); exists {
 			if d.isAccessor {
 				if rt.isCallable(d.setter) {
