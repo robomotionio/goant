@@ -1223,6 +1223,13 @@ func (c *compiler) compileCall(n *Node) {
 	// argument list is still a direct eval — `eval(...iter)` spreads the iterator
 	// (consuming it fully) and evaluates its first element.
 	if c.isDirectEvalCall(n) {
+		// The eval code may contain `super`, which an arrow inherits from the
+		// method enclosing it. The arrow has no [[HomeObject]] of its own, and the
+		// eval frame borrows the running closure's — so the arrow must carry it
+		// even though no `super` appears in the arrow's own source.
+		if c.fn != nil && c.fn.isArrow {
+			c.markInheritedSuper()
+		}
 		if spread {
 			c.compileDirectEvalSpread(n)
 		} else {
