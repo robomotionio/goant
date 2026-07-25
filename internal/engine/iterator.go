@@ -78,11 +78,14 @@ func (rt *Runtime) iterateWithClose(source Value, fn func(v Value) (stop bool, e
 // caller that already performed GetMethod(@@iterator) (e.g. Array.from) avoid a
 // second observable [[Get]] of the iterator method.
 func (rt *Runtime) iterateIteratorWithClose(iter Value, fn func(v Value) (stop bool, err *ThrowError)) *ThrowError {
+	// GetIterator reads `next` ONCE into the iterator record; every step calls
+	// that same function. Re-reading it each step is observable — an iterator with
+	// a `next` getter that rebuilds its state would never finish.
+	nextFn, e := rt.getField(iter, "next")
+	if e != nil {
+		return e
+	}
 	for {
-		nextFn, e := rt.getField(iter, "next")
-		if e != nil {
-			return e
-		}
 		r, e := rt.callValue(nextFn, iter, nil)
 		if e != nil {
 			return e

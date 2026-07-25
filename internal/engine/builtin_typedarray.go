@@ -7,9 +7,7 @@ package engine
 // element coercion). DataView provides explicit typed, endianness-aware access.
 
 import (
-	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"math"
 	"math/big"
 	"sort"
@@ -677,16 +675,33 @@ func (rt *Runtime) initTypedArrays() {
 				return mkundef(), e
 			}
 		} else {
+			// Array-like source: only its length is read before the result is
+			// constructed — each element is fetched, mapped and stored in turn, so a
+			// constructor that rejects (or an element getter that throws) is observed
+			// in source order.
 			n, e := rt.lengthOf(src)
 			if e != nil {
 				return mkundef(), e
 			}
-			items = make([]Value, n)
+			arrV, e := rt.typedArrayCreate(this, n)
+			if e != nil {
+				return mkundef(), e
+			}
 			for i := 0; i < n; i++ {
-				if items[i], e = rt.getElement(src, mknum(float64(i))); e != nil {
+				v, e := rt.getElement(src, mknum(float64(i)))
+				if e != nil {
+					return mkundef(), e
+				}
+				if rt.isCallable(mapFn) {
+					if v, e = rt.callValue(mapFn, thisArg, []Value{v, mknum(float64(i))}); e != nil {
+						return mkundef(), e
+					}
+				}
+				if e := rt.setElement(arrV, mknum(float64(i)), v); e != nil {
 					return mkundef(), e
 				}
 			}
+			return arrV, nil
 		}
 		arrV, e := rt.typedArrayCreate(this, len(items))
 		if e != nil {
@@ -751,122 +766,6 @@ func (rt *Runtime) initTypedArrays() {
 
 	rt.initArrayBufferBuiltin()
 	rt.initDataViewBuiltin()
-}
-
-// defUint8ArrayBase64Hex installs the Uint8Array base64/hex conversions
-// (toBase64/fromBase64/setFromBase64, toHex/fromHex/setFromHex — TC39 stage 4).
-func (rt *Runtime) defUint8ArrayBase64Hex(cobj, proto *object, kind taKind) {
-	// requireU8 validates the receiver of an instance base64/hex method: it must be
-	// a Uint8Array (ValidateUint8Array) whose backing buffer is neither detached nor
-	// out of bounds — otherwise a TypeError, before any argument coercion.
-	requireU8 := func(this Value) (*object, *ThrowError) {
-		o := rt.objPtr(this)
-		if o == nil || o.ta == nil || o.ta.kind != taUint8 {
-			return nil, rt.typeError("Uint8Array method called on an incompatible receiver")
-		}
-		if rt.taOutOfBounds(o) {
-			return nil, rt.typeError("Cannot perform Uint8Array operation on a detached or out-of-bounds buffer")
-		}
-		return o, nil
-	}
-	readBytes := func(this Value) []byte {
-		o := rt.objPtr(this)
-		n := rt.taLength(o)
-		b := make([]byte, n)
-		for i := 0; i < n; i++ {
-			v, _ := rt.taGet(o, i)
-			b[i] = byte(uint8(v.Number()))
-		}
-		return b
-	}
-	newFrom := func(b []byte) Value {
-		arrV, _ := rt.newTypedArray(kind, []Value{mknum(float64(len(b)))})
-		ao := rt.objPtr(arrV)
-		for i, by := range b {
-			rt.taSet(ao, i, float64(by))
-		}
-		return arrV
-	}
-	// setInto writes decoded bytes into `this`, returning {read, written} where
-	// written is capped at the receiver's length.
-	setInto := func(this Value, decoded []byte, srcLen int) Value {
-		o := rt.objPtr(this)
-		n := rt.taLength(o)
-		written := len(decoded)
-		if written > n {
-			written = n
-		}
-		for i := 0; i < written; i++ {
-			rt.taSet(o, i, float64(decoded[i]))
-		}
-		res := rt.newObject(rt.objectProto)
-		ro := rt.objPtr(res)
-		ro.defineOwn("read", mknum(float64(srcLen)), attrDefault)
-		ro.defineOwn("written", mknum(float64(written)), attrDefault)
-		return res
-	}
-
-	rt.defMethod(proto, "toHex", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if _, e := requireU8(this); e != nil {
-			return mkundef(), e
-		}
-		return rt.newString(hex.EncodeToString(readBytes(this))), nil
-	})
-	rt.defMethod(proto, "toBase64", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if _, e := requireU8(this); e != nil {
-			return mkundef(), e
-		}
-		return rt.newString(base64.StdEncoding.EncodeToString(readBytes(this))), nil
-	})
-	rt.defMethod(cobj, "fromHex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if !arg(args, 0).IsString() {
-			return mkundef(), rt.typeError("Uint8Array.fromHex requires a string argument")
-		}
-		s := string(rt.strBytes(arg(args, 0)))
-		b, err := hex.DecodeString(s)
-		if err != nil {
-			return mkundef(), rt.syntaxError("Invalid hex string")
-		}
-		return newFrom(b), nil
-	})
-	rt.defMethod(cobj, "fromBase64", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if !arg(args, 0).IsString() {
-			return mkundef(), rt.typeError("Uint8Array.fromBase64 requires a string argument")
-		}
-		b, err := base64.StdEncoding.DecodeString(string(rt.strBytes(arg(args, 0))))
-		if err != nil {
-			return mkundef(), rt.syntaxError("Invalid base64 string")
-		}
-		return newFrom(b), nil
-	})
-	rt.defMethod(proto, "setFromHex", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if _, e := requireU8(this); e != nil {
-			return mkundef(), e
-		}
-		if !arg(args, 0).IsString() {
-			return mkundef(), rt.typeError("setFromHex requires a string argument")
-		}
-		s := string(rt.strBytes(arg(args, 0)))
-		b, err := hex.DecodeString(s)
-		if err != nil {
-			return mkundef(), rt.syntaxError("Invalid hex string")
-		}
-		return setInto(this, b, len(s)), nil
-	})
-	rt.defMethod(proto, "setFromBase64", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		if _, e := requireU8(this); e != nil {
-			return mkundef(), e
-		}
-		if !arg(args, 0).IsString() {
-			return mkundef(), rt.typeError("setFromBase64 requires a string argument")
-		}
-		s := string(rt.strBytes(arg(args, 0)))
-		b, err := base64.StdEncoding.DecodeString(s)
-		if err != nil {
-			return mkundef(), rt.syntaxError("Invalid base64 string")
-		}
-		return setInto(this, b, len(s)), nil
-	})
 }
 
 func (rt *Runtime) initArrayBufferBuiltin() {
@@ -1540,6 +1439,12 @@ func (rt *Runtime) typedArrayCreate(C Value, length int) (Value, *ThrowError) {
 	}
 	if rt.taOutOfBounds(ro) {
 		return mkundef(), rt.typeError("TypedArray constructor returned a detached or out-of-bounds TypedArray")
+	}
+	// ValidateTypedArray(O, ~write~): from/of fill the result, so a constructor
+	// that hands back an array over an immutable buffer is rejected before any
+	// element is written.
+	if e := rt.taWriteImmutable(res); e != nil {
+		return mkundef(), e
 	}
 	if rt.taCurrentLen(ro) < length {
 		return mkundef(), rt.typeError("Derived TypedArray constructor created an array shorter than requested")
