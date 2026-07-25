@@ -162,6 +162,9 @@ type Runtime struct {
 	pendingModule *moduleRecord
 	// shadowRealms holds the isolated Runtime behind each ShadowRealm instance.
 	shadowRealms     map[*object]*shadowRealm
+	// wrapFailed marks that building a ShadowRealm wrapper hit an abrupt
+	// completion inside the other realm, which surfaces here as a TypeError.
+	wrapFailed bool
 	shadowRealmProto Value
 	// moduleNamespaces marks the module namespace exotic objects. Their exports
 	// are stored as accessors so reads see the live binding, but they must be

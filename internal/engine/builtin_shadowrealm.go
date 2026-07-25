@@ -28,7 +28,13 @@ func (rt *Runtime) marshalOut(inner *Runtime, v Value) (Value, *ThrowError) {
 		return rt.wrapRealmFunction(inner, v), nil
 	}
 	if v.IsSymbol() {
-		return mkundef(), rt.typeError("a symbol cannot cross a ShadowRealm boundary")
+		// A symbol is a primitive and does cross; it is re-created here so the
+		// handle belongs to this Runtime's pool, carrying its description over.
+		d := inner.symbolDesc(v)
+		if d.Type() == TStr {
+			d = rt.newStringBytes(inner.strBytes(d))
+		}
+		return rt.newSymbol(d), nil
 	}
 	return mkundef(), rt.typeError("only primitives and callables may cross a ShadowRealm boundary")
 }
@@ -71,12 +77,19 @@ func (rt *Runtime) wrapRealmFunction(other *Runtime, fn Value) Value {
 	// of its properties that cross — as non-writable, configurable data.
 	if wo := rt.objPtr(w); wo != nil {
 		length := float64(0)
-		if lv, e := other.getField(fn, "length"); e == nil && lv.Type() == TNum && lv.Number() > 0 {
+		lv, le := other.getField(fn, "length")
+		if le == nil && lv.Type() == TNum && lv.Number() > 0 {
 			length = lv.Number()
 		}
 		name := ""
-		if nv, e := other.getField(fn, "name"); e == nil && nv.Type() == TStr {
+		nv, ne := other.getField(fn, "name")
+		if ne == nil && nv.Type() == TStr {
 			name = string(other.strBytes(nv))
+		}
+		if le != nil || ne != nil {
+			// Reading the target's own length/name threw inside its realm; the
+			// wrapper cannot be created, and the error may not cross as-is.
+			rt.wrapFailed = true
 		}
 		wo.defineOwn("length", mknum(length), attrConfigurable)
 		wo.defineOwn("name", rt.newString(name), attrConfigurable)
@@ -127,7 +140,15 @@ func (rt *Runtime) initShadowRealmBuiltin() {
 			}
 			return mkundef(), rt.typeError("ShadowRealm evaluation threw: " + err.Error())
 		}
-		return rt.marshalOut(sr.rt, v)
+		out, me := rt.marshalOut(sr.rt, v)
+		if me != nil {
+			return mkundef(), me
+		}
+		if rt.wrapFailed {
+			rt.wrapFailed = false
+			return mkundef(), rt.typeError("could not wrap the value returned from the ShadowRealm")
+		}
+		return out, nil
 	})
 
 	rt.defMethod(po, "importValue", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -135,10 +156,15 @@ func (rt *Runtime) initShadowRealmBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		spec, name := arg(args, 0), arg(args, 1)
-		if spec.Type() != TStr {
-			return mkundef(), rt.typeError("ShadowRealm.prototype.importValue expects a string specifier")
+		// The specifier is coerced (a throwing toString propagates synchronously,
+		// before the promise is created).
+		spec, e2 := rt.toStringValue(arg(args, 0))
+		if e2 != nil {
+			return mkundef(), e2
 		}
+		// The export name, unlike the specifier, is NOT coerced: it must already
+		// be a string.
+		name := arg(args, 1)
 		if name.Type() != TStr {
 			return mkundef(), rt.typeError("ShadowRealm.prototype.importValue expects a string export name")
 		}
