@@ -1628,6 +1628,14 @@ restart:
 			// A function compiled inside a `with` captures the current with-object
 			// scope chain so its free names resolve against those objects when it is
 			// later invoked (its bytecode uses OpWithGetVar for them).
+			// An arrow that reads an inherited `super` takes the enclosing method's
+			// [[HomeObject]]: it has none of its own, and OpGetSuper reads it off the
+			// running closure.
+			if child.capturesHome && cl != nil && cl.home.IsObjectType() {
+				if ncl := rt.closureOf(fv); ncl != nil {
+					ncl.home = cl.home
+				}
+			}
 			if child.capturesWith && len(withStack) > 0 {
 				if ncl := rt.closureOf(fv); ncl != nil {
 					ncl.capturedWith = append([]Value(nil), withStack...)

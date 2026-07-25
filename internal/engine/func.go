@@ -68,6 +68,11 @@ type svFunc struct {
 	// the enclosing with-object scope chain at creation (see OpClosure).
 	capturesWith bool
 
+	// capturesHome marks an arrow function that reads `super` inherited from an
+	// enclosing object-literal method: its closure takes that method's
+	// [[HomeObject]], since an arrow has none of its own.
+	capturesHome bool
+
 	// isDerivedCtor marks a derived class constructor: `this` starts in its TDZ
 	// (thisSlot holds tEmpty until super() binds it), and OpReturn enforces
 	// GetThisBinding / the object-or-undefined return-value rule.

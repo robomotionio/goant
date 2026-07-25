@@ -151,11 +151,11 @@ func (c *compiler) compileSuperMember(n *Node) {
 			c.emit(OpUndef)
 		}
 		c.resolveClassBinding(c.superHomeBinding())
-	case c.fn != nil && c.fn.isMethod && !c.fn.isArrow:
+	case c.methodForInheritedSuper() != nil:
 		// Object-literal method: the receiver is the dynamic `this`, the base is
 		// the method's [[HomeObject]].[[Prototype]] (read at runtime via the
 		// method's closure). Flag the method so it receives a home object.
-		c.fn.usesSuper = true
+		c.markInheritedSuper()
 		c.emit(OpThis)
 		c.emit(OpGetSuper)
 	case c.borrowed != nil && c.borrowed.superAllowed:
@@ -520,4 +520,38 @@ func propKeyName(key *Node) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// methodForInheritedSuper returns the compiler of the object-literal method a
+// `super` reference here belongs to, looking through any arrow functions in
+// between: an arrow has no [[HomeObject]] of its own and inherits super from the
+// context it was defined in. A non-arrow function that is not a method breaks
+// the chain, since super does not cross an ordinary function boundary.
+func (c *compiler) methodForInheritedSuper() *compiler {
+	for e := c; e != nil; e = e.enclosing {
+		if e.fn == nil {
+			return nil
+		}
+		if e.fn.isArrow {
+			continue
+		}
+		if e.fn.isMethod {
+			return e
+		}
+		return nil
+	}
+	return nil
+}
+
+// markInheritedSuper flags the owning method to receive a [[HomeObject]] and
+// every arrow between here and it to capture that home into its closure.
+func (c *compiler) markInheritedSuper() {
+	m := c.methodForInheritedSuper()
+	if m == nil {
+		return
+	}
+	m.fn.usesSuper = true
+	for e := c; e != nil && e != m; e = e.enclosing {
+		e.fn.capturesHome = true
+	}
 }

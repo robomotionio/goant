@@ -541,8 +541,8 @@ func (c *compiler) emitSuperBase() bool {
 	if c.hasClassSuper() {
 		return c.resolveClassBinding(c.superHomeBinding())
 	}
-	if c.fn != nil && c.fn.isMethod && !c.fn.isArrow {
-		c.fn.usesSuper = true
+	if c.methodForInheritedSuper() != nil {
+		c.markInheritedSuper()
 		c.emit(OpGetSuper)
 		return true
 	}
