@@ -16,7 +16,9 @@ type proxyState struct {
 
 // newProxy builds a Proxy object over target/handler.
 func (rt *Runtime) newProxy(target, handler Value) (Value, *ThrowError) {
-	if !target.IsObjectType() || !handler.IsObjectType() {
+	// IsObjectLike, not IsObjectType: the latter excludes typed arrays, which are
+	// perfectly good objects and legal proxy targets (and handlers).
+	if !target.IsObjectLike() || !handler.IsObjectLike() {
 		return mkundef(), rt.typeError("Cannot create proxy with a non-object as target or handler")
 	}
 	v := rt.newObject(mknull())
