@@ -115,6 +115,35 @@ func (rt *Runtime) initShadowRealmBuiltin() {
 		return rt.marshalOut(sr.rt, v)
 	})
 
+	rt.defMethod(po, "importValue", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		sr, e := realmOf(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		spec, name := arg(args, 0), arg(args, 1)
+		if spec.Type() != TStr {
+			return mkundef(), rt.typeError("ShadowRealm.prototype.importValue expects a string specifier")
+		}
+		if name.Type() != TStr {
+			return mkundef(), rt.typeError("ShadowRealm.prototype.importValue expects a string export name")
+		}
+		// The module is loaded INSIDE the realm, then the one requested export is
+		// marshalled out. The result is a promise in this realm either way.
+		m, le := sr.rt.loadModule(string(rt.strBytes(spec)), "")
+		if le != nil {
+			return rt.rejectedPromise(rt.typeError("ShadowRealm.prototype.importValue could not load the module").Value), nil
+		}
+		inner, ok := m.exportValue(string(rt.strBytes(name)))
+		if !ok {
+			return rt.rejectedPromise(rt.typeError("the module has no export named '" + string(rt.strBytes(name)) + "'").Value), nil
+		}
+		out, me := rt.marshalOut(sr.rt, inner)
+		if me != nil {
+			return rt.rejectedPromise(me.Value), nil
+		}
+		return rt.resolvedPromise(out), nil
+	})
+
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 	if rt.symToStringTag != 0 {
 		po.defineOwnSymbol(rt.symToStringTag.handle(), rt.internString("ShadowRealm"), attrConfigurable)
