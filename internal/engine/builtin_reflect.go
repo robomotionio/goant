@@ -275,6 +275,11 @@ func (rt *Runtime) initReflectBuiltin() {
 		if o.proxy != nil {
 			return rt.proxyGetOwnPropertyDescriptor(o.proxy, pk)
 		}
+		if pk.IsString() {
+			if nd, ok, ne := rt.namespaceDescriptor(arg(args, 0), string(rt.strBytes(pk))); ok {
+				return nd, ne
+			}
+		}
 		d := rt.ownDescOf(o, pk) // covers array/typed/string-wrapper elements + length
 		if !d.exists {
 			return mkundef(), nil

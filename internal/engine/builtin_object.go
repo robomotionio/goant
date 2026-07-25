@@ -259,6 +259,9 @@ func (rt *Runtime) initObjectBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if nd, ok, ne := rt.namespaceDescriptor(obj, name); ok {
+			return nd, ne
+		}
 		d := o.ownDescriptor(name)
 		if !d.exists {
 			if arg(args, 0).Type() == TTypedArray {
@@ -461,6 +464,13 @@ func (rt *Runtime) initObjectBuiltin() {
 			}
 		}
 		for _, k := range o.ownKeys() {
+			if nd, ok, ne := rt.namespaceDescriptor(obj, k); ok {
+				if ne != nil {
+					return mkundef(), ne
+				}
+				reso.defineOwn(k, nd, attrDefault)
+				continue
+			}
 			d := o.ownDescriptor(k)
 			if d.exists {
 				reso.defineOwn(k, rt.descriptorToObject(d), attrDefault)

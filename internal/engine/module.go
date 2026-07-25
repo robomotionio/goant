@@ -412,6 +412,10 @@ func (rt *Runtime) moduleNamespace(m *moduleRecord) Value {
 		no.defineOwnSymbol(rt.symToStringTag.handle(), rt.internString("Module"), 0)
 	}
 	no.flags.extensible = false
+	if rt.moduleNamespaces == nil {
+		rt.moduleNamespaces = map[*object]bool{}
+	}
+	rt.moduleNamespaces[no] = true
 	m.namespace, m.hasNS = ns, true
 	return ns
 }
@@ -473,4 +477,27 @@ func (rt *Runtime) validateImportOptions(options Value) *ThrowError {
 		}
 	}
 	return nil
+}
+
+// namespaceDescriptor reports a module namespace export the way the spec
+// requires — a writable, enumerable, non-configurable DATA property — even
+// though it is stored as an accessor so that reads see the live binding. An
+// export still in its temporal dead zone has no value to report, so the getter's
+// throw propagates.
+func (rt *Runtime) namespaceDescriptor(ns Value, name string) (Value, bool, *ThrowError) {
+	o := rt.objPtr(ns)
+	if o == nil || !rt.moduleNamespaces[o] || !o.hasOwn(name) {
+		return mkundef(), false, nil
+	}
+	v, e := rt.getField(ns, name)
+	if e != nil {
+		return mkundef(), true, e
+	}
+	d := rt.newPlainObject()
+	do := rt.objPtr(d)
+	do.defineOwn("value", v, attrDefault)
+	do.defineOwn("writable", mkbool(true), attrDefault)
+	do.defineOwn("enumerable", mkbool(true), attrDefault)
+	do.defineOwn("configurable", mkbool(false), attrDefault)
+	return d, true, nil
 }
