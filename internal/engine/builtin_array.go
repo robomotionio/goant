@@ -240,7 +240,12 @@ func (rt *Runtime) arrayFromAsync(C, asyncItems, mapfn, thisArg Value) Value {
 					reject(rt.typeError("[Symbol.iterator]() returned a non-object").Value)
 					return resultP
 				}
-				iter, hasIter = rt.createAsyncFromSyncIterator(syncIt), true
+				w, we := rt.createAsyncFromSyncIterator(syncIt)
+				if we != nil {
+					reject(we.Value)
+					return resultP
+				}
+				iter, hasIter = w, true
 			}
 		}
 	}

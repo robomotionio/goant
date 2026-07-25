@@ -546,12 +546,36 @@ func (c *compiler) emitSuperBase() bool {
 		c.emit(OpGetSuper)
 		return true
 	}
-	if c.borrowed != nil && c.borrowed.superAllowed {
-		// Direct eval nested in a method/constructor borrows the home object.
+	if ec := c.borrowedSuperCompiler(); ec != nil {
+		// Direct eval nested in a method/constructor borrows the home object; an
+		// arrow written inside that eval code inherits it in turn.
+		for e := c; e != nil && e != ec; e = e.enclosing {
+			e.fn.capturesHome = true
+		}
 		c.emit(OpGetSuper)
 		return true
 	}
 	return false
+}
+
+// borrowedSuperCompiler returns the direct-eval compiler whose borrowed caller
+// scope permits `super`, searching outward past arrows: `eval("() => super.x")`
+// in a method resolves through the eval frame's borrowed [[HomeObject]] just as
+// the eval body itself does. An ordinary function written inside the eval code
+// establishes its own super context and stops the search.
+func (c *compiler) borrowedSuperCompiler() *compiler {
+	for e := c; e != nil; e = e.enclosing {
+		if e.borrowed != nil {
+			if e.borrowed.superAllowed {
+				return e
+			}
+			return nil
+		}
+		if e.fn == nil || !e.fn.isArrow {
+			return nil
+		}
+	}
+	return nil
 }
 
 // emitSuperThis pushes the `this` a super reference uses as its accessor
@@ -564,7 +588,12 @@ func (c *compiler) emitSuperThis() {
 		}
 		return
 	}
-	c.emit(OpThis)
+	// The synthetic *this* binding, exactly as a `this` expression reads it: an
+	// arrow (in a method or in eval code) has none of its own and captures the
+	// enclosing one.
+	if !c.resolveClassBinding("*this*") {
+		c.emit(OpThis)
+	}
 }
 
 // resolveClassBinding emits a load of a captured class binding (*superctor* /
@@ -1158,8 +1187,12 @@ func (c *compiler) compileClass(n *Node) {
 			c.errorf("unsupported class member key (slice)")
 			return
 		}
-		// Class field with a value (not a method): m.Right is an expression.
-		if m.Right != nil && m.Right.Kind != NFunc {
+		// Class field with a value (not a method): m.Right is an expression. A field
+		// initialized to a function expression or an arrow is still a FIELD — only a
+		// concise method carries fnMethod — so it must be an enumerable data
+		// property, and a static one must be evaluated in the class-element context
+		// where `this` and `super` mean the constructor.
+		if m.Right != nil && isClassFieldMember(m) {
 			if m.Flags&fnStatic != 0 {
 				// A static field initializer is evaluated with this = the class F, so
 				// `this` (and arrows capturing it) see the constructor. Wrap it in a

@@ -158,11 +158,15 @@ func (c *compiler) compileSuperMember(n *Node) {
 		c.markInheritedSuper()
 		c.emit(OpThis)
 		c.emit(OpGetSuper)
-	case c.borrowed != nil && c.borrowed.superAllowed:
+	case c.borrowedSuperCompiler() != nil:
 		// Direct eval nested in a method/constructor: the eval frame borrows the
 		// enclosing method's [[HomeObject]] (evalCl.home), so OpGetSuper reads it
-		// and OpThis is the borrowed `this`.
-		c.emit(OpThis)
+		// and the receiver is the borrowed `this`.
+		ec := c.borrowedSuperCompiler()
+		for e := c; e != nil && e != ec; e = e.enclosing {
+			e.fn.capturesHome = true
+		}
+		c.emitSuperThis()
 		c.emit(OpGetSuper)
 	default:
 		c.syntaxErrorf("'super' keyword unexpected here")

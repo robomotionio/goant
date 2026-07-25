@@ -157,7 +157,7 @@ func (rt *Runtime) getAsyncIterator(source Value) (Value, *ThrowError) {
 			if !syncIt.IsObjectType() {
 				return mkundef(), rt.typeError("[Symbol.iterator]() returned a non-object")
 			}
-			return rt.createAsyncFromSyncIterator(syncIt), nil
+			return rt.createAsyncFromSyncIterator(syncIt)
 		}
 	}
 	return mkundef(), rt.typeError("value is not async iterable")
@@ -166,18 +166,29 @@ func (rt *Runtime) getAsyncIterator(source Value) (Value, *ThrowError) {
 // createAsyncFromSyncIterator wraps a sync iterator so its next()/return() yield
 // promises of IteratorResults (25.1.4.1). The wrapper's next awaits the sync
 // value and re-wraps it with the sync done flag.
-func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) Value {
+func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) (Value, *ThrowError) {
 	proto := rt.objectProto
 	if rt.asyncIteratorProto != 0 {
 		proto = rt.asyncIteratorProto
+	}
+	// The sync iterator record caches [[NextMethod]], read once here as GetIterator
+	// does; every later next() calls that same function. `throw` and `return` are
+	// GetMethod'd afresh on each use, so only `next` is captured.
+	nextMethod, ne := rt.getField(syncIt, "next")
+	if ne != nil {
+		return mkundef(), ne
 	}
 	wrap := rt.newObject(proto)
 	o := rt.objPtr(wrap)
 	step := func(method string) nativeFunc {
 		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			fn, e := rt.getField(syncIt, method)
-			if e != nil {
-				return mkundef(), e
+			fn := nextMethod
+			if method != "next" {
+				f, e := rt.getField(syncIt, method)
+				if e != nil {
+					return mkundef(), e
+				}
+				fn = f
 			}
 			if !rt.isCallable(fn) {
 				switch method {
@@ -249,7 +260,7 @@ func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) Value {
 		})
 		o.defineOwnSymbol(rt.symAsyncIterator.handle(), self, attrWritable|attrConfigurable)
 	}
-	return wrap
+	return wrap, nil
 }
 
 // iterableValues returns the values produced by iterating v (for for-of and
