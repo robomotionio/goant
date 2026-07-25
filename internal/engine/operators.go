@@ -108,6 +108,13 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 	if name == "length" && (obj.Type() == TArr || o.boxed.Type() == TStr) {
 		return false, nil
 	}
+	// A String exotic object's in-range index is non-configurable, so [[Delete]]
+	// fails; it has no shape slot for deleteOwn to notice.
+	if o.boxed.Type() == TStr {
+		if idx, ok := canonicalIndex(name); ok && int(idx) < utf16Len(rt.strBytes(o.boxed)) {
+			return false, nil
+		}
+	}
 	ok := o.deleteOwn(name)
 	if ok {
 		// A deleted index stops aliasing its parameter (10.4.4.5 step 3).

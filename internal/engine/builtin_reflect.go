@@ -374,6 +374,13 @@ func (rt *Runtime) initReflectBuiltin() {
 				rt.arraySet(ra, ra.arrLen, rt.newString(strconv.Itoa(i)))
 			}
 		}
+		// A String exotic object owns an index property per code unit; they come
+		// first, ahead of "length" and every other own key.
+		if o.boxed.Type() == TStr {
+			for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+				rt.arraySet(ra, ra.arrLen, rt.newString(strconv.Itoa(i)))
+			}
+		}
 		for _, k := range o.ownKeys() {
 			rt.arraySet(ra, ra.arrLen, rt.newString(k))
 		}

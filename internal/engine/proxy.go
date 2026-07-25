@@ -24,6 +24,11 @@ func (rt *Runtime) newProxy(target, handler Value) (Value, *ThrowError) {
 	v := rt.newObject(mknull())
 	o := rt.objPtr(v)
 	o.proxy = &proxyState{target: target, handler: handler}
+	// A proxy anywhere on a prototype chain can intercept an indexed [[Set]] via
+	// its `set` trap, which the array fast path only consults when this flag is
+	// set. Monotonic and over-approximate by design: a false positive costs one
+	// chain walk.
+	rt.indexedProtoIntercept = true
 	// A proxy is callable/constructable iff its target is.
 	if rt.isCallable(target) {
 		o.flags.isCallable = true
@@ -108,7 +113,10 @@ func (rt *Runtime) proxyGet(p *proxyState, key, receiver Value) (Value, *ThrowEr
 		return mkundef(), e
 	}
 	if !rt.isCallable(trap) {
-		return rt.getElement(p.target, key)
+		// Missing trap: target.[[Get]](P, Receiver) — the RECEIVER stays the proxy
+		// (or whatever inherited from it), so a target accessor runs with that as
+		// its `this`.
+		return rt.getWithReceiver(p.target, rt.toPropertyKeyValue(key), receiver)
 	}
 	res, e := rt.callValue(trap, p.handler, []Value{p.target, rt.toPropertyKeyValue(key), receiver})
 	if e != nil {
@@ -433,6 +441,18 @@ func (rt *Runtime) targetOwnKeyList(target Value) []Value {
 			if int(i) < len(to.arr) && !to.arr[i].IsEmpty() {
 				out = append(out, rt.newString(itoaSmall(int(i))))
 			}
+		}
+	}
+	if target.Type() == TTypedArray {
+		for i, l := 0, rt.taLength(to); i < l; i++ {
+			out = append(out, rt.newString(itoaSmall(i)))
+		}
+	}
+	// A String exotic object owns an index property per code unit, ahead of
+	// "length" and its other keys.
+	if to.boxed.Type() == TStr {
+		for i, l := 0, utf16Len(rt.strBytes(to.boxed)); i < l; i++ {
+			out = append(out, rt.newString(itoaSmall(i)))
 		}
 	}
 	for _, k := range to.ownKeys() {
@@ -884,4 +904,36 @@ func (rt *Runtime) initProxyBuiltin() {
 		return res, nil
 	})
 	rt.defGlobal("Proxy", ctor)
+}
+
+// getWithReceiver is [[Get]](P, Receiver) on an ordinary (or proxy) object with
+// a receiver that is not the object itself: the chain is walked from obj, but an
+// accessor found along it is invoked with `receiver` as its `this`.
+func (rt *Runtime) getWithReceiver(obj, key, receiver Value) (Value, *ThrowError) {
+	if rt.sameValue(obj, receiver) {
+		return rt.getElement(obj, key)
+	}
+	// Only an ACCESSOR needs the receiver; a data property (including an exotic
+	// one with no descriptor of its own, such as an array element or a string
+	// index) reads identically, so the ordinary path handles it.
+	for cur, depth := obj, 0; depth < maxProtoChainDepth; depth++ {
+		o := rt.objPtr(cur)
+		if o == nil {
+			break
+		}
+		if o.proxy != nil {
+			return rt.proxyGet(o.proxy, key, receiver)
+		}
+		if d, ok := rt.targetOwnDesc(cur, key); ok {
+			if d.isAccessor {
+				if !rt.isCallable(d.getter) {
+					return mkundef(), nil
+				}
+				return rt.callValue(d.getter, receiver, nil)
+			}
+			break
+		}
+		cur = o.proto
+	}
+	return rt.getElement(obj, key)
 }

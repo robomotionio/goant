@@ -989,6 +989,16 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 				existing = ownDesc{exists: true, value: o.arr[idx], writable: true, enumerable: true, configable: true}
 			}
 		}
+		// A String exotic object's in-range index is an own NON-writable,
+		// non-configurable data property, likewise with no shape slot: redefining
+		// its value (or making it configurable) has to be rejected rather than
+		// treated as a fresh definition.
+		if !existing.exists && o.boxed.Type() == TStr {
+			b := rt.strBytes(o.boxed)
+			if idx, ok := canonicalIndex(name); ok && int(idx) < utf16Len(b) {
+				existing = ownDesc{exists: true, value: rt.charAt(b, int(idx)), enumerable: true}
+			}
+		}
 	}
 	// A new property cannot be defined on a non-extensible object; a
 	// non-configurable existing property cannot be redefined.
