@@ -57,6 +57,29 @@ func (c *compiler) annexBVarShadowed(name string) bool {
 }
 
 func (c *compiler) hoistFunctions(list []*Node, blockScoped bool) {
+	// A block FunctionDeclaration that qualifies for Annex B.3.3 gets TWO
+	// bindings: the block-scoped one it actually denotes, and the function-scope
+	// var the extension copies its value into. The lexical slot is declared here,
+	// before any body is compiled, so that a reference to the name from inside
+	// the function captures the block binding rather than the var — otherwise
+	// `{ function f(){ f = 1 } } f()` would overwrite the var and the outer name
+	// would stop being callable.
+	annexBLex := map[string]int{}
+	if blockScoped && !c.fn.isStrict {
+		for _, stmt := range list {
+			fn := stmt
+			for fn != nil && fn.Kind == NLabel {
+				fn = fn.Body
+			}
+			if fn == nil || fn.Kind != NFunc || fn.Str == "" ||
+				fn.Flags&(fnArrow|fnAsync|fnGenerator) != 0 || c.annexBVarShadowed(fn.Str) {
+				continue
+			}
+			if _, dup := annexBLex[fn.Str]; !dup {
+				annexBLex[fn.Str] = c.declareLexical(fn.Str, false)
+			}
+		}
+	}
 	for _, stmt := range list {
 		fn := stmt
 		// Annex B (sloppy): a labeled function declaration `label: function f(){}`
@@ -77,9 +100,15 @@ func (c *compiler) hoistFunctions(list []*Node, blockScoped bool) {
 			slot := c.declareLexical(fn.Str, false)
 			c.emitOpU16(OpPutLocal, uint16(slot))
 		} else if blockScoped {
-			// Annex B.3.3: the block function updates the function-scope var (created
-			// by hoisting), targeting it past any intervening catch parameter of the
-			// same name rather than the nearest binding bindDeclared would pick.
+			// Annex B.3.3: the value is stored in the block binding the declaration
+			// denotes, and a copy goes to the function-scope var the extension
+			// creates — targeting it past any intervening catch parameter of the same
+			// name rather than the nearest binding bindDeclared would pick. Later
+			// writes inside the block hit only the block binding.
+			if lex, ok := annexBLex[fn.Str]; ok {
+				c.emit(OpDup)
+				c.emitOpU16(OpPutLocal, uint16(lex))
+			}
 			if slot := c.resolveFunctionVar(fn.Str); slot >= 0 {
 				c.emitOpU16(OpPutLocal, uint16(slot))
 			} else {

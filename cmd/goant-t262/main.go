@@ -46,6 +46,7 @@ func main() {
 		verbose  = flag.Bool("v", false, "print every failure with a one-line reason")
 		showSkip = flag.Bool("show-skip", false, "also list skipped tests")
 		failFile = flag.String("failures", "", "write the sorted list of failing test paths here")
+		core     = flag.Bool("core", false, "score only the ECMA-262 core: skip ECMA-402 (intl402), the\n\tnon-normative staging/ imports, staged proposals, and the tests that\n\tneed threads, a second realm, or web-legacy document.all")
 	)
 	flag.Parse()
 
@@ -78,6 +79,7 @@ func main() {
 		*jobs = min(16, max(1, runtime.NumCPU()))
 	}
 
+	coreOnly = *core
 	results := runAll(*runner, *root, tests, harness, *timeout, *jobs)
 
 	report(results, *verbose, *showSkip, *failFile)
@@ -294,10 +296,39 @@ var skipFeatures = map[string]bool{
 	"source-phase-imports-typed": true,
 }
 
+// coreOnly restricts scoring to the ECMA-262 core (the -core flag).
+var coreOnly bool
+
+// coreSkipFeatures are the features outside a pure single-threaded ECMA-262
+// engine: staged proposals that are not yet the language, tests needing a second
+// realm the host must supply, and web-legacy document.all emulation.
+var coreSkipFeatures = map[string]bool{
+	"Temporal":                   true,
+	"decorators":                 true,
+	"source-phase-imports":       true,
+	"source-phase-imports-typed": true,
+	"import-defer":               true,
+	"import-bytes":               true,
+	"import-attributes":          false, // implemented; scored
+	"cross-realm":                true,
+	"IsHTMLDDA":                  true,
+	"Atomics":                    true,
+	"Atomics.waitAsync":          true,
+	"SharedArrayBuffer":          true,
+}
+
+// coreSkipDirs are the trees outside ECMA-262: ECMA-402 is a separate
+// specification (and needs CLDR data), and staging/ holds unreviewed engine
+// imports that are not normative.
+var coreSkipDirs = []string{"intl402/", "staging/"}
+
 func (m meta) skipReason() string {
 	for _, f := range m.features {
 		if skipFeatures[f] {
 			return "feature:" + f
+		}
+		if coreOnly && coreSkipFeatures[f] {
+			return "non-core:" + f
 		}
 	}
 	return ""
@@ -373,6 +404,13 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 		return result{rel, outFail, "read: " + err.Error()}
 	}
 	m := parseMeta(string(src))
+	if coreOnly {
+		for _, d := range coreSkipDirs {
+			if strings.HasPrefix(rel, "test/"+d) {
+				return result{rel, outSkip, "non-core:" + strings.TrimSuffix(d, "/")}
+			}
+		}
+	}
 	if r := m.skipReason(); r != "" {
 		return result{rel, outSkip, r}
 	}
