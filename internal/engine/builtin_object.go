@@ -24,6 +24,11 @@ func (rt *Runtime) initObjectBuiltin() {
 		if o == nil {
 			return mkfalse(), nil
 		}
+		if !pk.IsSymbol() {
+			if e := rt.namespaceTDZ(obj, string(rt.strBytes(pk))); e != nil {
+				return mkundef(), e
+			}
+		}
 		// HasOwnProperty -> [[GetOwnProperty]] routes through the proxy trap.
 		if o.proxy != nil {
 			d, e := rt.proxyGetOwnPropertyDescriptor(o.proxy, rt.toPropertyKeyValue(pk))
@@ -95,6 +100,11 @@ func (rt *Runtime) initObjectBuiltin() {
 		o := rt.objPtr(obj)
 		if o == nil {
 			return mkfalse(), nil
+		}
+		if !pk.IsSymbol() {
+			if e := rt.namespaceTDZ(obj, string(rt.strBytes(pk))); e != nil {
+				return mkundef(), e
+			}
 		}
 		// A Proxy routes [[GetOwnProperty]] through its trap (or its target); read
 		// the resulting descriptor's enumerable flag.
@@ -676,6 +686,11 @@ func (rt *Runtime) enumerableOwnKeysE(v Value) ([]string, *ThrowError) {
 	if o == nil {
 		return nil, nil
 	}
+	// A namespace reports enumerability through [[GetOwnProperty]], which reads
+	// each binding: one still in its temporal dead zone makes the whole call throw.
+	if e := rt.namespaceTDZAll(v); e != nil {
+		return nil, e
+	}
 	if o.proxy != nil {
 		// EnumerableOwnPropertyNames: [[OwnPropertyKeys]] then filter the string
 		// keys by the enumerability reported by [[GetOwnProperty]] (both traps).
@@ -780,6 +795,11 @@ func (rt *Runtime) enumerableOwnProps(v Value, kind int) (Value, *ThrowError) {
 	for _, key := range keys {
 		if key.IsSymbol() {
 			continue // string keys only
+		}
+		// EnumerableOwnProperties asks [[GetOwnProperty]] for each key, which on a
+		// module namespace reads the binding — one in its temporal dead zone throws.
+		if e := rt.namespaceTDZ(obj, string(rt.strBytes(key))); e != nil {
+			return mkundef(), e
 		}
 		enum, exists, e := rt.ownKeyEnumerable(obj, key)
 		if e != nil {
@@ -1458,6 +1478,22 @@ func (rt *Runtime) sealObject(v Value, freeze bool) *ThrowError {
 		}
 		return nil
 	}
+	// A module namespace's [[DefineOwnProperty]] accepts only a no-op. Sealing
+	// asks for {configurable: false}, which every export already is; FREEZING also
+	// asks for {writable: false}, which no export is — so it is rejected, after the
+	// [[GetOwnProperty]] read that precedes it.
+	if rt.moduleNamespaces[o] {
+		if freeze {
+			for _, k := range o.ownKeys() {
+				if e := rt.namespaceTDZ(v, k); e != nil {
+					return e
+				}
+				return rt.typeError("Cannot redefine property: " + k)
+			}
+		}
+		o.flags.sealed = true
+		return nil
+	}
 	o.flags.extensible = false
 	o.ensureUniqueShape()
 	for i := 0; i < o.shape.count(); i++ {
@@ -1528,6 +1564,12 @@ func (rt *Runtime) isSealedOrFrozenE(v Value, frozen bool) (bool, *ThrowError) {
 		return true, nil
 	}
 	if o.flags.extensible {
+		return false, nil
+	}
+	// A module namespace stores its exports as accessors so reads see the live
+	// binding, but REPORTS them as writable data properties — so it is never
+	// frozen, however many of them there are.
+	if frozen && rt.moduleNamespaces[o] && len(o.ownKeys()) > 0 {
 		return false, nil
 	}
 	for i := 0; i < o.shape.count(); i++ {

@@ -259,7 +259,12 @@ restart:
 			push(tEmpty)
 			ip++
 		case OpForIn:
-			push(rt.forInKeys(pop()))
+			keys, e := rt.forInKeys(pop())
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(keys)
 			ip++
 		case OpForOf:
 			vals, e := rt.iterableValues(pop())

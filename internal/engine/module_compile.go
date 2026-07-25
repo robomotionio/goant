@@ -100,8 +100,7 @@ func moduleExportEntries(stmts []*Node) map[string]string {
 		case s.Flags&exDefault != 0:
 			// An inferred name (NamedEvaluation gave an anonymous default the name
 			// "default") is not a binding, so it still goes through the synthetic one.
-			if d := s.Left; d != nil && (d.Kind == NFunc || d.Kind == NClass) &&
-				d.Str != "" && d.Flags&fnInferredName == 0 {
+			if d := s.Left; d != nil && isDefaultDeclaration(d) {
 				out["default"] = d.Str
 			} else {
 				out["default"] = moduleDefaultName
@@ -154,6 +153,19 @@ func moduleIndirectExports(stmts []*Node) map[string]indirectExport {
 				continue
 			}
 			out[spc.Right.Str] = indirectExport{specifier: spec, importName: spc.Left.Str}
+		}
+	}
+	return out
+}
+
+// moduleFromSpecifiers lists every `export … from "…"` specifier. Each is a
+// REQUESTED module regardless of how many names it forwards — `export {} from
+// "m"` still loads and parses m — so they join moduleRequests.
+func moduleFromSpecifiers(stmts []*Node) []string {
+	var out []string
+	for _, s := range stmts {
+		if s != nil && s.Kind == NExport && s.Flags&exFrom != 0 && s.Right != nil {
+			out = append(out, joinModuleKey(s.Right.Str, s.Str))
 		}
 	}
 	return out

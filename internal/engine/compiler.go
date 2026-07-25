@@ -375,6 +375,12 @@ func validateModuleExports(stmts []*Node) *SyntaxError {
 // or an evaluated expression.
 func unwrapModuleStmts(stmts []*Node) []*Node {
 	out := make([]*Node, 0, len(stmts))
+	// An anonymous `export default function/generator/async function` is a
+	// HoistableDeclaration: its binding is initialised before the body runs, so
+	// the module's own code can call it above the declaration. It is lowered like
+	// any other default export and then moved to the front, which is what
+	// hoisting amounts to for a statement whose value is a function literal.
+	var hoisted []*Node
 	for _, s := range stmts {
 		switch s.Kind {
 		case NExport:
@@ -383,14 +389,19 @@ func unwrapModuleStmts(stmts []*Node) []*Node {
 				out = append(out, s.Left)
 			case s.Flags&exDefault != 0 && s.Left != nil:
 				d := s.Left
-				if (d.Kind == NFunc || d.Kind == NClass) && d.Str != "" {
+				if isDefaultDeclaration(d) {
 					out = append(out, d) // named default declaration: hoist it
+					break
+				}
+				// An anonymous function/class or an expression is bound to the
+				// synthetic name "*default*", which the export table points at.
+				// Without this the value was evaluated and thrown away, so the
+				// module had no `default` export at all.
+				anonFn := d.Kind == NFunc && d.Flags&(fnParen|fnArrow) == 0
+				d.Flags |= fnParen
+				if anonFn {
+					hoisted = append(hoisted, mkDefaultBinding(d))
 				} else {
-					// An anonymous function/class or an expression is bound to the
-					// synthetic name "*default*", which the export table points at.
-					// Without this the value was evaluated and thrown away, so the
-					// module had no `default` export at all.
-					d.Flags |= fnParen
 					out = append(out, mkDefaultBinding(d))
 				}
 			}
@@ -401,7 +412,16 @@ func unwrapModuleStmts(stmts []*Node) []*Node {
 			out = append(out, s)
 		}
 	}
-	return out
+	return append(hoisted, out...)
+}
+
+// isDefaultDeclaration reports whether `export default X` declares X by name —
+// a function or class DECLARATION. A parenthesised `(class C {})` is an
+// expression: it binds nothing of its own, so the export goes through the
+// synthetic "*default*" binding instead.
+func isDefaultDeclaration(d *Node) bool {
+	return (d.Kind == NFunc || d.Kind == NClass) && d.Str != "" &&
+		d.Flags&(fnParen|fnInferredName) == 0
 }
 
 func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, isModule bool) (*svFunc, error) {
@@ -521,6 +541,7 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		}
 		c.fn.moduleStarFrom = moduleStarSpecifiers(moduleStmts)
 		c.fn.moduleIndirect = moduleIndirectExports(moduleStmts)
+		c.fn.moduleRequests = append(c.fn.moduleRequests, moduleFromSpecifiers(moduleStmts)...)
 	}
 	// Return the completion value.
 	c.emitOpU16(OpGetLocal, uint16(c.completionSlot))

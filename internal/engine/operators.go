@@ -119,10 +119,15 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 // forInKeys returns the array of enumerable string property keys for a for-in
 // loop: own + inherited enumerable keys, deduplicated, integer indices first in
 // ascending order, then insertion order (ant js_for_in_keys).
-func (rt *Runtime) forInKeys(obj Value) Value {
+func (rt *Runtime) forInKeys(obj Value) (Value, *ThrowError) {
 	arr := rt.newArray()
 	if obj.IsNullish() {
-		return arr
+		return arr, nil
+	}
+	// A module namespace answers enumerability from [[GetOwnProperty]], which
+	// reads each binding: enumerating one still in its temporal dead zone throws.
+	if e := rt.namespaceTDZAll(obj); e != nil {
+		return mkundef(), e
 	}
 	ao := rt.objPtr(arr)
 	seen := map[string]bool{}
@@ -191,7 +196,7 @@ func (rt *Runtime) forInKeys(obj Value) Value {
 		}
 		cur = o.proto
 	}
-	return arr
+	return arr, nil
 }
 
 // jsIn implements the `in` operator: key in obj.

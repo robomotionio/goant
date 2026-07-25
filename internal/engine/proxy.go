@@ -217,6 +217,19 @@ func (rt *Runtime) setOnReceiver(receiver, key, val Value) (bool, *ThrowError) {
 	if ro == nil {
 		return false, nil // primitive receiver
 	}
+	// OrdinarySetWithOwnDescriptor asks the RECEIVER for its own descriptor
+	// first. On a module namespace that reads the binding, so writing through a
+	// namespace receiver — `super.x = v` in a constructor that returned one —
+	// surfaces an uninitialised export as a ReferenceError.
+	if rt.moduleNamespaces[ro] {
+		k := rt.toPropertyKeyValue(key)
+		if !k.IsSymbol() {
+			if e := rt.namespaceTDZ(receiver, string(rt.strBytes(k))); e != nil {
+				return false, e
+			}
+		}
+		return false, nil // a namespace never accepts a write
+	}
 	if ro.proxy != nil {
 		existing, e := rt.proxyGetOwnPropertyDescriptor(ro.proxy, key)
 		if e != nil {

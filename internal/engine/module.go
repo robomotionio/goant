@@ -551,6 +551,36 @@ func (rt *Runtime) namespaceDescriptor(ns Value, name string) (Value, bool, *Thr
 	return d, true, nil
 }
 
+// namespaceTDZ performs the observable part of a module namespace's
+// [[GetOwnProperty]](P) for callers that only need to know whether it succeeds:
+// step 4 reads the binding through [[Get]], so an export still in its temporal
+// dead zone makes the whole operation a ReferenceError. Every operation built on
+// [[GetOwnProperty]] — hasOwnProperty, propertyIsEnumerable, Object.keys, for-in,
+// a [[Set]] whose receiver is the namespace — inherits that.
+func (rt *Runtime) namespaceTDZ(ns Value, name string) *ThrowError {
+	o := rt.objPtr(ns)
+	if o == nil || !rt.moduleNamespaces[o] || !o.hasOwn(name) {
+		return nil
+	}
+	_, e := rt.getField(ns, name)
+	return e
+}
+
+// namespaceTDZAll is namespaceTDZ for every own export, in key order — what an
+// operation that visits all the keys (Object.keys, for-in) must do.
+func (rt *Runtime) namespaceTDZAll(ns Value) *ThrowError {
+	o := rt.objPtr(ns)
+	if o == nil || !rt.moduleNamespaces[o] {
+		return nil
+	}
+	for _, k := range o.ownKeys() {
+		if e := rt.namespaceTDZ(ns, k); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
 // isModuleNamespace reports whether v is a module namespace exotic object.
 func (rt *Runtime) isModuleNamespace(v Value) bool {
 	o := rt.objPtr(v)

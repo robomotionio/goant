@@ -1035,6 +1035,14 @@ func (p *parser) parseParen() *Node {
 	p.consume()
 	if p.next() == TokRParen {
 		p.consume()
+		// `()` is not an expression: an empty parenthesized form is only ever an
+		// arrow function's parameter list, so anything but `=>` after it is a
+		// SyntaxError. (This is what rejects `export default function(){}()`, whose
+		// trailing `()` has to start a new statement.)
+		if p.next() != TokArrow {
+			p.errorf("Unexpected token %q; `()` is only valid as an arrow parameter list", p.tokStr())
+			return p.mk(NEmpty)
+		}
 		n := p.mk(NUndef)
 		n.Flags |= fnParen
 		n.SrcOff = parenOff
@@ -2842,6 +2850,17 @@ func (p *parser) parseExportName() *Node {
 	return name
 }
 
+// exportDefaultDeclEnd terminates `export default <declaration>`. A
+// HoistableDeclaration or ClassDeclaration needs no semicolon, and whatever
+// follows is simply the next statement — so `export default function(){} if (x)
+// {}` is fine, while `export default function(){}()` fails when `()` is parsed
+// as one.
+func (p *parser) exportDefaultDeclEnd() {
+	if p.next() == TokSemicolon {
+		p.consume()
+	}
+}
+
 func (p *parser) parseExportStmt() *Node {
 	decl := p.mk(NExport)
 	p.next()
@@ -2858,17 +2877,13 @@ func (p *parser) parseExportStmt() *Node {
 			decl.Left = p.parseFunc()
 			decl.Left.Flags |= fnAsync
 			decl.Left.SrcOff = asyncOff
-			if p.next() == TokSemicolon {
-				p.consume()
-			}
+			p.exportDefaultDeclEnd()
 			return decl
 		}
 		if p.tok() == TokFunc {
 			p.consume()
 			decl.Left = p.parseFunc()
-			if p.next() == TokSemicolon {
-				p.consume()
-			}
+			p.exportDefaultDeclEnd()
 			return decl
 		}
 		if p.tok() == TokClass {
@@ -2876,9 +2891,7 @@ func (p *parser) parseExportStmt() *Node {
 			p.consume()
 			decl.Left = p.parseClass()
 			decl.Left.SrcOff = classOff
-			if p.next() == TokSemicolon {
-				p.consume()
-			}
+			p.exportDefaultDeclEnd()
 			return decl
 		}
 		decl.Left = p.parseAssign()
