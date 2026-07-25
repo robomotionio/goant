@@ -33,6 +33,17 @@ func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 	obj.defineOwn("name", rt.internString(fn.name), attrConfigurable)
 
 	fnVal := mkval(TFunc, uint64(oh))
+	// Annex B legacy: an ORDINARY non-strict function declaration or expression
+	// carries its own `caller` and `arguments`, which shadow the %ThrowTypeError%
+	// accessors on Function.prototype. Every other function kind — strict,
+	// generator, async, arrow, method/accessor, class constructor — has none and
+	// keeps throwing through the prototype. goant tracks no caller chain, so the
+	// value is null; the point of the tests is that the read is permitted at all.
+	if !fn.isStrict && !fn.isArrow && !fn.isAsync && !fn.isGenerator &&
+		!fn.isMethod && !fn.isClassCtor {
+		obj.defineOwn("caller", mknull(), attrConfigurable)
+		obj.defineOwn("arguments", mknull(), attrConfigurable)
+	}
 	// Ordinary and generator functions carry a .prototype; arrow, async, and
 	// concise methods / accessors do not (and methods/accessors have no
 	// [[Construct]]).
