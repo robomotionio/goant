@@ -38,11 +38,12 @@ func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 	// accessors on Function.prototype. Every other function kind — strict,
 	// generator, async, arrow, method/accessor, class constructor — has none and
 	// keeps throwing through the prototype. goant tracks no caller chain, so the
-	// value is null; the point of the tests is that the read is permitted at all.
+	// value is undefined — which the tests read as "this host does not implement
+	// the extension" and skip, whereas null reads as a real (non-callable) caller.
 	if !fn.isStrict && !fn.isArrow && !fn.isAsync && !fn.isGenerator &&
 		!fn.isMethod && !fn.isClassCtor {
-		obj.defineOwn("caller", mknull(), attrConfigurable)
-		obj.defineOwn("arguments", mknull(), attrConfigurable)
+		obj.defineOwn("caller", mkundef(), attrConfigurable)
+		obj.defineOwn("arguments", mkundef(), attrConfigurable)
 	}
 	// Ordinary and generator functions carry a .prototype; arrow, async, and
 	// concise methods / accessors do not (and methods/accessors have no

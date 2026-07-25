@@ -625,6 +625,9 @@ restart:
 				for i, v := range args {
 					ao.defineOwn(numberToString(float64(i)), v, attrDefault)
 				}
+				if fn.mappedArgs {
+					ao.argMap = newArgumentsMap(locals, fn.paramCount, len(args))
+				}
 				ao.defineOwn("length", mknum(float64(len(args))), attrWritable|attrConfigurable)
 				if fn.isStrict {
 					// Strict arguments: `callee` is a poison-pill accessor.

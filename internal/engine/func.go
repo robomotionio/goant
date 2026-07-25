@@ -82,6 +82,12 @@ type svFunc struct {
 	// environment rather than starting a fresh one.
 	evalVarObj bool
 
+	// mappedArgs marks a function whose `arguments` object aliases its formal
+	// parameters (10.4.4): non-strict, non-arrow, and a simple parameter list of
+	// distinct names — the condition under which formal i owns frame slot i, which
+	// is what the parameter map indexes.
+	mappedArgs bool
+
 	// capturesHome marks an arrow function that reads `super` inherited from an
 	// enclosing object-literal method: its closure takes that method's
 	// [[HomeObject]], since an arrow has none of its own.

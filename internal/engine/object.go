@@ -100,6 +100,10 @@ type object struct {
 	// staying true after detach so the prototype getters can require the slot on
 	// their receiver while still distinguishing a detached buffer from a non-buffer.
 	abObj bool
+	// argMap is the [[ParameterMap]] of a mapped arguments object: the indices
+	// that alias their function's formal parameters (see arguments.go).
+	argMap *argumentsMap
+
 	// ta is set for TypedArray views (element kind + window into an ArrayBuffer);
 	// dv marks a DataView over a buffer.
 	ta *typedArray
@@ -727,6 +731,11 @@ func (o *object) ownDescriptor(key string) ownDesc {
 		}
 	} else {
 		d.value = o.slotGet(uint32(slot))
+		// A mapped arguments index reports the CURRENT value of the parameter it
+		// aliases, not the one stored when the object was made.
+		if i := o.argMap.index(key); i >= 0 {
+			d.value = o.argMap.get(i)
+		}
 	}
 	return d
 }
@@ -903,6 +912,10 @@ func (rt *Runtime) setProp(receiver Value, key string, v Value) bool {
 		}
 		if holder == ro {
 			holder.slotSet(slot, v)
+			// A mapped index writes through to the parameter it aliases.
+			if i := ro.argMap.index(key); i >= 0 {
+				ro.argMap.set(i, v)
+			}
 			return true
 		}
 		// Inherited writable data property: create an own property on receiver.

@@ -1014,6 +1014,34 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	if (hasGet || hasSet) && (hasVal || hasW) {
 		return rt.typeError("Invalid property descriptor. Cannot both specify accessors and a value or writable attribute")
 	}
+	// Arguments exotic [[DefineOwnProperty]] (10.4.4.2). A mapped index that is
+	// being made non-writable WITHOUT a value of its own first takes the value it
+	// currently aliases — otherwise the stale value the ordinary property holds
+	// would be resurrected as the frozen one. The map itself is updated after the
+	// definition is applied, since a rejected definition changes nothing.
+	argIdx := -1
+	if !sym {
+		argIdx = o.argMap.index(name)
+	}
+	if argIdx >= 0 && (hasVal || hasW) && !hasVal && hasW && !rt.toBoolean(wV) {
+		valV, hasVal = o.argMap.get(argIdx), true
+	}
+	applyArgMap := func() {
+		if argIdx < 0 {
+			return
+		}
+		switch {
+		case hasGet || hasSet:
+			o.argMap.unmap(name) // an accessor is no longer an alias
+		default:
+			if hasVal {
+				o.argMap.set(argIdx, valV)
+			}
+			if hasW && !rt.toBoolean(wV) {
+				o.argMap.unmap(name)
+			}
+		}
+	}
 	if hasGet && !getV.IsUndefined() && !rt.isCallable(getV) {
 		return rt.typeError("Getter must be a function")
 	}
@@ -1115,6 +1143,7 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 				}
 			}
 		}
+		applyArgMap()
 		return nil
 	}
 	// A generic descriptor (no value/writable and no get/set) over an existing
@@ -1228,6 +1257,7 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	} else {
 		o.defineOwn(name, val, attrs)
 	}
+	applyArgMap()
 	return nil
 }
 

@@ -818,6 +818,20 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		}
 	}
 	c.fn.paramCount = paramCount
+	// A mapped `arguments` needs formal i to own frame slot i: only a simple
+	// parameter list of distinct names lays out that way (declareVar reuses the
+	// slot of a repeated name), and only sloppy non-arrow functions map at all.
+	if !c.fn.isStrict && n.Flags&fnArrow == 0 {
+		distinct := map[string]bool{}
+		c.fn.mappedArgs = true
+		for _, p := range n.Args {
+			if p.Kind != NIdent || distinct[p.Str] {
+				c.fn.mappedArgs = false
+				break
+			}
+			distinct[p.Str] = true
+		}
+	}
 	// Function.length (ExpectedArgumentCount): the number of parameters before
 	// the first one with a default initializer or the rest parameter. A
 	// destructuring parameter without a default still counts.

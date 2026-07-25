@@ -108,7 +108,12 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 	if name == "length" && (obj.Type() == TArr || o.boxed.Type() == TStr) {
 		return false, nil
 	}
-	return o.deleteOwn(name), nil
+	ok := o.deleteOwn(name)
+	if ok {
+		// A deleted index stops aliasing its parameter (10.4.4.5 step 3).
+		o.argMap.unmap(name)
+	}
+	return ok, nil
 }
 
 // forInKeys returns the array of enumerable string property keys for a for-in
