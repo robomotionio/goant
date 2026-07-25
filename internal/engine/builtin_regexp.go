@@ -71,6 +71,10 @@ func (rt *Runtime) initRegExpBuiltin() {
 	rt.defMethod(po, "exec", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.regexpExec(this, arg(args, 0))
 	})
+	// Remember the built-in exec: the @@split / @@match fast paths are only
+	// legitimate while a regexp still resolves `exec` to it, since RegExpExec
+	// hands control to a user-supplied one.
+	rt.regexpProtoExec, _ = rt.getProp(proto, "exec")
 	rt.defMethod(po, "test", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if !this.IsObjectType() {
 			return mkundef(), rt.typeError("RegExp.prototype.test called on non-object")
@@ -364,8 +368,10 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if this.IsNullish() || !this.IsObjectType() {
 			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.split] called on incompatible receiver")
 		}
-		// Fast path: an ordinary RegExp whose @@species is the default RegExp ctor.
-		if re := rt.objPtr(this); re != nil && re.regex != nil {
+		// Fast path: an ordinary RegExp whose @@species is the default RegExp ctor
+		// AND whose `exec` is still the built-in — otherwise RegExpExec would hand
+		// the matching to user code, which the internal splitter cannot do.
+		if re := rt.objPtr(this); re != nil && re.regex != nil && rt.hasBuiltinExec(this) {
 			if C, e := rt.speciesConstructor(this, rt.regexpCtor); e == nil && C == rt.regexpCtor {
 				return rt.stringSplitRegexp(arg(args, 0), re.regex, arg(args, 1))
 			}
@@ -392,10 +398,9 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if so := rt.objPtr(splitter); so != nil && so.regex != nil {
-			return rt.stringSplitRegexp(arg(args, 0), so.regex, arg(args, 1))
-		}
-		// A non-RegExp splitter: run the fully generic exec-driven algorithm.
+		// The splitter is driven through RegExpExec and its own lastIndex — it is
+		// sticky by construction, and the internal split has no way to honour either
+		// a user `exec` or the per-position retry the algorithm performs.
 		return rt.regexpSymbolSplitGeneric(splitter, arg(args, 0), arg(args, 1), unicode)
 	})
 	defSym(rt.symMatchAll, 1, func(this Value, args []Value) (Value, *ThrowError) {
@@ -1930,4 +1935,16 @@ func (rt *Runtime) stringSplitString(this Value, args []Value) (Value, *ThrowErr
 		rt.arraySet(ro, ro.arrLen, rt.newString(p))
 	}
 	return res, nil
+}
+
+
+// hasBuiltinExec reports whether r still resolves "exec" to the built-in
+// %RegExp.prototype.exec%. Every fast path that matches internally depends on
+// it: RegExpExec would otherwise call a user-supplied exec instead.
+func (rt *Runtime) hasBuiltinExec(r Value) bool {
+	if rt.regexpProtoExec == 0 {
+		return false
+	}
+	v, e := rt.getField(r, "exec")
+	return e == nil && v == rt.regexpProtoExec
 }

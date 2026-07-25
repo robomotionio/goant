@@ -64,8 +64,15 @@ type Match struct {
 func translateAnnexBEscapes(src string) string {
 	rs := []rune(src)
 	var b strings.Builder
+	inClass := false
 	for i := 0; i < len(rs); i++ {
 		if rs[i] != '\\' || i+1 >= len(rs) {
+			switch rs[i] {
+			case '[':
+				inClass = true
+			case ']':
+				inClass = false
+			}
 			b.WriteRune(rs[i])
 			continue
 		}
@@ -83,9 +90,16 @@ func translateAnnexBEscapes(src string) string {
 				b.WriteRune(n)
 			}
 		case 'c':
-			if i+2 < len(rs) && isASCIILetter(rs[i+2]) {
+			switch {
+			case i+2 < len(rs) && isASCIILetter(rs[i+2]):
 				b.WriteString(`\c`)
-			} else {
+			case inClass && i+2 < len(rs) && (rs[i+2] == '_' || (rs[i+2] >= '0' && rs[i+2] <= '9')):
+				// Annex B ClassControlLetter admits a DecimalDigit or '_' as well, and
+				// only INSIDE a character class: `[\c0]` is U+0010 (0x30 mod 32) while a
+				// bare `\c0` stays the three literal characters.
+				fmt.Fprintf(&b, `\x%02X`, rs[i+2]%32)
+				i++ // the control letter is consumed here too
+			default:
 				b.WriteString(`\\c`)
 			}
 		default:
@@ -308,6 +322,7 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	// followed by a control letter is a literal backslash + c.
 	if !r.Unicode {
 		src = translateAnnexBEscapes(src)
+		src = annexBClassRanges(src)
 	}
 	// Rename named groups / backreferences to regexp2-safe internal names (ES
 	// allows names regexp2's \w+ grammar rejects, and duplicate names).
@@ -525,4 +540,49 @@ func (r *Regexp) Test(input []rune, start int) (bool, error) {
 // GroupCount returns the number of capture groups (excluding group 0).
 func (r *Regexp) GroupCount() int {
 	return r.re.GetGroupNumbers()[len(r.re.GetGroupNumbers())-1]
+}
+
+// annexBClassRanges rewrites a character-class range whose endpoint is a CLASS
+// ESCAPE (\d \D \s \S \w \W) so the '-' is a literal character rather than a
+// range operator. Annex B B.1.4 (NonemptyClassRangesNoDash) makes `[a-\w]` the
+// union of `a`, `-` and `\w` in a non-Unicode pattern; regexp2 rejects the range
+// outright, and Unicode mode rejects it too (validateUnicodePattern).
+func annexBClassRanges(src string) string {
+	if !strings.ContainsRune(src, '[') {
+		return src
+	}
+	rs := []rune(src)
+	var b strings.Builder
+	b.Grow(len(src))
+	isClassEsc := func(c rune) bool { return strings.ContainsRune("dDsSwW", c) }
+	inClass := false
+	prevClassEsc := false
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' && i+1 < len(rs) {
+			b.WriteRune(c)
+			b.WriteRune(rs[i+1])
+			prevClassEsc = inClass && isClassEsc(rs[i+1])
+			i++
+			continue
+		}
+		switch {
+		case !inClass && c == '[':
+			inClass, prevClassEsc = true, false
+		case inClass && c == ']':
+			inClass, prevClassEsc = false, false
+		case inClass && c == '-':
+			nextIsClassEsc := i+2 < len(rs) && rs[i+1] == '\\' && isClassEsc(rs[i+2])
+			if prevClassEsc || nextIsClassEsc {
+				b.WriteString(`\-`)
+				prevClassEsc = false
+				continue
+			}
+			prevClassEsc = false
+		default:
+			prevClassEsc = false
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
 }

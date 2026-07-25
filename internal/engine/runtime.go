@@ -53,6 +53,7 @@ type Runtime struct {
 	errorProto      Value
 	regexpProto     Value
 	regexpCtor      Value  // %RegExp% constructor (SpeciesConstructor default)
+	regexpProtoExec Value  // %RegExp.prototype.exec% (fast paths check for it)
 	regexpLastMatch string // RegExp.lastMatch (Annex B legacy static)
 	// Remaining Annex B legacy RegExp static state, updated on every successful
 	// built-in match (RegExp.input/$_, lastParen/$+, leftContext/$`,
