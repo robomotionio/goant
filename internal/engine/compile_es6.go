@@ -1058,6 +1058,18 @@ func (c *compiler) compileClass(n *Node) {
 	c.emitFieldOp(OpGetField, "prototype")
 	c.emitOpU16(OpPutLocal, uint16(protoSlot))
 
+	// The constructor gets a [[HomeObject]] too, like every other method. It is
+	// only observable through a direct eval — `super.x` written in the
+	// constructor's own source resolves against the class's *superproto* binding
+	// — but eval code borrows the running closure's home, and without this there
+	// was none to borrow. setMethodHome is a no-op unless the function is marked
+	// usesSuper, so this costs nothing for a constructor that cannot need it.
+	c.emitOpU16(OpGetLocal, uint16(protoSlot))
+	c.emitOpU16(OpGetLocal, uint16(ctorSlot))
+	c.emit(OpSetHomeObj)
+	c.emit(OpPop)
+	c.emit(OpPop)
+
 	// Define methods (skip the constructor; it's already the ctor function).
 	for _, m := range n.Args {
 		if m.Kind == NStaticBlock {

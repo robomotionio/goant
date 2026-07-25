@@ -535,7 +535,11 @@ func (c *compiler) methodForInheritedSuper() *compiler {
 		if e.fn.isArrow {
 			continue
 		}
-		if e.fn.isMethod {
+		// A class constructor or element counts too: `super` written in its own
+		// source takes the class-binding path (checked first in compileSuperMember),
+		// but an arrow inside it still needs the home object for eval code that
+		// borrows it.
+		if e.fn.isMethod || e.fn.isClassCtor || e.fn.isClassElement {
 			return e
 		}
 		return nil

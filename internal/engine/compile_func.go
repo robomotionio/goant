@@ -1230,6 +1230,17 @@ func (c *compiler) compileCall(n *Node) {
 		if c.fn != nil && c.fn.isArrow {
 			c.markInheritedSuper()
 		}
+		// Same reason inside a class constructor or element: the eval borrows this
+		// function's [[HomeObject]], which it only receives when marked.
+		for e := c; e != nil; e = e.enclosing {
+			if e.fn == nil || e.fn.isArrow {
+				continue
+			}
+			if e.fn.isClassCtor || e.fn.isClassElement {
+				e.fn.usesSuper = true
+			}
+			break
+		}
 		if spread {
 			c.compileDirectEvalSpread(n)
 		} else {
