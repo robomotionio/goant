@@ -597,6 +597,16 @@ func (rt *Runtime) inheritedIndexedSet(receiver, start Value, idx uint32, v Valu
 			b, e := rt.proxySet(o.proxy, rt.internString(name), v, receiver)
 			return true, b, e
 		}
+		// A typed array on the chain answers with its own integer-indexed [[Set]]
+		// and the walk stops. This branch is reached when the RECEIVER is an array
+		// (the array-index fast path) — the plain-object receiver goes through
+		// setFieldR's walk instead, which carries the same rule.
+		if cur.Type() == TTypedArray && o.ta != nil {
+			if idx >= uint32(rt.taLength(o)) {
+				return true, true, nil // unaddressable: discarded, nothing created
+			}
+			return false, false, nil // addressable: ordinary create-on-receiver
+		}
 		if slot := o.shape.lookupInterned(name); slot >= 0 {
 			if o.isAccessorSlot(uint32(slot)) {
 				p := o.shape.propAt(uint32(slot))
