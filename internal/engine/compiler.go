@@ -796,6 +796,19 @@ func (c *compiler) compileStmt(n *Node) {
 
 // blockHasUsing reports whether a statement list declares a `using` or
 // `await using` resource directly (so the block needs a disposal scope).
+func blockHasAwaitUsing(stmts []*Node) bool {
+	for _, s := range stmts {
+		d := s
+		if s != nil && s.Kind == NExport && s.Left != nil {
+			d = s.Left
+		}
+		if d != nil && d.Kind == NVar && d.VarKind == VarAwaitUsing {
+			return true
+		}
+	}
+	return false
+}
+
 func blockHasUsing(stmts []*Node) bool {
 	for _, s := range stmts {
 		d := s
@@ -830,13 +843,21 @@ func (c *compiler) compileBlockWithUsing(n *Node) {
 	savedUsing := c.usingStack
 	c.usingStack = stackLocal
 
+	// A block holding an `await using` disposes in an ASYNC disposal environment:
+	// every disposer's result is awaited, so a rejecting async disposer is
+	// observed at all.
+	disposeOp, disposeSuppressedOp := OpUsingDispose, OpUsingDisposeSuppressed
+	if blockHasAwaitUsing(n.Args) {
+		disposeOp, disposeSuppressedOp = OpUsingDisposeAsync, OpUsingDisposeAsyncSuppressed
+	}
+
 	catchHandler := c.emitJump(OpTryPush)
 	c.compileStmts(n.Args)
 	c.emit(OpTryPop)
 
 	// Normal completion: dispose all resources, discard the completion value.
 	c.emitOpU16(OpGetLocal, uint16(stackLocal))
-	c.emit(OpUsingDispose)
+	c.emit(disposeOp)
 	c.emit(OpPop)
 	endJump := c.emitJump(OpJmp)
 
@@ -847,7 +868,7 @@ func (c *compiler) compileBlockWithUsing(n *Node) {
 	c.emitOpU16(OpPutLocal, uint16(errLocal))
 	c.emitOpU16(OpGetLocal, uint16(stackLocal))
 	c.emitOpU16(OpGetLocal, uint16(errLocal))
-	c.emit(OpUsingDisposeSuppressed)
+	c.emit(disposeSuppressedOp)
 	c.emit(OpThrow)
 
 	c.patchJump(endJump)
@@ -865,7 +886,10 @@ func (c *compiler) compileVarDecl(n *Node) {
 				c.errorf("unsupported using declaration target (slice)")
 				return
 			}
-			slot := c.declareLexical(decl.Left.Str, false)
+			// A `using` binding is immutable, like a const: assigning to it is a
+			// TypeError, since the disposal at scope exit must reach the resource the
+			// declaration captured.
+			slot := c.declareLexical(decl.Left.Str, true)
 			// TDZ: the binding is dead until its initializer completes, so a
 			// self-reference in the initializer (`using x = x`) is a ReferenceError.
 			c.emit(OpEmpty)
@@ -1555,8 +1579,16 @@ func (c *compiler) compileUpdate(n *Node) {
 			c.emitGlobalGet(name)
 		}
 	}
+	// An update operator writes through the same binding an assignment would, so
+	// a const (or a named function expression's self-name) rejects it identically.
+	constTarget := (slot >= 0 && (c.locals[slot].isConst || c.locals[slot].selfName)) ||
+		(uv >= 0 && (c.upvalues[uv].isConst || c.upvalues[uv].selfName))
 	storeKeep := func() { // leaves the stored value on the stack
 		switch {
+		case constTarget:
+			if (slot >= 0 && c.locals[slot].isConst) || (uv >= 0 && c.upvalues[uv].isConst) || c.fn.isStrict {
+				c.emitConstAssignError()
+			}
 		case c.nameIsWithRouted(name):
 			c.emit(OpDup)
 			c.emitWithVar(OpWithPutVar, name)
@@ -1571,6 +1603,12 @@ func (c *compiler) compileUpdate(n *Node) {
 	}
 	storeConsume := func() { // consumes the stored value
 		switch {
+		case constTarget:
+			if (slot >= 0 && c.locals[slot].isConst) || (uv >= 0 && c.upvalues[uv].isConst) || c.fn.isStrict {
+				c.emitConstAssignError()
+			} else {
+				c.emit(OpPop) // sloppy self-name update: silently discarded
+			}
 		case c.nameIsWithRouted(name):
 			c.emitWithVar(OpWithPutVar, name)
 		case slot >= 0:

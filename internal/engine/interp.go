@@ -1204,24 +1204,34 @@ restart:
 			}
 			push(r)
 			ip++
-		case OpUsingDispose:
+		case OpUsingDispose, OpUsingDisposeAsync:
 			// [entries] -> [undefined]: dispose the block's resources on normal
-			// completion; a disposal error becomes a throw.
+			// completion; a disposal error becomes a throw. The async form awaits
+			// each async disposer's result.
 			entries := pop()
-			completion := rt.disposeEntries(entries, mkundef())
+			var completion Value
+			if op == OpUsingDisposeAsync {
+				completion = rt.disposeEntriesAsync(entries, mkundef())
+			} else {
+				completion = rt.disposeEntries(entries, mkundef())
+			}
 			if !completion.IsUndefined() {
 				thrown = &ThrowError{Value: completion, rt: rt}
 				goto unwind
 			}
 			push(mkundef())
 			ip++
-		case OpUsingDisposeSuppressed:
+		case OpUsingDisposeSuppressed, OpUsingDisposeAsyncSuppressed:
 			// [entries, completion] -> [completion']: dispose on abrupt completion,
 			// folding disposal errors into the pending one; the following OpThrow
 			// re-raises the aggregate.
 			completion := pop()
 			entries := pop()
-			push(rt.disposeEntries(entries, completion))
+			if op == OpUsingDisposeAsyncSuppressed {
+				push(rt.disposeEntriesAsync(entries, completion))
+			} else {
+				push(rt.disposeEntries(entries, completion))
+			}
 			ip++
 		case OpToObject:
 			// ToObject: null/undefined throw a TypeError; an Object (including a

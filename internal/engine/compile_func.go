@@ -1002,6 +1002,10 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		// resources when the body's declarative environment is torn down (function
 		// return / fall-through / throw), the same scaffolding a nested block uses.
 		bodyUsing := blockHasUsing(n.Body.Args)
+		bodyDispose, bodyDisposeSuppressed := OpUsingDispose, OpUsingDisposeSuppressed
+		if blockHasAwaitUsing(n.Body.Args) {
+			bodyDispose, bodyDisposeSuppressed = OpUsingDisposeAsync, OpUsingDisposeAsyncSuppressed
+		}
 		var usingStackLocal, usingErrLocal, usingCatch, usingEnd int
 		savedUsingStack := c.usingStack
 		if bodyUsing {
@@ -1019,7 +1023,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 			// function's implicit-return handling below.
 			c.emit(OpTryPop)
 			c.emitOpU16(OpGetLocal, uint16(usingStackLocal))
-			c.emit(OpUsingDispose)
+			c.emit(bodyDispose)
 			c.emit(OpPop)
 			usingEnd = c.emitJump(OpJmp)
 			// Abrupt completion (throw): dispose-suppressed and re-throw.
@@ -1029,7 +1033,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 			c.emitOpU16(OpPutLocal, uint16(usingErrLocal))
 			c.emitOpU16(OpGetLocal, uint16(usingStackLocal))
 			c.emitOpU16(OpGetLocal, uint16(usingErrLocal))
-			c.emit(OpUsingDisposeSuppressed)
+			c.emit(bodyDisposeSuppressed)
 			c.emit(OpThrow)
 			c.patchJump(usingEnd)
 			c.usingStack = savedUsingStack

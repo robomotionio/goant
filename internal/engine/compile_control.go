@@ -189,9 +189,15 @@ func (c *compiler) compileForOf(n *Node) {
 	if n.Left != nil && n.Left.Kind == NVar &&
 		(n.Left.VarKind == VarUsing || n.Left.VarKind == VarAwaitUsing) &&
 		len(n.Left.Args) == 1 && n.Left.Args[0].Left != nil {
+		// The declared name stays the LOOP variable, so it keeps the per-iteration
+		// fresh binding (and the head's temporal dead zone) that a `const` head
+		// already provides; a hidden `using` binding beside it drives the disposal.
+		// Binding the name in the body instead would give every iteration's closure
+		// the same cell.
 		binding := n.Left.Args[0].Left
-		loopVar := &Node{Kind: NVar, VarKind: VarLet, Args: []*Node{{Kind: NVarDecl, Left: &Node{Kind: NIdent, Str: "*forusing*"}}}}
-		usingVar := &Node{Kind: NVar, VarKind: n.Left.VarKind, Args: []*Node{{Kind: NVarDecl, Left: binding, Right: &Node{Kind: NIdent, Str: "*forusing*"}}}}
+		loopVar := &Node{Kind: NVar, VarKind: VarConst, Args: []*Node{{Kind: NVarDecl, Left: binding}}}
+		usingVar := &Node{Kind: NVar, VarKind: n.Left.VarKind, Args: []*Node{{Kind: NVarDecl,
+			Left: &Node{Kind: NIdent, Str: "*forusing*"}, Right: &Node{Kind: NIdent, Str: binding.Str}}}}
 		body := n.Body
 		if body == nil {
 			body = &Node{Kind: NEmpty}
