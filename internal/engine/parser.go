@@ -1995,7 +1995,12 @@ func (p *parser) parseTernary() *Node {
 		p.consume()
 		n := p.mk(NTernary)
 		n.Cond = cond
+		// The consequent is [+In] whatever the enclosing context; only the
+		// alternate inherits the [~In] of a for-head.
+		outerNoIn := p.noIn
+		p.noIn = false
 		n.Left = p.parseAssign()
+		p.noIn = outerNoIn
 		p.expect(TokColon)
 		n.Right = p.parseAssign()
 		return n
@@ -2475,7 +2480,12 @@ func (p *parser) parseClass() *Node {
 
 		if p.tok() == TokLBracket {
 			p.consume()
+			// A ComputedPropertyName is [+In]: `class { get ['x' in o]() {} }` is
+			// legal even in a for-head, where the enclosing context suppresses `in`.
+			outerNoIn := p.noIn
+			p.noIn = false
 			method.Left = p.parseAssign()
+			p.noIn = outerNoIn
 			p.expect(TokRBracket)
 			flags |= fnComputed
 		} else if p.tok() == TokHash {
