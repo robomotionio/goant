@@ -30,7 +30,11 @@ func (c *compiler) emitImportPrologue(stmts []*Node) {
 		if s == nil || s.Kind != NImportDecl || s.Right == nil {
 			continue
 		}
-		spec := s.Right.Str
+		// The import "type" attribute rides in the same string as the specifier
+		// (joinModuleKey): the same file imported as JSON and as source are two
+		// different modules, so every place that keys on the specifier — the
+		// registry, the hidden local, the link table — must see both.
+		spec := joinModuleKey(s.Right.Str, s.Str)
 		// Recorded even when the declaration binds nothing (`import "m"` for its
 		// side effects only): the module is still a request, so it must be
 		// instantiated and linked with the rest of the graph rather than first
@@ -136,7 +140,7 @@ func moduleIndirectExports(stmts []*Node) map[string]indirectExport {
 		if s == nil || s.Kind != NExport || s.Flags&exFrom == 0 || s.Right == nil {
 			continue
 		}
-		spec := s.Right.Str
+		spec := joinModuleKey(s.Right.Str, s.Str)
 		// `export * as ns from "m"` names the whole namespace; a bare `export *`
 		// has no name of its own and is handled as a star re-export instead.
 		if s.Flags&exStar != 0 {
@@ -164,7 +168,7 @@ func moduleStarSpecifiers(stmts []*Node) []string {
 		// individual export names, so only a bare `export *` counts here.
 		if s != nil && s.Kind == NExport && s.Flags&exStar != 0 &&
 			s.Flags&exNamespace == 0 && s.Right != nil {
-			out = append(out, s.Right.Str)
+			out = append(out, joinModuleKey(s.Right.Str, s.Str))
 		}
 	}
 	return out

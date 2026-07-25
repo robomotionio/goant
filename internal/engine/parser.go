@@ -2740,7 +2740,7 @@ func (p *parser) parseImportStmt() *Node {
 	if p.next() == TokString {
 		spec := p.mkStringFromTok()
 		p.consume()
-		p.parseWithClause()
+		decl.Str = p.parseWithClause() // the "type" attribute, if any
 		p.semicolon()
 		decl.Right = spec
 		return decl
@@ -2814,7 +2814,7 @@ parseFrom:
 	spec := p.mkStringFromTok()
 	p.consume()
 	decl.Right = spec
-	p.parseWithClause()
+	decl.Str = p.parseWithClause() // the "type" attribute, if any
 	p.semicolon()
 	return decl
 }
@@ -2975,7 +2975,7 @@ func (p *parser) parseExportStmt() *Node {
 			decl.Right = p.mkStringFromTok()
 			decl.Flags |= exFrom
 			p.consume()
-			p.parseWithClause()
+			decl.Str = p.parseWithClause()
 		} else {
 			// Without `from` the local name denotes a binding in this module, so it
 			// must be an IdentifierName; a string is only a name to look up in the
@@ -3012,7 +3012,7 @@ func (p *parser) parseExportStmt() *Node {
 		decl.Right = p.mkStringFromTok()
 		decl.Flags |= exFrom
 		p.consume()
-		p.parseWithClause()
+		decl.Str = p.parseWithClause()
 		p.semicolon()
 		return decl
 	}
@@ -3577,19 +3577,20 @@ func (p *parser) semicolon() {
 }
 
 // parseWithClause parses the import-attributes clause that may follow a module
-// specifier — `with { type: 'json', 'other-key': 'v', }` — attaching nothing to
-// the AST (goant honours no attribute type yet) but enforcing its grammar and
-// its one early error, a duplicate key. A line terminator before `with` is
-// allowed, and in a Module `with` can never start a statement (it is strict
-// code), so the keyword here is unambiguously this clause.
-func (p *parser) parseWithClause() {
+// specifier — `with { type: 'json', 'other-key': 'v', }` — enforcing its grammar
+// and its one early error, a duplicate key. It returns the value of the "type"
+// attribute, the only one the spec gives meaning to, or "". A line terminator
+// before `with` is allowed, and in a Module `with` can never start a statement
+// (it is strict code), so the keyword here is unambiguously this clause.
+func (p *parser) parseWithClause() string {
+	typ := ""
 	if p.next() != TokWith {
-		return
+		return typ
 	}
 	p.consume()
 	if p.next() != TokLBrace {
 		p.unexpected()
-		return
+		return typ
 	}
 	p.consume()
 	seen := map[string]bool{}
@@ -3603,22 +3604,25 @@ func (p *parser) parseWithClause() {
 			key = p.tokIdentStr()
 		default:
 			p.unexpected()
-			return
+			return typ
 		}
 		if seen[key] {
 			p.errorf("Duplicate import attribute key '%s'", key)
-			return
+			return typ
 		}
 		seen[key] = true
 		p.consume()
 		if p.next() != TokColon {
 			p.unexpected()
-			return
+			return typ
 		}
 		p.consume()
 		if p.next() != TokString { // the value is always a StringLiteral
 			p.unexpected()
-			return
+			return typ
+		}
+		if key == "type" {
+			typ = cookString(p.tokStr())
 		}
 		p.consume()
 		if p.next() != TokComma {
@@ -3627,4 +3631,5 @@ func (p *parser) parseWithClause() {
 		p.consume() // a trailing comma before `}` is allowed
 	}
 	p.expect(TokRBrace)
+	return typ
 }

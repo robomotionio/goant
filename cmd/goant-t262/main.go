@@ -309,6 +309,7 @@ var coreSkipFeatures = map[string]bool{
 	"source-phase-imports-typed": true,
 	"import-defer":               true,
 	"import-bytes":               true,
+	"import-text":                true,
 	"import-attributes":          false, // implemented; scored
 	"cross-realm":                true,
 	"IsHTMLDDA":                  true,

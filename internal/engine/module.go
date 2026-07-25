@@ -1,9 +1,11 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // ES module records and the host loader.
@@ -152,11 +154,34 @@ type exportTarget struct {
 
 func (t exportTarget) found() bool { return t.owner != nil || t.namespaceOf != nil }
 
+// moduleKeySep separates a specifier from its import "type" attribute in the
+// single string the compiler emits and the module registry keys on. The same
+// file imported with `type: "json"` and without it are DIFFERENT modules — one
+// is parsed as source, the other as JSON — so the type belongs in the key.
+const moduleKeySep = "\x00"
+
+func joinModuleKey(spec, typ string) string {
+	if typ == "" {
+		return spec
+	}
+	return spec + moduleKeySep + typ
+}
+
+func splitModuleKey(key string) (spec, typ string) {
+	if i := strings.Index(key, moduleKeySep); i >= 0 {
+		return key[:i], key[i+len(moduleKeySep):]
+	}
+	return key, ""
+}
+
 // resolveSpecifier turns an import specifier into an absolute path, relative to
-// the importing module's directory (or the process cwd at the entry point).
-func (rt *Runtime) resolveSpecifier(spec, referrer string) string {
+// the importing module's directory (or the process cwd at the entry point). The
+// import type rides along, so the result is the registry key.
+func (rt *Runtime) resolveSpecifier(key, referrer string) string {
+	spec, typ := splitModuleKey(key)
+	referrer, _ = splitModuleKey(referrer)
 	if filepath.IsAbs(spec) {
-		return filepath.Clean(spec)
+		return joinModuleKey(filepath.Clean(spec), typ)
 	}
 	// A specifier is relative to the importing *module*. The entry point may be a
 	// script (the harness concatenates those into a scratch file), whose path says
@@ -168,7 +193,7 @@ func (rt *Runtime) resolveSpecifier(spec, referrer string) string {
 			base = filepath.Dir(referrer)
 		}
 	}
-	return filepath.Clean(filepath.Join(base, spec))
+	return joinModuleKey(filepath.Clean(filepath.Join(base, spec)), typ)
 }
 
 // loadModule runs the three module phases in order: instantiate (parse and
@@ -212,11 +237,21 @@ func (rt *Runtime) instantiateModule(spec, referrer string) (*moduleRecord, *Syn
 		}
 		return m, nil, nil
 	}
-	src, err := os.ReadFile(path)
+	file, typ := splitModuleKey(path)
+	src, err := os.ReadFile(file)
 	if err != nil {
-		return nil, nil, rt.typeError("cannot resolve module '" + spec + "'")
+		bare, _ := splitModuleKey(spec)
+		return nil, nil, rt.typeError("cannot resolve module '" + bare + "'")
 	}
-	prog, perr := parseMode(path, string(src), true, true)
+	if typ != "" {
+		m, se, e := rt.syntheticModule(path, typ, string(src))
+		if se != nil || e != nil {
+			return nil, se, e
+		}
+		rt.modules[path] = m
+		return m, nil, nil
+	}
+	prog, perr := parseMode(file, string(src), true, true)
 	if perr != nil {
 		return nil, &SyntaxError{Msg: perr.Error()}, nil
 	}
@@ -244,6 +279,9 @@ func (rt *Runtime) linkModule(m *moduleRecord, seen map[string]bool) *SyntaxErro
 	// Every requested module is linked, including one imported purely for its
 	// side effects (`import "m"`), which binds nothing and so appears in no
 	// moduleImports entry.
+	if m.fn == nil {
+		return nil // a synthetic module has no imports to link
+	}
 	for _, spec := range m.fn.moduleRequests {
 		dep, ok := rt.modules[rt.resolveSpecifier(spec, m.path)]
 		if !ok {
@@ -316,6 +354,9 @@ func newModuleRecord(path string, fn *svFunc) *moduleRecord {
 // requestedSpecifiers lists every module this one names, from both its imports
 // and its `export * from` re-exports.
 func (m *moduleRecord) requestedSpecifiers() []string {
+	if m.fn == nil {
+		return nil // a synthetic module (JSON) requests nothing
+	}
 	seen := map[string]bool{}
 	var out []string
 	add := func(s string) {
@@ -347,6 +388,10 @@ func (rt *Runtime) evaluateModule(m *moduleRecord) *ThrowError {
 		if m.status == modErrored {
 			return m.evalErr
 		}
+		return nil
+	}
+	if m.fn == nil {
+		m.status = modEvaluated // a synthetic module has no body to run
 		return nil
 	}
 	m.status = modEvaluating
@@ -436,47 +481,51 @@ func (rt *Runtime) importModuleNamespace(spec, referrer string) (Value, *ThrowEr
 func (rt *Runtime) SetModuleBase(dir string) { rt.moduleDir = dir }
 
 // validateImportOptions checks the second argument of a dynamic import against
-// the ImportCall algorithm. goant supports no module types, so any attribute the
-// host would have to honour is rejected rather than silently ignored — importing
-// `{ type: 'json' }` and getting a JavaScript module back would be worse than a
-// clear failure. All failures are TypeErrors, which import() turns into a
-// rejected promise.
-func (rt *Runtime) validateImportOptions(options Value) *ThrowError {
+// the ImportCall algorithm and returns the "type" attribute it requests. An
+// attribute the host cannot honour is rejected rather than silently ignored —
+// asking for `{ type: 'json' }` and getting a JavaScript module back would be
+// worse than a clear failure. All failures are TypeErrors, which import() turns
+// into a rejected promise.
+func (rt *Runtime) validateImportOptions(options Value) (string, *ThrowError) {
 	if options.IsUndefined() {
-		return nil
+		return "", nil
 	}
 	if !options.IsObjectLike() {
-		return rt.typeError("import() options must be an object")
+		return "", rt.typeError("import() options must be an object")
 	}
 	attrs, e := rt.getField(options, "with")
 	if e != nil {
-		return e
+		return "", e
 	}
 	if attrs.IsUndefined() {
-		return nil
+		return "", nil
 	}
 	if !attrs.IsObjectLike() {
-		return rt.typeError("import() 'with' must be an object")
+		return "", rt.typeError("import() 'with' must be an object")
 	}
 	keys, e := rt.enumerableOwnKeysE(attrs)
 	if e != nil {
-		return e
+		return "", e
 	}
+	typ := ""
 	for _, k := range keys {
 		v, e := rt.getField(attrs, k)
 		if e != nil {
-			return e
+			return "", e
 		}
 		if v.Type() != TStr {
-			return rt.typeError("import attribute '" + k + "' must be a string")
+			return "", rt.typeError("import attribute '" + k + "' must be a string")
 		}
-		// "type" is the only attribute key the spec gives meaning to; every value
-		// of it names a module type goant cannot produce.
+		// "type" is the only attribute key the spec gives meaning to. Any other
+		// key is one the host does not support, which the spec has it ignore.
 		if k == "type" {
-			return rt.typeError("import attribute type '" + string(rt.strBytes(v)) + "' is not supported")
+			typ = string(rt.strBytes(v))
+			if typ != "json" {
+				return "", rt.typeError("import attribute type '" + typ + "' is not supported")
+			}
 		}
 	}
-	return nil
+	return typ, nil
 }
 
 // namespaceDescriptor reports a module namespace export the way the spec
@@ -568,3 +617,39 @@ func (rt *Runtime) namespaceDefineProperty(ns, key, descVal Value) *ThrowError {
 	}
 	return nil
 }
+
+// syntheticModule builds a module record whose exports come from a host-parsed
+// resource rather than from JavaScript source. A JSON module has the single
+// export "default" holding JSON.parse of its text (ParseJSONModule /
+// CreateDefaultExportSyntheticModule); no other attribute type is supported.
+//
+// It has no *svFunc: nothing to link, nothing to evaluate. The record holds the
+// value directly in its locals slice, which is what exportValue reads.
+func (rt *Runtime) syntheticModule(key, typ, src string) (*moduleRecord, *SyntaxError, *ThrowError) {
+	if typ != "json" {
+		return nil, nil, rt.typeError("import attribute type '" + typ + "' is not supported")
+	}
+	p := &jsonParser{rt: rt, src: src}
+	v, _, perr := p.parse()
+	if perr == nil {
+		p.skipWS()
+		if p.pos != len(p.src) {
+			perr = errUnexpectedAfterJSON
+		}
+	}
+	// Text that will not parse is reported like a module that will not parse: an
+	// early error of the resolution phase, before anything in the graph runs.
+	if perr != nil {
+		return nil, &SyntaxError{Msg: perr.Error()}, nil
+	}
+	return &moduleRecord{
+		path:    key,
+		exports: map[string]int{"default": 0},
+		locals:  []Value{v},
+		status:  modEvaluated,
+	}, nil, nil
+}
+
+// errUnexpectedAfterJSON is the parse failure for trailing non-whitespace, which
+// the JSON parser itself does not report (JSON.parse checks it at the call site).
+var errUnexpectedAfterJSON = errors.New("Unexpected non-whitespace character after JSON")

@@ -1253,9 +1253,10 @@ restart:
 			case e != nil:
 				push(rt.rejectedPromise(e.Value))
 			default:
-				if oe := rt.validateImportOptions(options); oe != nil {
+				typ, oe := rt.validateImportOptions(options)
+				if oe != nil {
 					push(rt.rejectedPromise(oe.Value))
-				} else if ns, le := rt.importModuleNamespace(string(rt.strBytes(spec)), fn.filename); le != nil {
+				} else if ns, le := rt.importModuleNamespace(joinModuleKey(string(rt.strBytes(spec)), typ), fn.filename); le != nil {
 					push(rt.rejectedPromise(le.Value))
 				} else {
 					push(rt.resolvedPromise(ns))
