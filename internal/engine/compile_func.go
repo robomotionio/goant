@@ -568,9 +568,11 @@ func (c *compiler) bindDeclared(name string) {
 	// function-scope eval keeps new names local — leaking into the caller's
 	// function scope is future work).
 	if c.borrowed != nil {
-		if uv := c.resolveBorrowed(name); uv >= 0 {
-			c.emitOpU16(OpPutUpval, uint16(uv))
-			return
+		if c.evalVarUpdatesBorrowed(name) {
+			if uv := c.resolveBorrowed(name); uv >= 0 {
+				c.emitOpU16(OpPutUpval, uint16(uv))
+				return
+			}
 		}
 		if c.evalVarGlobal {
 			c.emitGlobalPut(name)

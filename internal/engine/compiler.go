@@ -865,7 +865,11 @@ func (c *compiler) compileVarDecl(n *Node) {
 		// rather than creating an eval-frame local that would shadow it. A strict
 		// eval has its own variable environment, so its `var` never leaks.
 		if n.VarKind == VarVar && c.borrowed != nil && !c.fn.isStrict {
-			if uv := c.resolveBorrowed(name); uv >= 0 {
+			uv := -1
+			if c.evalVarUpdatesBorrowed(name) {
+				uv = c.resolveBorrowed(name)
+			}
+			if uv >= 0 {
 				if decl.Right != nil {
 					c.compileExpr(decl.Right)
 					c.emitOpU16(OpPutUpval, uint16(uv))
@@ -1228,6 +1232,14 @@ func (c *compiler) emitWithVarLenient(op Opcode, name string) {
 	c.emitWithVarFlags(op, name, 0x40)
 }
 
+// emitWithVarBase resolves a with-scoped name to its base ALONE (flags 0xa0:
+// reference mode, no value read), for a plain `=` whose Reference is created
+// before the right-hand side is evaluated. It must not perform the [[Get]] a
+// full reference-mode read would — that getter is not part of an assignment.
+func (c *compiler) emitWithVarBase(name string) {
+	c.emitWithVarFlags(OpWithGetVar, name, 0x80|0x20)
+}
+
 func (c *compiler) emitWithVarFlags(op Opcode, name string, flags byte) {
 	idx := c.constant(c.rt.internString(name))
 	// A `with` name access checks the with-object(s) first at run time; when none
@@ -1466,6 +1478,27 @@ func (c *compiler) compileUpdate(n *Node) {
 	uv := -1
 	if slot < 0 {
 		uv = c.resolveUpvalue(name)
+	}
+
+	// A with-routed update resolves its Reference once and reads and writes back
+	// through it, as PutValue requires — the getter may delete the binding (or a
+	// direct eval may add a nearer one) between the read and the write, and the
+	// store still belongs to the base the read used.
+	if c.nameIsWithRouted(name) && !c.storeKeepsStaticBinding(slot, uv) {
+		c.emitWithVarRef(OpWithGetVar, name) // [base, old]
+		if prefix {
+			c.emit(incOp)                        // [base, new]
+			c.emitWithVarRef(OpWithPutVar, name) // [new]
+			return
+		}
+		c.emit(OpNeg) // ToNumeric, as below
+		c.emit(OpNeg)
+		c.emit(OpDup)                        // [base, num, num]
+		c.emit(incOp)                        // [base, num, new]
+		c.emit(OpSwapUnder)                  // [num, base, new]
+		c.emitWithVarRef(OpWithPutVar, name) // [num, new]
+		c.emit(OpPop)                        // [num]
+		return
 	}
 
 	load := func() {
@@ -1715,6 +1748,18 @@ func (c *compiler) compileAssign(n *Node) {
 
 	// Evaluate the value to assign, leaving it on the stack.
 	if n.Op == TokAssign {
+		// A with-routed target resolves its Reference BEFORE the right-hand side is
+		// evaluated, and PutValue writes back through that same Reference — so a RHS
+		// that deletes the with-object's property (or has a direct eval declare a
+		// nearer binding) does not move the store. Only the base is resolved here;
+		// a plain assignment performs no [[Get]].
+		if c.nameIsWithRouted(name) && !c.storeKeepsStaticBinding(slot, uv) {
+			c.emitWithVarBase(name)
+			nameAnonExpr(n.Right, name)
+			c.compileExpr(n.Right)
+			c.emitWithVarRef(OpWithPutVar, name)
+			return
+		}
 		nameAnonExpr(n.Right, name)
 		c.compileExpr(n.Right)
 	} else {

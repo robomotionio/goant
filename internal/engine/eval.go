@@ -368,6 +368,31 @@ func (c *compiler) resolveBorrowed(name string) int {
 	return -1
 }
 
+// borrowedIsCallerVar reports whether a borrowed name is a binding of the CALLER
+// FRAME itself rather than one the caller only reaches through its closure. Only
+// the former lies in the eval's VariableEnvironment: EvalDeclarationInstantiation
+// asks varEnv.HasBinding, so `var x` naming an ENCLOSING function's binding
+// creates a new binding here that shadows it, instead of writing through.
+func (c *compiler) borrowedIsCallerVar(name string) bool {
+	if c.borrowed == nil {
+		return false
+	}
+	for _, b := range c.borrowed.bindings {
+		if b.name == name {
+			return b.kind == evalBindLocal
+		}
+	}
+	return false
+}
+
+// evalVarUpdatesBorrowed reports whether an eval `var`/function declaration of
+// name writes through to the caller binding of that name. With no variable
+// object of its own the eval has no alternative; with one, only a binding of the
+// caller frame is in its variable environment.
+func (c *compiler) evalVarUpdatesBorrowed(name string) bool {
+	return !c.evalVarDynamic || c.borrowedIsCallerVar(name)
+}
+
 // ---- run time: compiling and executing a direct eval body ----
 
 // parseEvalSource parses direct eval source in the caller's strictness and
@@ -440,7 +465,7 @@ func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc
 		names := evalVarDeclaredNames(prog.Args)
 		g := rt.objPtr(rt.global)
 		for name := range names {
-			if c.borrowed != nil && c.resolveBorrowed(name) >= 0 {
+			if c.borrowed != nil && c.evalVarUpdatesBorrowed(name) && c.resolveBorrowed(name) >= 0 {
 				continue
 			}
 			if c.evalVarGlobal {

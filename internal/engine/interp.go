@@ -364,7 +364,10 @@ restart:
 			// 0x40: a `typeof` read, whose global fallback yields undefined instead
 			// of throwing for an unresolvable reference.
 			lenient := code[ip+7]&0x40 != 0
-			fbKind := code[ip+7] & 0x3f
+			// 0x20 (reference mode only): resolve the base and push nothing else —
+			// a plain assignment creates its Reference without reading through it.
+			baseOnly := refMode && code[ip+7]&0x20 != 0
+			fbKind := code[ip+7] & 0x1f
 			found := false
 			for k := len(withStack) - 1; k >= 0; k-- {
 				has, e := rt.hasPropE(withStack[k], name)
@@ -385,6 +388,11 @@ restart:
 					unscoped = u
 				}
 				if has && !unscoped {
+					if baseOnly {
+						push(withStack[k])
+						found = true
+						break
+					}
 					// GetBindingValue performs its OWN HasProperty (step 2) before the
 					// Get (step 4) — a second observable trap on a Proxy binding object,
 					// distinct from the one HasBinding just did.
@@ -408,6 +416,10 @@ restart:
 			if !found {
 				if refMode {
 					push(tEmpty) // base marker: use the lexical fallback on write
+				}
+				if baseOnly {
+					ip += 8
+					continue
 				}
 				// No with-object binds the name: fall back to the lexical resolution
 				// the compiler baked into the spare operand bytes (kind@ip+7, index@ip+5).
@@ -702,6 +714,15 @@ restart:
 			push(a)
 			push(obj)
 			push(a)
+			ip++
+		case OpSwapUnder:
+			// a b c -> b a c (swap the two values UNDER the top one)
+			cv := pop()
+			b := pop()
+			a := pop()
+			push(b)
+			push(a)
+			push(cv)
 			ip++
 		case OpInsert3:
 			// obj prop a -> a obj prop a
