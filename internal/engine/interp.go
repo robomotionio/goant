@@ -489,6 +489,18 @@ restart:
 					unscoped = u
 				}
 				if has && !unscoped {
+					// SetMutableBinding re-checks HasProperty (step 1) before the Set
+					// (step 3): a second observable trap, and the point at which a
+					// strict write to a binding deleted since HasBinding is caught.
+					stillExists, se := rt.hasPropE(withStack[k], name)
+					if se != nil {
+						thrown = se
+						goto unwind
+					}
+					if !stillExists && fn.isStrict {
+						thrown = rt.referenceError(name + " is not defined")
+						goto unwind
+					}
 					if e := rt.setField(withStack[k], name, val); e != nil {
 						thrown = e
 						goto unwind
