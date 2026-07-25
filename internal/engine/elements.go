@@ -223,6 +223,20 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 			if o.proxy != nil {
 				return rt.proxySet(o.proxy, rt.internString(name), v, obj)
 			}
+			// A typed array reached on the chain (the receiver inherits from one)
+			// answers with its OWN integer-indexed [[Set]] and the walk stops: a
+			// canonical index it cannot address discards the write (10.4.5.5 step
+			// 1.b), so an accessor further along — on %TypedArray%.prototype, say —
+			// is never reached and nothing is created on the receiver. cur == obj is
+			// the plain typed-array case, already handled by setElementR.
+			if cur != obj && cur.Type() == TTypedArray && o.ta != nil {
+				if fidx, isNum := canonicalNumericIndex(name); isNum {
+					if idx, integral := integerIndex(fidx); !integral || idx < 0 || idx >= rt.taLength(o) {
+						return true, nil
+					}
+					break // addressable: ordinary create-on-receiver
+				}
+			}
 			if slot := o.shape.lookupInterned(name); slot >= 0 {
 				if o.isAccessorSlot(uint32(slot)) {
 					p := o.shape.propAt(uint32(slot))
