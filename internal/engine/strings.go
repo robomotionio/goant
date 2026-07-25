@@ -322,6 +322,75 @@ func byteOffsetToUtf16(b []byte, byteOff int) int {
 	return pos
 }
 
+// concatWTF8 joins two WTF-8 strings. When the first ends with a lone HIGH
+// surrogate and the second begins with a lone LOW surrogate, the pair at the
+// seam becomes the single code point it denotes. That is the concatenation rule
+// WTF-8 requires, and it is what makes `'\uD83D' + '\uDCA9'` equal to '💩'
+// rather than a distinct string of the same two code units.
+func concatWTF8(a, b []byte) []byte {
+	if len(a) >= 3 && len(b) >= 3 {
+		ha, lo3 := a[len(a)-3:], b[:3]
+		// A surrogate is ED A0-AF (high) / ED B0-BF (low) in WTF-8. 0xED can only
+		// be a leader byte, so finding it three bytes from the end is unambiguous.
+		if ha[0] == 0xED && ha[1] >= 0xA0 && ha[1] <= 0xAF &&
+			lo3[0] == 0xED && lo3[1] >= 0xB0 && lo3[1] <= 0xBF {
+			hi := 0xD000 | uint32(ha[1]&0x3F)<<6 | uint32(ha[2]&0x3F)
+			lo := 0xD000 | uint32(lo3[1]&0x3F)<<6 | uint32(lo3[2]&0x3F)
+			cp := 0x10000 + (hi-0xD800)<<10 + (lo - 0xDC00)
+			out := make([]byte, 0, len(a)+len(b)-2)
+			out = append(out, a[:len(a)-3]...)
+			out = wtf8Encode(out, cp)
+			return append(out, b[3:]...)
+		}
+	}
+	out := make([]byte, 0, len(a)+len(b))
+	return append(append(out, a...), b...)
+}
+
+// substringUnits returns the bytes of the [start,end) UTF-16 code-unit range of
+// a WTF-8 string. A boundary that falls INSIDE a surrogate pair splits it: the
+// half that stays is emitted as a lone surrogate. That is the case a byte-range
+// slice cannot express, since the pair's 4-byte form has no interior boundary,
+// and it is why `"\u{1F306}".slice(1)` is a string of one code unit rather than
+// the empty string.
+func substringUnits(b []byte, start, end int) []byte {
+	if start < 0 {
+		start = 0
+	}
+	if end <= start {
+		return nil
+	}
+	if isASCIIBytes(b) {
+		bs, be := min(start, len(b)), min(end, len(b))
+		return b[bs:be]
+	}
+	out := make([]byte, 0, end-start)
+	pos, i := 0, 0
+	for i < len(b) && pos < end {
+		slen, units, cp := wtf8Decode(b, i)
+		next := pos + units
+		switch {
+		case next <= start: // entirely before the range
+		case units == 1 || (pos >= start && next <= end):
+			out = append(out, b[i:i+slen]...)
+		default:
+			// An astral code point straddling a boundary: emit the surrogate half
+			// that lies inside the range.
+			hi := uint32(0xD800 + ((cp - 0x10000) >> 10))
+			lo := uint32(0xDC00 + ((cp - 0x10000) & 0x3FF))
+			if pos >= start && pos < end {
+				out = wtf8Encode(out, hi)
+			}
+			if pos+1 >= start && pos+1 < end {
+				out = wtf8Encode(out, lo)
+			}
+		}
+		i += slen
+		pos = next
+	}
+	return out
+}
+
 // utf16RangeToByteRange maps a UTF-16 [start,end) range to a byte range
 // (ant utf16_range_to_byte_range). Indices are assumed clamped by the caller.
 func utf16RangeToByteRange(b []byte, start, end int) (bStart, bEnd int) {

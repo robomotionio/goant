@@ -6,7 +6,10 @@ package engine
 import (
 	"math"
 	"strings"
+	"unicode"
 	"unicode/utf8"
+
+	"goant/internal/regexpjs"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -26,10 +29,66 @@ func jsToUpperCase(b []byte) string {
 }
 
 func jsToLowerCase(b []byte) string {
-	if utf8.Valid(b) {
-		return cases.Lower(language.Und).String(string(b))
+	if !utf8.Valid(b) {
+		return strings.ToLower(string(b))
 	}
-	return strings.ToLower(string(b))
+	s := string(b)
+	lower := cases.Lower(language.Und)
+	if !strings.ContainsRune(s, 'Σ') {
+		return lower.String(s)
+	}
+	// Σ is decided here rather than by the general mapping: Final_Sigma is a
+	// CONTEXT condition, and the one place the default (language-independent)
+	// lowercase mapping has one. Splitting the string at each Σ is safe precisely
+	// because it is the only such rule — every other Und mapping is per-character.
+	rs := []rune(s)
+	var out strings.Builder
+	start := 0
+	for i, r := range rs {
+		if r != 'Σ' {
+			continue
+		}
+		out.WriteString(lower.String(string(rs[start:i])))
+		if finalSigma(rs, i) {
+			out.WriteRune('ς')
+		} else {
+			out.WriteRune('σ')
+		}
+		start = i + 1
+	}
+	out.WriteString(lower.String(string(rs[start:])))
+	return out.String()
+}
+
+// finalSigma reports whether the Σ at rs[i] takes the word-final form: it is
+// preceded by a Cased character and not followed by one, in both directions
+// skipping Case_Ignorable characters. U+0345 is BOTH cased and case-ignorable,
+// and being case-ignorable is what decides it — so `\u0345\u03A3` lowercases to
+// a non-final sigma while `\u0391\u0345\u03A3` gives the final one.
+func finalSigma(rs []rune, i int) bool {
+	cased := regexpjs.UnicodeBinaryProperty("Cased")
+	ignorable := regexpjs.UnicodeBinaryProperty("Case_Ignorable")
+	if cased == nil || ignorable == nil {
+		return false
+	}
+	before := false
+	for j := i - 1; j >= 0; j-- {
+		if unicode.Is(ignorable, rs[j]) {
+			continue
+		}
+		before = unicode.Is(cased, rs[j])
+		break
+	}
+	if !before {
+		return false
+	}
+	for j := i + 1; j < len(rs); j++ {
+		if unicode.Is(ignorable, rs[j]) {
+			continue
+		}
+		return !unicode.Is(cased, rs[j])
+	}
+	return true
 }
 
 // isRegExpValue implements ES IsRegExp: an object whose Symbol.match is truthy
@@ -272,8 +331,7 @@ func (rt *Runtime) initStringBuiltin() {
 		if start >= end {
 			return rt.internString(""), nil
 		}
-		bs, be := utf16RangeToByteRange(b, start, end)
-		return rt.newStringBytes(append([]byte{}, b[bs:be]...)), nil
+		return rt.newStringBytes(substringUnits(b, start, end)), nil
 	})
 	rt.defMethod(proto, "substring", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
@@ -294,8 +352,7 @@ func (rt *Runtime) initStringBuiltin() {
 		if start > end {
 			start, end = end, start
 		}
-		bs, be := utf16RangeToByteRange(b, start, end)
-		return rt.newStringBytes(append([]byte{}, b[bs:be]...)), nil
+		return rt.newStringBytes(substringUnits(b, start, end)), nil
 	})
 	rt.defMethod(proto, "toUpperCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
@@ -451,8 +508,7 @@ func (rt *Runtime) initStringBuiltin() {
 		if resultLen <= 0 {
 			return rt.internString(""), nil
 		}
-		bs, be := utf16RangeToByteRange(b, start, start+int(resultLen))
-		return rt.newStringBytes(append([]byte{}, b[bs:be]...)), nil
+		return rt.newStringBytes(substringUnits(b, start, start+int(resultLen))), nil
 	})
 	rt.defMethod(proto, "localeCompare", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)

@@ -1,5 +1,7 @@
 package regexpjs
 
+import "unicode"
+
 // esBinaryProperties is the ECMAScript-permitted set of lone Unicode binary
 // property names (`\p{Name}`), mapping each canonical name and alias to its
 // canonical name. Properties outside this set (e.g. Go's Other_Math, Hyphen,
@@ -57,3 +59,10 @@ var esBinaryProperties = map[string]string{
 	"XID_Continue": "XID_Continue", "XIDC": "XID_Continue",
 	"XID_Start": "XID_Start", "XIDS": "XID_Start",
 }
+
+// UnicodeBinaryProperty returns the code-point set of a Unicode binary property
+// by its canonical name ("Cased", "Case_Ignorable", …), or nil if there is no
+// such property. It exposes the generated tables to callers outside the regexp
+// engine — String.prototype.toLowerCase needs Cased / Case_Ignorable to decide
+// the Final_Sigma context.
+func UnicodeBinaryProperty(name string) *unicode.RangeTable { return u17Binary[name] }
