@@ -916,10 +916,12 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	if !descVal.IsObjectType() {
 		return rt.typeError("Property description must be an object")
 	}
-	if e := rt.namespaceDefineProperty(obj, key, descVal); e != nil {
-		return e
-	} else if rt.isModuleNamespace(obj) {
-		return nil // accepted: the descriptor matched the existing one exactly
+	// Only a STRING key on a namespace takes the namespace rule; a symbol falls
+	// through to the ordinary path, where a new key on this non-extensible object
+	// is correctly rejected. Testing isModuleNamespace alone would treat the
+	// helper's symbol early-return as an acceptance.
+	if !key.IsSymbol() && rt.isModuleNamespace(obj) {
+		return rt.namespaceDefineProperty(obj, key, descVal)
 	}
 	o := rt.objPtr(obj)
 	if o == nil {
