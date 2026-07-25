@@ -198,14 +198,25 @@ func (c *compiler) declareAnnexBName(name string) {
 func (c *compiler) compileIfBranch(n *Node) {
 	if !c.fn.isStrict && n != nil && n.Kind == NFunc && n.Str != "" &&
 		n.Flags&fnArrow == 0 && n.Flags&fnParen == 0 {
-		c.compileFunc(n)
 		// When the B.3.4 extension is skipped (a parameter/lexical shadows the
 		// name), the declaration must not update the enclosing binding: compile the
 		// function for its early errors, then discard its value.
 		if c.annexBIfVarShadowed(n.Str) {
+			c.compileFunc(n)
 			c.emit(OpPop)
 			return
 		}
+		// The declaration has its own binding in the branch's scope — that is what
+		// a reference from inside the function denotes — and the var receives only
+		// a copy, so a later write inside the function does not reach it and the
+		// outer name stays callable. The scope is entered and the binding declared
+		// BEFORE the body is compiled, or the closure would capture the var
+		// instead (the same ordering hoistFunctions needs for B.3.3).
+		c.scopeDepth++
+		lex := c.declareLexical(n.Str, false)
+		c.compileFunc(n)
+		c.emit(OpDup)
+		c.emitOpU16(OpPutLocal, uint16(lex))
 		// The B.3.4 assignment targets the enclosing var-scope binding (the one
 		// declareAnnexBName created), not an intervening catch parameter: a simple
 		// catch parameter may coexist with the var, so `try{}catch(f){if(1)function
@@ -218,6 +229,8 @@ func (c *compiler) compileIfBranch(n *Node) {
 		} else {
 			c.emitGlobalPut(n.Str)
 		}
+		c.scopeDepth--
+		c.popBlockScope()
 		return
 	}
 	c.compileStmt(n)
