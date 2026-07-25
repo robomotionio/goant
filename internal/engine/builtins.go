@@ -43,6 +43,33 @@ func (rt *Runtime) initBuiltins() {
 	// print (a bare stdout printer, convenient for conformance harnesses)
 	g.defineOwn("print", rt.newNativeFunc("print", 0, logFn(os.Stdout)), attrWritable|attrConfigurable)
 
+	// evalScript(source): evaluate source as a new SCRIPT in this realm. This is a
+	// host capability rather than an ECMAScript one, and it is NOT eval: a
+	// Script's top-level `var` and function declarations become NON-configurable
+	// global properties, and its top-level let/const/class join the global lexical
+	// environment where the next Script still sees them.
+	g.defineOwn("evalScript", rt.newNativeFunc("evalScript", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		sv, e := rt.toStringValue(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		src := string(rt.strBytes(sv))
+		prog, perr := Parse("<script>", src)
+		if perr != nil {
+			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
+			return mkundef(), &ThrowError{Value: ev, rt: rt}
+		}
+		fn, cerr := rt.Compile(prog, "<script>", src)
+		if gde, ok := cerr.(*GlobalDeclError); ok {
+			return mkundef(), rt.typeError(gde.Msg)
+		}
+		if cerr != nil {
+			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(cerr.Error())})
+			return mkundef(), &ThrowError{Value: ev, rt: rt}
+		}
+		return rt.runFrame(fn, nil, mkundef(), rt.global, nil)
+	}), attrWritable|attrConfigurable)
+
 	// Timers (HTML setTimeout/setInterval). goant runs a virtual clock: callbacks
 	// fire from the host event loop in (delay, scheduling-order), after the
 	// microtask queue drains. The delay only orders tasks; no time actually

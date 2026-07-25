@@ -80,13 +80,47 @@ func (rt *Runtime) evalInGlobalScope(src string, strict bool) (Value, *ThrowErro
 		ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
 		return mkundef(), &ThrowError{Value: ev, rt: rt}
 	}
+	// A strict eval keeps its declarations in its own variable environment; only
+	// a sloppy one creates global bindings, and then only after every one of them
+	// is checked to be definable (EvalDeclarationInstantiation validates the whole
+	// set before creating any, so a failure leaves nothing behind).
+	if prog.Flags&fnParseStrict == 0 {
+		if e := rt.validateGlobalEvalDeclarations(prog); e != nil {
+			return mkundef(), e
+		}
+	}
 	fn, cerr := rt.CompileEval(prog, "<eval>", src)
 	if cerr != nil {
 		ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(cerr.Error())})
 		return mkundef(), &ThrowError{Value: ev, rt: rt}
 	}
-	rt.prepareGlobalFuncBindings(prog)
+	if prog.Flags&fnParseStrict == 0 {
+		rt.prepareGlobalFuncBindings(prog)
+	}
 	return rt.runFrame(fn, nil, mkundef(), rt.global, nil)
+}
+
+// validateGlobalEvalDeclarations is EvalDeclarationInstantiation's definability
+// check for eval code whose variable environment is the global one: an
+// undefinable name — a non-configurable global property, or any new name on a
+// non-extensible global — is a TypeError raised before a single binding is made.
+func (rt *Runtime) validateGlobalEvalDeclarations(prog *Node) *ThrowError {
+	funcNames := map[string]bool{}
+	topLevelFuncNames(prog.Args, funcNames)
+	for f := range funcNames {
+		if !rt.canDeclareGlobalFunction(f) {
+			return rt.typeError("Cannot declare global function '" + f + "'")
+		}
+	}
+	for v := range evalVarDeclaredNames(prog.Args) {
+		if funcNames[v] {
+			continue
+		}
+		if !rt.canDeclareGlobalVar(v) {
+			return rt.typeError("Cannot declare global variable '" + v + "'")
+		}
+	}
+	return nil
 }
 
 // prepareGlobalFuncBindings applies CreateGlobalFunctionBinding for the top-level
@@ -251,8 +285,15 @@ func topLevelFuncNames(stmts []*Node, out map[string]bool) {
 // also gathers) are lexical — they bind in the eval's own declarative environment,
 // not the variable environment — so they are excluded here.
 func evalVarDeclaredNames(stmts []*Node) map[string]bool {
+	return evalVarDeclaredNamesMode(stmts, false)
+}
+
+// evalVarDeclaredNamesMode is evalVarDeclaredNames with the Annex B.3.3
+// extension switched off for strict code, where a block-level function
+// declaration binds only in its block.
+func evalVarDeclaredNamesMode(stmts []*Node, strict bool) map[string]bool {
 	names := map[string]bool{}
-	collectVarFuncNames(stmts, names)
+	collectVarFuncNamesMode(stmts, names, strict)
 	for _, n := range stmts {
 		s := n
 		if s != nil && s.Kind == NLabel {
@@ -547,21 +588,8 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 	// colliding with a non-configurable global property) is a TypeError, and no
 	// partial bindings are left behind.
 	if !sc.inFunction && !evalStrict {
-		funcNames := map[string]bool{}
-		topLevelFuncNames(prog.Args, funcNames)
-		allNames := evalVarDeclaredNames(prog.Args)
-		for f := range funcNames {
-			if !rt.canDeclareGlobalFunction(f) {
-				return mkundef(), rt.typeError("Cannot declare global function '" + f + "'")
-			}
-		}
-		for v := range allNames {
-			if funcNames[v] {
-				continue
-			}
-			if !rt.canDeclareGlobalVar(v) {
-				return mkundef(), rt.typeError("Cannot declare global variable '" + v + "'")
-			}
+		if e := rt.validateGlobalEvalDeclarations(prog); e != nil {
+			return mkundef(), e
 		}
 	}
 

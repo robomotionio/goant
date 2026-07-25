@@ -591,7 +591,10 @@ func (c *compiler) bindDeclared(name string) {
 		c.emitOpU16(OpPutLocal, uint16(slot))
 		return
 	}
-	if c.isScript && !c.isModule {
+	// Script code binds on the global object, and so does a SLOPPY indirect eval
+	// (its variable environment is the global one). A STRICT eval has its own
+	// variable environment, so its declarations stay frame-local and never leak.
+	if c.isScript && !c.isModule && (!c.isEval || c.evalVarGlobal) {
 		c.emitGlobalPut(name)
 		return
 	}

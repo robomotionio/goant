@@ -130,15 +130,29 @@ func (rt *Runtime) initShadowRealmBuiltin() {
 		if src.Type() != TStr { // no coercion: the argument must already be a string
 			return mkundef(), rt.typeError("ShadowRealm.prototype.evaluate expects a string")
 		}
-		v, err := sr.rt.RunString("<shadowrealm>", string(rt.strBytes(src)))
-		if err != nil {
-			// A SyntaxError inside the realm surfaces as this realm's SyntaxError;
-			// any other abrupt completion becomes a TypeError, since the thrown
-			// value itself may not cross.
-			if _, isSyntax := err.(*SyntaxError); isSyntax {
-				return mkundef(), rt.syntaxError(err.Error())
+		// PerformShadowRealmEval runs the source as an INDIRECT EVAL in the other
+		// realm, not as a Script: its top-level let/const belong to that eval, so
+		// two evaluations may declare the same name, and its `var`s are
+		// configurable global bindings.
+		srcText := string(rt.strBytes(src))
+		// Only a SyntaxError from PARSING this source crosses as a SyntaxError. Once
+		// the code is running, every abrupt completion — including a SyntaxError a
+		// nested eval raises — becomes a TypeError here, since the thrown value
+		// itself may not cross realms.
+		if _, perr := parseMode("<shadowrealm>", srcText, false, false); perr != nil {
+			return mkundef(), rt.syntaxError(perr.Error())
+		}
+		v, terr := sr.rt.evalInGlobalScope(srcText, false)
+		sr.rt.runEventLoop()
+		if terr != nil {
+			name, msg := "", ""
+			if nv, e2 := sr.rt.getField(terr.Value, "name"); e2 == nil && nv.IsString() {
+				name = string(sr.rt.strBytes(nv))
 			}
-			return mkundef(), rt.typeError("ShadowRealm evaluation threw: " + err.Error())
+			if mv, e2 := sr.rt.getField(terr.Value, "message"); e2 == nil && mv.IsString() {
+				msg = string(sr.rt.strBytes(mv))
+			}
+			return mkundef(), rt.typeError("ShadowRealm evaluation threw: " + name + ": " + msg)
 		}
 		out, me := rt.marshalOut(sr.rt, v)
 		if me != nil {

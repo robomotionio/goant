@@ -88,6 +88,10 @@ type svFunc struct {
 	// is what the parameter map indexes.
 	mappedArgs bool
 
+	// globalLex maps this Script's top-level lexical names to the frame slots
+	// holding them, so frame entry can publish them as global lexical bindings.
+	globalLex map[string]globalLexDecl
+
 	// capturesHome marks an arrow function that reads `super` inherited from an
 	// enclosing object-literal method: its closure takes that method's
 	// [[HomeObject]], since an arrow has none of its own.

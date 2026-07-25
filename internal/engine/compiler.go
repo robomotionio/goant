@@ -466,13 +466,11 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		}
 		c.emitImportPrologue(moduleStmts)
 	} else if !c.isEval {
-		names := map[string]bool{}
-		collectVarFuncNames(prog.Args, names)
-		g := rt.objPtr(rt.global)
-		for name := range names {
-			if !g.hasOwn(name) {
-				g.defineOwn(name, mkundef(), attrWritable|attrEnumerable)
-			}
+		// GlobalDeclarationInstantiation: validate every top-level declaration and
+		// only then create the global var/function bindings, so a Script that fails
+		// leaves the global environment exactly as it found it.
+		if e := rt.globalDeclarationInstantiation(prog, strict); e != nil {
+			return nil, e
 		}
 	} else if c.evalVarGlobal {
 		// Sloppy indirect eval: pre-create its var/function names on the global as
@@ -490,6 +488,23 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 
 	c.checkBlockDeclConflicts(prog.Args, false)
 	c.hoistLexicals(prog.Args)
+	if !isEval && !isModule {
+		// GlobalDeclarationInstantiation: a Script's top-level lexical bindings
+		// belong to the global environment's DECLARATIVE record — not to the global
+		// object — and outlive the Script. They keep their frame slots (so this
+		// Script's own code and closures are unchanged); recording them here is
+		// what publishes them to later Scripts and to eval.
+		for i := range c.locals {
+			lv := &c.locals[i]
+			if lv.dead || !lv.blockScoped || lv.depth != c.scopeDepth || !borrowableName(lv.name) {
+				continue
+			}
+			if c.fn.globalLex == nil {
+				c.fn.globalLex = map[string]globalLexDecl{}
+			}
+			c.fn.globalLex[lv.name] = globalLexDecl{slot: i, isConst: lv.isConst}
+		}
+	}
 	c.hoistFunctions(prog.Args, false)
 	c.compileStmts(prog.Args)
 	if c.err != nil {

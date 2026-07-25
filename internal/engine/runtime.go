@@ -191,6 +191,11 @@ type Runtime struct {
 	callerVarObj    Value
 	callerWithStack []Value
 
+	// globalLex is the declarative half of the global environment record: the
+	// Script-level let/const/class bindings, which are not properties of the
+	// global object but are visible to every later Script and eval (globallex.go).
+	globalLex map[string]*globalLexBinding
+
 	// pendingVarObj hands the caller's variable object to the eval frame about to
 	// run, so a direct eval nested inside eval code still reaches the variable
 	// environment of the function that started the chain.

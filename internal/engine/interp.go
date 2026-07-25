@@ -208,6 +208,12 @@ restart:
 		rt.pendingModule.locals = locals
 		rt.pendingModule = nil
 	}
+	// A Script's top-level lexical bindings become global ones here — before any
+	// of them is initialised, so a read from a nested call reaches the temporal
+	// dead zone rather than finding nothing at all.
+	if fn.globalLex != nil {
+		rt.registerGlobalLex(fn, locals)
+	}
 	openUpvals = nil
 	handlers = nil
 	pendingThrow = mkundef()
@@ -973,6 +979,18 @@ restart:
 			ip += 3
 		case OpGetGlobal:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			// The global environment's declarative record is consulted first: a
+			// Script-level let/const/class shadows a same-named global property.
+			if b := rt.lookupGlobalLex(name); b != nil {
+				v, e := rt.globalLexRead(b, name)
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				push(v)
+				ip += 7
+				continue
+			}
 			// GetValue on an unresolvable reference throws (a bare undeclared name);
 			// typeof reads via GET_GLOBAL_UNDEF instead, so it never reaches here.
 			if !rt.hasProp(rt.global, name) {
@@ -991,8 +1009,19 @@ restart:
 			ip += 7
 		case OpGetGlobalUndef:
 			// Lenient global read (typeof of a possibly-undeclared global): absent
-			// names yield undefined rather than a ReferenceError.
+			// names yield undefined rather than a ReferenceError. A global lexical
+			// binding is NOT absent, so its temporal dead zone still throws.
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			if b := rt.lookupGlobalLex(name); b != nil {
+				v, e := rt.globalLexRead(b, name)
+				if e != nil {
+					thrown = e
+					goto unwind
+				}
+				push(v)
+				ip += 7
+				continue
+			}
 			v, ge := rt.getField(rt.global, name)
 			if ge != nil {
 				thrown = ge
@@ -1003,6 +1032,14 @@ restart:
 		case OpPutGlobal:
 			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			val := pop()
+			if b := rt.lookupGlobalLex(name); b != nil {
+				if e := rt.globalLexWrite(b, name, val); e != nil {
+					thrown = e
+					goto unwind
+				}
+				ip += 5
+				continue
+			}
 			if fn.isStrict && !rt.hasProp(rt.global, name) {
 				thrown = rt.referenceError(name + " is not defined")
 				goto unwind
