@@ -160,6 +160,9 @@ type Runtime struct {
 	// pendingModule is the record whose body is about to start; runFrame hands
 	// it the frame's locals slice so importers keep a live view of its bindings.
 	pendingModule *moduleRecord
+	// shadowRealms holds the isolated Runtime behind each ShadowRealm instance.
+	shadowRealms     map[*object]*shadowRealm
+	shadowRealmProto Value
 	// moduleNamespaces marks the module namespace exotic objects. Their exports
 	// are stored as accessors so reads see the live binding, but they must be
 	// REPORTED as data properties, so descriptor queries consult this set.
@@ -315,6 +318,7 @@ func New() *Runtime {
 	rt.initGeneratorBuiltin()
 	rt.initReflectBuiltin()
 	rt.initProxyBuiltin()
+	rt.initShadowRealmBuiltin()
 	rt.initTypedArrays()
 	rt.initIteratorHelpers()
 	rt.initAsyncIterator()
