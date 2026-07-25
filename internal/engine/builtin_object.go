@@ -916,6 +916,11 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	if !descVal.IsObjectType() {
 		return rt.typeError("Property description must be an object")
 	}
+	if e := rt.namespaceDefineProperty(obj, key, descVal); e != nil {
+		return e
+	} else if rt.isModuleNamespace(obj) {
+		return nil // accepted: the descriptor matched the existing one exactly
+	}
 	o := rt.objPtr(obj)
 	if o == nil {
 		return rt.typeError("Object.defineProperty called on non-object")

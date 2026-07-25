@@ -501,3 +501,70 @@ func (rt *Runtime) namespaceDescriptor(ns Value, name string) (Value, bool, *Thr
 	do.defineOwn("configurable", mkbool(false), attrDefault)
 	return d, true, nil
 }
+
+// isModuleNamespace reports whether v is a module namespace exotic object.
+func (rt *Runtime) isModuleNamespace(v Value) bool {
+	o := rt.objPtr(v)
+	return o != nil && rt.moduleNamespaces[o]
+}
+
+// namespaceDefineProperty implements [[DefineOwnProperty]] for a module
+// namespace object: it never adds or alters anything, and succeeds only when the
+// descriptor is a no-op — one that matches the export's existing attributes
+// (writable, enumerable, non-configurable) and, if a value is given, its current
+// value. Anything else is rejected, which Reflect.defineProperty reports as
+// false and Object.defineProperty throws.
+func (rt *Runtime) namespaceDefineProperty(ns, key, descVal Value) *ThrowError {
+	if !rt.isModuleNamespace(ns) || key.IsSymbol() {
+		// A symbol key is not an export name: it takes the ordinary path, which is
+		// what makes @@toStringTag definable.
+		return nil
+	}
+	// Not key.IsString(): toPropertyKey leaves an array-index key numeric for the
+	// fast paths, so an integer property name would slip past a string-only test.
+	name, e := rt.propKeyString(key)
+	if e != nil {
+		return e
+	}
+	cur, isExport, e2 := rt.namespaceDescriptor(ns, name)
+	e = e2
+	if e != nil {
+		return e
+	}
+	if !isExport {
+		// A name the module does not export cannot be created on the namespace.
+		return rt.rejectDefine("cannot define property '" + name + "' on a module namespace")
+	}
+	sameField := func(field string, want Value) (bool, *ThrowError) {
+		has, e := rt.hasPropE(descVal, field)
+		if e != nil || !has {
+			return true, e // absent fields impose no constraint
+		}
+		got, e := rt.getField(descVal, field)
+		if e != nil {
+			return false, e
+		}
+		return rt.sameValue(got, want), nil
+	}
+	for _, f := range []string{"get", "set"} {
+		has, e := rt.hasPropE(descVal, f)
+		if e != nil {
+			return e
+		}
+		if has { // a namespace export is never an accessor
+			return rt.rejectDefine("cannot redefine property '" + name + "' on a module namespace")
+		}
+	}
+	curo := rt.objPtr(cur)
+	for _, f := range []string{"value", "writable", "enumerable", "configurable"} {
+		want, _ := curo.getOwn(f)
+		ok, e := sameField(f, want)
+		if e != nil {
+			return e
+		}
+		if !ok {
+			return rt.rejectDefine("cannot redefine property '" + name + "' on a module namespace")
+		}
+	}
+	return nil
+}
