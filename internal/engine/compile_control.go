@@ -937,15 +937,21 @@ func (c *compiler) compileFinallyBlock(body *Node) {
 	c.unwindPush(unwFinallyBody)
 	// A finally that completes normally does not contribute its own completion
 	// value: `try Block Finally` yields Block's value (step 3, "let F be B"), and
-	// `try Block Catch Finally` yields the Block/Catch value. Preserve the
-	// completion value across the finally body so the finally's statements don't
-	// clobber it (script/eval completion only). An abrupt finally is resumed via
-	// OpFinallyRet with its own value, so the restore is harmless there.
+	// `try Block Catch Finally` yields the Block/Catch value. Preserve it across
+	// the finally body so the finally's statements don't clobber it, and restore
+	// it below — code only reached when the body completes normally, since an
+	// abrupt one jumps out of the region.
+	//
+	// An ABRUPT finally keeps its OWN value, and UpdateEmpty(F, undefined) turns
+	// an empty one into undefined rather than the block's: `do { try { 39 }
+	// finally { break } } while (false)` is undefined, while `finally { 42;
+	// break }` is 42. So the body starts from undefined, not from the saved value.
 	saveSlot := -1
 	if c.isScript {
 		saveSlot = c.addLocal("*fincmp*", false)
 		c.emitOpU16(OpGetLocal, uint16(c.completionSlot))
 		c.emitOpU16(OpPutLocal, uint16(saveSlot))
+		c.resetCompletion()
 	}
 	// The finally Block is in tail position when the TryStatement is: whatever
 	// completion it was entered with, a `return f()` here replaces it and leaves

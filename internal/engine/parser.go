@@ -724,6 +724,16 @@ func (p *parser) parseDotPropertyName() *Node {
 	return name
 }
 
+// allowIn clears the [~In] restriction for the duration of a bracketed
+// sub-expression and returns a restore function. Only the TOP LEVEL of a
+// for-head suppresses `in`; inside brackets, parentheses, an argument list or a
+// template substitution the [+In] parameter is restored.
+func (p *parser) allowIn() func() {
+	saved := p.noIn
+	p.noIn = false
+	return func() { p.noIn = saved }
+}
+
 func (p *parser) parseMemberSuffix(left *Node, la Token) *Node {
 	if la == TokDot {
 		p.consume()
@@ -755,7 +765,9 @@ func (p *parser) parseMemberSuffix(left *Node, la Token) *Node {
 		p.consume()
 		mem := p.mk(NMember)
 		mem.Left = left
+		restore := p.allowIn()
 		mem.Right = p.parseExpr()
+		restore()
 		mem.Flags = 1
 		p.expect(TokRBracket)
 		return mem
@@ -1199,7 +1211,9 @@ func (p *parser) parseTemplate() *Node {
 		}
 		sub := in[base+exprStart : base+exprStart+exprMaxLen]
 		cp := p.lx.pushSource(sub)
+		restoreIn := p.allowIn()
 		expr := p.parseExpr()
+		restoreIn()
 		n.Args = append(n.Args, expr)
 		if p.next() != TokRBrace {
 			p.errorf("Unterminated template expression")
@@ -1274,6 +1288,8 @@ func (p *parser) parseNew() *Node {
 	n.Left = callee
 	if p.next() == TokLParen {
 		p.consume()
+		restoreNewArgs := p.allowIn()
+		defer restoreNewArgs()
 		for p.next() != TokRParen && p.tok() != TokEOF {
 			if p.tok() == TokRest {
 				p.consume()
@@ -1334,6 +1350,7 @@ func (p *parser) parseImportExpr() *Node {
 // AssignmentExpressions — not a comma sequence, and no spread.
 func (p *parser) parseImportCallArgs() *Node {
 	p.consume() // '('
+	defer p.allowIn()()
 	n := p.mk(NImport)
 	if p.next() == TokRParen {
 		p.errorf("import() requires a specifier argument")
@@ -1863,6 +1880,7 @@ func (p *parser) parseCall() *Node {
 			p.consume()
 			call := p.mk(NCall)
 			call.Left = n
+			restore := p.allowIn()
 			for p.next() != TokRParen && p.tok() != TokEOF {
 				if p.tok() == TokRest {
 					p.consume()
@@ -1878,6 +1896,7 @@ func (p *parser) parseCall() *Node {
 					break
 				}
 			}
+			restore()
 			p.expect(TokRParen)
 			n = call
 		case TokDot, TokLBracket:
