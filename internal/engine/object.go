@@ -151,7 +151,7 @@ type nativeFunc func(rt *Runtime, this Value, args []Value) (Value, *ThrowError)
 func (rt *Runtime) newObject(proto Value) Value {
 	h, obj := rt.objects.alloc()
 	obj.proto = proto
-	obj.shape = newShape()
+	obj.shape = rt.newShape()
 	obj.typeTag = TObj
 	obj.flags.extensible = true
 	return mkval(TObj, uint64(h))
@@ -161,7 +161,7 @@ func (rt *Runtime) newObject(proto Value) Value {
 func (rt *Runtime) newArray() Value {
 	h, obj := rt.objects.alloc()
 	obj.proto = rt.arrayProto
-	obj.shape = newShape()
+	obj.shape = rt.newShape()
 	obj.typeTag = TArr
 	obj.flags.extensible = true
 	obj.flags.fastArray = true

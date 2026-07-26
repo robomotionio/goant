@@ -23,7 +23,7 @@ package engine
 // costs one predictable compare and removes the need to re-derive that argument
 // every time this file changes.
 func (ic *propIC) hit(o *object) bool {
-	return ic.shape == o.shape && ic.epoch == icEpoch && ic.slot != icMissSlot && o.proxy == nil
+	return ic.shape == o.shape && ic.epoch == icEpoch() && ic.slot != icMissSlot && o.proxy == nil
 }
 
 // dead reports that this site has seen too many shapes to be worth caching.
@@ -35,7 +35,7 @@ func (ic *propIC) dead() bool { return ic.misses >= icMissLimit }
 // there is nothing for a fill to learn. This is what keeps a site whose property
 // is inherited from re-probing the receiver's own shape on every access.
 func (ic *propIC) known(o *object) bool {
-	return ic.shape == o.shape && ic.epoch == icEpoch
+	return ic.shape == o.shape && ic.epoch == icEpoch()
 }
 
 // record points the entry at o's shape, first charging a miss if it is being
@@ -49,7 +49,7 @@ func (ic *propIC) record(o *object, slot uint32) {
 			return
 		}
 	}
-	ic.shape, ic.epoch, ic.slot = o.shape, icEpoch, slot
+	ic.shape, ic.epoch, ic.slot = o.shape, icEpoch(), slot
 }
 
 // icReceiver returns the object to consult for an inline-cached read, or nil if

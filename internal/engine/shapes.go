@@ -1,5 +1,7 @@
 package engine
 
+import "sync/atomic"
+
 // Port of ant src/shapes.c — the hidden-class ("shape") transition system.
 // Objects sharing the same property-addition history share a shape, which maps
 // property keys to fixed slot indices; this is what makes inline caches and
@@ -24,13 +26,23 @@ const (
 // inobjMaxSlots is ant's ANT_INOBJ_MAX_SLOTS (inline object slot count).
 const inobjMaxSlots = 4
 
-// icEpoch is the global inline-cache generation counter (ant ant_ic_epoch_counter).
-var icEpoch uint32 = 1
+// icEpochCounter is the inline-cache generation counter (ant
+// ant_ic_epoch_counter).
+//
+// It stays process-wide rather than per-Runtime because the shape methods that
+// invalidate have no Runtime to hand, but it is atomic: Runtimes on different
+// goroutines bump it independently. Sharing it is harmless — a bump from an
+// unrelated Runtime only makes another's caches refill, which is a cost, not a
+// wrong answer — whereas a torn read or a lost update would be neither.
+var icEpochCounter atomic.Uint32
+
+func init() { icEpochCounter.Store(1) }
+
+func icEpoch() uint32 { return icEpochCounter.Load() }
 
 func icEpochBump() {
-	icEpoch++
-	if icEpoch == 0 {
-		icEpoch = 1
+	if icEpochCounter.Add(1) == 0 {
+		icEpochCounter.Store(1)
 	}
 }
 
@@ -113,9 +125,6 @@ type shape struct {
 	parentKey  childKey
 }
 
-// rootShapes caches the empty root shape per inobj_limit.
-var rootShapes [inobjMaxSlots + 1]*shape
-
 func clampInobjLimit(limit uint8) uint8 {
 	if limit > inobjMaxSlots {
 		return inobjMaxSlots
@@ -123,18 +132,28 @@ func clampInobjLimit(limit uint8) uint8 {
 	return limit
 }
 
-// newShapeWithLimit returns the shared empty root shape for a given inobj
+// newShapeWithLimit returns this runtime's empty root shape for a given inobj
 // limit, retained (ant ant_shape_new_with_inobj_limit).
-func newShapeWithLimit(inobjLimit uint8) *shape {
+//
+// The roots live on the Runtime, not in a package variable. Every shape an
+// object ever gets descends from one of them through the transition tree, and
+// a transition MUTATES its parent's children map — so a shared root is a shared
+// mutable structure, and two Runtimes allocating objects at the same time race
+// on it. That is not a theoretical race: it crashes with "concurrent map read
+// and map write" inside New(), before any script runs.
+//
+// A host running scripts in parallel gives each goroutine its own Runtime and
+// is entitled to assume they are independent. This is what makes that true.
+func (rt *Runtime) newShapeWithLimit(inobjLimit uint8) *shape {
 	c := clampInobjLimit(inobjLimit)
-	if rootShapes[c] == nil {
-		rootShapes[c] = &shape{refCount: 1, inobjLimit: c, index: map[propKey]uint32{}}
+	if rt.rootShapes[c] == nil {
+		rt.rootShapes[c] = &shape{refCount: 1, inobjLimit: c, index: map[propKey]uint32{}}
 	}
-	rootShapes[c].refCount++
-	return rootShapes[c]
+	rt.rootShapes[c].refCount++
+	return rt.rootShapes[c]
 }
 
-func newShape() *shape { return newShapeWithLimit(inobjMaxSlots) }
+func (rt *Runtime) newShape() *shape { return rt.newShapeWithLimit(inobjMaxSlots) }
 
 func (s *shape) retain() {
 	if s != nil {

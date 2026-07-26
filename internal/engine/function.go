@@ -18,7 +18,7 @@ func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 	case fn.isGenerator && rt.generatorFuncProto != 0:
 		obj.proto = rt.generatorFuncProto
 	}
-	obj.shape = newShape()
+	obj.shape = rt.newShape()
 	obj.typeTag = TFunc
 	obj.flags.extensible = true
 	obj.flags.isCallable = true
@@ -122,7 +122,7 @@ func (rt *Runtime) setMethodHome(fnVal, home Value) {
 func (rt *Runtime) newNativeFunc(name string, length int, fn nativeFunc) Value {
 	oh, obj := rt.objects.alloc()
 	obj.proto = rt.functionProto
-	obj.shape = newShape()
+	obj.shape = rt.newShape()
 	obj.typeTag = TFunc
 	obj.flags.extensible = true
 	obj.flags.isCallable = true

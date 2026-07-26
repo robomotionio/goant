@@ -131,6 +131,9 @@ func (rt *Runtime) primitiveProto(v Value) Value {
 
 // setField writes obj.name = v (ignoring rejection; see setFieldR for strict).
 func (rt *Runtime) setField(obj Value, name string, v Value) *ThrowError {
+	// A write reaching an object that predates this invocation is a write the
+	// next run would inherit. See invocation_dirty.go.
+	rt.noteSharedMutation(obj)
 	_, e := rt.setFieldR(obj, name, v)
 	return e
 }
@@ -188,6 +191,7 @@ func (rt *Runtime) createDataProperty(obj, key, v Value) *ThrowError {
 // = rejected by a non-writable data property, a setter-less accessor, or a
 // non-extensible object). Callers in strict mode turn a false into a TypeError.
 func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError) {
+	rt.noteSharedMutation(obj)
 	if obj.IsNullish() {
 		return false, rt.typeError("cannot set properties of " + rt.nullishName(obj))
 	}

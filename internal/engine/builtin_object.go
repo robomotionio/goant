@@ -922,12 +922,14 @@ func (rt *Runtime) setThrow(to, key, val Value) *ThrowError {
 
 // objectDefineProperty applies an ES5 property descriptor to obj[name].
 func (rt *Runtime) objectDefineProperty(obj Value, name string, descVal Value) *ThrowError {
+	rt.noteSharedMutation(obj)
 	return rt.objectDefinePropertyKey(obj, rt.internString(name), descVal)
 }
 
 // objectDefinePropertyKey applies a descriptor to obj[key] for a string or
 // symbol key.
 func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) *ThrowError {
+	rt.noteSharedMutation(obj)
 	// ToPropertyKey(P) precedes ToPropertyDescriptor(Attributes): a throwing key
 	// coercion must be observed before the "descriptor must be an object" check
 	// (Reflect.defineProperty / Object.defineProperty step ordering). The result
@@ -1343,6 +1345,7 @@ func (rt *Runtime) ownPropertyKeyValues(v Value) ([]Value, *ThrowError) {
 }
 
 func (rt *Runtime) objectDefineProperties(obj, props Value) *ThrowError {
+	rt.noteSharedMutation(obj)
 	// ObjectDefineProperties (20.1.2.3.1) begins with ToObject(Properties): a
 	// primitive is boxed (its wrapper has no own enumerable descriptors, so it is
 	// a no-op), and null/undefined is a TypeError.

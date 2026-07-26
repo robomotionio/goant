@@ -1043,6 +1043,10 @@ restart:
 			obj := pop()
 			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].shape != nil {
 				if o := rt.icReceiver(obj); o != nil && ics[icx].hit(o) {
+					// The cached store skips [[Set]] entirely, so shared-state
+					// detection has to happen here too or a warmed site would
+					// write through to a builtin unnoticed.
+					rt.noteSharedMutation(obj)
 					o.slotSet(ics[icx].slot, val)
 					ip += 7
 					break

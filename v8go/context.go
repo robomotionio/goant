@@ -7,12 +7,30 @@ import (
 	"github.com/robomotionio/goant/internal/engine"
 )
 
-// Context is an execution context: its own globals and prototypes, sharing the
-// isolate's string interning and object pools. That is a realm, and it is the
-// same split V8 draws between an isolate and a context.
+// Context is an execution context: its own globals, sharing the isolate's
+// builtins, string interning and object pools.
+//
+// Under V8 this is a fresh realm, because V8 builds one from a heap snapshot
+// and it is cheap. goant has no snapshot, so a realm costs 366 µs and 885
+// allocations — against roughly 6 µs for the work a short script actually does.
+// Rebuilding the universe to isolate a message transform is the wrong trade.
+//
+// So a Context is an Invocation: a fresh global object whose prototype is the
+// shared one. Builtins resolve up the chain, everything the script installs
+// lands on the fresh global and is dropped at Close. Measured at 111 ns.
+//
+// The one thing this does not isolate is modification of the shared builtins.
+// That is detected rather than prevented: Dirty reports it, and a host pooling
+// isolates must not reuse one whose Context reported true.
+//
+// Consequence of sharing the isolate rather than forking it: one Context at a
+// time per Isolate. That is how a pooled-isolate host already uses this — a
+// lease per in-flight call — and it is the same constraint V8 places on an
+// isolate anyway.
 type Context struct {
 	iso *Isolate
 	r   *engine.Runtime
+	inv *engine.Invocation
 
 	mu     sync.Mutex
 	closed bool
@@ -49,20 +67,21 @@ func NewContext(opt ...ContextOption) *Context {
 	if err != nil {
 		return nil
 	}
-	c := &Context{iso: iso, r: root.NewRealm()}
+	c := &Context{iso: iso, r: root, inv: root.BeginInvocation()}
 
 	iso.mu.Lock()
 	iso.contexts++
 	iso.mu.Unlock()
 
+	// Host functions are installed on the invocation's global, so they go away
+	// with it rather than accumulating across calls.
 	if opts.tmpl != nil {
 		opts.tmpl.installOn(c)
 	}
 	return c
 }
 
-// Close releases the context. The realm becomes collectable once nothing refers
-// to it; there is no separate heap to hand back.
+// Close ends the invocation, discarding the globals the script installed.
 func (c *Context) Close() {
 	if c == nil {
 		return
@@ -70,10 +89,12 @@ func (c *Context) Close() {
 	c.mu.Lock()
 	already := c.closed
 	c.closed = true
+	inv := c.inv
 	c.mu.Unlock()
 	if already {
 		return
 	}
+	inv.End()
 	c.iso.mu.Lock()
 	if c.iso.contexts > 0 {
 		c.iso.contexts--
@@ -151,4 +172,19 @@ func (o *Object) Get(key string) (*Value, error) {
 		return nil, asJSError(o.Value.r, err)
 	}
 	return wrap(o.Value.r, v), nil
+}
+
+// Dirty reports whether the script modified state that predates this Context —
+// a builtin prototype, most likely. Such an isolate must be disposed rather
+// than returned to a pool: the next script on it would inherit the change.
+//
+// Valid until Close, and after it.
+func (c *Context) Dirty() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	inv := c.inv
+	c.mu.Unlock()
+	return inv.Dirty()
 }

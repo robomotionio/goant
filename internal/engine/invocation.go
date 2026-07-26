@@ -41,18 +41,26 @@ package engine
 type Invocation struct {
 	rt *Runtime
 
-	prevGlobal Value
-	prevLex    map[string]*globalLexBinding
-	ended      bool
+	prevGlobal   Value
+	prevLex      map[string]*globalLexBinding
+	prevWatermrk Handle
+	ended        bool
 }
 
 // BeginInvocation starts a run with a fresh global object.
 func (rt *Runtime) BeginInvocation() *Invocation {
 	inv := &Invocation{
-		rt:         rt,
-		prevGlobal: rt.global,
-		prevLex:    rt.globalLex,
+		rt:           rt,
+		prevGlobal:   rt.global,
+		prevLex:      rt.globalLex,
+		prevWatermrk: rt.invWatermark,
 	}
+
+	// Arm shared-state detection before allocating anything for this run, so the
+	// fresh global itself counts as the invocation's own. Taking the watermark
+	// afterwards would make every write to globalThis look like a write to
+	// shared state.
+	rt.beginDirtyTracking()
 
 	// The fresh global inherits from the shared one, so every builtin resolves
 	// through the prototype chain while assignments land here and are dropped at
@@ -80,6 +88,7 @@ func (inv *Invocation) End() {
 	inv.ended = true
 	inv.rt.global = inv.prevGlobal
 	inv.rt.globalLex = inv.prevLex
+	inv.rt.invWatermark = inv.prevWatermrk
 }
 
 // Global returns this invocation's global object, for a host installing

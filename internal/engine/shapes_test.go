@@ -3,7 +3,9 @@ package engine
 import "testing"
 
 func TestShapeSlotAssignment(t *testing.T) {
-	s := newShape()
+	rt := New()
+	_ = rt
+	s := rt.newShape()
 	for i, name := range []string{"a", "b", "c"} {
 		slot, ok := addInternedTr(&s, name, attrDefault)
 		if !ok {
@@ -27,10 +29,12 @@ func TestShapeSlotAssignment(t *testing.T) {
 }
 
 func TestShapeReaddUpdatesAttrs(t *testing.T) {
-	s := newShape()
+	rt := New()
+	_ = rt
+	s := rt.newShape()
 	slot0, _ := addInternedTr(&s, "x", attrDefault)
 	before := s.count()
-	epoch := icEpoch
+	epoch := icEpoch()
 	// Re-adding same key with different attrs updates in place, no new slot.
 	slot1, ok := addInternedTr(&s, "x", attrEnumerable)
 	if !ok || slot1 != slot0 {
@@ -42,21 +46,23 @@ func TestShapeReaddUpdatesAttrs(t *testing.T) {
 	if s.attrsAt(slot0) != attrEnumerable {
 		t.Errorf("attrs not updated: %d", s.attrsAt(slot0))
 	}
-	if icEpoch == epoch {
+	if icEpoch() == epoch {
 		t.Error("attr change should bump IC epoch")
 	}
 }
 
 func TestShapeTransitionCanonicalization(t *testing.T) {
+	rt := New()
+	_ = rt
 	// The first object to create a transition gets a private working shape;
 	// the 2nd and subsequent objects converge on the canonical tree shape.
-	s1 := newShape()
+	s1 := rt.newShape()
 	addInternedTr(&s1, "a", attrDefault)
 
-	s2 := newShape()
+	s2 := rt.newShape()
 	addInternedTr(&s2, "a", attrDefault)
 
-	s3 := newShape()
+	s3 := rt.newShape()
 	addInternedTr(&s3, "a", attrDefault)
 
 	if s2 != s3 {
@@ -66,7 +72,7 @@ func TestShapeTransitionCanonicalization(t *testing.T) {
 		t.Error("all shapes should map 'a' to slot 0")
 	}
 	// Distinct property additions diverge into distinct shapes.
-	sx := newShape()
+	sx := rt.newShape()
 	addInternedTr(&sx, "different", attrDefault)
 	if sx == s2 {
 		t.Error("distinct keys must not share a shape")
@@ -74,7 +80,9 @@ func TestShapeTransitionCanonicalization(t *testing.T) {
 }
 
 func TestShapeSymbolKeys(t *testing.T) {
-	s := newShape()
+	rt := New()
+	_ = rt
+	s := rt.newShape()
 	slotA, _ := addSymbolTr(&s, 100, attrDefault)
 	slotB, _ := addInternedTr(&s, "str", attrDefault)
 	if slotA == slotB {
@@ -89,10 +97,12 @@ func TestShapeSymbolKeys(t *testing.T) {
 }
 
 func TestShapeRemoveSlot(t *testing.T) {
+	rt := New()
+	_ = rt
 	// removeSlot is order-preserving: removing a slot shifts every following
 	// property down by one, keeping the surviving keys in insertion order (ES
 	// OrdinaryDelete). Removing "a" from [a,b,c] yields [b,c] at slots 0,1.
-	s := newShape()
+	s := rt.newShape()
 	addInternedTr(&s, "a", attrDefault)
 	addInternedTr(&s, "b", attrDefault)
 	addInternedTr(&s, "c", attrDefault)
@@ -116,12 +126,14 @@ func TestShapeRemoveSlot(t *testing.T) {
 }
 
 func TestShapeInobjLimit(t *testing.T) {
-	s := newShapeWithLimit(2)
+	rt := New()
+	_ = rt
+	s := rt.newShapeWithLimit(2)
 	if s.getInobjLimit() != 2 {
 		t.Errorf("inobj limit=%d want 2", s.getInobjLimit())
 	}
 	// Over-limit clamps to inobjMaxSlots.
-	s2 := newShapeWithLimit(99)
+	s2 := rt.newShapeWithLimit(99)
 	if s2.getInobjLimit() != inobjMaxSlots {
 		t.Errorf("clamp failed: %d", s2.getInobjLimit())
 	}

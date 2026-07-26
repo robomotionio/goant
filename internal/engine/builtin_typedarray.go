@@ -465,7 +465,7 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 		return mkundef(), e
 	}
 	o.proto = pr
-	o.shape = newShape()
+	o.shape = rt.newShape()
 	o.typeTag = TTypedArray
 	o.flags.extensible = true
 	tv := mkval(TTypedArray, uint64(h))
@@ -2468,7 +2468,7 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 func (rt *Runtime) newTypedArrayView(t *typedArray, start, length int) uint32 {
 	h, o := rt.objects.alloc()
 	o.proto = rt.typedArrayProtos[t.kind]
-	o.shape = newShape()
+	o.shape = rt.newShape()
 	o.typeTag = TTypedArray
 	o.flags.extensible = true
 	o.ta = &typedArray{buf: t.buf, kind: t.kind, byteOffset: t.byteOffset + start*t.size(), length: length}

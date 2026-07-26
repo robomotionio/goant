@@ -30,6 +30,18 @@ type Runtime struct {
 	// String interning table (Phase 2): interned text -> flat-string handle.
 	interned map[string]Handle
 
+	// rootShapes holds this runtime's empty root shape per inobj limit. Every
+	// shape descends from one of them through the transition tree, and adding a
+	// transition mutates its parent's children map — so these are per-Runtime,
+	// not package-wide. See newShapeWithLimit.
+	rootShapes [inobjMaxSlots + 1]*shape
+
+	// invWatermark is the object handle boundary for the running invocation:
+	// anything below it predates the run and is shared with the next one.
+	// invDirty records that the run reached below it. See invocation_dirty.go.
+	invWatermark Handle
+	invDirty     bool
+
 	// Thrown-value convention (ant thrown_value/thrown_exists).
 	thrownValue  Value
 	thrownExists bool
@@ -478,7 +490,7 @@ func (rt *Runtime) initPrototypes() {
 	{
 		h, obj := rt.objects.alloc()
 		obj.proto = rt.objectProto
-		obj.shape = newShape()
+		obj.shape = rt.newShape()
 		obj.typeTag = TArr
 		obj.flags.extensible = true
 		obj.flags.fastArray = true
