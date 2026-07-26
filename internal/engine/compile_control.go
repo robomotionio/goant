@@ -120,21 +120,34 @@ func (c *compiler) compileFor(n *Node) {
 	c.resetCompletion()
 	c.scopeDepth++
 	// Initializer (a declaration or expression statement).
-	lexSlot := -1
+	var lexSlots []int
 	if n.Init != nil {
 		if n.Init.Kind == NVar {
 			c.compileVarDecl(n.Init)
-			// A single let/const init variable gets a fresh per-iteration binding.
-			if (n.Init.VarKind == VarLet || n.Init.VarKind == VarConst) &&
-				len(n.Init.Args) == 1 && n.Init.Args[0].Left != nil &&
-				n.Init.Args[0].Left.Kind == NIdent {
-				lexSlot = c.resolveLocal(n.Init.Args[0].Left.Str)
+			// EVERY let/const head binding gets a fresh binding per iteration, not
+			// just a lone loop counter.
+			if n.Init.VarKind == VarLet || n.Init.VarKind == VarConst {
+				var names []string
+				for _, d := range n.Init.Args {
+					if d != nil {
+						collectPatternNames(d.Left, &names)
+					}
+				}
+				for _, nm := range names {
+					if slot := c.resolveLocal(nm); slot >= 0 {
+						lexSlots = append(lexSlots, slot)
+					}
+				}
 			}
 		} else {
 			c.compileExpr(n.Init)
 			c.emit(OpPop)
 		}
 	}
+	// CreatePerIterationEnvironment runs once BEFORE the loop too: the values are
+	// copied out of the initializer's environment, so a closure created by the
+	// initializer keeps what it captured there and never sees the loop advance.
+	c.closeForHeadBindings(lexSlots)
 
 	l := c.pushLoop(c.consumeLabel(), false)
 	condStart := len(c.fn.code)
@@ -154,9 +167,7 @@ func (c *compiler) compileFor(n *Node) {
 	c.patchContinues(l)
 	// Per-iteration lexical binding: close the loop var's captures before the
 	// update mutates it for the next iteration.
-	if lexSlot >= 0 {
-		c.emitOpU16(OpCloseUpval, uint16(lexSlot))
-	}
+	c.closeForHeadBindings(lexSlots)
 	if n.Update != nil {
 		c.compileExpr(n.Update)
 		c.emit(OpPop)

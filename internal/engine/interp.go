@@ -378,7 +378,10 @@ restart:
 			// 0x20 (reference mode only): resolve the base and push nothing else —
 			// a plain assignment creates its Reference without reading through it.
 			baseOnly := refMode && code[ip+7]&0x20 != 0
-			fbKind := code[ip+7] & 0x1f
+			// 0x10 (reference mode only): the base is a call's `this`, so an absent
+			// one is undefined rather than the write-back marker.
+			thisMode := refMode && code[ip+7]&0x10 != 0
+			fbKind := code[ip+7] & 0x0f
 			found := false
 			for k := len(withStack) - 1; k >= 0; k-- {
 				has, e := rt.hasPropE(withStack[k], name)
@@ -441,7 +444,11 @@ restart:
 			}
 			if !found {
 				if refMode {
-					push(tEmpty) // base marker: use the lexical fallback on write
+					if thisMode {
+						push(mkundef()) // no binding object: `this` is undefined
+					} else {
+						push(tEmpty) // base marker: use the lexical fallback on write
+					}
 				}
 				if baseOnly {
 					ip += 8

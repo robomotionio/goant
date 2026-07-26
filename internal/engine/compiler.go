@@ -1322,6 +1322,15 @@ func (c *compiler) emitWithVarBase(name string) {
 	c.emitWithVarFlags(OpWithGetVar, name, 0x80|0x20)
 }
 
+// emitWithVarCallee reads a with-scoped name as a CALLEE, leaving [this, fn]:
+// the `this` of a call through an object environment is that environment's
+// binding object (WithBaseObject), and undefined when the name resolved
+// lexically instead. Flags 0x90: reference mode, with the absent base spelled
+// undefined rather than the write-back marker.
+func (c *compiler) emitWithVarCallee(name string) {
+	c.emitWithVarFlags(OpWithGetVar, name, 0x80|0x10)
+}
+
 func (c *compiler) emitWithVarFlags(op Opcode, name string, flags byte) {
 	idx := c.constant(c.rt.internString(name))
 	// A `with` name access checks the with-object(s) first at run time; when none

@@ -1342,6 +1342,19 @@ func (c *compiler) compileCall(n *Node) {
 		return
 	}
 
+	// A callee resolved through an object environment (`with (o) { f() }`) is
+	// called with that environment's binding object as `this` — the with-object,
+	// not undefined. emitWithVarCallee leaves [this, fn], which is what
+	// CALL_METHOD wants; a name that resolved lexically instead gets undefined.
+	if n.Left != nil && n.Left.Kind == NIdent && c.nameIsWithRouted(n.Left.Str) && !spread {
+		c.emitWithVarCallee(n.Left.Str)
+		for _, arg := range n.Args {
+			c.compileExpr(arg)
+		}
+		c.emit(OpCallMethod)
+		c.emitU16(uint16(len(n.Args)))
+		return
+	}
 	// Plain call: `this` is undefined.
 	if spread {
 		c.compileExpr(n.Left) // [func]
