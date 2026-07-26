@@ -416,6 +416,16 @@ func (rt *Runtime) evaluateModule(m *moduleRecord) *ThrowError {
 	if po := rt.objPtr(promise); po != nil && po.promise != nil && po.promise.state == 2 {
 		m.status = modErrored
 		m.evalErr = &ThrowError{Value: po.promise.value, rt: rt}
+		// InnerModuleEvaluation on an abrupt completion records the SAME
+		// [[EvaluationError]] on every module still on the evaluation stack — the
+		// rest of this cycle. Without it they stay "evaluating" for ever, and a
+		// later import of one of them resolves instead of rejecting.
+		for _, other := range rt.modules {
+			if other.status == modEvaluating {
+				other.status = modErrored
+				other.evalErr = m.evalErr
+			}
+		}
 		return m.evalErr
 	}
 	m.status = modEvaluated
