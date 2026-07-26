@@ -1183,6 +1183,12 @@ func (rt *Runtime) initArrayBuiltin() {
 				if e != nil {
 					return e
 				}
+				// The length check precedes the element loop: a spreadable whose
+				// length would push the result past 2^53-1 is a TypeError up front,
+				// not after 2^53 iterations.
+				if float64(idx)+float64(vn) > float64(1<<53-1) {
+					return rt.typeError("Array.prototype.concat result exceeds the maximum array length")
+				}
 				for i := 0; i < vn; i++ {
 					if rt.hasElem(v, i) {
 						el, e := rt.getElement(v, mknum(float64(i)))
@@ -1196,6 +1202,9 @@ func (rt *Runtime) initArrayBuiltin() {
 					idx++
 				}
 			} else {
+				if float64(idx) >= float64(1<<53-1) {
+					return rt.typeError("Array.prototype.concat result exceeds the maximum array length")
+				}
 				if e := rt.createDataProperty(res, mknum(float64(idx)), v); e != nil {
 					return e
 				}

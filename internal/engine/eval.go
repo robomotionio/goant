@@ -48,6 +48,12 @@ type evalScope struct {
 	superAllowed     bool
 	argumentsAllowed bool
 
+	// strict is the CALLER's strictness, fixed when the call site was compiled.
+	// Reading it from the running frame instead is unreliable: a generator or
+	// async body runs on its own goroutine, so the Runtime-wide flag can reflect
+	// whichever frame last entered rather than the one performing the eval.
+	strict bool
+
 	// inFunction marks that the eval is nested in function code (its `var` and
 	// hoisted function declarations bind in the caller's function VariableEnvironment
 	// rather than on the global object).
@@ -208,6 +214,7 @@ func (c *compiler) captureEvalScope() *evalScope {
 	// is an arrow; super is permitted when the function carries a home object or
 	// class-super bindings. These are refined as later commits thread the context.
 	sc.inFunction = !c.isScript
+	sc.strict = c.fn.isStrict
 	sc.newTargetAllowed = !c.isScript && !c.fn.isArrow
 	sc.argumentsAllowed = !c.isScript && !c.fn.isArrow
 	sc.superAllowed = c.superAvailable()
@@ -608,7 +615,7 @@ func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc
 func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closure,
 	thisVal, newTarget Value, capture func(int) *upvalue) (Value, *ThrowError) {
 
-	strict := rt.frameStrict
+	strict := sc.strict
 	prog, perr := parseEvalSource("<eval>", src, strict, sc)
 	if perr != nil {
 		ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
