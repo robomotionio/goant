@@ -225,6 +225,52 @@ func modifiedDotAll(rs []rune, i int, outer bool) bool {
 	return outer
 }
 
+// asciiFoldOutliers are the two characters whose .NET case-insensitive matching
+// crosses the ASCII boundary that ECMAScript's non-Unicode Canonicalize keeps:
+// it uppercases a single code point and then REFUSES the result when a
+// non-ASCII character would become an ASCII one. So `/\u212a/i` must not match
+// "k", and `/\u017f/i` must not match "s".
+var asciiFoldOutliers = map[rune]bool{0x212A: true, 0x017F: true}
+
+// isolateAsciiFoldOutliers wraps those characters in a `(?-i:…)` region so
+// regexp2's IgnoreCase cannot fold them. Only outside a character class, where
+// a group is not expressible.
+func isolateAsciiFoldOutliers(src string) string {
+	rs := []rune(src)
+	var out strings.Builder
+	inClass := false
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' && i+1 < len(rs) {
+			if r, n := hexEscapeAt(src, len(string(rs[:i]))); n > 0 && asciiFoldOutliers[rune(r)] && !inClass {
+				out.WriteString("(?-i:")
+				out.WriteString(string(rs[i : i+n]))
+				out.WriteString(")")
+				i += n - 1
+				continue
+			}
+			out.WriteRune(c)
+			out.WriteRune(rs[i+1])
+			i++
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		}
+		if !inClass && asciiFoldOutliers[c] {
+			out.WriteString("(?-i:")
+			out.WriteRune(c)
+			out.WriteString(")")
+			continue
+		}
+		out.WriteRune(c)
+	}
+	return out.String()
+}
+
 // annexBIdentityEscapes rewrites the escapes regexp2 gives a .NET meaning but
 // ECMAScript's Annex B IdentityEscape leaves as the plain character: `\a` is BEL
 // in .NET and the letter "a" here, and `\A` / `\Z` / `\z` / `\G` are .NET
@@ -544,6 +590,9 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if !r.Unicode {
 		src = splitAstralLiterals(src)
 		src = annexBIdentityEscapes(src)
+		if r.IgnoreCase {
+			src = isolateAsciiFoldOutliers(src)
+		}
 	} else {
 		src = joinSurrogateEscapes(src)
 	}
