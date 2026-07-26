@@ -440,6 +440,25 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 	// new.target's prototype and surfaces a throwing "prototype" getter (falls
 	// back to the intrinsic when not constructing, e.g. internal map/filter/
 	// toReversed allocations).
+	size := taKinds[kind].size
+	a0 := arg(args, 0)
+	// A non-object first argument is a length, and ToIndex(firstArgument) runs
+	// BEFORE AllocateTypedArray — so before GetPrototypeFromConstructor reads
+	// new.target's "prototype". `Reflect.construct(TA, [Symbol()], nt)` therefore
+	// throws the ToIndex TypeError, whatever nt.prototype would have done.
+	lengthArg, hasLengthArg := 0, false
+	if !a0.IsObjectType() && a0.Type() != TTypedArray {
+		n, e := rt.toIndex(a0)
+		if e != nil {
+			rt.objects.free(h)
+			return mkundef(), e
+		}
+		if n > maxByteLen/size {
+			rt.objects.free(h)
+			return mkundef(), rt.rangeError("Invalid typed array length")
+		}
+		lengthArg, hasLengthArg = n, true
+	}
 	pr, e := rt.newTargetProtoE(rt.typedArrayProtos[kind])
 	if e != nil {
 		rt.objects.free(h)
@@ -451,22 +470,10 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 	o.flags.extensible = true
 	tv := mkval(TTypedArray, uint64(h))
 
-	size := taKinds[kind].size
-	a0 := arg(args, 0)
 	switch {
-	case !a0.IsObjectType() && a0.Type() != TTypedArray:
-		// A non-object first argument (or none) is a length: ToIndex(firstArg). A
-		// Symbol or BigInt first argument throws in ToNumber/ToIndex rather than
-		// being mistaken for an (empty) array-like source.
-		n, e := rt.toIndex(a0)
-		if e != nil {
-			return mkundef(), e
-		}
-		if n > maxByteLen/size {
-			return mkundef(), rt.rangeError("Invalid typed array length")
-		}
-		buf := rt.newArrayBuffer(n * size)
-		o.ta = &typedArray{buf: buf, kind: kind, length: n}
+	case hasLengthArg:
+		buf := rt.newArrayBuffer(lengthArg * size)
+		o.ta = &typedArray{buf: buf, kind: kind, length: lengthArg}
 	case a0.IsObjectType() && rt.objPtr(a0) != nil && rt.objPtr(a0).abObj:
 		// InitializeTypedArrayFromArrayBuffer. The brand check (abObj) also matches
 		// a detached buffer, so it takes this branch and throws the detached
