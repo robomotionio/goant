@@ -61,17 +61,22 @@ func (rt *Runtime) JSONParseBytes(b []byte) (Value, error) {
 // outputs stringify the whole lot a second time so it can travel as one value —
 // costs several full passes over the payload and escapes it twice.
 func (rt *Runtime) JSONStringifyToBytes(v Value, dst []byte) (out []byte, ok bool, err error) {
-	st := &jsonStringifier{rt: rt}
+	// Serialize straight into the caller's buffer: the stringifier appends, so
+	// handing it dst means the document is built once, in place, with no
+	// intermediate string and no final copy.
+	st := &jsonStringifier{rt: rt, buf: dst}
 	holder := rt.newPlainObject()
 	rt.objPtr(holder).defineOwn("", v, attrDefault)
-	s, ok, terr := st.str("", holder, "")
+	ok, terr := st.str("", holder, "")
 	if terr != nil {
 		return dst, false, terr
 	}
 	if !ok {
-		return dst, false, nil
+		// Nothing was appended, but the stringifier may have grown the buffer;
+		// return it truncated to what the caller gave us.
+		return st.buf[:len(dst)], false, nil
 	}
-	return append(dst, s...), true, nil
+	return st.buf, true, nil
 }
 
 // JSONStringifyEachToBytes serializes each of vals in turn, appending every

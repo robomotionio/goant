@@ -100,14 +100,14 @@ func (rt *Runtime) initJSONBuiltin() {
 		}
 		holder := rt.newPlainObject()
 		rt.objPtr(holder).defineOwn("", arg(args, 0), attrDefault)
-		out, ok, e := st.str("", holder, "")
+		ok, e := st.str("", holder, "")
 		if e != nil {
 			return mkundef(), e
 		}
 		if !ok {
 			return mkundef(), nil
 		}
-		return rt.newString(out), nil
+		return rt.newStringBytes(st.buf), nil
 	})
 
 	rt.defMethod(jo, "parse", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -198,6 +198,13 @@ type jsonStringifier struct {
 	gap             string
 	indent          string
 	stack           []Value // objects/arrays currently being serialized (cycle detection)
+
+	// buf is the output. Serializing appends to it rather than returning
+	// strings, so a large document costs one growing buffer instead of a string
+	// per value plus a join per level. A value that turns out to serialize to
+	// nothing is removed by truncating back to a mark, which is why str may
+	// only write after it has decided it will produce output.
+	buf []byte
 }
 
 // enterCycle pushes v onto the serialization stack, returning a TypeError if v
@@ -212,18 +219,21 @@ func (st *jsonStringifier) enterCycle(v Value) (func(), *ThrowError) {
 	return func() { st.stack = st.stack[:len(st.stack)-1] }, nil
 }
 
-func (st *jsonStringifier) str(key string, holder Value, indent string) (string, bool, *ThrowError) {
+// str serializes holder[key], appending to st.buf. ok is false when the value
+// serializes to nothing (undefined, a function, a symbol); in that case nothing
+// has been appended, so a caller that already wrote a prefix must truncate.
+func (st *jsonStringifier) str(key string, holder Value, indent string) (bool, *ThrowError) {
 	rt := st.rt
 	v, e := rt.getField(holder, key)
 	if e != nil {
-		return "", false, e
+		return false, e
 	}
 	// toJSON: looked up for Objects and (per SerializeJSONProperty) BigInt values.
 	if v.IsObjectType() || v.Type() == TBigInt {
 		if tj, _ := rt.getField(v, "toJSON"); rt.isCallable(tj) {
 			nv, terr := rt.callValue(tj, v, []Value{rt.newString(key)})
 			if terr != nil {
-				return "", false, terr
+				return false, terr
 			}
 			v = nv
 		}
@@ -231,7 +241,7 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 	if st.replacerFn != 0 {
 		nv, terr := rt.callValue(st.replacerFn, holder, []Value{rt.newString(key), v})
 		if terr != nil {
-			return "", false, terr
+			return false, terr
 		}
 		v = nv
 	}
@@ -245,7 +255,7 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 			case prim.Type() == TNum:
 				n, e := rt.toNumber(v)
 				if e != nil {
-					return "", false, e
+					return false, e
 				}
 				v = mknum(n)
 			case prim.Type() == TBigInt:
@@ -253,7 +263,7 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 			case o.boxed.Type() == TStr:
 				s, e := rt.toStringValue(v)
 				if e != nil {
-					return "", false, e
+					return false, e
 				}
 				v = s
 			case o.boxed.Type() == TBool:
@@ -264,31 +274,38 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 
 	switch v.Type() {
 	case TBigInt:
-		return "", false, rt.typeError("Do not know how to serialize a BigInt")
+		return false, rt.typeError("Do not know how to serialize a BigInt")
 	case TNull:
-		return "null", true, nil
+		st.buf = append(st.buf, "null"...)
+		return true, nil
 	case TBool:
 		if v.Bool() {
-			return "true", true, nil
+			st.buf = append(st.buf, "true"...)
+		} else {
+			st.buf = append(st.buf, "false"...)
 		}
-		return "false", true, nil
+		return true, nil
 	case TStr:
-		return jsonQuote(rt.strGo(v)), true, nil
+		st.buf = appendJSONQuote(st.buf, rt.strGo(v))
+		return true, nil
 	case TNum:
 		if math.IsNaN(v.Number()) || math.IsInf(v.Number(), 0) {
-			return "null", true, nil
+			st.buf = append(st.buf, "null"...)
+			return true, nil
 		}
-		return numberToString(v.Number()), true, nil
+		st.buf = append(st.buf, numberToString(v.Number())...)
+		return true, nil
 	case TArr:
 		return st.stringifyArray(v, indent)
 	case TFunc, TCFunc, TUndef:
-		return "", false, nil
+		return false, nil
 	default:
 		if v.IsObjectType() {
 			// A JSON.rawJSON object emits its [[RawJSON]] text verbatim.
 			if o := rt.objPtr(v); o != nil {
 				if raw := o.getSlot(slotRawJSON); raw.Type() == TStr {
-					return rt.strGo(raw), true, nil
+					st.buf = append(st.buf, rt.strGo(raw)...)
+					return true, nil
 				}
 			}
 			// A Proxy wrapping an array serializes as an array (via its traps).
@@ -297,52 +314,62 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 			}
 			return st.stringifyObject(v, indent)
 		}
-		return "", false, nil
+		return false, nil
 	}
 }
 
-func (st *jsonStringifier) stringifyArray(v Value, indent string) (string, bool, *ThrowError) {
+func (st *jsonStringifier) stringifyArray(v Value, indent string) (bool, *ThrowError) {
 	rt := st.rt
 	leave, e := st.enterCycle(v)
 	if e != nil {
-		return "", false, e
+		return false, e
 	}
 	defer leave()
 	newIndent := indent + st.gap
 	n, e := rt.lengthOf(v)
 	if e != nil {
-		return "", false, e
+		return false, e
 	}
-	parts := make([]string, n)
+	if n == 0 {
+		st.buf = append(st.buf, "[]"...)
+		return true, nil
+	}
+	st.buf = append(st.buf, '[')
 	for i := 0; i < n; i++ {
-		s, ok, e := st.str(numberToString(float64(i)), v, newIndent)
+		if i > 0 {
+			st.buf = append(st.buf, ',')
+		}
+		if st.gap != "" {
+			st.buf = append(st.buf, '\n')
+			st.buf = append(st.buf, newIndent...)
+		}
+		// A hole, or an element that serializes to nothing, is "null" in an
+		// array — unlike an object, where the key is dropped entirely.
+		ok, e := st.str(numberToString(float64(i)), v, newIndent)
 		if e != nil {
-			return "", false, e
+			return false, e
 		}
 		if !ok {
-			s = "null"
+			st.buf = append(st.buf, "null"...)
 		}
-		parts[i] = s
 	}
-	if len(parts) == 0 {
-		return "[]", true, nil
+	if st.gap != "" {
+		st.buf = append(st.buf, '\n')
+		st.buf = append(st.buf, indent...)
 	}
-	if st.gap == "" {
-		return "[" + strings.Join(parts, ",") + "]", true, nil
-	}
-	return "[\n" + newIndent + strings.Join(parts, ",\n"+newIndent) + "\n" + indent + "]", true, nil
+	st.buf = append(st.buf, ']')
+	return true, nil
 }
 
-func (st *jsonStringifier) stringifyObject(v Value, indent string) (string, bool, *ThrowError) {
+func (st *jsonStringifier) stringifyObject(v Value, indent string) (bool, *ThrowError) {
 	rt := st.rt
 	leave, e := st.enterCycle(v)
 	if e != nil {
-		return "", false, e
+		return false, e
 	}
 	defer leave()
 	o := rt.objPtr(v)
 	newIndent := indent + st.gap
-	var parts []string
 	// With an array replacer, serialize exactly the PropertyList keys in order
 	// (str skips any that are absent on the object). Otherwise use
 	// EnumerableOwnPropertyNames — for a proxy, via its ownKeys +
@@ -356,43 +383,87 @@ func (st *jsonStringifier) stringifyObject(v Value, indent string) (string, bool
 		// rather than serializing as an empty object).
 		ek, e := rt.enumerableOwnKeysE(v)
 		if e != nil {
-			return "", false, e
+			return false, e
 		}
 		keys = ek
 	} else {
 		keys = o.ownKeysEnumerable()
 	}
+	// open marks where this object starts, so an object that turns out to have
+	// no serializable keys can be rewritten as "{}" without having built a
+	// separate list first.
+	open := len(st.buf)
+	st.buf = append(st.buf, '{')
+	wrote := false
 	for _, k := range keys {
-		s, ok, e := st.str(k, v, newIndent)
+		// Everything for this key goes after mark, so a value that serializes to
+		// nothing takes its key and separator with it.
+		mark := len(st.buf)
+		if wrote {
+			st.buf = append(st.buf, ',')
+		}
+		if st.gap != "" {
+			st.buf = append(st.buf, '\n')
+			st.buf = append(st.buf, newIndent...)
+		}
+		st.buf = appendJSONQuote(st.buf, k)
+		st.buf = append(st.buf, ':')
+		if st.gap != "" {
+			st.buf = append(st.buf, ' ')
+		}
+		ok, e := st.str(k, v, newIndent)
 		if e != nil {
-			return "", false, e
+			return false, e
 		}
 		if !ok {
+			st.buf = st.buf[:mark]
 			continue
 		}
-		sep := ":"
-		if st.gap != "" {
-			sep = ": "
-		}
-		parts = append(parts, jsonQuote(k)+sep+s)
+		wrote = true
 	}
-	if len(parts) == 0 {
-		return "{}", true, nil
+	if !wrote {
+		st.buf = append(st.buf[:open], "{}"...)
+		return true, nil
 	}
-	if st.gap == "" {
-		return "{" + strings.Join(parts, ",") + "}", true, nil
+	if st.gap != "" {
+		st.buf = append(st.buf, '\n')
+		st.buf = append(st.buf, indent...)
 	}
-	return "{\n" + newIndent + strings.Join(parts, ",\n"+newIndent) + "\n" + indent + "}", true, nil
+	st.buf = append(st.buf, '}')
+	return true, nil
 }
 
-// jsonQuote produces a JSON string literal.
-func jsonQuote(s string) string {
+// appendJSONQuote appends s as a JSON string literal.
+//
+// The common case by far is a run of plain ASCII with nothing to escape, so
+// those bytes are copied in bulk rather than one at a time; only a byte that
+// needs attention breaks the run.
+func appendJSONQuote(dst []byte, s string) []byte {
 	const hexd = "0123456789abcdef"
-	var b strings.Builder
-	b.WriteByte('"')
+	dst = append(dst, '"')
 	src := []byte(s)
+
+	// Fast path: no byte in s needs escaping or decoding.
+	plain := true
+	for i := 0; i < len(src); i++ {
+		if c := src[i]; c < 0x20 || c == '"' || c == '\\' || c >= 0x80 {
+			plain = false
+			break
+		}
+	}
+	if plain {
+		return append(append(dst, src...), '"')
+	}
+
 	i := 0
+	run := 0 // start of the current run of bytes that need no escaping
+	flush := func(upto int) {
+		if upto > run {
+			dst = append(dst, src[run:upto]...)
+		}
+	}
 	for i < len(src) {
+		start := i
 		c := src[i]
 		// Decode one WTF-8 code point (may be a lone surrogate, unlike UTF-8).
 		var cp rune
@@ -413,36 +484,43 @@ func jsonQuote(s string) string {
 			cp = rune(c)
 		}
 		i += size
+		esc := ""
 		switch cp {
 		case '"':
-			b.WriteString("\\\"")
+			esc = "\\\""
 		case '\\':
-			b.WriteString("\\\\")
+			esc = "\\\\"
 		case '\n':
-			b.WriteString("\\n")
+			esc = "\\n"
 		case '\r':
-			b.WriteString("\\r")
+			esc = "\\r"
 		case '\t':
-			b.WriteString("\\t")
+			esc = "\\t"
 		case '\b':
-			b.WriteString("\\b")
+			esc = "\\b"
 		case '\f':
-			b.WriteString("\\f")
-		default:
-			// Control chars and lone surrogates (ES2019 well-formed JSON) escape.
-			if cp < 0x20 || (cp >= 0xD800 && cp <= 0xDFFF) {
-				b.WriteString("\\u")
-				b.WriteByte(hexd[(cp>>12)&0xF])
-				b.WriteByte(hexd[(cp>>8)&0xF])
-				b.WriteByte(hexd[(cp>>4)&0xF])
-				b.WriteByte(hexd[cp&0xF])
-			} else {
-				b.WriteRune(cp)
-			}
+			esc = "\\f"
 		}
+		if esc != "" {
+			flush(start)
+			dst = append(dst, esc...)
+			run = i
+			continue
+		}
+		// Control chars and lone surrogates (ES2019 well-formed JSON) escape.
+		if cp < 0x20 || (cp >= 0xD800 && cp <= 0xDFFF) {
+			flush(start)
+			dst = append(dst, '\\', 'u',
+				hexd[(cp>>12)&0xF], hexd[(cp>>8)&0xF], hexd[(cp>>4)&0xF], hexd[cp&0xF])
+			run = i
+			continue
+		}
+		// Nothing to do: leave it in the run and copy it verbatim later. The
+		// source is already WTF-8, so re-encoding the code point would only turn
+		// well-formed input back into itself.
 	}
-	b.WriteByte('"')
-	return b.String()
+	flush(len(src))
+	return append(dst, '"')
 }
 
 // ---- parse ----
