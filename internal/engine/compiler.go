@@ -953,6 +953,16 @@ func (c *compiler) compileVarDecl(n *Node) {
 			}
 		}
 		if asGlobal {
+			// Inside `with(obj)` the Reference is resolved BEFORE the initializer, so
+			// an initializer that deletes the with-object's property still writes
+			// back through the environment it named.
+			if decl.Right != nil && c.withDepth > 0 && c.resolveLocal(name) < 0 {
+				c.emitWithVarBase(name)
+				c.compileExpr(decl.Right)
+				c.emitWithVarRef(OpWithPutVar, name)
+				c.emit(OpPop)
+				continue
+			}
 			if decl.Right != nil {
 				c.compileExpr(decl.Right)
 				// The initializer assignment resolves the name to the nearest binding:
@@ -962,11 +972,6 @@ func (c *compiler) compileVarDecl(n *Node) {
 				// outer/global `e` untouched.
 				if slot := c.resolveLocal(name); slot >= 0 {
 					c.emitOpU16(OpPutLocal, uint16(slot))
-				} else if c.withDepth > 0 {
-					// Inside `with(obj)`: the initializer assignment goes through the
-					// object environment — if obj binds the name it writes there,
-					// otherwise it falls back to the global var binding.
-					c.emitWithVar(OpWithPutVar, name)
 				} else {
 					c.emitGlobalPut(name)
 				}
@@ -996,8 +1001,13 @@ func (c *compiler) compileVarDecl(n *Node) {
 			if decl.Right == nil {
 				continue // bare `var x;` is declaration-only — no assignment
 			}
+			// The Reference is resolved BEFORE the initializer runs, so an
+			// initializer that deletes the with-object's property still writes back
+			// through the environment it named (creating the property again).
+			c.emitWithVarBase(name)
 			c.compileExpr(decl.Right)
-			c.emitWithVar(OpWithPutVar, name)
+			c.emitWithVarRef(OpWithPutVar, name)
+			c.emit(OpPop)
 			continue
 		}
 		if decl.Right == nil && !isLexical {
@@ -1511,7 +1521,14 @@ func (c *compiler) compileDelete(n *Node) {
 		c.emitU32(uint32(idx))
 		return
 	}
-	// `delete 1`, `delete this`, etc. → true.
+	// `delete <expression>` still EVALUATES the operand and then yields true,
+	// since the result is not a Reference: `delete foo()` calls foo. Only a
+	// literal-shaped operand can be skipped, and evaluating one is harmless
+	// anyway, so everything left goes through the same path.
+	if target != nil {
+		c.compileExpr(target)
+		c.emit(OpPop)
+	}
 	c.emit(OpTrue)
 }
 

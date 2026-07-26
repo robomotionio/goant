@@ -406,10 +406,25 @@ restart:
 					}
 					// GetBindingValue performs its OWN HasProperty (step 2) before the
 					// Get (step 4) — a second observable trap on a Proxy binding object,
-					// distinct from the one HasBinding just did.
-					if _, e := rt.hasPropE(withStack[k], name); e != nil {
+					// distinct from the one HasBinding just did. If the binding is gone
+					// by then (an @@unscopables getter deleted it), strict code throws a
+					// ReferenceError and sloppy code reads undefined.
+					still, e := rt.hasPropE(withStack[k], name)
+					if e != nil {
 						thrown = e
 						goto unwind
+					}
+					if !still {
+						if fn.isStrict {
+							thrown = rt.referenceError(name + " is not defined")
+							goto unwind
+						}
+						if refMode {
+							push(withStack[k])
+						}
+						push(mkundef())
+						found = true
+						break
 					}
 					v, e := rt.getField(withStack[k], name)
 					if e != nil {
@@ -2291,8 +2306,27 @@ func (rt *Runtime) jsBitwise(op Opcode, a, b Value) (Value, *ThrowError) {
 	return mkundef(), rt.typeError("bad bitwise op")
 }
 
-// jsRelational implements abstract relational comparison for primitives.
+// jsRelational implements abstract relational comparison.
 func (rt *Runtime) jsRelational(op Opcode, a, b Value) (Value, *ThrowError) {
+	// IsLessThan begins with ToPrimitive(hint number) on both operands, always
+	// coercing the SOURCE left operand first (`a > b` is IsLessThan(b, a, false),
+	// whose "right first" is this a). Two String results then compare as strings —
+	// which is how `function(){} > {}` compares their source texts rather than
+	// coercing both to NaN.
+	if a.IsObjectLike() {
+		pa, e := rt.toPrimitive(a, "number")
+		if e != nil {
+			return mkundef(), e
+		}
+		a = pa
+	}
+	if b.IsObjectLike() {
+		pb, e := rt.toPrimitive(b, "number")
+		if e != nil {
+			return mkundef(), e
+		}
+		b = pb
+	}
 	if a.Type() == TBigInt && b.Type() == TBigInt {
 		cmp := rt.bigIntVal(a).Cmp(rt.bigIntVal(b))
 		switch op {

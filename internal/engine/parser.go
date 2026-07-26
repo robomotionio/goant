@@ -1205,9 +1205,20 @@ func (p *parser) parseNew() *Node {
 	callee := p.parsePrimary()
 	for {
 		la := p.next()
-		if la == TokDot || la == TokLBracket {
+		switch la {
+		case TokDot, TokLBracket:
 			callee = p.parseMemberSuffix(callee, la)
-		} else {
+		case TokTemplate:
+			// MemberExpression : MemberExpression TemplateLiteral — a tagged template
+			// is part of the callee, so `new tag`x`` constructs what tag returns.
+			tagged := p.mk(NTaggedTemplate)
+			tagged.Left = callee
+			tagged.Right = p.parsePrimary()
+			callee = tagged
+		default:
+			la = 0
+		}
+		if la == 0 {
 			break
 		}
 		if callee != nil && callee.Kind == NEmpty {

@@ -129,6 +129,9 @@ func (rt *Runtime) initStringBuiltin() {
 	// String.prototype.valueOf() is "" and Object.prototype.toString tags it
 	// "[object String]").
 	proto.boxed = rt.newString("")
+	// String.prototype is a String exotic object, so it owns "length" like any
+	// other: a non-writable, non-enumerable, non-configurable 0.
+	proto.defineOwn("length", mknum(0), 0)
 
 	strThis := func(this Value) (Value, *ThrowError) {
 		if this.IsString() {
