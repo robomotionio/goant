@@ -38,6 +38,11 @@ type svFunc struct {
 	isAsync     bool
 	isGenerator bool
 	isClassCtor bool
+	// usesAwait records that this function's OWN body suspends on an await —
+	// written `await`, `for await`, or the implicit await of `await using`. For a
+	// Module this is [[HasTLA]], which module evaluation must know STATICALLY:
+	// `if (false) await x;` still makes the module an async-evaluating one.
+	usesAwait bool
 
 	// Module goal only: exported name -> top-level local slot, and the
 	// specifiers of `export * from` re-exports.
@@ -46,6 +51,13 @@ type svFunc struct {
 	moduleImports  []moduleImport
 	moduleRequests []string // every specifier imported, bindings or not
 	moduleIndirect map[string]indirectExport
+	// moduleHoistFn is the module's InitializeEnvironment prologue split off as
+	// its own function: the import bindings, the temporal dead zones, and the
+	// hoisted function declarations. It runs when the module is LINKED, so a
+	// cyclic importer whose body runs first still sees this module's functions.
+	// startIP is where the remaining body then begins.
+	moduleHoistFn *svFunc
+	startIP       int
 	isMethod       bool // concise method / getter / setter: no [[Construct]], no .prototype
 	// isClassElement marks a class constructor / method / accessor / static block:
 	// its `super` resolves via the class's captured *superproto* / *superctor*

@@ -19,12 +19,23 @@ import (
 
 type moduleStatus int
 
+// The spec's [[Status]] values, minus the linking ones goant resolves eagerly.
+// "evaluated with an [[EvaluationError]]" is split out as modErrored because a
+// failed module is remembered and rethrown to every later importer.
 const (
-	modNew moduleStatus = iota
+	modNew moduleStatus = iota // spec: linked
 	modEvaluating
+	modEvaluatingAsync
 	modEvaluated
 	modErrored
 )
+
+// settled reports whether evaluation of this module has finished, successfully
+// or not — the spec's "evaluating-async or evaluated" test, which also covers
+// modErrored since that is an evaluated module carrying an error.
+func (s moduleStatus) settled() bool {
+	return s == modEvaluatingAsync || s == modEvaluated || s == modErrored
+}
 
 type moduleRecord struct {
 	path   string // resolved absolute path; the registry key
@@ -37,14 +48,41 @@ type moduleRecord struct {
 	starFrom  []string                  // specifiers of `export * from` re-exports
 	namespace Value
 	hasNS     bool // namespace built; the zero Value decodes as 0, not undefined
+	hoisted   bool // InitializeEnvironment has run; m.locals is the environment
 	status    moduleStatus
 	evalErr   *ThrowError
-	// evalPromise settles when this module — and everything it requested — has
-	// finished evaluating. It is what lets a module with top-level await suspend
-	// without blocking its siblings: the graph is driven by the microtask queue
-	// rather than by a nested event-loop drain per module.
+	// evalPromise/evalCap are [[TopLevelCapability]]: present only on a module
+	// Evaluate() was called on directly (an entry point or a dynamic import), and
+	// settled when that module's whole subgraph has finished.
 	evalPromise Value
 	evalCap     *object
+
+	// Tarjan bookkeeping for InnerModuleEvaluation. Modules that are mutually
+	// reachable form one strongly connected component and must be treated as a
+	// unit: the component's root carries everyone's completion, so a cycle
+	// containing a top-level await makes the WHOLE cycle async.
+	dfsIndex         int
+	dfsAncestorIndex int
+	cycleRoot        *moduleRecord
+	// asyncEvaluation marks a module that cannot finish synchronously — it has
+	// top-level await, or it depends on something that does. asyncEvalOrder is
+	// the agent-wide sequence number it acquired, which orders the modules that
+	// become runnable together.
+	asyncEvaluation bool
+	asyncEvalOrder  uint64
+	// asyncParents are the modules waiting on this one; pendingAsyncDeps counts
+	// how many async dependencies this module is still waiting for.
+	asyncParents     []*moduleRecord
+	pendingAsyncDeps int
+}
+
+// root returns the module that owns this one's evaluation — itself unless it
+// belongs to a cycle, in which case it is the cycle's root.
+func (m *moduleRecord) root() *moduleRecord {
+	if m.cycleRoot != nil {
+		return m.cycleRoot
+	}
+	return m
 }
 
 // exportValue reads an export's current value. A lexical binding that has not
@@ -218,6 +256,9 @@ func (rt *Runtime) loadModule(spec, referrer string) (*moduleRecord, *ThrowError
 		// Reaching here through import(): the rejection value is a SyntaxError.
 		return nil, rt.syntaxError(se.Msg)
 	}
+	if e := rt.hoistModuleGraph(m, map[string]bool{}); e != nil {
+		return nil, e
+	}
 	if e := rt.evaluateModule(m); e != nil {
 		return nil, e
 	}
@@ -386,17 +427,43 @@ func (m *moduleRecord) requestedSpecifiers() []string {
 	return out
 }
 
-// evaluateModule runs a module body once. A module already being evaluated is a
-// cycle: its (partly initialised) bindings are returned as-is, which is what
-// makes circular imports observe live bindings rather than deadlock.
-func (rt *Runtime) evaluateModule(m *moduleRecord) *ThrowError {
-	if m.status != modNew {
-		if m.status == modErrored {
-			return m.evalErr
-		}
+// hoistModuleGraph runs InitializeEnvironment for every module in the graph,
+// which is the second half of linking: each module's environment is created and
+// its imports, temporal dead zones and hoisted function declarations are
+// installed BEFORE any body runs. That is what lets a cyclic importer whose body
+// runs first call a function the module it is importing from has not reached
+// yet — the ordinary `export function` mutual-recursion pattern.
+func (rt *Runtime) hoistModuleGraph(m *moduleRecord, seen map[string]bool) *ThrowError {
+	if seen[m.path] {
 		return nil
 	}
-	p := rt.startModuleEvaluation(m)
+	seen[m.path] = true
+	for _, req := range m.requestedSpecifiers() {
+		if dep, ok := rt.modules[rt.resolveSpecifier(req, m.path)]; ok {
+			if e := rt.hoistModuleGraph(dep, seen); e != nil {
+				return e
+			}
+		}
+	}
+	if m.hoisted || m.fn == nil || m.fn.moduleHoistFn == nil {
+		return nil
+	}
+	m.hoisted = true
+	// runFrame publishes the frame's locals slice to the pending record: those
+	// slots are the module environment, and the body frame adopts the same slice.
+	rt.pendingModule = m
+	_, e := rt.runFrame(m.fn.moduleHoistFn, nil, mkundef(), mkundef(), nil)
+	rt.pendingModule = nil
+	return e
+}
+
+// evaluateModule runs a module graph for a host that needs a synchronous answer
+// (the entry point, ShadowRealm.importValue): it starts evaluation and drives
+// the loop until the graph settles. A module that suspends on a top-level await
+// nothing ever resolves simply runs the host out of work, which is what a real
+// host observes too.
+func (rt *Runtime) evaluateModule(m *moduleRecord) *ThrowError {
+	p := rt.moduleEvaluate(m)
 	rt.runEventLoop()
 	if po := rt.objPtr(p); po != nil && po.promise != nil && po.promise.state == 2 {
 		if m.evalErr == nil {
@@ -407,123 +474,242 @@ func (rt *Runtime) evaluateModule(m *moduleRecord) *ThrowError {
 	return nil
 }
 
-// startModuleEvaluation is Evaluate(): it returns a promise for this module's
-// completion WITHOUT draining the loop, so several branches of the graph make
-// progress together. A module's body runs once every module it requested has
-// settled; a request that is already evaluating is a cycle edge and counts as
-// satisfied, which is what stops the wait from deadlocking on itself.
-func (rt *Runtime) startModuleEvaluation(m *moduleRecord) Value {
-	switch m.status {
-	case modEvaluated:
-		return rt.resolvedPromise(mkundef())
-	case modErrored:
-		return rt.rejectedPromise(m.evalErr.Value)
-	case modEvaluating:
-		// On the current descent it is a CYCLE edge, which counts as satisfied;
-		// otherwise it is a module already in flight (typically suspended on
-		// top-level await) that several importers share, and they must all wait
-		// for the same completion.
-		for _, x := range rt.moduleEvalStack {
-			if x == m {
-				return rt.resolvedPromise(mkundef())
-			}
-		}
+// moduleEvaluate is Evaluate() (16.2.1.5.3): it returns a promise for this
+// module's completion WITHOUT draining the loop, so the graph advances on the
+// microtask queue and a suspended module does not block its siblings.
+func (rt *Runtime) moduleEvaluate(m *moduleRecord) Value {
+	// A module that has already finished reports through its cycle's root — the
+	// record that owns the whole component's completion.
+	if m.status.settled() {
+		m = m.root()
+	}
+	if m.evalCap != nil {
 		return m.evalPromise
+	}
+	m.evalPromise, m.evalCap = rt.makePromise()
+	stack, _, err := rt.innerModuleEvaluation(m, nil, 0)
+	if err != nil {
+		// Everything still on the stack is in the failed component, or an ancestor
+		// of it, and records the same [[EvaluationError]].
+		for _, x := range stack {
+			x.status, x.evalErr = modErrored, err
+		}
+		m.status, m.evalErr = modErrored, err
+		rt.rejectPromise(m.evalCap, err.Value)
+	} else if !m.asyncEvaluation {
+		rt.resolvePromise(m.evalPromise, m.evalCap, mkundef())
+	}
+	return m.evalPromise
+}
+
+// innerModuleEvaluation is InnerModuleEvaluation: one Tarjan walk that both
+// evaluates in depth-first post-order and groups the graph into strongly
+// connected components. Modules that can reach each other must be treated as a
+// unit — the component's root carries everyone's completion — which is what
+// makes a cycle containing a top-level await suspend as a whole rather than
+// letting one member of it appear to have finished.
+//
+// `index` is the DFS counter; `stack` holds the modules of the component being
+// built, and is returned so an error can name everything left unfinished.
+func (rt *Runtime) innerModuleEvaluation(m *moduleRecord, stack []*moduleRecord, index int) ([]*moduleRecord, int, *ThrowError) {
+	switch {
+	case m.status == modErrored:
+		return stack, index, m.evalErr
+	case m.status.settled(), m.status == modEvaluating:
+		// Already done, in flight, or a back edge into the component being built.
+		return stack, index, nil
 	}
 	if m.fn == nil {
 		m.status = modEvaluated // a synthetic module (JSON) has no body to run
-		return rt.resolvedPromise(mkundef())
+		return stack, index, nil
 	}
 	m.status = modEvaluating
-	m.evalPromise, m.evalCap = rt.makePromise()
+	m.dfsIndex, m.dfsAncestorIndex = index, index
+	m.pendingAsyncDeps = 0
+	index++
+	stack = append(stack, m)
 
-	settled := false
-	fail := func(v Value) {
-		if settled {
-			return
-		}
-		settled = true
-		m.status = modErrored
-		m.evalErr = &ThrowError{Value: v, rt: rt}
-		// InnerModuleEvaluation records the same [[EvaluationError]] on every
-		// module still on the evaluation stack — the rest of this cycle.
-		for _, other := range rt.modules {
-			if other.status == modEvaluating {
-				other.status = modErrored
-				other.evalErr = m.evalErr
-			}
-		}
-		rt.rejectPromise(m.evalCap, v)
-	}
-	done := func() {
-		if settled {
-			return
-		}
-		settled = true
-		m.status = modEvaluated
-		rt.resolvePromise(m.evalPromise, m.evalCap, mkundef())
-	}
-	runBody := func() {
-		if settled {
-			return
-		}
-		// runFrame publishes its locals slice to the pending record as the frame
-		// starts — before any nested import can run and claim the slot.
-		rt.pendingModule = m
-		body := rt.runAsync(m.fn, nil, mkundef(), mkundef(), nil)
-		rt.pendingModule = nil
-		bo := rt.objPtr(body)
-		if bo == nil || bo.promise == nil {
-			done()
-			return
-		}
-		rt.promiseThen(
-			rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) { done(); return mkundef(), nil }),
-			rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) { fail(arg(a, 0)); return mkundef(), nil }),
-			bo)
-	}
-
-	// Evaluate the requested modules in source order. A subtree with no top-level
-	// await settles SYNCHRONOUSLY, which is what keeps the traversal depth-first:
-	// only a request that is still pending becomes an async dependency, and the
-	// walk then carries on to the next one instead of blocking on it.
-	rt.moduleEvalStack = append(rt.moduleEvalStack, m)
-	pending := 0
 	for _, req := range m.requestedSpecifiers() {
 		dep, ok := rt.modules[rt.resolveSpecifier(req, m.path)]
 		if !ok {
 			continue
 		}
-		dp := rt.startModuleEvaluation(dep)
-		do := rt.objPtr(dp)
-		if do == nil || do.promise == nil || do.promise.state == 1 {
-			continue // already fulfilled
+		var err *ThrowError
+		if stack, index, err = rt.innerModuleEvaluation(dep, stack, index); err != nil {
+			return stack, index, err
 		}
-		if do.promise.state == 2 {
-			rt.moduleEvalStack = rt.moduleEvalStack[:len(rt.moduleEvalStack)-1]
-			fail(do.promise.value)
-			return m.evalPromise
+		if dep.status == modEvaluating {
+			// A back edge: dep is still on the stack, so m belongs to its component.
+			if dep.dfsAncestorIndex < m.dfsAncestorIndex {
+				m.dfsAncestorIndex = dep.dfsAncestorIndex
+			}
+		} else {
+			dep = dep.root()
+			if dep.status == modErrored {
+				return stack, index, dep.evalErr
+			}
 		}
-		pending++
-		rt.promiseThen(
-			rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				pending--
-				if pending == 0 {
-					runBody()
-				}
-				return mkundef(), nil
-			}),
-			rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				fail(arg(a, 0))
-				return mkundef(), nil
-			}),
-			do)
+		if dep.asyncEvaluation {
+			m.pendingAsyncDeps++
+			dep.asyncParents = append(dep.asyncParents, m)
+		}
 	}
-	rt.moduleEvalStack = rt.moduleEvalStack[:len(rt.moduleEvalStack)-1]
-	if pending == 0 {
-		runBody()
+
+	switch {
+	case m.pendingAsyncDeps > 0 || m.fn.usesAwait:
+		// [[HasTLA]] is STATIC: `if (false) await x` still makes the module an
+		// async-evaluating one, and the order it acquires here is what sequences
+		// the modules that later become runnable together.
+		rt.asyncEvalOrder++
+		m.asyncEvaluation, m.asyncEvalOrder = true, rt.asyncEvalOrder
+		if m.pendingAsyncDeps == 0 {
+			rt.executeAsyncModule(m)
+		}
+	default:
+		if err := rt.executeModuleBody(m); err != nil {
+			return stack, index, err
+		}
 	}
-	return m.evalPromise
+
+	// m roots its component (nothing below it reached higher): pop the component
+	// and publish it. A member is only "evaluated" if it is not waiting on a
+	// top-level await, its own or one inherited from the component.
+	if m.dfsAncestorIndex == m.dfsIndex {
+		for {
+			last := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if last.asyncEvaluation {
+				last.status = modEvaluatingAsync
+			} else {
+				last.status = modEvaluated
+			}
+			last.cycleRoot = m
+			if last == m {
+				break
+			}
+		}
+	}
+	return stack, index, nil
+}
+
+// executeModuleBody runs a module that has no top-level await. Its body cannot
+// suspend, so the coroutine either completes or throws before genDrive returns.
+func (rt *Runtime) executeModuleBody(m *moduleRecord) *ThrowError {
+	// runFrame publishes the frame's locals slice to the pending record as the
+	// frame starts — before any nested import can run and claim the slot.
+	rt.pendingModule = m
+	res := rt.genDrive(rt.newGenState(m.fn, nil, mkundef(), mkundef(), nil), genNext, mkundef())
+	rt.pendingModule = nil
+	return res.err
+}
+
+// executeAsyncModule is ExecuteAsyncModule: the body runs as a coroutine and the
+// promise for its completion decides whether the module fulfils or rejects.
+func (rt *Runtime) executeAsyncModule(m *moduleRecord) {
+	rt.pendingModule = m
+	body := rt.runAsync(m.fn, nil, mkundef(), mkundef(), nil)
+	rt.pendingModule = nil
+	bo := rt.objPtr(body)
+	if bo == nil || bo.promise == nil {
+		rt.asyncModuleExecutionFulfilled(m)
+		return
+	}
+	rt.promiseThen(
+		rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			rt.asyncModuleExecutionFulfilled(m)
+			return mkundef(), nil
+		}),
+		rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			rt.asyncModuleExecutionRejected(m, arg(a, 0))
+			return mkundef(), nil
+		}),
+		bo)
+}
+
+// gatherAvailableAncestors collects the modules that m finishing has unblocked.
+// Each async parent loses one pending dependency; one that reaches zero joins
+// the list, and if it has no top-level await of its own the walk continues
+// through it, because it will run to completion within the same job.
+func (rt *Runtime) gatherAvailableAncestors(m *moduleRecord, execList *[]*moduleRecord) {
+	for _, p := range m.asyncParents {
+		if p.root().status == modErrored || containsModule(*execList, p) {
+			continue
+		}
+		p.pendingAsyncDeps--
+		if p.pendingAsyncDeps == 0 {
+			*execList = append(*execList, p)
+			if !p.fn.usesAwait {
+				rt.gatherAvailableAncestors(p, execList)
+			}
+		}
+	}
+}
+
+func containsModule(list []*moduleRecord, m *moduleRecord) bool {
+	for _, x := range list {
+		if x == m {
+			return true
+		}
+	}
+	return false
+}
+
+// asyncModuleExecutionFulfilled settles a finished async module and then runs
+// every ancestor its completion unblocked, oldest [[AsyncEvaluationOrder]]
+// first — the order in which those ancestors started waiting. That ordering is
+// observable: it is why a leaf's importers settle leaf-to-root.
+func (rt *Runtime) asyncModuleExecutionFulfilled(m *moduleRecord) {
+	if m.status == modEvaluated || m.status == modErrored {
+		return // already settled, by a rejection travelling the other way
+	}
+	m.asyncEvaluation = false
+	m.status = modEvaluated
+	if m.evalCap != nil {
+		rt.resolvePromise(m.evalPromise, m.evalCap, mkundef())
+	}
+	var execList []*moduleRecord
+	rt.gatherAvailableAncestors(m, &execList)
+	sort.SliceStable(execList, func(i, j int) bool {
+		return execList[i].asyncEvalOrder < execList[j].asyncEvalOrder
+	})
+	for _, p := range execList {
+		switch {
+		case p.status == modEvaluated || p.status == modErrored:
+			// settled underneath us while this list was being worked through
+		case p.fn.usesAwait:
+			rt.executeAsyncModule(p)
+		default:
+			if err := rt.executeModuleBody(p); err != nil {
+				rt.asyncModuleExecutionRejected(p, err.Value)
+				continue
+			}
+			p.asyncEvaluation = false
+			p.status = modEvaluated
+			if p.evalCap != nil {
+				rt.resolvePromise(p.evalPromise, p.evalCap, mkundef())
+			}
+		}
+	}
+}
+
+// asyncModuleExecutionRejected fails a module and, transitively, everything
+// waiting on it.
+func (rt *Runtime) asyncModuleExecutionRejected(m *moduleRecord, err Value) {
+	if m.status == modEvaluated || m.status == modErrored {
+		return
+	}
+	m.evalErr = &ThrowError{Value: err, rt: rt}
+	m.status = modErrored
+	m.asyncEvaluation = false
+	// This module's own waiters are told BEFORE its ancestors are failed, so a
+	// rejection surfaces leaf-to-root: whoever imported the module that actually
+	// threw learns of it first.
+	if m.evalCap != nil {
+		rt.rejectPromise(m.evalCap, err)
+	}
+	for _, p := range m.asyncParents {
+		rt.asyncModuleExecutionRejected(p, err)
+	}
 }
 
 // moduleNamespace returns the module's namespace exotic object, creating it on
@@ -569,15 +755,71 @@ func (rt *Runtime) moduleNamespace(m *moduleRecord) Value {
 	return ns
 }
 
-// importModuleNamespace is the runtime half of a static import: it loads the
-// module and hands back its namespace object, which the importing frame keeps in
-// a hidden local so every reference to an imported name reads through it.
+// importModuleNamespace is the runtime half of a STATIC import: it hands back
+// the namespace object, which the importing frame keeps in a hidden local so
+// every reference to an imported name reads through it. It must not evaluate
+// anything — InnerModuleEvaluation has already run every requested module (or,
+// in a cycle, left it half-evaluated on purpose so the bindings are live).
 func (rt *Runtime) importModuleNamespace(spec, referrer string) (Value, *ThrowError) {
+	if m, ok := rt.modules[rt.resolveSpecifier(spec, referrer)]; ok {
+		if m.status == modErrored {
+			return mkundef(), m.evalErr
+		}
+		return rt.moduleNamespace(m), nil
+	}
 	m, e := rt.loadModule(spec, referrer)
 	if e != nil {
 		return mkundef(), e
 	}
 	return rt.moduleNamespace(m), nil
+}
+
+// importModuleDynamic is ContinueDynamicImport: load and link the graph, then
+// return a promise for the namespace that settles when evaluation does. Unlike
+// a static import this must NOT drive the loop — the importer is itself running
+// on it, and a nested drain would let the import preempt the depth-first order
+// the rest of the graph is still being evaluated in.
+func (rt *Runtime) importModuleDynamic(spec, referrer string) Value {
+	promise, cap := rt.makePromise()
+	// HostLoadImportedModule is asynchronous, so loading, linking and evaluating
+	// all happen in a LATER job. That is not an implementation detail: it is what
+	// stops a dynamic import from preempting the depth-first evaluation its own
+	// importer is still in the middle of.
+	rt.enqueueMicrotask(func() {
+		m, se, e := rt.instantiateModule(spec, referrer)
+		if e != nil {
+			rt.rejectPromise(cap, e.Value)
+			return
+		}
+		if se == nil {
+			se = rt.linkModule(m, map[string]bool{})
+		}
+		if se != nil {
+			rt.rejectPromise(cap, rt.syntaxError(se.Msg).Value)
+			return
+		}
+		if he := rt.hoistModuleGraph(m, map[string]bool{}); he != nil {
+			rt.rejectPromise(cap, he.Value)
+			return
+		}
+		done := func() { rt.resolvePromise(promise, cap, rt.moduleNamespace(m)) }
+		po := rt.objPtr(rt.moduleEvaluate(m))
+		if po == nil || po.promise == nil {
+			done()
+			return
+		}
+		rt.promiseThen(
+			rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+				done()
+				return mkundef(), nil
+			}),
+			rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+				rt.rejectPromise(cap, arg(a, 0))
+				return mkundef(), nil
+			}),
+			po)
+	})
+	return promise
 }
 
 // SetModuleBase sets the directory that import specifiers resolve against when

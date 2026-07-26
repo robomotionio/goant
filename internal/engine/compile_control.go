@@ -374,7 +374,8 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	c.emitOpU16(OpGetLocal, uint16(iterSlot))
 	c.emitOpU16(OpGetLocal, uint16(nextSlot)) // [iter, next]
 	c.emit(OpCallMethod)
-	c.emitU16(0)    // [promise]
+	c.emitU16(0) // [promise]
+	c.fn.usesAwait = true
 	c.emit(OpAwait) // [result]
 	c.emitOpU16(OpPutLocal, uint16(resSlot))
 	// if result.done: exit without closing (already exhausted)

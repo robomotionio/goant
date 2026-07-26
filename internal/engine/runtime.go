@@ -158,9 +158,10 @@ type Runtime struct {
 	// is the directory specifiers resolve against at the entry point.
 	modules   map[string]*moduleRecord
 	moduleDir string
-	// moduleEvalStack is the current depth-first descent of Evaluate(); a module
-	// found on it is a cycle edge rather than a shared pending dependency.
-	moduleEvalStack []*moduleRecord
+	// asyncEvalOrder hands out [[AsyncEvaluationOrder]] numbers: the sequence in
+	// which modules started waiting, which orders the ones a single completion
+	// makes runnable together.
+	asyncEvalOrder uint64
 	// pendingModule is the record whose body is about to start; runFrame hands
 	// it the frame's locals slice so importers keep a live view of its bindings.
 	pendingModule *moduleRecord
@@ -570,6 +571,9 @@ func (rt *Runtime) RunModule(filename, src string) (Value, error) {
 		// from a runtime throw.
 		se.Filename = filename
 		return mkundef(), se
+	}
+	if e := rt.hoistModuleGraph(m, map[string]bool{}); e != nil {
+		return mkundef(), e
 	}
 	// A Module evaluates asynchronously: its body runs as an async coroutine (so
 	// top-level await suspends) and the loop is driven until the completion

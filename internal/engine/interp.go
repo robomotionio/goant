@@ -205,8 +205,14 @@ restart:
 	// A module body hands its locals slice to the record being evaluated: those
 	// slots *are* the module environment, so importers holding the slice see the
 	// bindings live. Claimed here, at frame entry, before any nested import runs.
-	if rt.pendingModule != nil && rt.pendingModule.fn == fn {
-		rt.pendingModule.locals = locals
+	// The environment is created by the link-time hoisting frame and ADOPTED by
+	// the body frame, so both halves of the module share one set of bindings.
+	if pm := rt.pendingModule; pm != nil && (pm.fn == fn || pm.fn.moduleHoistFn == fn) {
+		if pm.locals != nil {
+			locals = pm.locals
+		} else {
+			pm.locals = locals
+		}
 		rt.pendingModule = nil
 	}
 	// A Script's top-level lexical bindings become global ones here — before any
@@ -249,7 +255,7 @@ restart:
 		varObj = rt.newObject(mknull())
 		withStack = append(withStack, varObj)
 	}
-	ip = 0
+	ip = fn.startIP
 
 	for {
 		op := Opcode(code[ip])
@@ -1422,10 +1428,8 @@ restart:
 				typ, oe := rt.validateImportOptions(options)
 				if oe != nil {
 					push(rt.rejectedPromise(oe.Value))
-				} else if ns, le := rt.importModuleNamespace(joinModuleKey(string(rt.strBytes(spec)), typ), fn.filename); le != nil {
-					push(rt.rejectedPromise(le.Value))
 				} else {
-					push(rt.resolvedPromise(ns))
+					push(rt.importModuleDynamic(joinModuleKey(string(rt.strBytes(spec)), typ), fn.filename))
 				}
 			}
 			ip++

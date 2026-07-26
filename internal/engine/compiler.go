@@ -549,6 +549,9 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		}
 	}
 	c.hoistFunctions(prog.Args, false)
+	// Everything emitted so far is InitializeEnvironment, which for a Module runs
+	// at LINK time rather than at evaluation.
+	hoistEnd := len(c.fn.code)
 	c.compileStmts(prog.Args)
 	if c.err != nil {
 		return nil, c.err
@@ -587,12 +590,33 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		c.fn.moduleRequests = moduleRequestSpecifiers(moduleStmts)
 	}
 	// Return the completion value.
-	c.emitOpU16(OpGetLocal, uint16(c.completionSlot))
+	if isModule {
+		// A Module's body is driven as an async coroutine, so whatever it returns
+		// becomes its completion promise's value. A Module has no observable
+		// completion value, and resolving with a thenable would cost extra ticks
+		// that module-evaluation ordering is sensitive to.
+		c.emit(OpUndef)
+	} else {
+		c.emitOpU16(OpGetLocal, uint16(c.completionSlot))
+	}
 	c.emit(OpReturn)
 
 	c.fn.maxLocals = len(c.locals)
 	if c.fn.maxStack < 8 {
 		c.fn.maxStack = 8
+	}
+	if isModule {
+		// Split the prologue off as its own synchronous function over the SAME
+		// locals (the module environment): both frames share the record's slice, so
+		// a closure hoisted at link time and the body that runs later read and
+		// write the very same bindings. Jump targets are absolute, so the body
+		// keeps the whole code array and simply starts past the prologue.
+		hoist := *c.fn
+		hoist.code = append(append([]byte(nil), c.fn.code[:hoistEnd]...), byte(OpUndef), byte(OpReturn))
+		hoist.isAsync = false
+		hoist.startIP = 0
+		c.fn.moduleHoistFn = &hoist
+		c.fn.startIP = hoistEnd
 	}
 	return c.fn, nil
 }
@@ -892,6 +916,7 @@ func (c *compiler) compileBlockWithUsing(n *Node) {
 	disposeOp, disposeSuppressedOp := OpUsingDispose, OpUsingDisposeSuppressed
 	if blockHasAwaitUsing(n.Args) {
 		disposeOp, disposeSuppressedOp = OpUsingDisposeAsync, OpUsingDisposeAsyncSuppressed
+		c.fn.usesAwait = true
 	}
 
 	catchHandler := c.emitJump(OpTryPush)
@@ -1239,6 +1264,7 @@ func (c *compiler) compileExpr(n *Node) {
 		c.compileYield(n)
 	case NAwait:
 		c.compileExpr(n.Right)
+		c.fn.usesAwait = true
 		c.emit(OpAwait)
 	case NImport:
 		// Dynamic import(): evaluate the specifier (and optional options/attributes

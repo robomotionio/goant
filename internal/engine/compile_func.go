@@ -1033,6 +1033,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		bodyDispose, bodyDisposeSuppressed := OpUsingDispose, OpUsingDisposeSuppressed
 		if blockHasAwaitUsing(n.Body.Args) {
 			bodyDispose, bodyDisposeSuppressed = OpUsingDisposeAsync, OpUsingDisposeAsyncSuppressed
+			c.fn.usesAwait = true
 		}
 		var usingStackLocal, usingErrLocal, usingCatch, usingEnd int
 		savedUsingStack := c.usingStack
