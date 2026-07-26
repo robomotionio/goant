@@ -1014,7 +1014,7 @@ restart:
 			obj := pop()
 			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].shape != nil {
 				if o := rt.icReceiver(obj); o != nil && ics[icx].hit(o) {
-					push(o.slotGet(ics[icx].slot))
+					push(ics[icx].source(o).slotGet(ics[icx].slot))
 					ip += 7
 					break
 				}
@@ -1041,7 +1041,7 @@ restart:
 			obj := peek()
 			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].shape != nil {
 				if o := rt.icReceiver(obj); o != nil && ics[icx].hit(o) {
-					push(o.slotGet(ics[icx].slot))
+					push(ics[icx].source(o).slotGet(ics[icx].slot))
 					ip += 7
 					break
 				}
@@ -1158,7 +1158,7 @@ restart:
 			icx := readU16(code, ip+5)
 			if icx != icNoSlot && ics[icx].shape != nil {
 				if g := rt.objPtr(rt.global); g != nil && ics[icx].hit(g) {
-					push(g.slotGet(ics[icx].slot))
+					push(ics[icx].source(g).slotGet(ics[icx].slot))
 					ip += 7
 					break
 				}

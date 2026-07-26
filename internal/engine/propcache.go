@@ -23,7 +23,17 @@ package engine
 // costs one predictable compare and removes the need to re-derive that argument
 // every time this file changes.
 func (ic *propIC) hit(o *object) bool {
-	return ic.shape == o.shape && ic.epoch == icEpoch() && ic.slot != icMissSlot && o.proxy == nil
+	return ic.shape == o.shape && ic.epoch == icEpoch() && ic.slot != icMissSlot && o.proxy == nil &&
+		(ic.holder == nil || ic.protoVal == o.proto)
+}
+
+// source returns the object to read the cached slot from: the receiver for an
+// own property, the recorded prototype for an inherited one.
+func (ic *propIC) source(o *object) *object {
+	if ic.holder != nil {
+		return ic.holder
+	}
+	return o
 }
 
 // dead reports that this site has seen too many shapes to be worth caching.
@@ -50,6 +60,21 @@ func (ic *propIC) record(o *object, slot uint32) {
 		}
 	}
 	ic.shape, ic.epoch, ic.slot = o.shape, icEpoch(), slot
+	ic.holder, ic.protoVal = nil, mkundef()
+}
+
+// recordProto points the entry at a property reached through o's prototype
+// chain, held on holder at the given slot.
+func (ic *propIC) recordProto(o, holder *object, slot uint32) {
+	if ic.shape != nil && ic.shape != o.shape {
+		ic.misses++
+		if ic.dead() {
+			ic.shape = nil
+			return
+		}
+	}
+	ic.shape, ic.epoch, ic.slot = o.shape, icEpoch(), slot
+	ic.holder, ic.protoVal = holder, o.proto
 }
 
 // icReceiver returns the object to consult for an inline-cached read, or nil if
@@ -96,12 +121,56 @@ func (rt *Runtime) icFillGet(ic *propIC, o *object, name string) {
 		ic.record(o, icMissSlot)
 		return
 	}
-	slot := o.shape.lookupInterned(name)
-	if slot < 0 || o.isAccessorSlot(uint32(slot)) {
-		ic.record(o, icMissSlot)
+	if slot := o.shape.lookupInterned(name); slot >= 0 {
+		if o.isAccessorSlot(uint32(slot)) {
+			ic.record(o, icMissSlot)
+			return
+		}
+		ic.record(o, uint32(slot))
 		return
 	}
-	ic.record(o, uint32(slot))
+	if h, slot, ok := rt.icProtoHolder(o, name); ok {
+		ic.recordProto(o, h, slot)
+		return
+	}
+	ic.record(o, icMissSlot)
+}
+
+// icProtoHolder walks o's prototype chain for a cacheable inherited data slot,
+// flagging every object it passes as one an inline cache now depends on.
+//
+// The flag is set here rather than wherever an object first becomes some
+// object's prototype, because this is precisely the set of objects whose layout
+// a cache has come to rely on. An object no cached lookup ever passed through
+// carries no flag and pays nothing when it is mutated.
+//
+// Anything the fast path could not reproduce disqualifies the walk: an
+// accessor, an exotic holder, a Proxy, or an array the walk would have to
+// continue past — getField answers an array's exotic "length" and its element
+// storage before reaching the chain below it.
+func (rt *Runtime) icProtoHolder(o *object, name string) (*object, uint32, bool) {
+	cur := o
+	for depth := 0; depth < maxProtoChainDepth; depth++ {
+		next := rt.objPtr(cur.proto)
+		if next == nil {
+			return nil, 0, false
+		}
+		if next.proxy != nil || next.ta != nil || next.dv != nil || next.argMap != nil {
+			return nil, 0, false
+		}
+		next.flags.usedAsProto = true
+		if slot := next.shape.lookupInterned(name); slot >= 0 {
+			if next.isAccessorSlot(uint32(slot)) {
+				return nil, 0, false
+			}
+			return next, uint32(slot), true
+		}
+		if next.typeTag == TArr {
+			return nil, 0, false
+		}
+		cur = next
+	}
+	return nil, 0, false
 }
 
 // icFillPut records name's own writable data slot on o for a store.

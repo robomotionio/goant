@@ -59,11 +59,35 @@ func icEpochBump() {
 // setAttrs, clearAccessor, re-adding a live key — all bump icEpoch, while
 // appending a brand new key leaves lower slots where they are and so needs no
 // invalidation.
+// A second form of the entry serves a property found on the receiver's
+// prototype chain, which is where every method lives. Such a site could not be
+// cached at all before, so `p.method()` walked the chain and did a shape lookup
+// at each link on every call — the dominant cost of any object-oriented
+// program.
+//
+// It is guarded by three facts, all of which must still hold:
+//
+//   - the receiver's shape is unchanged, so it has grown no own property that
+//     would now shadow the inherited one;
+//   - the receiver's [[Prototype]] is the same object, so the walk starts where
+//     it started before (shapes do not record the prototype, so two objects
+//     with one shape may have different prototypes);
+//   - the epoch is unchanged, which is what covers everything further along the
+//     chain: an object a cached walk passed through is flagged usedAsProto, and
+//     changing such an object's layout or prototype bumps the epoch.
+//
+// The holder is kept as a pointer and its slot read live, so reassigning a
+// method (C.prototype.m = f) needs no invalidation at all.
 type propIC struct {
 	shape  *shape
 	epoch  uint32
 	slot   uint32
 	misses uint8 // shape changes seen; at icMissLimit the site is abandoned
+
+	// holder is the prototype the property was found on, nil for an own-slot
+	// entry; protoVal is the receiver's [[Prototype]] the walk started from.
+	holder   *object
+	protoVal Value
 }
 
 // icMissLimit is how many times a site may see a different shape before it stops
@@ -312,6 +336,16 @@ func addKeyTr(sp **shape, key propKey, attrs uint8) (uint32, bool) {
 		return 0, false
 	}
 	if !s.isInTree() {
+		// A shape not in the tree is mutated in place, so its pointer does not
+		// change when a key is appended. An inline cache keyed on that pointer
+		// therefore cannot tell that the object has gained an own property —
+		// and a prototype-dispatch entry is precisely a bet that it has not.
+		// (splay.js sets SplayTree.prototype.root_ = null and then assigns
+		// this.root_, which is that bet coming due.)
+		//
+		// A transition through the tree needs no bump: it produces a different
+		// shape, which every entry compares against.
+		icEpochBump()
 		return s.addKey(key, attrs)
 	}
 	ck := childKey{key: key, attrs: attrs}

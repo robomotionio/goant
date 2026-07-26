@@ -208,6 +208,187 @@ func TestPropCacheInvalidation(t *testing.T) {
 			      String(read(o)) + "," + String(o.y)`,
 			want: "49,9",
 		},
+
+		// ---- properties reached through the prototype chain ----
+		//
+		// These sites cache a holder somewhere up the chain, so the receiver's
+		// shape is doing double duty: it identifies the layout AND stands for
+		// "this object has no own property of that name". Everything that can
+		// falsify the second reading has to be caught.
+
+		{
+			// The one the Octane Splay benchmark found. The delete makes o's
+			// shape private, and a private shape is appended to IN PLACE — so
+			// the shadowing assignment leaves the shape pointer untouched and
+			// only the epoch can tell the site that o now answers for itself.
+			// splay.js does exactly this: SplayTree.prototype.root_ = null,
+			// then this.root_ = new Node(...).
+			name: "own shadows proto on a private shape",
+			src: `function read(o) { return o.v; }
+			      function C() {}
+			      C.prototype.v = "proto";
+			      var o = new C();
+			      o.pad1 = 1; o.pad2 = 2;
+			      delete o.pad2;
+			      warm(read, o);
+			      var before = read(o);
+			      o.v = "own";
+			      before + "," + read(o)`,
+			want: "proto,own",
+		},
+		{
+			// A method three prototypes up: the walk the cache replaces is the
+			// whole chain, so the answer has to survive the chain being long.
+			name: "method three levels up",
+			src: `function call(o) { return o.m(); }
+			      function A() {} A.prototype.m = function () { return "A"; };
+			      function B() {} B.prototype = Object.create(A.prototype);
+			      function C() {} C.prototype = Object.create(B.prototype);
+			      var o = new C();
+			      warm(call, o);
+			      call(o)`,
+			want: "A",
+		},
+		{
+			// Installing the name on a NEARER prototype after the site cached a
+			// farther one. Nothing about the receiver changes, so only flagging
+			// the objects the walk passed through catches it.
+			name: "nearer proto shadows cached holder",
+			src: `function call(o) { return o.m(); }
+			      function A() {} A.prototype.m = function () { return "A"; };
+			      function B() {} B.prototype = Object.create(A.prototype);
+			      var o = new B();
+			      warm(call, o);
+			      var before = call(o);
+			      B.prototype.m = function () { return "B"; };
+			      before + "," + call(o)`,
+			want: "A,B",
+		},
+		{
+			// Deleting the property from the holder: the site must fall back to
+			// the rest of the chain rather than keep reading a retired slot.
+			name: "delete from cached holder",
+			src: `function read(o) { return o.v; }
+			      var far = {v: "far"};
+			      var near = Object.create(far);
+			      near.v = "near";
+			      var o = Object.create(near);
+			      warm(read, o);
+			      var before = read(o);
+			      delete near.v;
+			      before + "," + read(o)`,
+			want: "near,far",
+		},
+		{
+			// Re-pointing a link in the middle of the chain.
+			name: "setPrototypeOf on a mid-chain object",
+			src: `function read(o) { return o.v; }
+			      var mid = Object.create({v: "first"});
+			      var o = Object.create(mid);
+			      warm(read, o);
+			      var before = read(o);
+			      Object.setPrototypeOf(mid, {v: "second"});
+			      before + "," + read(o)`,
+			want: "first,second",
+		},
+		{
+			// Two receivers built the same way therefore share a shape, but
+			// their prototypes differ — so the shape alone cannot say which
+			// holder to read. This is why the entry compares the receiver's
+			// [[Prototype]] on every hit.
+			name: "same shape different proto",
+			src: `function read(o) { return o.v; }
+			      var a = Object.create({v: "A"});
+			      var b = Object.create({v: "B"});
+			      a.x = 1; b.x = 1;
+			      warm(read, a);
+			      read(a) + "," + read(b) + "," + read(a)`,
+			want: "A,B,A",
+		},
+		{
+			// Reassigning a method changes the holder's slot value, not its
+			// layout. The cache holds the holder and reads the slot live, so
+			// this needs no invalidation at all — and must still be seen.
+			name: "reassigned method is seen live",
+			src: `function call(o) { return o.m(); }
+			      function C() {} C.prototype.m = function () { return 1; };
+			      var o = new C();
+			      warm(call, o);
+			      var before = call(o);
+			      C.prototype.m = function () { return 2; };
+			      String(before) + "," + String(call(o))`,
+			want: "1,2",
+		},
+		{
+			// A property arriving on the holder that was absent when the site
+			// cached "not found anywhere".
+			name: "proto gains the property after a cached miss",
+			src: `function read(o) { return o.late; }
+			      var proto = {};
+			      var o = Object.create(proto);
+			      warm(read, o);
+			      var before = read(o);
+			      proto.late = "here";
+			      String(before) + "," + String(read(o))`,
+			want: "undefined,here",
+		},
+		{
+			// Freezing the holder leaves the value readable, but a site that
+			// cached a store must stop writing through.
+			name: "frozen proto still reads",
+			src: `function read(o) { return o.v; }
+			      var proto = {v: 3};
+			      var o = Object.create(proto);
+			      warm(read, o);
+			      Object.freeze(proto);
+			      String(read(o))`,
+			want: "3",
+		},
+		{
+			// A method on Array.prototype reached from an array receiver. The
+			// walk passes through an exotic object, whose element storage and
+			// length a cached named read must not skip.
+			name: "array method through the chain",
+			src: `function call(a) { return a.slice(0).length; }
+			      warm(call, [1, 2, 3]);
+			      String(call([1, 2, 3, 4, 5]))`,
+			want: "5",
+		},
+		{
+			// A Proxy in the prototype chain has no shape of its own, so the
+			// walk must refuse to cache past it and let the trap run.
+			name: "proxy in the chain traps",
+			src: `function read(o) { return o.v; }
+			      var p = new Proxy({}, {get: function () { return "trap"; }});
+			      var o = Object.create(p);
+			      warm(read, o);
+			      read(o)`,
+			want: "trap",
+		},
+		{
+			// A global function is an own property of the global object, read
+			// through GET_GLOBAL's cache rather than a field site. Redefining
+			// it must be visible.
+			name: "global rebound after caching",
+			src: `function g() { return 1; }
+			      function call() { return g(); }
+			      for (var i = 0; i < 50; i++) call();
+			      var before = call();
+			      g = function () { return 2; };
+			      String(before) + "," + String(call())`,
+			want: "1,2",
+		},
+		{
+			// A Script-level let shadows a same-named global object property.
+			// The declaration is published at frame entry, after any earlier
+			// script's sites have already cached the object's slot.
+			name: "global lexical shadows a cached property",
+			src: `globalThis.shadowed = "prop";
+			      function read() { return shadowed; }
+			      for (var i = 0; i < 50; i++) read();
+			      read()`,
+			want: "prop",
+		},
 	}
 
 	for _, tc := range cases {

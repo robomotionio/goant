@@ -34,6 +34,12 @@ type objFlags struct {
 	// immutableProto marks an object whose [[Prototype]] cannot be changed
 	// (%Object.prototype%). A SetPrototypeOf to a different value is rejected.
 	immutableProto bool
+	// usedAsProto marks an object that a cached property lookup walked through
+	// as a prototype. Changing such an object's layout or [[Prototype]] can
+	// change what those lookups would find, so it retires the caches; an object
+	// no cache depends on carries no flag and pays nothing. Set by
+	// icProtoHolder, never cleared — a prototype stays one.
+	usedAsProto bool
 }
 
 // extraSlot is one internal slot entry (ant ant_extra_slot_t).
@@ -206,6 +212,20 @@ func (o *object) slotSet(slot uint32, v Value) {
 	o.overflow[idx] = v
 }
 
+// noteLayoutChange retires the inline caches that a change to this object's
+// layout could invalidate.
+//
+// It only does anything for an object some cached lookup walked through as a
+// prototype: adding, removing or redefining one of its properties can change
+// what that lookup finds, and unlike the receiver's own shape that is not
+// something the cache re-checks. Reassigning an existing property's *value*
+// needs nothing — the cache holds the holder and reads the slot live.
+func (o *object) noteLayoutChange() {
+	if o.flags.usedAsProto {
+		icEpochBump()
+	}
+}
+
 // ensureUniqueShape clones the object's shape if it is shared, so it can be
 // mutated in place (ant js_obj_ensure_unique_shape). Returns the private shape.
 func (o *object) ensureUniqueShape() {
@@ -337,6 +357,10 @@ func (rt *Runtime) ordinarySetProto(o *object, v Value) bool {
 		p = po.proto
 	}
 	o.proto = v
+	// Re-pointing an object that a cached lookup walked through changes what
+	// the rest of that walk would find. (A change to the *receiver's* own
+	// prototype needs nothing: the cache compares it on every hit.)
+	o.noteLayoutChange()
 	return true
 }
 
@@ -358,6 +382,7 @@ func (o *object) defineOwnSymbol(sym uint32, v Value, attrs uint8) bool {
 		p.getter, p.setter = mkundef(), mkundef()
 	}
 	o.slotSet(slot, v)
+	o.noteLayoutChange()
 	return true
 }
 
@@ -373,6 +398,7 @@ func (o *object) defineAccessorSymbol(sym uint32, getter, setter Value, hasGet, 
 	p.hasGetter, p.hasSetter = hasGet, hasSet
 	p.getter, p.setter = getter, setter
 	o.slotSet(slot, mkundef())
+	o.noteLayoutChange()
 	return true
 }
 
@@ -393,6 +419,7 @@ func (o *object) defineOwn(key string, v Value, attrs uint8) bool {
 		p.getter, p.setter = mkundef(), mkundef()
 	}
 	o.slotSet(slot, v)
+	o.noteLayoutChange()
 	return true
 }
 
@@ -448,6 +475,7 @@ func (o *object) deleteSlot(slot int32) bool {
 	for i, v := range tail {
 		o.slotSet(uint32(int(slot)+i), v)
 	}
+	o.noteLayoutChange()
 	return true
 }
 
@@ -913,6 +941,7 @@ func (o *object) ownDescriptorSym(off uint32) ownDesc {
 func (o *object) setAttrsOwn(key string, attrs uint8) {
 	o.ensureUniqueShape()
 	o.shape.setAttrs(strKey(key), attrs)
+	o.noteLayoutChange()
 }
 
 // setProp implements ordinary [[Set]] for data properties (OrdinarySet). An
@@ -963,5 +992,6 @@ func (o *object) defineAccessor(key string, getter, setter Value, hasGet, hasSet
 	p.hasGetter, p.hasSetter = hasGet, hasSet
 	p.getter, p.setter = getter, setter
 	o.slotSet(slot, mkundef())
+	o.noteLayoutChange()
 	return true
 }
