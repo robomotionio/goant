@@ -40,6 +40,9 @@ type Regexp struct {
 	// groups before all named ones, back into left-to-right order. nil when the
 	// pattern has no named groups (no reordering needed).
 	groupKinds []bool
+	// quantParent maps each ECMAScript capture group to a quantified enclosing
+	// capture group (or 0). See quantifiedParents.
+	quantParent []int
 }
 
 // Group is one capture group in a match (Index is a rune offset; -1 = unmatched).
@@ -550,6 +553,7 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if r.Unicode {
 		src = translateWordClass(src, r.IgnoreCase)
 	}
+	r.quantParent = quantifiedParents(src)
 	src = clampQuantifiers(src)
 	src = translateDot(src, r.DotAll)
 	if src == "" {
@@ -689,6 +693,25 @@ func (r *Regexp) exec(input []rune, start int) (*Match, error) {
 		return gg
 	}
 	out := &Match{Index: m.Index, Groups: make([]Group, len(groups))}
+	// A quantifier resets the captures inside its body at the start of each
+	// iteration, so a group whose last capture lies outside its quantified
+	// parent's last capture did not participate in the final one. regexp2 keeps
+	// the earlier capture; drop it.
+	defer func() {
+		for g := 1; g < len(out.Groups) && g < len(r.quantParent); g++ {
+			p := r.quantParent[g]
+			if p == 0 || p >= len(out.Groups) {
+				continue
+			}
+			child, parent := out.Groups[g], out.Groups[p]
+			if child.Index < 0 || parent.Index < 0 {
+				continue
+			}
+			if child.Index < parent.Index || child.Index+child.Length > parent.Index+parent.Length {
+				out.Groups[g] = Group{Index: -1, Name: child.Name}
+			}
+		}
+	}()
 	// regexp2 numbers every unnamed group before every named group; when the
 	// pattern mixes the two, reorder them into ECMAScript left-to-right order.
 	if r.groupKinds != nil && len(r.groupKinds)+1 == len(groups) {

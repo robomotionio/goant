@@ -7,6 +7,101 @@ import (
 	"unicode"
 )
 
+// quantifiedParents maps each ECMAScript capture group (1-based) to the group
+// that encloses it AND is directly quantified, or 0 when there is none. A
+// quantifier resets every capture inside its body at the start of each
+// iteration, so a group whose last capture lies outside its quantified parent's
+// last capture did not participate in the final iteration and reads as
+// undefined — `/(z)((a+)?(b+)?(c))*/` on "zaacbbbcac" leaves group 4 unset.
+//
+// Only a CAPTURING quantified parent is reported: a non-capturing one has no
+// span to test against. Groups inside a lookbehind are exempt, since their
+// captures legitimately sit before the parent's.
+func quantifiedParents(src string) []int {
+	rs := []rune(src)
+	parents := []int{0} // parents[0] unused; index by ES group number
+	type frame struct {
+		group      int // capture-group number, 0 for a non-capturing group
+		start      int // rune index of the '('
+		lookbehind bool
+	}
+	var stack []frame
+	groupNum := 0
+	lookbehindDepth := 0
+	inClass := false
+	// quantified[g] records whether capture group g is followed by a quantifier.
+	quantified := map[int]bool{}
+	// closed keeps the group number of each ')' so the quantifier check can attach.
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' {
+			i++
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+		case '(':
+			f := frame{start: i}
+			if i+1 < len(rs) && rs[i+1] == '?' {
+				if i+2 < len(rs) && rs[i+2] == '<' && i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!') {
+					f.lookbehind = true
+					lookbehindDepth++
+				} else if i+2 < len(rs) && rs[i+2] == '<' {
+					groupNum++
+					f.group = groupNum
+				}
+			} else {
+				groupNum++
+				f.group = groupNum
+			}
+			if f.group > 0 {
+				for len(parents) <= f.group {
+					parents = append(parents, 0)
+				}
+				// The nearest enclosing CAPTURING group, recorded now; whether it is
+				// quantified is only known once its ')' is seen.
+				if lookbehindDepth == 0 {
+					for k := len(stack) - 1; k >= 0; k-- {
+						if stack[k].group > 0 {
+							parents[f.group] = stack[k].group
+							break
+						}
+					}
+				}
+			}
+			stack = append(stack, f)
+		case ')':
+			if len(stack) == 0 {
+				break
+			}
+			f := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if f.lookbehind {
+				lookbehindDepth--
+			}
+			if f.group > 0 && i+1 < len(rs) {
+				switch rs[i+1] {
+				case '*', '+', '?', '{':
+					quantified[f.group] = true
+				}
+			}
+		}
+	}
+	for g := 1; g < len(parents); g++ {
+		if !quantified[parents[g]] {
+			parents[g] = 0
+		}
+	}
+	return parents
+}
+
 // isValidGroupName reports whether name is a RegExpIdentifierName: an
 // IdentifierStart followed by IdentifierParts. ID_Start is approximated by
 // letters + Nl, ID_Continue by letters + Nl + Nd + Mn + Mc + Pc; `$`, `_`, and
