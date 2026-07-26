@@ -16,7 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"goant/internal/regexp2"
+	"github.com/robomotionio/goant/internal/regexp2"
 )
 
 // Regexp is a compiled JS regular expression.

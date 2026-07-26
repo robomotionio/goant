@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"goant/internal/engine"
+	"github.com/robomotionio/goant/internal/engine"
 )
 
 // Context is an execution context: its own globals and prototypes, sharing the

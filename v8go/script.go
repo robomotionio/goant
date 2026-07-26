@@ -3,7 +3,7 @@ package v8go
 import (
 	"errors"
 
-	"goant/internal/engine"
+	"github.com/robomotionio/goant/internal/engine"
 )
 
 // CompilerCachedData is a compilation cache blob. Under V8 this let a fresh

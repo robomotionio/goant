@@ -21,7 +21,7 @@ import (
 	"runtime"
 	"sync"
 
-	"goant/internal/engine"
+	"github.com/robomotionio/goant/internal/engine"
 )
 
 // IsolateOptions mirrors the V8 heap-sizing options. goant has no separately
@@ -38,10 +38,10 @@ type IsolateOptions struct {
 // this isolate's own accounting of live engine objects — not a Go-runtime-wide
 // figure, and not directly comparable to V8's.
 type HeapStatistics struct {
-	TotalHeapSize    uint64
-	UsedHeapSize     uint64
-	HeapSizeLimit    uint64
-	ExternalMemory   uint64
+	TotalHeapSize          uint64
+	UsedHeapSize           uint64
+	HeapSizeLimit          uint64
+	ExternalMemory         uint64
 	NumberOfNativeContexts uint64
 }
 

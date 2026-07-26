@@ -3,7 +3,7 @@ package engine
 import (
 	"sort"
 
-	"goant/internal/regexpjs"
+	"github.com/robomotionio/goant/internal/regexpjs"
 )
 
 // Port of ant include/object.h + the property protocol in src/ant.c. An object

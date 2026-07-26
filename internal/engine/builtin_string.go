@@ -9,7 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"goant/internal/regexpjs"
+	"github.com/robomotionio/goant/internal/regexpjs"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"

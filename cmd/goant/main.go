@@ -13,7 +13,7 @@ import (
 	"os"
 	"strings"
 
-	"goant/internal/engine"
+	"github.com/robomotionio/goant/internal/engine"
 )
 
 func main() {

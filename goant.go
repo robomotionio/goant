@@ -2,7 +2,7 @@
 // JavaScript engine. See PLAN.md / TODO.md for the porting roadmap.
 package goant
 
-import "goant/internal/engine"
+import "github.com/robomotionio/goant/internal/engine"
 
 // Runtime is an embeddable JavaScript isolate.
 type Runtime struct {

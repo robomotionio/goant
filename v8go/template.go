@@ -3,7 +3,7 @@ package v8go
 import (
 	"errors"
 
-	"goant/internal/engine"
+	"github.com/robomotionio/goant/internal/engine"
 )
 
 // FunctionCallback is a Go function callable from JavaScript. Returning nil

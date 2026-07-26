@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode"
 
-	"goant/internal/regexpjs"
+	"github.com/robomotionio/goant/internal/regexpjs"
 )
 
 // regExpEscape implements RegExp.escape's EncodeForRegExpEscape (ES2025): the

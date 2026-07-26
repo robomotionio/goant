@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"goant/internal/engine"
+	"github.com/robomotionio/goant/internal/engine"
 )
 
 // Value is a JavaScript value. It carries the runtime that produced it: engine

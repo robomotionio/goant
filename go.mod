@@ -1,4 +1,4 @@
-module goant
+module github.com/robomotionio/goant
 
 go 1.26.3
 

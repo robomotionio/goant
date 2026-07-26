@@ -3,7 +3,7 @@ package v8go
 import (
 	"errors"
 
-	"goant/internal/engine"
+	"github.com/robomotionio/goant/internal/engine"
 )
 
 // JSError is a JavaScript exception that escaped to the host. Callers type-

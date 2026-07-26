@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"errors"
 
-	"goant/internal/regexp2/syntax"
+	"github.com/robomotionio/goant/internal/regexp2/syntax"
 )
 
 const (
