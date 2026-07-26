@@ -466,8 +466,40 @@ func (rt *Runtime) initRegExpBuiltin() {
 }
 
 // newRegExp compiles a pattern/flags pair into a RegExp object.
-func (rt *Runtime) newRegExp(pattern, flags string) (Value, *ThrowError) {
+// regexpCacheMax bounds the compiled-pattern cache. A program with unboundedly
+// many distinct patterns exists (a matcher built from user input), and it must
+// not retain all of them; dropping the whole table is fine, since refilling it
+// costs exactly what having no cache would have cost.
+const regexpCacheMax = 1024
+
+// compileRegExp compiles a pattern, reusing an earlier compilation of the same
+// source and flags.
+//
+// A regular-expression literal creates a NEW RegExp object every time it is
+// evaluated, so a literal inside a loop was recompiled on every iteration —
+// 20% of Octane's RegExp benchmark. The compiled program is immutable and holds
+// no per-object state (lastIndex is an own property of the RegExp object), so
+// sharing it between objects is not observable.
+func (rt *Runtime) compileRegExp(pattern, flags string) (*regexpjs.Regexp, error) {
+	k := regexpKey{pattern, flags}
+	if re, ok := rt.regexpCache[k]; ok {
+		return re, nil
+	}
 	re, err := regexpjs.Compile(pattern, flags)
+	if err != nil {
+		return nil, err
+	}
+	if rt.regexpCache == nil {
+		rt.regexpCache = map[regexpKey]*regexpjs.Regexp{}
+	} else if len(rt.regexpCache) >= regexpCacheMax {
+		clear(rt.regexpCache)
+	}
+	rt.regexpCache[k] = re
+	return re, nil
+}
+
+func (rt *Runtime) newRegExp(pattern, flags string) (Value, *ThrowError) {
+	re, err := rt.compileRegExp(pattern, flags)
 	if err != nil {
 		return mkundef(), &ThrowError{Value: rt.makeError(rt.errors.syntaxProto, "SyntaxError", err.Error()), rt: rt}
 	}

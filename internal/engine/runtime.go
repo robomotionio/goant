@@ -4,6 +4,8 @@ import (
 	"errors"
 	"math"
 	"path/filepath"
+
+	"github.com/robomotionio/goant/internal/regexpjs"
 )
 
 // Runtime is a single JavaScript isolate — the Go analogue of ant's ant_t
@@ -74,6 +76,10 @@ type Runtime struct {
 	// Remaining Annex B legacy RegExp static state, updated on every successful
 	// built-in match (RegExp.input/$_, lastParen/$+, leftContext/$`,
 	// rightContext/$', and $1…$9).
+	// regexpCache maps a pattern and its flags to the compiled program, which
+	// is immutable and shared between RegExp objects. See compileRegExp.
+	regexpCache map[regexpKey]*regexpjs.Regexp
+
 	// regexpInput and the two context strings are built on demand from the last
 	// match's subject and offsets; see buildLegacyRegExpStrings.
 	regexpLegacyInput []rune
@@ -292,6 +298,9 @@ type Runtime struct {
 }
 
 // flatString is a heap-resident flat string payload (Phase 2 strings).
+// regexpKey identifies a compiled pattern.
+type regexpKey struct{ pattern, flags string }
+
 type flatString struct {
 	bytes   []byte
 	gostr   string // lazily cached Go view of bytes; see (*Runtime).strGo
