@@ -35,7 +35,12 @@ type genMsg struct {
 	// (GeneratorYield(innerResult)), so its shape — including a missing `done` —
 	// is observable and must not be rebuilt.
 	raw bool
-	err *ThrowError
+	// noAwait marks a yield whose value must NOT be awaited before it reaches the
+	// consumer. `yield x` in an async generator awaits x (the Yield evaluation
+	// does that), but `yield*` hands AsyncGeneratorYield the inner iterator's
+	// value directly — so a promise yielded through `yield*` stays a promise.
+	noAwait bool
+	err     *ThrowError
 }
 
 // genResume travels driver -> coroutine: how to resume the suspended point.
@@ -150,6 +155,12 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 // throw/return injection, signals the interpreter to unwind.
 func (rt *Runtime) suspend(value Value, isAwait bool) (resumed Value, inject *genResume) {
 	return rt.suspendMsg(genMsg{value: value, await: isAwait})
+}
+
+// suspendYieldNoAwait suspends yielding a value the async-generator driver must
+// deliver without awaiting it (async `yield*`).
+func (rt *Runtime) suspendYieldNoAwait(value Value) (resumed Value, inject *genResume) {
+	return rt.suspendMsg(genMsg{value: value, noAwait: true})
 }
 
 // suspendRaw suspends yielding a ready-made IteratorResult object, which the
@@ -327,6 +338,13 @@ func (rt *Runtime) asyncGenResume(g *genState, kind genResumeKind, val Value) {
 	}
 	if m.done {
 		rt.resolvePromise(req.p, req.po, rt.genResult(m.value, true))
+		rt.asyncGenFinishReq(g)
+		return
+	}
+	// A `yield*` delegation hands the inner value straight to the consumer:
+	// AsyncGeneratorYield performs no Await of its own.
+	if m.noAwait {
+		rt.resolvePromise(req.p, req.po, rt.genResult(m.value, false))
 		rt.asyncGenFinishReq(g)
 		return
 	}

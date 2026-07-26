@@ -1635,7 +1635,7 @@ restart:
 						thrown = ve
 						goto unwind
 					}
-					resumed, inject = rt.suspend(value, false)
+					resumed, inject = rt.suspendYieldNoAwait(value)
 				} else {
 					resumed, inject = rt.suspendRaw(result)
 				}
