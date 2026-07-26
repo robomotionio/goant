@@ -31,6 +31,13 @@ type poolCell[T any] struct {
 	live bool
 }
 
+// gcPoison is the GOANT_GC_POISON debug mode: a swept cell is not returned to
+// the free list, and the first use of one panics instead of quietly reading
+// whatever was allocated over it. That turns a missing collector root — which
+// otherwise surfaces as an unrelated value going wrong much later — into a Go
+// stack trace at the exact read. See collect.go.
+var gcPoison = osGetenvGCPoison()
+
 // pool is a chunked non-moving arena of T.
 type pool[T any] struct {
 	// chunks holds pointers to fixed-size arrays rather than slices. Resolving
@@ -42,6 +49,9 @@ type pool[T any] struct {
 	freeList []Handle // stack of freed handles for reuse
 	next     Handle   // next never-used handle (starts at 1)
 	liveN    int
+
+	// poisoned records cells the collector freed, under gcPoison only.
+	poisoned map[Handle]bool
 }
 
 func newPool[T any]() *pool[T] {
@@ -98,10 +108,19 @@ func (p *pool[T]) ensure(h Handle) {
 func (p *pool[T]) get(h Handle) *T {
 	cl := p.cell(h)
 	if cl == nil || !cl.live {
+		if gcPoison && p.poisoned[h] {
+			panic(poisonError{h})
+		}
 		return nil
 	}
 	return &cl.elem
 }
+
+// poisonError is what a gcPoison build panics with when something dereferences
+// a handle the collector freed.
+type poisonError struct{ h Handle }
+
+func (e poisonError) Error() string { return "goant: use of collected handle" }
 
 // gen returns the current generation of a handle's cell (0 if absent).
 func (p *pool[T]) gen(h Handle) uint32 {
@@ -239,6 +258,23 @@ func (p *pool[T]) sweep(m markSet) int {
 				break
 			}
 			if !p.chunks[c][s].live || m.has(h) {
+				continue
+			}
+			if gcPoison {
+				// Free without recycling: the handle stays dead so a dangling
+				// reference to it is caught rather than silently repointed at
+				// the next allocation.
+				cl := &p.chunks[c][s]
+				cl.live = false
+				cl.gen++
+				var zero T
+				cl.elem = zero
+				p.liveN--
+				if p.poisoned == nil {
+					p.poisoned = map[Handle]bool{}
+				}
+				p.poisoned[h] = true
+				freed++
 				continue
 			}
 			p.free(h)

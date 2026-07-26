@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"os"
 	"reflect"
+	"strconv"
 	"sync"
 )
 
@@ -46,6 +48,19 @@ import (
 // collection over a few hundred fields, which does not show up next to the
 // trace, and the walk is pruned by a memoised "can this type reach a Value at
 // all" test so it never descends into bytecode, source text or maps of strings.
+//
+// # Debugging
+//
+// A missing root shows up as an unrelated value going wrong much later, so two
+// environment variables, read once at start-up, bring it forward:
+//
+//	GOANT_GC_FLOOR=n   collect once n objects are live rather than at the
+//	                   default threshold, so a short program collects often.
+//	GOANT_GC_POISON=1  do not recycle a swept cell; panic at the first use of
+//	                   one instead.
+//
+// Together they turn a corrupted value into a Go stack trace at the exact read
+// that touched the freed cell.
 
 // gcState is the collector's persistent state: the mark bitsets (reused
 // between cycles), the trace worklist, and the trigger threshold.
@@ -83,7 +98,18 @@ const gcGrowthFactor = 2
 // gcFloor is the smallest live-object count worth collecting at. A realm's own
 // intrinsics are several thousand objects, so a lower threshold would collect
 // repeatedly before a script had allocated anything of its own.
-const gcFloor = 1 << 16
+var gcFloor = 1 << 16
+
+// osGetenvGCPoison reports whether the poison debug mode is on; see pools.go.
+func osGetenvGCPoison() bool { return os.Getenv("GOANT_GC_POISON") != "" }
+
+func init() {
+	if v := os.Getenv("GOANT_GC_FLOOR"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			gcFloor = n
+		}
+	}
+}
 
 // maybeCollect runs a collection if the heap has grown past the threshold and
 // the engine is at a point where every live value is published.
