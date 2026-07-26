@@ -19,6 +19,15 @@ type svFunc struct {
 	code      []byte
 	constants []Value
 
+	// constNames is the Go text of every string constant, by the same index.
+	//
+	// The name of a property is a constant, and the interpreter needs it as a Go
+	// string on every access that misses its inline cache. Going through the
+	// Value meant resolving a handle — a chunk lookup, a bounds check and a
+	// pointer chase — to reach a string that was decided at compile time and can
+	// never change. It was 6% of Octane's Richards.
+	constNames []string
+
 	childFuncs []*svFunc   // nested functions, referenced by CLOSURE index
 	upvalDescs []upvalDesc // how this function captures its upvalues
 
@@ -242,6 +251,11 @@ func (c *compiler) constant(v Value) int {
 		}
 	}
 	c.fn.constants = append(c.fn.constants, v)
+	text := ""
+	if v.IsString() {
+		text = c.rt.strGo(v)
+	}
+	c.fn.constNames = append(c.fn.constNames, text)
 	return len(c.fn.constants) - 1
 }
 

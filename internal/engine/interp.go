@@ -481,7 +481,7 @@ restart:
 			withStack = withStack[:len(withStack)-1]
 			ip++
 		case OpWithGetVar:
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			// Reference mode (high bit of the fallback-kind byte): also push the
 			// resolved base beneath the value, so a paired OpWithPutVar can write
 			// back to the same base (compound assignment; see emitWithVarRef).
@@ -602,7 +602,7 @@ restart:
 			}
 			ip += 8
 		case OpWithPutVar:
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			refMode := code[ip+7]&0x80 != 0
 			fbKind := code[ip+7] & 0x7f
 			val := pop()
@@ -717,7 +717,7 @@ restart:
 			}
 			ip += 8
 		case OpWithDelVar:
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			done := false
 			for k := len(withStack) - 1; k >= 0; k-- {
 				has, e := rt.hasPropE(withStack[k], name)
@@ -943,7 +943,7 @@ restart:
 			push(arrv)
 			ip += 3
 		case OpDefineField:
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			val := pop()
 			if o := rt.objPtr(peek()); o != nil {
 				if isPrivateKey(name) {
@@ -974,7 +974,7 @@ restart:
 			}
 			ip += 5
 		case OpDefineMethod:
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			flags := code[ip+5]
 			enumerable := flags&4 != 0 // bit 2: object-literal accessor (enumerable)
 			shared := flags&8 != 0     // bit 3: shared private method, already homed
@@ -1073,7 +1073,7 @@ restart:
 					}
 				}
 			}
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			var v Value
 			var e *ThrowError
 			if isPrivateKey(name) {
@@ -1102,7 +1102,7 @@ restart:
 					}
 				}
 			}
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			var v Value
 			var e *ThrowError
 			if isPrivateKey(name) {
@@ -1135,7 +1135,7 @@ restart:
 					}
 				}
 			}
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			if isPrivateKey(name) {
 				if e := rt.setPrivate(obj, name, privEnv, val); e != nil {
 					thrown = e
@@ -1223,7 +1223,7 @@ restart:
 					}
 				}
 			}
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			// The global environment's declarative record is consulted first: a
 			// Script-level let/const/class shadows a same-named global property.
 			if b := rt.lookupGlobalLex(name); b != nil {
@@ -1259,7 +1259,7 @@ restart:
 			// Lenient global read (typeof of a possibly-undeclared global): absent
 			// names yield undefined rather than a ReferenceError. A global lexical
 			// binding is NOT absent, so its temporal dead zone still throws.
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			if b := rt.lookupGlobalLex(name); b != nil {
 				v, e := rt.globalLexRead(b, name)
 				if e != nil {
@@ -1278,7 +1278,7 @@ restart:
 			push(v)
 			ip += 7
 		case OpPutGlobal:
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			val := pop()
 			if b := rt.lookupGlobalLex(name); b != nil {
 				if e := rt.globalLexWrite(b, name, val); e != nil {
@@ -1303,7 +1303,7 @@ restart:
 			// assignment's right-hand side: it records whether the name bound to
 			// anything, and the paired OpPutConst below throws afterwards if it did
 			// not. Resolving first is observable — the RHS may create the binding.
-			nm := rt.strGo(fn.constants[readU32(code, ip+1)])
+			nm := fn.constNames[readU32(code, ip+1)]
 			push(mkbool(rt.lookupGlobalLex(nm) != nil || rt.hasProp(rt.global, nm)))
 			ip += 5
 		case OpPutConst:
@@ -1311,7 +1311,7 @@ restart:
 			// [resolvable, value] -> [value].
 			pcVal := pop()
 			pcOK := pop()
-			pcName := rt.strGo(fn.constants[readU32(code, ip+1)])
+			pcName := fn.constNames[readU32(code, ip+1)]
 			if !rt.toBoolean(pcOK) {
 				thrown = rt.referenceError(pcName + " is not defined")
 				goto unwind
@@ -1605,7 +1605,7 @@ restart:
 		case OpImportNamed:
 			// Read one binding out of a namespace object. This runs on every
 			// reference to an imported name, which is what keeps the binding live.
-			name := rt.strGo(fn.constants[readU32(code, ip+1)])
+			name := fn.constNames[readU32(code, ip+1)]
 			ns := pop()
 			v, e := rt.getField(ns, name)
 			if e != nil {
@@ -1777,7 +1777,7 @@ restart:
 		case OpThrowError:
 			// Throw a native error of the given kind (0=TypeError, 1=ReferenceError,
 			// 2=SyntaxError, 3=RangeError) with a constant message.
-			msg := rt.strGo(fn.constants[readU32(code, ip+1)])
+			msg := fn.constNames[readU32(code, ip+1)]
 			switch code[ip+5] {
 			case 1:
 				thrown = rt.referenceError(msg)
