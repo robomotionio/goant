@@ -1303,6 +1303,45 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 }
 
 // objectDefineProperties applies a map of descriptors (Object.defineProperties).
+// ownPropertyKeyValues is [[OwnPropertyKeys]] as a list of key VALUES, so a
+// symbol key survives (the string-keyed helpers drop it). Order is
+// OrdinaryOwnPropertyKeys': array indices ascending, then string keys in
+// creation order, then symbols.
+func (rt *Runtime) ownPropertyKeyValues(v Value) ([]Value, *ThrowError) {
+	o := rt.objPtr(v)
+	if o == nil {
+		return nil, nil
+	}
+	if o.proxy != nil {
+		return rt.proxyOwnKeys(o.proxy)
+	}
+	var out []Value
+	switch {
+	case v.Type() == TArr:
+		for i := uint32(0); i < o.arrLen; i++ {
+			if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
+				out = append(out, rt.newString(numberToString(float64(i))))
+			}
+		}
+		out = append(out, rt.newString("length"))
+	case v.Type() == TTypedArray:
+		for i, l := 0, rt.taLength(o); i < l; i++ {
+			out = append(out, rt.newString(numberToString(float64(i))))
+		}
+	case o.boxed.Type() == TStr:
+		for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+			out = append(out, rt.newString(numberToString(float64(i))))
+		}
+	}
+	for _, k := range o.ownKeys() {
+		out = append(out, rt.newString(k))
+	}
+	for _, off := range o.ownSymbolKeys() {
+		out = append(out, mkval(TSymbol, uint64(off)))
+	}
+	return out, nil
+}
+
 func (rt *Runtime) objectDefineProperties(obj, props Value) *ThrowError {
 	// ObjectDefineProperties (20.1.2.3.1) begins with ToObject(Properties): a
 	// primitive is boxed (its wrapper has no own enumerable descriptors, so it is
@@ -1311,18 +1350,40 @@ func (rt *Runtime) objectDefineProperties(obj, props Value) *ThrowError {
 	if e != nil {
 		return e
 	}
-	// Enumerate via [[OwnPropertyKeys]] + [[GetOwnProperty]] (proxy traps), then
-	// read each descriptor object via [[Get]].
-	keys, e := rt.enumerableOwnKeysE(props)
+	// Enumerate via [[OwnPropertyKeys]] + [[GetOwnProperty]] (proxy traps) and read
+	// every descriptor object first; only then define them, so a define that
+	// throws does not stop the remaining reads that already happened. Symbol keys
+	// count: `Object.defineProperties(o, {[Symbol()]: {…}})` defines that property.
+	keys, e := rt.ownPropertyKeyValues(props)
 	if e != nil {
 		return e
 	}
+	type pending struct {
+		key  Value
+		desc Value
+	}
+	var descs []pending
 	for _, k := range keys {
-		desc, e := rt.getField(props, k)
+		en, exists, e := rt.ownKeyEnumerable(props, k)
 		if e != nil {
 			return e
 		}
-		if e := rt.objectDefineProperty(obj, k, desc); e != nil {
+		if !exists || !en {
+			continue
+		}
+		desc, e := rt.getElement(props, k)
+		if e != nil {
+			return e
+		}
+		// ToPropertyDescriptor's first step, performed in the read phase so an
+		// invalid entry is rejected before anything is defined.
+		if !desc.IsObjectType() {
+			return rt.typeError("Property description must be an object")
+		}
+		descs = append(descs, pending{key: k, desc: desc})
+	}
+	for _, pd := range descs {
+		if e := rt.objectDefinePropertyKey(obj, pd.key, pd.desc); e != nil {
 			return e
 		}
 	}

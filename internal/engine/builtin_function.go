@@ -231,6 +231,13 @@ func (rt *Runtime) dynamicFunctionCtor(keyword string, defaultProto Value) nativ
 		// Compile in the global scope and capture the function via a temporary
 		// global binding (the script completion value drops function-expression
 		// statements, so we read the binding back instead).
+		// CreateDynamicFunction parses the parameter text on its own goal symbol,
+		// before the function's source text is assembled — so a construct that is
+		// only legal because of where the assembled text happens to place it (an
+		// Annex B `-->` after the opening parenthesis) is still a SyntaxError.
+		if perr := ParseFunctionParameters(keyword, strings.Join(params, ",")); perr != nil {
+			return mkundef(), &ThrowError{Value: rt.makeError(rt.errors.syntaxProto, "SyntaxError", perr.Error()), rt: rt}
+		}
 		const tmp = "__goant_Function__"
 		src := "globalThis." + tmp + " = (" + keyword + " anonymous(" + strings.Join(params, ",") + "\n) {\n" + body + "\n});"
 		prog, perr := Parse("<anonymous>", src)

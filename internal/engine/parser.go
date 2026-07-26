@@ -75,6 +75,21 @@ func Parse(filename, src string) (*Node, error) {
 	return parseMode(filename, src, false, false)
 }
 
+// ParseFunctionParameters checks the parameter text handed to the dynamic
+// Function constructor. CreateDynamicFunction parses P on its own goal symbol
+// (FormalParameters) BEFORE assembling the function's source text, so a `-->`
+// there is a SyntaxError even though the assembled source would put it right
+// after `anonymous(`, where Annex B would take it for a comment.
+func ParseFunctionParameters(prefix, params string) error {
+	src := prefix + " anonymous(" + params + "\n) {\n}"
+	p := &parser{lx: newLexer(src, false), filename: "<anonymous>"}
+	p.lx.noHTMLClose = true
+	p.usingAllowed = false
+	program := p.mk(NProgram)
+	p.parseStmtList(&program.Args, false, true)
+	return p.err
+}
+
 func parseMode(filename, src string, strict, module bool) (*Node, error) {
 	p := &parser{lx: newLexer(src, strict), filename: filename}
 	p.lx.module = module
@@ -839,6 +854,11 @@ func (p *parser) tryParseAsyncArrow() *Node {
 				fn.SrcEnd = nodeSrcEnd(p, fn.Body)
 				return fn
 			}
+			// `async()` with no `=>` is a CALL of a function named `async`; there is
+			// no parenthesised expression to re-parse, so re-parsing as one would
+			// report a bogus SyntaxError at the `)`.
+			p.lx.restore(saved)
+			return nil
 		}
 		p.lx.restore(saved)
 		p.next()

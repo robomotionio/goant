@@ -92,6 +92,11 @@ type lexer struct {
 	code   string
 	strict bool
 	module bool // Module goal: HTML-comment openers/closers are not comments
+	// noHTMLClose suppresses the `-->` SingleLineHTMLCloseComment. It is set when
+	// the source is not a Script or Module but a fragment parsed on its own goal
+	// symbol — the dynamic Function constructor's parameter text — where the
+	// HTMLCloseComment production of InputElementHashbangOrRegExp does not apply.
+	noHTMLClose bool
 	// commentErr is set when whitespace skipping runs off the end of an
 	// unterminated block comment (`/* …` with no closing `*/`). Per the spec an
 	// unterminated MultiLineComment is an early SyntaxError, so nextRaw turns this
@@ -289,7 +294,7 @@ done:
 		if p+3 < end && code[p] == '<' && code[p+1] == '!' && code[p+2] == '-' && code[p+3] == '-' {
 			p = l.skipHTMLLineComment(p+4, end, &sawNL)
 		} else if p+2 < end && code[p] == '-' && code[p+1] == '-' && code[p+2] == '>' &&
-			(sawNL || htmlCloseAtLineStart(code, p)) {
+			(sawNL || htmlCloseAtLineStart(code, p, !l.noHTMLClose)) {
 			// A `-->` HTML close comment must follow a LineTerminatorSequence and then
 			// only whitespace / delimited comments. sawNL covers a preceding multiline
 			// comment that itself contained a newline (`/* … \n … */-->`), which
@@ -332,7 +337,11 @@ func (l *lexer) skipHTMLLineComment(p, end int, sawNL *bool) int {
 	return p
 }
 
-func htmlCloseAtLineStart(code string, p int) bool {
+// htmlCloseAtLineStart reports whether the `-->` at p may open a
+// SingleLineHTMLCloseComment. lenient adds the two acceptances that only a
+// Script/Module goal has: the very start of the input, and (matching common
+// engines) a `-->` directly after an opening bracket.
+func htmlCloseAtLineStart(code string, p int, lenient bool) bool {
 	for p > 0 {
 		c := code[p-1]
 		if c == '\n' || c == '\r' {
@@ -364,18 +373,15 @@ func htmlCloseAtLineStart(code string, p int) bool {
 			p = open
 			continue
 		}
-		// A `-->` SingleLineHTMLCloseComment is recognized only at the start of a
-		// line. As Annex B leniency (matching common engines), a `-->` directly after
-		// an opening bracket is also taken as a comment — its `--` could not be a
-		// decrement there. A statement separator (`;`, `,`) does NOT get this leniency:
+		// A statement separator (`;`, `,`) does NOT get the bracket leniency:
 		// `;-->` is a token sequence and a SyntaxError.
 		switch c {
 		case '{', '(', '[':
-			return true
+			return lenient
 		}
 		return false
 	}
-	return true
+	return lenient
 }
 
 // ---- identifiers ----
