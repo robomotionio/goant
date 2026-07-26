@@ -458,6 +458,15 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	// zone) so the per-iteration assignments below use a fresh cell — the
 	// RHS-scope binding stays permanently uninitialized, so such a closure throws.
 	c.closeForHeadBindings(lexSlots)
+	// for-in keeps the source object so each key can be re-checked just before it
+	// is visited: the key list is a snapshot, but a property deleted during the
+	// loop must not be enumerated.
+	objSlot := -1
+	if produceOp == OpForIn {
+		c.emit(OpDup)
+		objSlot = c.addLocal("*fio*", false)
+		c.emitOpU16(OpPutLocal, uint16(objSlot))
+	}
 	c.emit(produceOp) // source -> keys/values array
 	keysSlot := c.addLocal("*fik*", false)
 	c.emitOpU16(OpPutLocal, uint16(keysSlot))
@@ -480,6 +489,16 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	c.emitOpU16(OpGetLocal, uint16(keysSlot))
 	c.emitOpU16(OpGetLocal, uint16(iSlot))
 	c.emit(OpGetElem)
+	var deleted int
+	if objSlot >= 0 {
+		c.emit(OpDup)                            // [k, k]
+		c.emitOpU16(OpGetLocal, uint16(objSlot)) // [k, k, obj]
+		c.emit(OpHasPrivate)                     // [k, stillThere]
+		present := c.emitJump(OpJmpTrue)
+		c.emit(OpPop) // gone: skip to the increment without binding it
+		deleted = c.emitJump(OpJmp)
+		c.patchJump(present)
+	}
 	store()
 
 	c.compileStmt(n.Body)
@@ -487,6 +506,9 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	// continue target: i++
 	l.continueTarget = len(c.fn.code)
 	c.patchContinues(l)
+	if objSlot >= 0 {
+		c.patchJump(deleted)
+	}
 	// Per-iteration lexical binding: close any closure capture of the loop var
 	// before the next iteration reuses its slot.
 	c.closeForHeadBindings(lexSlots)

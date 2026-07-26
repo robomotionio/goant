@@ -123,6 +123,35 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 	return ok, nil
 }
 
+// forInStillEnumerable re-checks, at the moment a for-in loop is about to visit
+// a key, that the key is still an enumerable property of the object. The key
+// list is materialised up front, but a property deleted before it is reached
+// must not be visited (14.7.5.10, EnumerateObjectProperties). A chain
+// containing a proxy is exempt: re-running its traps here would be observable,
+// and the trap results were already taken when the list was built.
+func (rt *Runtime) forInStillEnumerable(obj, key Value) bool {
+	cur := obj
+	for depth := 0; depth < maxProtoChainDepth; depth++ {
+		o := rt.objPtr(cur)
+		if o == nil {
+			return false
+		}
+		if o.proxy != nil {
+			return true
+		}
+		en, exists, e := rt.ownKeyEnumerable(cur, key)
+		if e != nil {
+			return true
+		}
+		if exists {
+			// A non-enumerable own property shadows an inherited enumerable one.
+			return en
+		}
+		cur = o.proto
+	}
+	return true
+}
+
 // forInKeys returns the array of enumerable string property keys for a for-in
 // loop: own + inherited enumerable keys, deduplicated, integer indices first in
 // ascending order, then insertion order (ant js_for_in_keys).

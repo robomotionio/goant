@@ -274,6 +274,14 @@ restart:
 			}
 			push(keys)
 			ip++
+		case OpHasPrivate:
+			// Reused as the for-in re-validation check (see forInStillEnumerable):
+			// [key, obj] -> bool. The opcode table entry is otherwise unclaimed and
+			// its shape (pop 2, push 1) matches exactly.
+			fiObj := pop()
+			fiKey := pop()
+			push(mkbool(rt.forInStillEnumerable(fiObj, fiKey)))
+			ip++
 		case OpForOf:
 			vals, e := rt.iterableValues(pop())
 			if e != nil {

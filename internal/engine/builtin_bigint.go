@@ -40,12 +40,11 @@ func stringToBigInt(s string) (*big.Int, bool) {
 	if s == "" {
 		return big.NewInt(0), true
 	}
-	neg := false
+	neg, signed := false, false
 	if strings.HasPrefix(s, "+") {
-		s = s[1:]
+		s, signed = s[1:], true
 	} else if strings.HasPrefix(s, "-") {
-		neg = true
-		s = s[1:]
+		neg, s, signed = true, s[1:], true
 	}
 	base := 10
 	switch {
@@ -55,6 +54,11 @@ func stringToBigInt(s string) (*big.Int, bool) {
 		base, s = 8, s[2:]
 	case strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B"):
 		base, s = 2, s[2:]
+	}
+	// Only a StrDecimalLiteral may carry a sign: NonDecimalIntegerLiteral has no
+	// sign production, so "-0x1" is not a StringNumericLiteral at all.
+	if signed && base != 10 {
+		return nil, false
 	}
 	if s == "" {
 		return nil, false

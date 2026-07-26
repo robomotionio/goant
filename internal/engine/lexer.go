@@ -342,6 +342,28 @@ func htmlCloseAtLineStart(code string, p int) bool {
 			p--
 			continue
 		}
+		// HTMLCloseComment allows a SingleLineDelimitedCommentSequence before the
+		// `-->`, so step back over each `/* … */` that contains no LineTerminator:
+		// `/* a */ /* b */--> …` on a line of its own is all comment.
+		if c == '/' && p >= 2 && code[p-2] == '*' {
+			open := -1
+			for i := p - 3; i >= 1; i-- {
+				if code[i] == '*' && code[i-1] == '/' {
+					open = i - 1
+					break
+				}
+			}
+			if open < 0 {
+				return false
+			}
+			for i := open; i < p-2; i++ {
+				if code[i] == '\n' || code[i] == '\r' || (code[i] >= 0x80 && isLSorPS(code, i, p)) {
+					return false
+				}
+			}
+			p = open
+			continue
+		}
 		// A `-->` SingleLineHTMLCloseComment is recognized only at the start of a
 		// line. As Annex B leniency (matching common engines), a `-->` directly after
 		// an opening bracket is also taken as a comment — its `--` could not be a

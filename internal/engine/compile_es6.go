@@ -993,6 +993,16 @@ func fieldKeySlotName(i int) string { return "*fk" + strconv.Itoa(i) + "*" }
 func (c *compiler) compileClass(n *Node) {
 	ctorSlot := c.tempLocal()
 	protoSlot := c.tempLocal()
+	// All parts of a class definition are strict-mode code — the heritage, the
+	// computed keys, and the element initializers — even when the class appears in
+	// sloppy code. The parser already enforces that for early errors; this makes
+	// the CODE emitted for those parts strict too, so a function expression in the
+	// heritage has no own `arguments` / `caller` and its `arguments` object is
+	// unmapped (class/strict-mode/arguments-callee).
+	savedStrict := c.fn.isStrict
+	c.fn.isStrict = true
+	defer func() { c.fn.isStrict = savedStrict }()
+
 	// Whether this class body needs a ClassPrivateEnvironment of its own (the
 	// OpSpecialObj kind 4/5 pair below): only if it declares private names.
 	ownPrivEnv := false
