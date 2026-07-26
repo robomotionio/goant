@@ -504,6 +504,10 @@ func (rt *Runtime) initObjectBuiltin() {
 				if !ok { // O.[[PreventExtensions]]() returned false
 					return mkundef(), rt.typeError("Object.preventExtensions: proxy preventExtensions trap returned false")
 				}
+			} else if o.ta != nil && !rt.taFixedLength(o) {
+				// A typed array over a resizable buffer answers [[PreventExtensions]]
+				// with false: its length can still change.
+				return mkundef(), rt.typeError("Object.preventExtensions: cannot prevent extensions of a length-changing TypedArray")
 			} else {
 				o.flags.extensible = false
 			}
@@ -1510,6 +1514,19 @@ func (rt *Runtime) sealObject(v Value, freeze bool) *ThrowError {
 		}
 		o.flags.sealed = true
 		return nil
+	}
+	// SetIntegrityLevel begins with O.[[PreventExtensions]](), which a typed array
+	// over a resizable buffer answers false — and then, for "frozen", asks each
+	// integer-indexed element to become non-writable, which a typed array's
+	// [[DefineOwnProperty]] always rejects.
+	if o.ta != nil {
+		if !rt.taFixedLength(o) {
+			return rt.typeError("Cannot freeze or seal a TypedArray whose length can change")
+		}
+		o.flags.extensible = false
+		if freeze && rt.taCurrentLen(o) > 0 {
+			return rt.typeError("Cannot freeze a TypedArray with elements")
+		}
 	}
 	o.flags.extensible = false
 	o.ensureUniqueShape()

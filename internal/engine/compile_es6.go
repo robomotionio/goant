@@ -1312,6 +1312,15 @@ func (c *compiler) compileClass(n *Node) {
 		c.emit(OpPop)
 	}
 
+	// ClassDefinitionEvaluation initialises the inner class-name binding once every
+	// element has been defined and BEFORE the static elements run, so a static
+	// block or static field initializer can name the class — while a computed key,
+	// evaluated above, still finds it in its temporal dead zone.
+	if classNameSlot >= 0 {
+		c.emitOpU16(OpGetLocal, uint16(ctorSlot))
+		c.emitOpU16(OpPutLocal, uint16(classNameSlot))
+	}
+
 	// Static elements: field initializers and static blocks, in source order,
 	// after every element's key has been evaluated. Each runs with `this` bound to
 	// the constructor, so an arrow inside one captures the class.
@@ -1384,12 +1393,9 @@ func (c *compiler) compileClass(n *Node) {
 		c.emit(OpPop)                         // []
 	}
 
-	// Now that all members (including computed keys) are defined, initialize the
-	// inner class-name binding to the constructor so method bodies see the class,
-	// then close its scope (the methods have already captured the binding).
+	// Close the inner class-name scope (the methods have already captured the
+	// binding, which was initialised before the static elements ran).
 	if classNameSlot >= 0 {
-		c.emitOpU16(OpGetLocal, uint16(ctorSlot))
-		c.emitOpU16(OpPutLocal, uint16(classNameSlot))
 		c.scopeDepth--
 		c.popBlockScope()
 	}

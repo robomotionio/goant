@@ -275,6 +275,21 @@ func (rt *Runtime) taCurrentLen(o *object) int {
 	return t.length
 }
 
+// taFixedLength implements IsTypedArrayFixedLength(O): a length-tracking view,
+// or any view over a resizable (non-shared) buffer, is NOT fixed length — its
+// [[PreventExtensions]] returns false, so it can be neither sealed nor frozen.
+func (rt *Runtime) taFixedLength(o *object) bool {
+	t := o.ta
+	if t == nil {
+		return true
+	}
+	if t.track {
+		return false
+	}
+	b := rt.objPtr(t.buf)
+	return b == nil || !b.abResizable
+}
+
 // validateTypedArray implements ValidateTypedArray(O): O must be a TypedArray
 // whose buffer is attached and in-bounds, else a TypeError. Used to guard the
 // non-generic %TypedArray%.prototype methods.

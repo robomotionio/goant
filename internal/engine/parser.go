@@ -3410,7 +3410,21 @@ func (p *parser) parseFor() *Node {
 		}
 	}
 
-	if initNode == nil && p.tok() == TokUsing {
+	// The for-of form of a using declaration forbids `of` as the binding name, so
+	// `for (using of of x)` is the identifier `using` followed by the `of` of a
+	// for-of head. The restriction is only on that production: in a plain
+	// `for ( ; ; )` head `for (using of = null;;)` is still a declaration, so the
+	// decision needs the token AFTER `of`.
+	usingDecl := p.tok() == TokUsing && p.usingBeginsDeclaration()
+	if usingDecl && p.la() == TokOf {
+		saved := p.lx.save()
+		p.consume() // `using`
+		p.next()
+		p.consume() // `of`
+		usingDecl = p.next() != TokOf
+		p.lx.restore(saved)
+	}
+	if initNode == nil && usingDecl {
 		p.consume()
 		p.noIn = true
 		initNode = p.parseVarDecl(VarUsing, true)

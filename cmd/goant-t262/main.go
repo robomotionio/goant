@@ -162,6 +162,11 @@ func parseMeta(src string) meta {
 		return m
 	}
 	block := src[start+len("/*---") : start+end]
+	// A few tests use CR (or CRLF) line terminators throughout — the whole file is
+	// then one LF-delimited "line", so normalise before splitting or every key
+	// (including `includes`) is missed.
+	block = strings.ReplaceAll(block, "\r\n", "\n")
+	block = strings.ReplaceAll(block, "\r", "\n")
 	lines := strings.Split(block, "\n")
 
 	for i := 0; i < len(lines); i++ {

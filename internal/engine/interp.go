@@ -834,6 +834,13 @@ restart:
 			val := pop()
 			if o := rt.objPtr(peek()); o != nil {
 				if isPrivateKey(name) {
+					if !o.flags.extensible {
+						// PrivateFieldAdd step 1: a private field cannot be added to a
+						// non-extensible object (a constructor return override can hand
+						// the class one).
+						thrown = rt.typeError("Cannot add private member " + privDisplay(name) + " to a non-extensible object")
+						goto unwind
+					}
 					if !o.definePrivateField(name, privEnv, val) {
 						thrown = rt.typeError("Cannot initialize private field " + privDisplay(name) + " twice on the same object")
 						goto unwind
@@ -865,6 +872,12 @@ restart:
 			}
 			if isPrivateKey(name) {
 				if o := rt.objPtr(peek()); o != nil {
+					if !o.flags.extensible {
+						// PrivateMethodOrAccessorAdd, like PrivateFieldAdd, refuses a
+						// non-extensible object.
+						thrown = rt.typeError("Cannot add private member " + privDisplay(name) + " to a non-extensible object")
+						goto unwind
+					}
 					ok := true
 					switch flags {
 					case 1:
