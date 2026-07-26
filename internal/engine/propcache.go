@@ -4,36 +4,45 @@ package engine
 // PUT_FIELD). Each site carries a u16 cache index, reserved in the bytecode
 // since the compiler was written; this is what finally reads it.
 //
-// The cache is deliberately the narrowest useful one: monomorphic, and only for
-// a property found in the *receiver's own* shape. That keeps invalidation to a
-// shape-identity check plus the global epoch, with no dependence on the
-// prototype chain — so nothing here has to reason about setPrototypeOf, about a
-// method being added to a prototype later, or about shadowing.
+// A site remembers up to icWays shapes, and for each of them either an own slot
+// or a holder somewhere up the prototype chain. Invalidation stays a shape
+// identity check plus the global epoch; what the epoch does not cover directly
+// is described on icWay.
 
-// hit reports whether this entry describes o's current layout.
+// hit reports whether this way describes o's current layout.
 //
 // Shape identity does most of the work, but it is not sufficient on its own: a
 // shape that is not yet shared (isInTree false) is mutated in place, so a delete
 // can shift slots underneath a cache while the pointer stays equal. That is what
-// the epoch catches, and it is the only guard here without which the tests fail.
+// the epoch catches.
 //
 // The proxy check is defensive rather than load-bearing. A Proxy keeps its
 // properties on the target, so its own shape stays empty and can never equal a
-// cached one (entries are only filled from a shape holding the property). It
-// costs one predictable compare and removes the need to re-derive that argument
-// every time this file changes.
-func (ic *propIC) hit(o *object) bool {
-	return ic.shape == o.shape && ic.epoch == icEpoch() && ic.slot != icMissSlot && o.proxy == nil &&
-		(ic.holder == nil || ic.protoVal == o.proto)
+// cached one (ways are only filled from a shape holding the property). It costs
+// one predictable compare and removes the need to re-derive that argument every
+// time this file changes.
+func (w *icWay) hit(o *object) bool {
+	return w.shape == o.shape && w.epoch == icEpoch() && w.slot != icMissSlot &&
+		o.proxy == nil && (w.holder == nil || w.protoVal == o.proto)
 }
 
-// source returns the object to read the cached slot from: the receiver for an
-// own property, the recorded prototype for an inherited one.
-func (ic *propIC) source(o *object) *object {
-	if ic.holder != nil {
-		return ic.holder
+// read returns the cached property's current value: the receiver's slot for an
+// own property, the recorded prototype's for an inherited one.
+func (w *icWay) read(o *object) Value {
+	if w.holder != nil {
+		return w.holder.slotGet(w.slot)
 	}
-	return o
+	return o.slotGet(w.slot)
+}
+
+// lookup finds the way describing o, or nil.
+func (ic *propIC) lookup(o *object) *icWay {
+	for i := 0; i < int(ic.n); i++ {
+		if ic.ways[i].hit(o) {
+			return &ic.ways[i]
+		}
+	}
+	return nil
 }
 
 // dead reports that this site has seen too many shapes to be worth caching.
@@ -41,40 +50,58 @@ func (ic *propIC) source(o *object) *object {
 // what the site would have paid anyway.
 func (ic *propIC) dead() bool { return ic.misses >= icMissLimit }
 
-// known reports that this entry already describes o's shape, hit or miss, so
-// there is nothing for a fill to learn. This is what keeps a site whose property
-// is inherited from re-probing the receiver's own shape on every access.
+// known reports that some way already describes o's shape, hit or miss, so
+// there is nothing for a fill to learn. This is what keeps a site from
+// re-probing a shape whose answer it has already recorded.
 func (ic *propIC) known(o *object) bool {
-	return ic.shape == o.shape && ic.epoch == icEpoch()
+	for i := 0; i < int(ic.n); i++ {
+		if ic.ways[i].shape == o.shape && ic.ways[i].epoch == icEpoch() {
+			return true
+		}
+	}
+	return false
 }
 
-// record points the entry at o's shape, first charging a miss if it is being
-// aimed somewhere new. Re-pointing at the same shape after an epoch bump is not
-// a miss — invalidation is global and says nothing about this site.
+// way returns the entry to record o's shape in: a stale one if there is any,
+// otherwise a fresh one, otherwise nil once the site is full and has been
+// pushed past icMissLimit.
+//
+// Reusing a stale way first is what keeps a site working across an epoch bump
+// (a collection retires every way) without charging it a miss: invalidation is
+// global and says nothing about this site.
+func (ic *propIC) way(o *object) *icWay {
+	for i := 0; i < int(ic.n); i++ {
+		if ic.ways[i].shape == o.shape || ic.ways[i].epoch != icEpoch() {
+			return &ic.ways[i]
+		}
+	}
+	if int(ic.n) < icWays {
+		w := &ic.ways[ic.n]
+		ic.n++
+		return w
+	}
+	ic.misses++
+	if ic.dead() {
+		ic.n = 0 // no live object matches an empty set of ways
+		return nil
+	}
+	// Full and still useful: replace the oldest.
+	return &ic.ways[0]
+}
+
 func (ic *propIC) record(o *object, slot uint32) {
-	if ic.shape != nil && ic.shape != o.shape {
-		ic.misses++
-		if ic.dead() {
-			ic.shape = nil // no live object has a nil shape, so hit() stays false
-			return
-		}
+	if w := ic.way(o); w != nil {
+		*w = icWay{shape: o.shape, epoch: icEpoch(), slot: slot}
 	}
-	ic.shape, ic.epoch, ic.slot = o.shape, icEpoch(), slot
-	ic.holder, ic.protoVal = nil, mkundef()
 }
 
-// recordProto points the entry at a property reached through o's prototype
-// chain, held on holder at the given slot.
+// recordProto points a way at a property reached through o's prototype chain,
+// held on holder at the given slot.
 func (ic *propIC) recordProto(o, holder *object, slot uint32) {
-	if ic.shape != nil && ic.shape != o.shape {
-		ic.misses++
-		if ic.dead() {
-			ic.shape = nil
-			return
-		}
+	if w := ic.way(o); w != nil {
+		*w = icWay{shape: o.shape, epoch: icEpoch(), slot: slot,
+			holder: holder, protoVal: o.proto}
 	}
-	ic.shape, ic.epoch, ic.slot = o.shape, icEpoch(), slot
-	ic.holder, ic.protoVal = holder, o.proto
 }
 
 // icReceiver returns the object to consult for an inline-cached read, or nil if

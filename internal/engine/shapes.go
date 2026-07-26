@@ -46,20 +46,15 @@ func icEpochBump() {
 	}
 }
 
-// propIC is one monomorphic inline-cache entry: the receiver shape a named
-// property access last saw, and the own data slot the name resolved to.
-//
-// Without it every obj.name goes through shape.index, a map[propKey]uint32
-// whose key holds a string — so a property read costs a string hash. That was
-// measured at ~37% of interpreter CPU on a monomorphic read loop.
+// icWay is one shape a site has seen and where the name resolved to for it.
 //
 // A hit needs shape identity plus a matching epoch. Shape identity alone is not
 // enough because a shape not yet shared (isInTree false) is mutated in place;
 // the mutations that can move or retire an existing slot — removeSlot,
 // setAttrs, clearAccessor, re-adding a live key — all bump icEpoch, while
-// appending a brand new key leaves lower slots where they are and so needs no
-// invalidation.
-// A second form of the entry serves a property found on the receiver's
+// appending a brand new key leaves lower slots where they are.
+//
+// A way may also serve a property found on the receiver's
 // prototype chain, which is where every method lives. Such a site could not be
 // cached at all before, so `p.method()` walked the chain and did a shape lookup
 // at each link on every call — the dominant cost of any object-oriented
@@ -78,11 +73,10 @@ func icEpochBump() {
 //
 // The holder is kept as a pointer and its slot read live, so reassigning a
 // method (C.prototype.m = f) needs no invalidation at all.
-type propIC struct {
-	shape  *shape
-	epoch  uint32
-	slot   uint32
-	misses uint8 // shape changes seen; at icMissLimit the site is abandoned
+type icWay struct {
+	shape *shape
+	epoch uint32
+	slot  uint32
 
 	// holder is the prototype the property was found on, nil for an own-slot
 	// entry; protoVal is the receiver's [[Prototype]] the walk started from.
@@ -90,15 +84,38 @@ type propIC struct {
 	protoVal Value
 }
 
-// icMissLimit is how many times a site may see a different shape before it stops
-// caching for good (shape set to nil, which no live object can match).
+// icWays is how many shapes one site remembers.
 //
-// A genuinely polymorphic site cannot be served by a one-entry cache, and every
-// attempt costs a second shape probe on top of the lookup that already happened
-// — measured at +16% on a four-shape read loop. Giving up makes such a site cost
-// what it did before the cache existed. Four is the usual industry cut-off;
-// eight leaves room for a site whose object legitimately grows a few times
-// before settling.
+// One was not enough. A site in an object-oriented program routinely sees a
+// small handful of shapes — Octane's Richards passes task control blocks,
+// packets and the scheduler itself through the same accessors — and a
+// single-entry cache does not merely miss on those, it thrashes: every access
+// evicts the entry the previous one installed, so the site pays a full lookup
+// AND a refill, which is worse than not caching at all.
+//
+// Four covers the overwhelming majority of real sites while keeping the probe a
+// short scan of adjacent memory. Past that a site is megamorphic and better
+// served by giving up (see icMissLimit).
+const icWays = 4
+
+// propIC is one inline-cache site: the shapes it has seen and where the name
+// resolved to for each.
+//
+// Without it every obj.name goes through the shape index, which for a large
+// shape hashes the property name. That was measured at ~37% of interpreter CPU
+// on a monomorphic read loop.
+type propIC struct {
+	ways   [icWays]icWay
+	n      uint8 // ways filled
+	misses uint8 // shapes seen beyond what fits; at icMissLimit the site is abandoned
+}
+
+// icMissLimit is how many shapes beyond its ways a site may see before it stops
+// caching for good.
+//
+// A megamorphic site cannot be served by a fixed set of ways, and every attempt
+// costs a probe on top of the lookup that already happened. Giving up makes such
+// a site cost what it did before the cache existed.
 const icMissLimit = 8
 
 // icMissSlot marks a shape this site has already tried and cannot cache — most

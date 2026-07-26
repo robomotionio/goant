@@ -1062,11 +1062,13 @@ restart:
 
 		case OpGetField:
 			obj := pop()
-			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].shape != nil {
-				if o := rt.icReceiver(obj); o != nil && ics[icx].hit(o) {
-					push(ics[icx].source(o).slotGet(ics[icx].slot))
-					ip += 7
-					break
+			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].n != 0 {
+				if o := rt.icReceiver(obj); o != nil {
+					if w := ics[icx].lookup(o); w != nil {
+						push(w.read(o))
+						ip += 7
+						break
+					}
 				}
 			}
 			name := rt.strGo(fn.constants[readU32(code, ip+1)])
@@ -1089,11 +1091,13 @@ restart:
 		case OpGetField2:
 			// obj -> obj val (keeps the receiver for a following method call)
 			obj := peek()
-			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].shape != nil {
-				if o := rt.icReceiver(obj); o != nil && ics[icx].hit(o) {
-					push(ics[icx].source(o).slotGet(ics[icx].slot))
-					ip += 7
-					break
+			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].n != 0 {
+				if o := rt.icReceiver(obj); o != nil {
+					if w := ics[icx].lookup(o); w != nil {
+						push(w.read(o))
+						ip += 7
+						break
+					}
 				}
 			}
 			name := rt.strGo(fn.constants[readU32(code, ip+1)])
@@ -1116,15 +1120,17 @@ restart:
 		case OpPutField:
 			val := pop()
 			obj := pop()
-			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].shape != nil {
-				if o := rt.icReceiver(obj); o != nil && ics[icx].hit(o) {
-					// The cached store skips [[Set]] entirely, so shared-state
-					// detection has to happen here too or a warmed site would
-					// write through to a builtin unnoticed.
-					rt.noteSharedMutation(obj)
-					o.slotSet(ics[icx].slot, val)
-					ip += 7
-					break
+			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].n != 0 {
+				if o := rt.icReceiver(obj); o != nil {
+					if w := ics[icx].lookup(o); w != nil {
+						// The cached store skips [[Set]] entirely, so shared-state
+						// detection has to happen here too or a warmed site would
+						// write through to a builtin unnoticed.
+						rt.noteSharedMutation(obj)
+						o.slotSet(w.slot, val)
+						ip += 7
+						break
+					}
 				}
 			}
 			name := rt.strGo(fn.constants[readU32(code, ip+1)])
@@ -1206,11 +1212,13 @@ restart:
 			// answers, and it is not part of the object's shape, so registering
 			// one bumps the IC epoch to retire entries filled before it existed.
 			icx := readU16(code, ip+5)
-			if icx != icNoSlot && ics[icx].shape != nil {
-				if g := rt.objPtr(rt.global); g != nil && ics[icx].hit(g) {
-					push(ics[icx].source(g).slotGet(ics[icx].slot))
-					ip += 7
-					break
+			if icx != icNoSlot && ics[icx].n != 0 {
+				if g := rt.objPtr(rt.global); g != nil {
+					if w := ics[icx].lookup(g); w != nil {
+						push(w.read(g))
+						ip += 7
+						break
+					}
 				}
 			}
 			name := rt.strGo(fn.constants[readU32(code, ip+1)])
