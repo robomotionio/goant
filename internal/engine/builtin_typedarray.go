@@ -526,11 +526,47 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 			if !rt.isCallable(usingIter) {
 				return mkundef(), rt.typeError("TypedArray source is not iterable: its Symbol.iterator is not a function")
 			}
-			it, e := rt.iterableValues(a0)
+			// IteratorToList drives the iterator the GetMethod above found: a
+			// patched %ArrayIteratorPrototype%.next is observable here, so the
+			// array fast path of iterableValues must not be taken.
+			iter, e := rt.callValue(usingIter, a0, nil)
 			if e != nil {
 				return mkundef(), e
 			}
-			items = it
+			if !iter.IsObjectType() {
+				return mkundef(), rt.typeError("[Symbol.iterator]() returned a non-object")
+			}
+			nextFn, e := rt.getField(iter, "next")
+			if e != nil {
+				return mkundef(), e
+			}
+			if !rt.isCallable(nextFn) {
+				return mkundef(), rt.typeError("iterator.next is not a function")
+			}
+			for {
+				res, e := rt.callValue(nextFn, iter, nil)
+				if e != nil {
+					return mkundef(), e
+				}
+				if !res.IsObjectType() {
+					return mkundef(), rt.typeError("iterator result is not an object")
+				}
+				dv, e := rt.getField(res, "done")
+				if e != nil {
+					return mkundef(), e
+				}
+				if rt.toBoolean(dv) {
+					break
+				}
+				val, e := rt.getField(res, "value")
+				if e != nil {
+					return mkundef(), e
+				}
+				items = append(items, val)
+				if len(items) > maxByteLen/size {
+					return mkundef(), rt.rangeError("Invalid typed array length")
+				}
+			}
 		} else {
 			n, e := rt.lengthOf(a0)
 			if e != nil {
