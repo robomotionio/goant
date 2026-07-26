@@ -146,6 +146,84 @@ func TestCollectKeepsNativeClosureState(t *testing.T) {
 	}
 }
 
+// TestCollectKeepsSuspendedAsyncFrame covers an async function parked at an
+// await. It has no generator object, so between suspension and resumption its
+// whole frame is referenced only by the Go closure driving it.
+func TestCollectKeepsSuspendedAsyncFrame(t *testing.T) {
+	rt := New()
+	if _, err := rt.RunString("t.js", `
+		var log = [];
+		var release;
+		var gate = new Promise(function (r) { release = r; });
+		(async function () {
+			// Computed, so it is not interned: an interned string is rooted by
+			// the intern table and would survive whether the frame did or not.
+			var local = "held-" + "across-" + "the-await";
+			var n = await gate;
+			log.push(local + ":" + n);
+		})();
+	`); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	rt.Collect()
+	// Churn through nested frames as well as the heap: a stale entry left in the
+	// interpreter's published frames would otherwise keep the suspended
+	// coroutine's values marked by accident.
+	if _, err := rt.RunString("t2.js", `
+		var filler = [];
+		function deep(n) {
+			var s = "junk-" + n + "-" + (n * 3);
+			filler.push(s);
+			return n > 0 ? deep(n - 1) : s;
+		}
+		for (var i = 0; i < 800; i++) deep(24);
+	`); err != nil {
+		t.Fatalf("refill: %v", err)
+	}
+
+	// Releasing queues the resumption; the reader runs after the queue drains.
+	if _, err := rt.RunString("t3.js", `release(41);`); err != nil {
+		t.Fatalf("resuming after a collection: %v", err)
+	}
+	v, err := rt.RunString("t4.js", `log.join(",")`)
+	if err != nil {
+		t.Fatalf("reading the result: %v", err)
+	}
+	got, _ := rt.toStringValue(v)
+	if s := rt.strGo(got); s != "held-across-the-await:41" {
+		t.Errorf("suspended async frame lost across a collection: %q", s)
+	}
+}
+
+// TestCollectKeepsUnreachedConstants covers a running function's constant pool.
+// A script or an eval body is not reachable from any object — nothing called it
+// — so unless the frame publishes the code it is running, its constants are
+// unmarked. Most are interned strings and survive anyway; a tagged template's
+// frozen strings array does not, which is what this uses.
+//
+// It also exercises the automatic trigger rather than an explicit Collect: the
+// cycle happens at a loop back edge in the middle of this very script.
+func TestCollectKeepsUnreachedConstants(t *testing.T) {
+	rt := New()
+	v, err := rt.RunString("t.js", `
+		function tag(strings, sub) { return strings[0] + sub + strings.raw[1]; }
+		var churn = [];
+		for (var i = 0; i < 80000; i++) churn.push({n: i});
+		churn = null;
+		for (var j = 0; j < 80000; j++) ({m: j});
+		// The strings array behind this was built at compile time and has sat in
+		// the constant pool, unreferenced, across both loops.
+		tag` + "`head-${42}-tail`" + `;
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got, _ := rt.toStringValue(v)
+	if s := rt.strGo(got); s != "head-42-tail" {
+		t.Errorf("constants lost across a collection: %q", s)
+	}
+}
+
 // TestCollectDropsDeadIteratorState covers the object-keyed side tables. They
 // hold state on behalf of an object and are keyed by it, so treating them as
 // ordinary roots would make every iterator ever created immortal — which for a

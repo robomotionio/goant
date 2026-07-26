@@ -99,6 +99,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	// that matters and covers every entry including a tail call.
 	f := rt.publishFrame(rt.frameDepth)
 	f.args, f.thisVal, f.fnVal = args, thisVal, fnVal
+	f.fn, f.cl = fn, cl
 
 	// Frame entry is one of the two points where a collection may happen: the
 	// caller's state is published, the callee has not started, and no native is
@@ -145,6 +146,7 @@ func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 	// at the loop back edge, and while an unwind is carrying one.
 	syncFrame := func() {
 		f := &rt.frames[rt.frameDepth]
+		f.fn, f.cl = fn, cl
 		f.locals, f.stack, f.withStack = locals, stack, withStack
 		f.varObj, f.newTarget = varObj, newTarget
 		f.pending, f.completed = pendingThrow, comp.value

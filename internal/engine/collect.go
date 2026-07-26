@@ -376,6 +376,8 @@ func (rt *Runtime) traceGen(g *genState) {
 	}
 	rt.markValue(g.fnVal)
 	rt.markValue(g.thisVal)
+	rt.markValue(g.awaiting)
+	rt.markValue(g.completion)
 	rt.markSlice(g.args)
 	if g.cl != nil {
 		rt.markValue(g.cl.home)
@@ -414,6 +416,17 @@ func (rt *Runtime) markSlabs(slabs []frameSlab) {
 func (rt *Runtime) markFrames(frames []vmFrame) {
 	for i := range frames {
 		f := &frames[i]
+		rt.traceFunc(f.fn)
+		if f.cl != nil {
+			rt.markValue(f.cl.home)
+			rt.markSlice(f.cl.capturedWith)
+			for _, u := range f.cl.upvalues {
+				if u != nil {
+					rt.markValue(u.get())
+				}
+			}
+			rt.traceFunc(f.cl.fn)
+		}
 		rt.markSlice(f.locals)
 		rt.markSlice(f.stack[:cap(f.stack)])
 		rt.markSlice(f.args)
@@ -443,6 +456,15 @@ func (rt *Runtime) markRoots() {
 	// than a Value belongs here too.
 	for _, h := range rt.interned {
 		rt.gc.strMarks.set(h)
+	}
+
+	// A suspended async function has no object to hang its coroutine off, so
+	// rt.asyncFrames is what keeps it alive; the reflective walk below finds it
+	// by descending into the map's keys. This pass is still needed on top of
+	// that: reflection walks a slice to its length, and a frame's operand stack
+	// has to be scanned to its capacity (see markSlabs).
+	for g := range rt.asyncFrames {
+		rt.traceGen(g)
 	}
 
 	if rt.gc.seenPtr == nil {

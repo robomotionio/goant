@@ -43,6 +43,15 @@ type frameSlab struct {
 // progress live in exactly that region above the stack pointer. Scanning it
 // retains a little garbage and keeps those alive.
 type vmFrame struct {
+	// fn and cl are the code this frame is running, published so the collector
+	// can reach its constant pool. An ordinary function is reachable through the
+	// function object that was called, but a script or an eval body is reachable
+	// from nowhere at all. Most constants are interned strings and would survive
+	// regardless; a tagged template's frozen strings array is built at compile
+	// time, lives only in the pool, and would not.
+	fn *svFunc
+	cl *closure
+
 	locals    []Value
 	stack     []Value
 	args      []Value

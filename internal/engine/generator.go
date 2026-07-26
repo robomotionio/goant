@@ -75,6 +75,12 @@ type genState struct {
 	// internal `await` returns control to the microtask queue mid-step.
 	asyncReqs   []asyncGenReq
 	asyncActive bool
+
+	// awaiting is the promise this coroutine is parked on, and — for an async
+	// function, which has no generator object — the completion promise it will
+	// settle. Both are otherwise reachable only from the driver's Go closures.
+	// See Runtime.asyncFrames.
+	awaiting, completion Value
 }
 
 // asyncGenReq is one pending async-generator next/return/throw call and the
@@ -307,6 +313,13 @@ func (rt *Runtime) asyncGenDrain(g *genState) {
 		return
 	}
 	g.asyncActive = true
+	// While a request is in flight the coroutine is driven from Go closures
+	// hanging off promise reactions, so its own generator object may be
+	// unreachable long before the request settles. See Runtime.asyncFrames.
+	if rt.asyncFrames == nil {
+		rt.asyncFrames = map[*genState]bool{}
+	}
+	rt.asyncFrames[g] = true
 	req := g.asyncReqs[0]
 	rt.asyncGenStep(g, req.kind, req.val)
 }
@@ -401,6 +414,7 @@ func (rt *Runtime) asyncGenResume(g *genState, kind genResumeKind, val Value) {
 		rt.asyncGenStep(g, genThrow, arg(a, 0))
 		return mkundef(), nil
 	})
+	g.awaiting = awaited
 	rt.promiseThen(onF, onR, rt.objPtr(awaited))
 }
 
@@ -410,6 +424,9 @@ func (rt *Runtime) asyncGenFinishReq(g *genState) {
 		g.asyncReqs = g.asyncReqs[1:]
 	}
 	g.asyncActive = false
+	if len(g.asyncReqs) == 0 {
+		delete(rt.asyncFrames, g)
+	}
 	rt.asyncGenDrain(g)
 }
 
@@ -421,14 +438,24 @@ func (rt *Runtime) runAsync(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	g := rt.newGenState(fn, cl, fnVal, thisVal, args)
 	p, po := rt.makePromise()
 
+	// The coroutine and the promise it will settle are reachable only from the
+	// closures below until the function completes; see Runtime.asyncFrames.
+	if rt.asyncFrames == nil {
+		rt.asyncFrames = map[*genState]bool{}
+	}
+	rt.asyncFrames[g] = true
+	g.completion = p
+
 	var step func(kind genResumeKind, val Value)
 	step = func(kind genResumeKind, val Value) {
 		m := rt.genDrive(g, kind, val)
 		if m.err != nil {
+			delete(rt.asyncFrames, g)
 			rt.rejectPromise(po, m.err.Value)
 			return
 		}
 		if m.done {
+			delete(rt.asyncFrames, g)
 			rt.resolvePromise(p, po, m.value)
 			return
 		}
@@ -448,6 +475,7 @@ func (rt *Runtime) runAsync(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			step(genThrow, arg(a, 0))
 			return mkundef(), nil
 		})
+		g.awaiting = awaited
 		rt.promiseThen(onF, onR, ao)
 	}
 	step(genNext, mkundef())

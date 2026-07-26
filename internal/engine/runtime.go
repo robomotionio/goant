@@ -156,6 +156,13 @@ type Runtime struct {
 	// shared %RegExpStringIteratorPrototype%.next that steps RegExpExec lazily.
 	regexpStrIterStates map[*object]*regexpStrIterState
 
+	// asyncFrames holds the suspended coroutine of every async function that is
+	// parked at an await. Such a function has no generator object, so between
+	// the await and its resumption its whole frame — locals, operand stacks,
+	// the promise it will settle — is referenced only by the Go closure driving
+	// it, which the collector cannot see into.
+	asyncFrames map[*genState]bool
+
 	// nativeDrivers holds the working set of a built-in that drives itself
 	// through promise reactions — Array.fromAsync, a module's top-level await.
 	// Such a driver has neither an interpreter frame nor an object of its own,
