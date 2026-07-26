@@ -234,9 +234,12 @@ func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) (Value, *ThrowError
 			// valueWrapper = PromiseResolve(%Promise%, value): reading value.constructor
 			// may throw (a poisoned wrapper). If it does — and this is next() on a
 			// not-done result (closeOnRejection) — close the sync iterator, then reject.
+			// closeOnRejection is true for next() and throw(), false for return()
+			// (which is already closing the iterator).
+			closeOnRejection := method != "return"
 			valP, pe := rt.promiseResolve(rt.promiseCtor, val)
 			if pe != nil {
-				if method == "next" && !done {
+				if closeOnRejection && !done {
 					rt.iteratorClose(syncIt)
 				}
 				return rt.rejectedPromise(pe.Value), nil
@@ -245,7 +248,7 @@ func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) (Value, *ThrowError
 				return rt.genResult(arg(a, 0), done), nil
 			})
 			onRej := mkundef()
-			if method == "next" && !done {
+			if closeOnRejection && !done {
 				onRej = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
 					rt.iteratorClose(syncIt) // close on rejection; swallow the close outcome
 					return mkundef(), &ThrowError{Value: arg(a, 0), rt: rt}

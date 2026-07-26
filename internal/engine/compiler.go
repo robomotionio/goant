@@ -812,6 +812,12 @@ func (c *compiler) compileStmt(n *Node) {
 		}
 		if n.Right != nil {
 			c.compileExpr(n.Right)
+			// ReturnStatement : return Expression — in an async GENERATOR the value
+			// is Awaited (13.10.1 step 3), which costs a tick. A bare `return;`, and
+			// falling off the end, do not.
+			if c.fn.isAsync && c.fn.isGenerator {
+				c.emit(OpAwait)
+			}
 		} else {
 			c.emit(OpUndef)
 		}
