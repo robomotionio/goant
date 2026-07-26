@@ -16,7 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/dlclark/regexp2"
+	"goant/internal/regexp2"
 )
 
 // Regexp is a compiled JS regular expression.
