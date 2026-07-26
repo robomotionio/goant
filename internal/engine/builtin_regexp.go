@@ -1930,11 +1930,42 @@ func (rt *Runtime) stringSplitString(this Value, args []Value) (Value, *ThrowErr
 	}
 	sep := string(sepB)
 	if len(sep) == 0 {
-		for i := 0; i < utf16Len(b); i++ {
+		// "abc".split("") — one element per UTF-16 code unit. Both bounds here
+		// used to be recomputed per iteration: utf16Len scans the whole buffer,
+		// and charAt's utf16CodeUnitAt re-tests the whole buffer for ASCII on
+		// every call. Either one alone makes this quadratic, so splitting a 1 MB
+		// string did ~10^12 byte reads. Hoist the length, and take the ASCII case
+		// directly rather than through the general decoder.
+		n := utf16Len(b)
+		if isASCIIBytes(b) {
+			for i := 0; i < n; i++ {
+				if int64(ro.arrLen) >= limit {
+					break
+				}
+				rt.arraySet(ro, ro.arrLen, rt.newStringBytes([]byte{b[i]}))
+			}
+			return res, nil
+		}
+		// Non-ASCII: one forward pass over the buffer, emitting each code unit as
+		// we reach it, rather than seeking from the start for every index. A
+		// surrogate pair yields two elements — split("") divides code units, not
+		// code points, so an astral character comes apart into its halves.
+		for i := 0; i < len(b); {
 			if int64(ro.arrLen) >= limit {
 				break
 			}
-			rt.arraySet(ro, ro.arrLen, rt.charAt(b, i))
+			slen, nunits, cp := wtf8Decode(b, i)
+			if nunits == 2 {
+				hi := uint16(0xD800 + ((cp - 0x10000) >> 10))
+				lo := uint16(0xDC00 + ((cp - 0x10000) & 0x3FF))
+				rt.arraySet(ro, ro.arrLen, rt.newStringBytes(utf16ToWTF8([]uint16{hi})))
+				if int64(ro.arrLen) < limit {
+					rt.arraySet(ro, ro.arrLen, rt.newStringBytes(utf16ToWTF8([]uint16{lo})))
+				}
+			} else {
+				rt.arraySet(ro, ro.arrLen, rt.newStringBytes(utf16ToWTF8([]uint16{uint16(cp)})))
+			}
+			i += slen
 		}
 		return res, nil
 	}
