@@ -442,6 +442,9 @@ func (rt *Runtime) targetOwnKeyList(target Value) []Value {
 				out = append(out, rt.newString(itoaSmall(int(i))))
 			}
 		}
+		// An Array's "length" is an own property with no shape slot, so it has to
+		// be listed here or a proxy over an array reports no keys at all.
+		out = append(out, rt.newString("length"))
 	}
 	if target.Type() == TTypedArray {
 		for i, l := 0, rt.taLength(to); i < l; i++ {

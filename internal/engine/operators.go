@@ -151,10 +151,18 @@ func (rt *Runtime) forInKeys(obj Value) (Value, *ThrowError) {
 					continue
 				}
 				k := string(rt.strBytes(kv))
-				if !seen[k] {
-					seen[k] = true
-					rt.arraySet(ao, ao.arrLen, kv)
+				if seen[k] {
+					continue
 				}
+				seen[k] = true
+				// for-in visits only ENUMERABLE keys, so each is checked through
+				// [[GetOwnProperty]] — an array's "length", for instance, is own but
+				// not enumerable.
+				en, exists, e := rt.ownKeyEnumerable(cur, kv)
+				if e != nil || !exists || !en {
+					continue
+				}
+				rt.arraySet(ao, ao.arrLen, kv)
 			}
 			break
 		}
