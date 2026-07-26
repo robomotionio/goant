@@ -446,6 +446,10 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		// compiled and driven as an async coroutine.
 		fn: &svFunc{name: "", filename: filename, source: source, isStrict: strict, isAsync: isModule},
 	}
+	if isModule {
+		// `import.meta` is one object per Module, shared by every function in it.
+		c.fn.metaCell = new(Value)
+	}
 	// A Module's export/import declarations are validated (ExportEntries static
 	// semantics) then lowered to their inner declarations before hoisting so the
 	// ordinary declaration machinery applies.
@@ -540,14 +544,34 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		// Resolve each export to the top-level slot holding it, while the module
 		// scope is still open.
 		c.fn.moduleExports = map[string]int{}
+		c.fn.moduleIndirect = moduleIndirectExports(moduleStmts)
 		for exported, local := range moduleExportEntries(moduleStmts) {
 			if slot := c.resolveLocal(local); slot >= 0 {
 				c.fn.moduleExports[exported] = slot
+				continue
+			}
+			// The exported name is not a binding of this module's own — it is one
+			// this module imported. ParseModule turns `import {a} from "m"; export
+			// {a}` (and the `import * as ns` form) into an INDIRECT export entry
+			// naming m, so the export denotes m's binding, not a local copy: two
+			// modules re-exporting the same import stay unambiguous, and a
+			// re-exported namespace object is the very same object.
+			for _, mi := range c.fn.moduleImports {
+				if mi.local != local {
+					continue
+				}
+				imported := mi.importName
+				if imported == "" {
+					imported = "*" // `import * as ns`: the whole namespace
+				}
+				c.fn.moduleIndirect[exported] = indirectExport{specifier: mi.specifier, importName: imported}
+				break
 			}
 		}
 		c.fn.moduleStarFrom = moduleStarSpecifiers(moduleStmts)
-		c.fn.moduleIndirect = moduleIndirectExports(moduleStmts)
-		c.fn.moduleRequests = append(c.fn.moduleRequests, moduleFromSpecifiers(moduleStmts)...)
+		// Replace the list emitImportPrologue built (imports only, in its own
+		// order) with the full source-ordered one.
+		c.fn.moduleRequests = moduleRequestSpecifiers(moduleStmts)
 	}
 	// Return the completion value.
 	c.emitOpU16(OpGetLocal, uint16(c.completionSlot))

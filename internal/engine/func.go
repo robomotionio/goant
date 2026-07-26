@@ -92,6 +92,11 @@ type svFunc struct {
 	// holding them, so frame entry can publish them as global lexical bindings.
 	globalLex map[string]globalLexDecl
 
+	// metaCell is the shared cell holding this Module's `import.meta` object —
+	// one per module, created on first access and seen by every function compiled
+	// inside the module. nil outside module code.
+	metaCell *Value
+
 	// capturesHome marks an arrow function that reads `super` inherited from an
 	// enclosing object-literal method: its closure takes that method's
 	// [[HomeObject]], since an arrow has none of its own.

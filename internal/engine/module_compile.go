@@ -158,13 +158,17 @@ func moduleIndirectExports(stmts []*Node) map[string]indirectExport {
 	return out
 }
 
-// moduleFromSpecifiers lists every `export … from "…"` specifier. Each is a
-// REQUESTED module regardless of how many names it forwards — `export {} from
-// "m"` still loads and parses m — so they join moduleRequests.
-func moduleFromSpecifiers(stmts []*Node) []string {
+// moduleRequestSpecifiers lists [[RequestedModules]] in SOURCE order — every
+// `import … from` and every `export … from`, interleaved as written. The order
+// is observable: Evaluate() runs the requested modules in it, so a module named
+// by an `export … from` between two imports evaluates between them.
+func moduleRequestSpecifiers(stmts []*Node) []string {
 	var out []string
 	for _, s := range stmts {
-		if s != nil && s.Kind == NExport && s.Flags&exFrom != 0 && s.Right != nil {
+		if s == nil || s.Right == nil {
+			continue
+		}
+		if s.Kind == NImportDecl || (s.Kind == NExport && s.Flags&exFrom != 0) {
 			out = append(out, joinModuleKey(s.Right.Str, s.Str))
 		}
 	}

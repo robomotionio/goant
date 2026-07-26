@@ -695,11 +695,15 @@ restart:
 				push(fnVal)
 			case 2: // new.target
 				push(newTarget)
-			case 3: // import.meta — a per-module ordinary object, created once
-				if rt.importMeta == 0 {
-					rt.importMeta = rt.newObject(rt.objectProto)
+			case 3: // import.meta — one ordinary object per Module, created once
+				cell := fn.metaCell
+				if cell == nil {
+					cell = &rt.importMeta
 				}
-				push(rt.importMeta)
+				if *cell == 0 {
+					*cell = rt.newObject(rt.objectProto)
+				}
+				push(*cell)
 			case 4:
 				// Enter a class body: push a fresh ClassPrivateEnvironment link. Every
 				// closure created while it is in effect (methods, field initializers,
