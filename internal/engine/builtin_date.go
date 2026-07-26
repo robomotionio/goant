@@ -380,6 +380,14 @@ func (rt *Runtime) initDateBuiltin() {
 			return mkundef(), e
 		}
 		o := rt.objPtr(this)
+		// OrdinaryCreateFromConstructor(newTarget, "%Date.prototype%"): a new target
+		// whose `prototype` is not an object falls back to %Date.prototype%, not to
+		// %Object.prototype%.
+		pr, e := rt.newTargetProtoE(dateProto)
+		if e != nil {
+			return mkundef(), e
+		}
+		o.proto = pr
 		o.boxed = mknum(ms)
 		o.setSlot(slotBrand, mknum(brandDate))
 		return this, nil
@@ -546,6 +554,10 @@ func parseDate(s string) float64 {
 		"2006-01-02T15:04:05",
 		"2006-01-02T15:04",
 		"2006-01-02",
+		// Date-only ISO forms may omit the day and the month: YYYY-MM and YYYY are
+		// complete Date Time Strings, interpreted as UTC.
+		"2006-01",
+		"2006",
 		"2006/01/02",
 		time.RFC1123,
 		"Mon Jan 02 2006 15:04:05 GMT-0700",

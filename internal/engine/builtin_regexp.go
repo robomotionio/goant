@@ -1937,7 +1937,6 @@ func (rt *Runtime) stringSplitString(this Value, args []Value) (Value, *ThrowErr
 	return res, nil
 }
 
-
 // hasBuiltinExec reports whether r still resolves "exec" to the built-in
 // %RegExp.prototype.exec%. Every fast path that matches internally depends on
 // it: RegExpExec would otherwise call a user-supplied exec instead.

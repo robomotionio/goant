@@ -259,11 +259,16 @@ func (rt *Runtime) initMapBuiltin() {
 	rt.objPtr(ctor).defineOwn("prototype", proto, 0)
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 	rt.defMethod(rt.objPtr(ctor), "groupBy", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// GroupBy checks the callback BEFORE iterating, so an empty iterable with a
+		// non-callable callback is still a TypeError.
+		cb := arg(args, 1)
+		if !rt.isCallable(cb) {
+			return mkundef(), rt.typeError("Map.groupBy callback is not a function")
+		}
 		items, e := rt.iterableValues(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		cb := arg(args, 0+1)
 		res := rt.newObject(proto)
 		c := &collection{index: map[string]int{}}
 		rt.objPtr(res).coll = c

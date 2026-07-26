@@ -442,6 +442,14 @@ func (rt *Runtime) initPromiseBuiltin() {
 		if o == nil {
 			return mkundef(), rt.typeError("Constructor Promise requires 'new'")
 		}
+		// OrdinaryCreateFromConstructor: the single ? Get(newTarget, "prototype")
+		// happens here, so a throwing `prototype` getter on the new target
+		// propagates rather than silently falling back to %Promise.prototype%.
+		pr, e := rt.newTargetProtoE(rt.promiseProto)
+		if e != nil {
+			return mkundef(), e
+		}
+		o.proto = pr
 		o.promise = &promiseState{state: 0}
 		p := this
 		done := false

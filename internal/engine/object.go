@@ -348,6 +348,15 @@ func (o *object) defineOwnSymbol(sym uint32, v Value, attrs uint8) bool {
 	if !ok {
 		return false
 	}
+	// Converting an accessor slot to a data property clears the accessor markers,
+	// exactly as the string-keyed defineOwn does — otherwise the slot keeps
+	// reporting (and invoking) a getter that the redefinition removed.
+	if p := o.shape.propAt(slot); p.isAccessor {
+		o.ensureUniqueShape()
+		p = o.shape.propAt(slot)
+		p.isAccessor, p.hasGetter, p.hasSetter = false, false, false
+		p.getter, p.setter = mkundef(), mkundef()
+	}
 	o.slotSet(slot, v)
 	return true
 }

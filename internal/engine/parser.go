@@ -2685,6 +2685,12 @@ func (p *parser) parseVarDecl(kind VarKind, allowUninitConst bool) *Node {
 				p.errorf("Keyword must not contain escaped characters")
 				return v
 			}
+			// A BindingIdentifier is an identifier: `var 1 = 1` or `var "s" = 1` is a
+			// SyntaxError, not a binding whose name happens to read as a literal.
+			if p.tok() < TokIdentifier || p.tok() >= TokIdentLikeEnd {
+				p.unexpected()
+				return v
+			}
 			decl.Left = p.mkIdentFromTok()
 			p.strictCheckBindingIdent(decl.Left.Str)
 			p.consume()
