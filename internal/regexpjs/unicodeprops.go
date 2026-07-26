@@ -2,8 +2,10 @@ package regexpjs
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // translateUnicodeProps rewrites ECMAScript Unicode property escapes
@@ -17,11 +19,21 @@ import (
 // which holds a regexp2 alternation of every literal code-point sequence each
 // property matches (see unicode17_gen.go / tools/genunicode).
 
-func translateUnicodeProps(pattern string, unicodeSets bool) (string, error) {
+func translateUnicodeProps(pattern string, unicodeSets, ignoreCase bool) (string, error) {
 	var out strings.Builder
 	inClass := false
+	// The inline `(?i:…)` / `(?-i:…)` state, which decides how a NEGATED property
+	// escape is expanded (see foldClosedTable).
+	rs := []rune(pattern)
+	icStack := []bool{ignoreCase}
+	runeIdx := 0
 	for i := 0; i < len(pattern); {
 		c := pattern[i]
+		if c == '(' && !inClass {
+			icStack = append(icStack, modifiedIgnoreCase(rs, runeIdx, icStack[len(icStack)-1]))
+		} else if c == ')' && !inClass && len(icStack) > 1 {
+			icStack = icStack[:len(icStack)-1]
+		}
 		if c == '\\' && i+1 < len(pattern) {
 			n := pattern[i+1]
 			if (n == 'p' || n == 'P') && i+2 < len(pattern) && pattern[i+2] == '{' {
@@ -41,14 +53,23 @@ func translateUnicodeProps(pattern string, unicodeSets bool) (string, error) {
 				if !ok {
 					return "", fmt.Errorf("unknown unicode category or property `%s`", name)
 				}
+				if n == 'P' && icStack[len(icStack)-1] {
+					// `\P{X}` is the complement taken BEFORE canonicalisation, so under
+					// IgnoreCase a code point matches unless its WHOLE fold orbit lies
+					// in X — `(?i:\P{Lu})` matches "A", because "a" is in the
+					// complement and canonicalises the same way.
+					rt = foldClosedTable(rt)
+				}
 				out.WriteString(rangeTableToClass(rt, n == 'P', inClass))
 				i += 3 + rel + 1
+				runeIdx += utf8.RuneCountInString(pattern[i-(3+rel+1) : i])
 				continue
 			}
 			// Any other escape: copy both bytes verbatim.
 			out.WriteByte(c)
 			out.WriteByte(n)
 			i += 2
+			runeIdx += 2
 			continue
 		}
 		switch c {
@@ -59,8 +80,97 @@ func translateUnicodeProps(pattern string, unicodeSets bool) (string, error) {
 		}
 		out.WriteByte(c)
 		i++
+		if c < 0x80 || c >= 0xC0 {
+			runeIdx++ // count lead bytes only, so runeIdx tracks rs
+		}
 	}
 	return out.String(), nil
+}
+
+// foldClosedTable returns the code points of rt whose entire simple-fold orbit
+// is also in rt. Complementing THAT is what `\P{X}` means under IgnoreCase:
+// ECMAScript takes the complement of X first and canonicalises afterwards, so a
+// character matches unless every character folding to the same thing is in X.
+func foldClosedTable(rt *unicode.RangeTable) *unicode.RangeTable {
+	// Only a cased character can have an orbit with more than one member, so the
+	// scan is bounded by Lu ∪ Ll ∪ Lt rather than by rt (which may be enormous).
+	var drop []rune
+	for _, tbl := range []*unicode.RangeTable{unicode.Lu, unicode.Ll, unicode.Lt} {
+		forEachRune(tbl, func(c rune) {
+			if !unicode.Is(rt, c) {
+				return
+			}
+			for f := unicode.SimpleFold(c); f != c; f = unicode.SimpleFold(f) {
+				if !unicode.Is(rt, f) {
+					drop = append(drop, c)
+					return
+				}
+			}
+		})
+	}
+	if len(drop) == 0 {
+		return rt
+	}
+	sort.Slice(drop, func(i, j int) bool { return drop[i] < drop[j] })
+	return subtractRunes(rt, drop)
+}
+
+// forEachRune visits every code point a RangeTable contains.
+func forEachRune(rt *unicode.RangeTable, f func(rune)) {
+	for _, r := range rt.R16 {
+		st := rune(r.Stride)
+		if st == 0 {
+			st = 1
+		}
+		for c := rune(r.Lo); c <= rune(r.Hi); c += st {
+			f(c)
+		}
+	}
+	for _, r := range rt.R32 {
+		st := rune(r.Stride)
+		if st == 0 {
+			st = 1
+		}
+		for c := rune(r.Lo); c <= rune(r.Hi); c += st {
+			f(c)
+		}
+	}
+}
+
+// subtractRunes removes a sorted set of code points from a RangeTable, flattening
+// it to stride-1 ranges.
+func subtractRunes(rt *unicode.RangeTable, drop []rune) *unicode.RangeTable {
+	inDrop := make(map[rune]bool, len(drop))
+	for _, d := range drop {
+		inDrop[d] = true
+	}
+	out := &unicode.RangeTable{}
+	var lo, hi rune = -1, -1
+	flush := func() {
+		if lo < 0 {
+			return
+		}
+		if hi <= 0xFFFF {
+			out.R16 = append(out.R16, unicode.Range16{Lo: uint16(lo), Hi: uint16(hi), Stride: 1})
+		} else {
+			out.R32 = append(out.R32, unicode.Range32{Lo: uint32(lo), Hi: uint32(hi), Stride: 1})
+		}
+		lo, hi = -1, -1
+	}
+	forEachRune(rt, func(c rune) {
+		if inDrop[c] {
+			flush()
+			return
+		}
+		if lo >= 0 && c == hi+1 && (hi <= 0xFFFF) == (c <= 0xFFFF) {
+			hi = c
+			return
+		}
+		flush()
+		lo, hi = c, c
+	})
+	flush()
+	return out
 }
 
 // expandCaseFold rewrites literal letters whose Unicode simple-fold orbit has
