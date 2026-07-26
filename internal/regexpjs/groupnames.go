@@ -126,6 +126,7 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 	// which may appear before their group (forward references are legal) — resolve.
 	inClass := false
 	counter := 0
+	var order []bool // every capture group in source order: true = named
 	for i := 0; i < len(rs); i++ {
 		c := rs[i]
 		if c == '\\' {
@@ -140,8 +141,12 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 			inClass = false
 			continue
 		}
+		if !inClass && c == '(' && !(i+1 < len(rs) && rs[i+1] == '?') {
+			order = append(order, false)
+		}
 		if !inClass && c == '(' && i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
 			!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
+			order = append(order, true)
 			name, end, err := decodeGroupName(rs, i+3)
 			if err != nil {
 				return "", nil, nil, err
@@ -164,6 +169,26 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 	}
 	if counter == 0 {
 		return src, nil, nil, nil // no named groups; leave the source untouched
+	}
+	// regexp2 numbers every UNNAMED group before every named one, so once a
+	// pattern mixes the two a `\N` backreference means a different group there
+	// than in ECMAScript. Map each ECMAScript group number to regexp2's.
+	netNum := make([]int, len(order)+1)
+	unnamed := 0
+	for _, named := range order {
+		if !named {
+			unnamed++
+		}
+	}
+	unnamedPtr, namedPtr := 1, unnamed+1
+	for es, named := range order {
+		if named {
+			netNum[es+1] = namedPtr
+			namedPtr++
+		} else {
+			netNum[es+1] = unnamedPtr
+			unnamedPtr++
+		}
 	}
 
 	// Pass 2: rewrite definitions and defined backreferences to the internal
@@ -192,6 +217,18 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 				out.WriteString("\\k<")
 				i += 2
 				continue
+			}
+			if !inClass && i+1 < len(rs) && rs[i+1] >= '1' && rs[i+1] <= '9' {
+				j := i + 1
+				for j < len(rs) && rs[j] >= '0' && rs[j] <= '9' {
+					j++
+				}
+				if n, err := strconv.Atoi(string(rs[i+1 : j])); err == nil && n >= 1 && n < len(netNum) {
+					out.WriteByte('\\')
+					out.WriteString(strconv.Itoa(netNum[n]))
+					i = j - 1
+					continue
+				}
 			}
 			out.WriteRune(c)
 			if i+1 < len(rs) {
