@@ -18,23 +18,18 @@ type shadowRealm struct {
 // Primitives cross by value; a callable becomes a wrapped function; anything
 // else is a TypeError, which is what keeps the two object graphs apart.
 func (rt *Runtime) marshalOut(inner *Runtime, v Value) (Value, *ThrowError) {
+	// The two realms belong to one agent and share the value pools, so a
+	// primitive — including a symbol, whose IDENTITY the Symbol.for registry
+	// makes observable across realms — crosses unchanged.
 	switch v.Type() {
-	case TUndef, TNull, TBool, TNum:
-		return v, nil // these carry their payload inline, not a pool handle
-	case TStr:
-		return rt.newStringBytes(inner.strBytes(v)), nil
+	case TUndef, TNull, TBool, TNum, TStr, TBigInt:
+		return v, nil
+	}
+	if v.IsSymbol() {
+		return v, nil
 	}
 	if inner.isCallable(v) {
 		return rt.wrapRealmFunction(inner, v), nil
-	}
-	if v.IsSymbol() {
-		// A symbol is a primitive and does cross; it is re-created here so the
-		// handle belongs to this Runtime's pool, carrying its description over.
-		d := inner.symbolDesc(v)
-		if d.Type() == TStr {
-			d = rt.newStringBytes(inner.strBytes(d))
-		}
-		return rt.newSymbol(d), nil
 	}
 	return mkundef(), rt.typeError("only primitives and callables may cross a ShadowRealm boundary")
 }
@@ -42,10 +37,11 @@ func (rt *Runtime) marshalOut(inner *Runtime, v Value) (Value, *ThrowError) {
 // marshalIn copies a caller value into the shadow realm, by the same rules.
 func (rt *Runtime) marshalIn(inner *Runtime, v Value) (Value, *ThrowError) {
 	switch v.Type() {
-	case TUndef, TNull, TBool, TNum:
+	case TUndef, TNull, TBool, TNum, TStr, TBigInt:
 		return v, nil
-	case TStr:
-		return inner.newStringBytes(rt.strBytes(v)), nil
+	}
+	if v.IsSymbol() {
+		return v, nil
 	}
 	if rt.isCallable(v) {
 		return inner.wrapRealmFunction(rt, v), nil
@@ -109,7 +105,10 @@ func (rt *Runtime) initShadowRealmBuiltin() {
 		if rt.shadowRealms == nil {
 			rt.shadowRealms = map[*object]*shadowRealm{}
 		}
-		rt.shadowRealms[o] = &shadowRealm{rt: New()}
+		// A ShadowRealm is a realm of the SAME agent: it shares the value pools,
+		// the interned strings, the well-known symbols and the Symbol.for registry
+		// (all per-agent in the spec) while getting its own global and intrinsics.
+		rt.shadowRealms[o] = &shadowRealm{rt: rt.NewRealm()}
 		return this, nil
 	})
 

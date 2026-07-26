@@ -324,6 +324,11 @@ func New() *Runtime {
 // carried over, so `Symbol.iterator` is one symbol everywhere and an object
 // made in one realm is still iterable from the other.
 func (rt *Runtime) NewRealm() *Runtime {
+	// The Symbol.for registry is created lazily; make it exist so both realms
+	// share the same map rather than the child starting with nil.
+	if rt.symbolRegistry == nil {
+		rt.symbolRegistry = map[string]Value{}
+	}
 	r := &Runtime{
 		objects:        rt.objects,
 		strings:        rt.strings,
