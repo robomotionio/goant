@@ -30,19 +30,27 @@ import (
 // anything. A caller that relies on the cap to bound memory should keep its own
 // accounting; see HeapStatistics.
 type IsolateOptions struct {
-	MaxOldSpaceBytes   uint64
-	MaxYoungSpaceBytes uint64
+	InitialOldSpaceBytes uint64
+	MaxOldSpaceBytes     uint64
+	MaxYoungSpaceBytes   uint64
 }
 
-// HeapStatistics reports memory use. Only UsedHeapSize is meaningful, and it is
-// this isolate's own accounting of live engine objects — not a Go-runtime-wide
-// figure, and not directly comparable to V8's.
+// HeapStatistics reports memory use. The field set matches the binding this
+// replaces so call sites compile unchanged, but only UsedHeapSize,
+// TotalHeapSize, HeapSizeLimit and NumberOfNativeContexts carry a value — the
+// rest are V8 bookkeeping with no counterpart here and stay zero.
 type HeapStatistics struct {
-	TotalHeapSize          uint64
-	UsedHeapSize           uint64
-	HeapSizeLimit          uint64
-	ExternalMemory         uint64
-	NumberOfNativeContexts uint64
+	TotalHeapSize            uint64
+	TotalHeapSizeExecutable  uint64
+	TotalPhysicalSize        uint64
+	TotalAvailableSize       uint64
+	UsedHeapSize             uint64
+	HeapSizeLimit            uint64
+	MallocedMemory           uint64
+	ExternalMemory           uint64
+	PeakMallocedMemory       uint64
+	NumberOfNativeContexts   uint64
+	NumberOfDetachedContexts uint64
 }
 
 // Isolate is an independent engine instance.
@@ -121,6 +129,21 @@ func (i *Isolate) ResumeExecution() {
 
 // CancelTerminateExecution is an alias for ResumeExecution.
 func (i *Isolate) CancelTerminateExecution() { i.ResumeExecution() }
+
+// Close is an alias for Dispose, matching the binding.
+func (i *Isolate) Close() { i.Dispose() }
+
+// IsExecutionTerminating reports whether a termination is in flight or still
+// pending.
+func (i *Isolate) IsExecutionTerminating() bool {
+	i.mu.Lock()
+	rt := i.rt
+	i.mu.Unlock()
+	return rt != nil && rt.Interrupted()
+}
+
+// apply lets an Isolate be passed to NewContext as a ContextOption.
+func (i *Isolate) apply(o *contextOptions) { o.iso = i }
 
 // GetHeapStatistics reports this isolate's memory use. UsedHeapSize is derived
 // from Go's own accounting of heap in use, which for a single-isolate process

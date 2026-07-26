@@ -18,15 +18,32 @@ type Context struct {
 	closed bool
 }
 
-// NewContext creates a context on iso. If tmpl is non-nil its entries are
-// installed on the new global object.
-//
-// Unlike the V8 binding, iso may not be nil: there is no implicit isolate to
-// fall back on, and inventing one would silently give the caller a context that
-// shares nothing with the scripts they compiled.
-func NewContext(iso *Isolate, tmpl *ObjectTemplate) *Context {
+// contextOptions accumulates what NewContext was given.
+type contextOptions struct {
+	iso  *Isolate
+	tmpl *ObjectTemplate
+}
+
+// ContextOption configures a new Context. Both *Isolate and *ObjectTemplate
+// satisfy it, which is what lets NewContext(iso, globals) read naturally while
+// either argument stays optional.
+type ContextOption interface {
+	apply(*contextOptions)
+}
+
+// NewContext creates a context. Passing an *Isolate puts the context on that
+// isolate; passing an *ObjectTemplate installs its entries on the new global.
+// With no isolate a fresh one is created, matching the binding.
+func NewContext(opt ...ContextOption) *Context {
+	var opts contextOptions
+	for _, o := range opt {
+		if o != nil {
+			o.apply(&opts)
+		}
+	}
+	iso := opts.iso
 	if iso == nil {
-		return nil
+		iso = NewIsolate()
 	}
 	root, err := iso.runtime()
 	if err != nil {
@@ -38,8 +55,8 @@ func NewContext(iso *Isolate, tmpl *ObjectTemplate) *Context {
 	iso.contexts++
 	iso.mu.Unlock()
 
-	if tmpl != nil {
-		tmpl.installOn(c)
+	if opts.tmpl != nil {
+		opts.tmpl.installOn(c)
 	}
 	return c
 }

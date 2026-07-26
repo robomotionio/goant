@@ -87,12 +87,17 @@ func Null(i *Isolate) *Value {
 }
 
 // NewExternalOneByteValue creates a string value from Latin-1 bytes. Under V8
-// this avoided a copy by pinning the caller's buffer; goant copies, so this is
-// an ordinary string constructor kept for call-site compatibility. The buffer
-// is NOT retained, which makes it safer than the binding it replaces.
-func NewExternalOneByteValue(i *Isolate, s string) (*Value, error) {
-	return NewValue(i, s)
+// this avoided a copy by pinning the caller's buffer, which meant the caller
+// had to keep it alive and unmodified. goant copies, so the buffer is NOT
+// retained — the same call is simply safer here.
+func NewExternalOneByteValue(i *Isolate, data []byte) (*Value, error) {
+	return NewValue(i, string(data))
 }
+
+// Valuer is anything that can produce a Value.
+type Valuer interface{ value() *Value }
+
+func (v *Value) value() *Value { return v }
 
 // String applies ToString. A conversion that throws yields the empty string,
 // matching the binding's behaviour of never failing here.
