@@ -265,6 +265,11 @@ func (rt *Runtime) setOnReceiver(receiver, key, val Value) (bool, *ThrowError) {
 			do.defineOwn("value", val, attrDefault)
 		}
 		if e := rt.proxyDefineProperty(ro.proxy, key, desc); e != nil {
+			// OrdinarySetWithOwnDescriptor ends in CreateDataProperty(Receiver, …),
+			// whose false result makes [[Set]] return false — it is not a throw.
+			if e.rejected {
+				return false, nil
+			}
 			return false, e
 		}
 		return true, nil

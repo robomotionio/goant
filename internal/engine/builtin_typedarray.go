@@ -1838,9 +1838,21 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 		bigKind := isBigIntKind(rt.objPtr(this).ta.kind)
 		for i := k; i < l; i++ {
 			el := get(this, i)
-			// BigInt equality goes through taStrictEq (SameValueZero on BigInts is
-			// plain equality); Numbers use SameValueZero so NaN matches NaN.
-			if (bigKind && taStrictEq(rt, el, search, true)) || (!bigKind && rt.sameValueZero(el, search)) {
+			// An index the array can no longer address reads as undefined, so
+			// `includes(undefined)` is true even on a BigInt array — where the
+			// element comparison would otherwise go through taStrictEq, which only
+			// knows how to compare two BigInts.
+			var same bool
+			switch {
+			case el.IsUndefined() || search.IsUndefined():
+				same = el.IsUndefined() && search.IsUndefined()
+			case bigKind:
+				// SameValueZero on BigInts is plain equality.
+				same = taStrictEq(rt, el, search, true)
+			default:
+				same = rt.sameValueZero(el, search) // NaN matches NaN
+			}
+			if same {
 				return mktrue(), nil
 			}
 		}
@@ -2239,6 +2251,12 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 				out += ","
 			}
 			el := get(this, i)
+			// An index the array can no longer address (the buffer shrank while an
+			// earlier element's toLocaleString ran) reads as undefined, which
+			// contributes the empty string rather than being invoked.
+			if el.IsUndefined() || el.IsNull() {
+				continue
+			}
 			// Call the element's own toLocaleString, then ToString the result.
 			m, e := rt.getField(el, "toLocaleString")
 			if e != nil {
