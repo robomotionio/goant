@@ -351,7 +351,13 @@ func (rt *Runtime) asyncGenResume(g *genState, kind genResumeKind, val Value) {
 	// Both `await x` and `yield x` first Await(x); await rejection resumes the
 	// body with a throw at the suspension point.
 	resume := m.await
-	awaited := rt.resolvedPromise(m.value)
+	// Await(v) is PromiseResolve(%Promise%, v), which reads v.constructor when v
+	// is already a promise — observable, and it may throw.
+	awaited, ae := rt.promiseResolve(rt.promiseCtor, m.value)
+	if ae != nil {
+		rt.asyncGenStep(g, genThrow, ae.Value)
+		return
+	}
 	onF := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
 		if resume {
 			rt.asyncGenStep(g, genNext, arg(a, 0))
@@ -396,8 +402,13 @@ func (rt *Runtime) runAsync(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 			rt.resolvePromise(p, po, m.value)
 			return
 		}
-		// m.value is the awaited operand: adopt it as a promise, then resume.
-		awaited := rt.resolvedPromise(m.value)
+		// m.value is the awaited operand: Await is PromiseResolve(%Promise%, v),
+		// which reads v.constructor when v is already a promise.
+		awaited, ae := rt.promiseResolve(rt.promiseCtor, m.value)
+		if ae != nil {
+			step(genThrow, ae.Value)
+			return
+		}
 		ao := rt.objPtr(awaited)
 		onF := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
 			step(genNext, arg(a, 0))
