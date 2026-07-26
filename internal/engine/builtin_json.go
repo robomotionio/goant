@@ -115,7 +115,7 @@ func (rt *Runtime) initJSONBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		p := &jsonParser{rt: rt, src: rt.strGo(s)}
+		p := &jsonParser{rt: rt, src: rt.strGo(s), needSrc: rt.isCallable(arg(args, 1))}
 		v, src, perr := p.parse()
 		if perr != nil {
 			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
@@ -208,16 +208,22 @@ type jsonStringifier struct {
 }
 
 // enterCycle pushes v onto the serialization stack, returning a TypeError if v
-// is already present (a cyclical structure). The returned func pops it.
-func (st *jsonStringifier) enterCycle(v Value) (func(), *ThrowError) {
+// is already present (a cyclical structure). Paired with leaveCycle.
+//
+// It used to return a closure that popped the stack, which cost an allocation
+// for every object and array serialised — 12% of all allocations on a small
+// document. A deferred method call on the receiver costs none.
+func (st *jsonStringifier) enterCycle(v Value) *ThrowError {
 	for _, s := range st.stack {
 		if s == v {
-			return nil, st.rt.typeError("Converting circular structure to JSON")
+			return st.rt.typeError("Converting circular structure to JSON")
 		}
 	}
 	st.stack = append(st.stack, v)
-	return func() { st.stack = st.stack[:len(st.stack)-1] }, nil
+	return nil
 }
+
+func (st *jsonStringifier) leaveCycle() { st.stack = st.stack[:len(st.stack)-1] }
 
 // str serializes holder[key], appending to st.buf. ok is false when the value
 // serializes to nothing (undefined, a function, a symbol); in that case nothing
@@ -320,11 +326,10 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (bool, *
 
 func (st *jsonStringifier) stringifyArray(v Value, indent string) (bool, *ThrowError) {
 	rt := st.rt
-	leave, e := st.enterCycle(v)
-	if e != nil {
+	if e := st.enterCycle(v); e != nil {
 		return false, e
 	}
-	defer leave()
+	defer st.leaveCycle()
 	newIndent := indent + st.gap
 	n, e := rt.lengthOf(v)
 	if e != nil {
@@ -363,11 +368,10 @@ func (st *jsonStringifier) stringifyArray(v Value, indent string) (bool, *ThrowE
 
 func (st *jsonStringifier) stringifyObject(v Value, indent string) (bool, *ThrowError) {
 	rt := st.rt
-	leave, e := st.enterCycle(v)
-	if e != nil {
+	if e := st.enterCycle(v); e != nil {
 		return false, e
 	}
-	defer leave()
+	defer st.leaveCycle()
 	o := rt.objPtr(v)
 	newIndent := indent + st.gap
 	// With an array replacer, serialize exactly the PropertyList keys in order
@@ -529,6 +533,27 @@ type jsonParser struct {
 	rt  *Runtime
 	src string
 	pos int
+
+	// aliased records that src is a view over a caller-owned buffer rather than
+	// a string the engine owns (JSONParseBytes). Values are safe either way —
+	// newString copies — but a property key is interned, and the intern table
+	// holds the Go string itself. Interning a view of someone else's buffer
+	// leaves the table pointing at memory the caller is free to overwrite.
+	aliased bool
+
+	// ownedKeys dedupes key copies within one document. Objects in a message are
+	// overwhelmingly records with the same few field names, so cloning per
+	// occurrence copies the same handful of strings over and over; this makes it
+	// one clone per distinct key. The map is keyed by the owned copy, so it never
+	// retains a view of the caller's buffer.
+	ownedKeys map[string]string
+
+	// needSrc records whether anyone will read the parse records. They exist for
+	// the reviver's context.source, so a parse without a reviver — which is every
+	// parse a host does — builds a jsonSrc per value, a map per object and a
+	// slice per array purely to throw them away. Measured at a third of the
+	// allocations of a small parse.
+	needSrc bool
 }
 
 type jsonError struct{ msg string }
@@ -564,12 +589,11 @@ func (p *jsonParser) parse() (Value, *jsonSrc, error) {
 		return mkundef(), nil, &jsonError{"Unexpected end of JSON input"}
 	}
 	start := p.pos
-	// prim wraps a primitive parse result with its source span.
+	// prim wraps a primitive parse result with its source span. Written as a
+	// method call rather than a closure: a closure here is allocated once per
+	// primitive value, which on a message of small values is most of them.
 	prim := func(v Value, err error) (Value, *jsonSrc, error) {
-		if err != nil {
-			return mkundef(), nil, err
-		}
-		return v, &jsonSrc{text: p.src[start:p.pos], val: v}, nil
+		return p.primSrc(start, v, err)
 	}
 	c := p.src[p.pos]
 	switch {
@@ -593,6 +617,33 @@ func (p *jsonParser) parse() (Value, *jsonSrc, error) {
 		return prim(p.parseNumber())
 	}
 	return mkundef(), nil, &jsonError{"Unexpected token in JSON"}
+}
+
+// ownKey returns an engine-owned copy of a property key parsed out of a
+// caller-owned buffer, reusing the copy if this document has used the key
+// before.
+func (p *jsonParser) ownKey(key string) string {
+	if owned, ok := p.ownedKeys[key]; ok {
+		return owned
+	}
+	owned := strings.Clone(key)
+	if p.ownedKeys == nil {
+		p.ownedKeys = make(map[string]string, 8)
+	}
+	p.ownedKeys[owned] = owned
+	return owned
+}
+
+// primSrc pairs a primitive with its source span, or with nothing when no
+// reviver will ask for it.
+func (p *jsonParser) primSrc(start int, v Value, err error) (Value, *jsonSrc, error) {
+	if err != nil {
+		return mkundef(), nil, err
+	}
+	if !p.needSrc {
+		return v, nil, nil
+	}
+	return v, &jsonSrc{text: p.src[start:p.pos], val: v}, nil
 }
 
 func (p *jsonParser) parseLit(lit string, v Value) (Value, error) {
@@ -657,6 +708,27 @@ func (p *jsonParser) parseNumber() (Value, error) {
 
 func (p *jsonParser) parseString() (string, error) {
 	p.pos++ // opening quote
+
+	// Fast path: most JSON strings contain no escape, so the unescaped result is
+	// the source substring and needs no buffer at all. Scan for the closing
+	// quote; the moment a backslash appears, fall back to building.
+	for i := p.pos; i < len(p.src); i++ {
+		c := p.src[i]
+		if c == '"' {
+			out := p.src[p.pos:i]
+			p.pos = i + 1
+			return out, nil
+		}
+		if c == '\\' {
+			break
+		}
+		if c < 0x20 {
+			// A raw control character is invalid in a JSON string; leave it to the
+			// slow path so the error comes from one place.
+			break
+		}
+	}
+
 	var b strings.Builder
 	for p.pos < len(p.src) {
 		c := p.src[p.pos]
@@ -721,7 +793,10 @@ func (p *jsonParser) parseArray() (Value, *jsonSrc, error) {
 	p.pos++ // [
 	arr := p.rt.newArray()
 	ao := p.rt.objPtr(arr)
-	src := &jsonSrc{composite: true}
+	var src *jsonSrc
+	if p.needSrc {
+		src = &jsonSrc{composite: true}
+	}
 	p.skipWS()
 	if p.pos < len(p.src) && p.src[p.pos] == ']' {
 		p.pos++
@@ -733,7 +808,9 @@ func (p *jsonParser) parseArray() (Value, *jsonSrc, error) {
 			return mkundef(), nil, err
 		}
 		p.rt.arraySet(ao, ao.arrLen, v)
-		src.elems = append(src.elems, csrc)
+		if src != nil {
+			src.elems = append(src.elems, csrc)
+		}
 		p.skipWS()
 		if p.pos >= len(p.src) {
 			return mkundef(), nil, &jsonError{"Unterminated JSON array"}
@@ -755,7 +832,10 @@ func (p *jsonParser) parseObject() (Value, *jsonSrc, error) {
 	p.pos++ // {
 	obj := p.rt.newPlainObject()
 	o := p.rt.objPtr(obj)
-	src := &jsonSrc{composite: true, props: map[string]*jsonSrc{}}
+	var src *jsonSrc
+	if p.needSrc {
+		src = &jsonSrc{composite: true, props: map[string]*jsonSrc{}}
+	}
 	p.skipWS()
 	if p.pos < len(p.src) && p.src[p.pos] == '}' {
 		p.pos++
@@ -770,6 +850,9 @@ func (p *jsonParser) parseObject() (Value, *jsonSrc, error) {
 		if err != nil {
 			return mkundef(), nil, err
 		}
+		if p.aliased {
+			key = p.ownKey(key)
+		}
 		p.skipWS()
 		if p.pos >= len(p.src) || p.src[p.pos] != ':' {
 			return mkundef(), nil, &jsonError{"Expected ':' in JSON object"}
@@ -780,7 +863,9 @@ func (p *jsonParser) parseObject() (Value, *jsonSrc, error) {
 			return mkundef(), nil, err
 		}
 		o.defineOwn(key, v, attrDefault)
-		src.props[key] = csrc // last duplicate key wins, matching the value
+		if src != nil {
+			src.props[key] = csrc // last duplicate key wins, matching the value
+		}
 		p.skipWS()
 		if p.pos >= len(p.src) {
 			return mkundef(), nil, &jsonError{"Unterminated JSON object"}

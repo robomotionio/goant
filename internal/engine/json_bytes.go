@@ -35,7 +35,7 @@ func (rt *Runtime) JSONParseBytes(b []byte) (Value, error) {
 	// and because every string it produces is a fresh allocation — parseString
 	// unescapes into a new buffer, and newString copies.
 	src := unsafe.String(unsafe.SliceData(b), len(b))
-	p := &jsonParser{rt: rt, src: src}
+	p := &jsonParser{rt: rt, src: src, aliased: true}
 	v, _, err := p.parse()
 	if err != nil {
 		return mkundef(), err
