@@ -75,25 +75,9 @@ func expandCaseFold(pattern string) string {
 	for i := 0; i < len(rs); i++ {
 		c := rs[i]
 		if c == '\\' && i+1 < len(rs) {
-			// Under u+i, the ASCII \w orbit folds in ſ (U+017F, from s) and the
-			// Kelvin sign (U+212A, from k), which regexp2's IgnoreCase misses for the
-			// shorthand. \W must correspondingly exclude them.
-			switch rs[i+1] {
-			case 'w':
-				if inClass {
-					out.WriteString(`\wſK`)
-				} else {
-					out.WriteString(`[0-9A-Za-z_ſK]`)
-				}
-				i++
-				continue
-			case 'W':
-				if !inClass {
-					out.WriteString(`[^0-9A-Za-z_ſK]`)
-					i++
-					continue
-				}
-			}
+			// \w / \W are handled by translateWordClass, which tracks ignoreCase down
+			// the inline-modifier nesting — a `(?-i:…)` region must get the plain
+			// ASCII word set back, which a whole-pattern rewrite here cannot express.
 			out.WriteRune(c)
 			out.WriteRune(rs[i+1])
 			i++

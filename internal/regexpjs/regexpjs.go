@@ -365,6 +365,12 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if !r.Unicode {
 		src = splitAstralLiterals(src)
 	}
+	// Under u/v, \w is decided by ES's Canonicalize rather than regexp2's
+	// IgnoreCase option, and an inline modifier group can turn it on or off for a
+	// region of the pattern.
+	if r.Unicode {
+		src = translateWordClass(src, r.IgnoreCase)
+	}
 	src = translateDot(src, r.DotAll)
 	if src == "" {
 		src = "(?:)"
@@ -585,4 +591,104 @@ func annexBClassRanges(src string) string {
 		b.WriteRune(c)
 	}
 	return b.String()
+}
+
+// wordClassUnicodeI is \w under the `u` (or `v`) flag with ignoreCase active:
+// simple case folding brings LATIN SMALL LETTER LONG S and KELVIN SIGN into the
+// word set, since they fold to "s" and "k".
+const wordClassUnicodeI = `0-9A-Za-z_\u017F\u212A`
+
+// wordClassPlain is \w with ignoreCase inactive — exactly the ASCII word set.
+const wordClassPlain = `0-9A-Za-z_`
+
+// translateWordClass spells out `\w` / `\W` for a Unicode-mode pattern, tracking
+// ignoreCase down the inline-modifier group nesting the way translateDot tracks
+// dotAll. regexp2 applies its IgnoreCase option to \w wholesale, which is both
+// too wide where a `(?-i:…)` group turns matching case-sensitive again and too
+// narrow where ES's simple case folding pulls in ſ and K.
+func translateWordClass(src string, ignoreCase bool) string {
+	if !strings.Contains(src, `\w`) && !strings.Contains(src, `\W`) {
+		return src
+	}
+	rs := []rune(src)
+	var b strings.Builder
+	b.Grow(len(src) + 16)
+	stack := []bool{ignoreCase}
+	cur := func() bool { return stack[len(stack)-1] }
+	inClass := 0
+	set := func() string {
+		if cur() {
+			return wordClassUnicodeI
+		}
+		return wordClassPlain
+	}
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' && i+1 < len(rs) {
+			switch rs[i+1] {
+			case 'w':
+				if inClass > 0 {
+					b.WriteString(set())
+				} else {
+					b.WriteString("[" + set() + "]")
+				}
+				i++
+				continue
+			case 'W':
+				// Inside a class a complement cannot be spelled inline; regexp2's own
+				// \W stands, which only differs for ſ / K.
+				if inClass > 0 {
+					b.WriteString(`\W`)
+				} else {
+					b.WriteString("[^" + set() + "]")
+				}
+				i++
+				continue
+			}
+			b.WriteRune(c)
+			b.WriteRune(rs[i+1])
+			i++
+			continue
+		}
+		switch {
+		case c == '[':
+			inClass++
+		case c == ']':
+			if inClass > 0 {
+				inClass--
+			}
+		case inClass > 0:
+		case c == '(':
+			stack = append(stack, modifiedIgnoreCase(rs, i, cur()))
+		case c == ')':
+			if len(stack) > 1 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
+}
+
+// modifiedIgnoreCase returns the ignoreCase state inside the group opening at
+// rs[i], applying the add/remove flags of an inline `(?ims-ims:` modifier group.
+func modifiedIgnoreCase(rs []rune, i int, outer bool) bool {
+	if i+1 >= len(rs) || rs[i+1] != '?' {
+		return outer
+	}
+	add := true
+	for j := i + 2; j < len(rs); j++ {
+		switch rs[j] {
+		case 'm', 's':
+		case 'i':
+			outer = add
+		case '-':
+			add = false
+		case ':':
+			return outer
+		default:
+			return outer // not a modifier group: (?: (?= (?! (?<name> …
+		}
+	}
+	return outer
 }
