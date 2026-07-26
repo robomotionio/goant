@@ -509,7 +509,13 @@ func writeResets(out *strings.Builder, names []string) {
 	for _, n := range names {
 		// Atomic: without it the engine can backtrack into the pop and simply
 		// choose to keep the previous iteration's capture.
-		out.WriteString("(?>(?<-" + n + ">)*)")
+		//
+		// `?` rather than `*`: one iteration of the enclosing quantified group can
+		// only have pushed one capture, so at most one pop is ever wanted — and a
+		// zero-width `*` is precisely where the .NET and ECMAScript loop rules
+		// disagree, which would make this reset depend on which one the engine is
+		// applying.
+		out.WriteString("(?>(?<-" + n + ">)?)")
 	}
 }
 
