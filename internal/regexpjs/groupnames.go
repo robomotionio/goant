@@ -2,6 +2,7 @@ package regexpjs
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -212,16 +213,34 @@ func pathsDiverge(p1, p2 []int) bool {
 // group names, none of which regexp2's `\w+` name grammar allows; and it permits
 // duplicate names across disjoint alternatives, which unique internal names make
 // compilable.
-func translateGroupNames(src string) (string, map[string]string, []bool, error) {
+// groupSlot says how to read one ECMAScript capture group out of a regexp2
+// match. An unnamed group is positional (regexp2 numbers the unnamed ones
+// first); a named one is read by its internal name. When several definitions
+// share an ECMAScript name they also share ONE regexp2 group — which is what
+// makes `\k<name>` mean "whichever alternative matched" — and `marker` names the
+// zero-width group sitting at the end of THIS definition, so the value is
+// attributed to the definition that actually produced the last capture.
+type groupSlot struct {
+	netName string
+	marker  string
+}
+
+// translateGroupNames rewrites a pattern's named groups into names regexp2
+// accepts, and returns the plan for reading the result back.
+func translateGroupNames(src string) (string, map[string]string, []groupSlot, error) {
 	rs := []rune(src)
-	names := map[string]string{}   // decoded original name -> internal name
+	names := map[string]string{}   // decoded original name -> shared internal name
 	reverse := map[string]string{} // internal name -> decoded original name
+	dupCount := map[string]int{}   // decoded original name -> definitions seen
 
 	// Pass 1: collect every named-group definition, so that backreferences —
-	// which may appear before their group (forward references are legal) — resolve.
+	// which may appear before their group (forward references are legal) —
+	// resolve, and so the ECMAScript group order is known before rewriting.
 	inClass := false
 	counter := 0
-	var order []bool // every capture group in source order: true = named
+	var order []bool     // every capture group in source order: true = named
+	var defName []string // per ECMAScript group (1-based, [0] unused): its name
+	defName = append(defName, "")
 	for i := 0; i < len(rs); i++ {
 		c := rs[i]
 		if c == '\\' {
@@ -236,11 +255,15 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 			inClass = false
 			continue
 		}
-		if !inClass && c == '(' && !(i+1 < len(rs) && rs[i+1] == '?') {
-			order = append(order, false)
+		if inClass || c != '(' {
+			continue
 		}
-		if !inClass && c == '(' && i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
-			!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
+		if !(i+1 < len(rs) && rs[i+1] == '?') {
+			order = append(order, false)
+			defName = append(defName, "")
+			continue
+		}
+		if i+2 < len(rs) && rs[i+2] == '<' && !(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
 			order = append(order, true)
 			name, end, err := decodeGroupName(rs, i+3)
 			if err != nil {
@@ -249,49 +272,108 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 			if !isValidGroupName(name) {
 				return "", nil, nil, fmt.Errorf("invalid capture group name")
 			}
-			in := "__g" + strconv.Itoa(counter)
-			counter++
-			// ES2025 allows the same name on groups in disjoint alternatives.
-			// Each definition still needs its own internal name, or .NET would
-			// merge them into a single capture slot and drop a result element;
-			// backreferences resolve to the first definition.
+			defName = append(defName, name)
 			if _, dup := names[name]; !dup {
+				in := "__g" + strconv.Itoa(counter)
+				counter++
 				names[name] = in
+				reverse[in] = name
 			}
-			reverse[in] = name
+			dupCount[name]++
 			i = end
 		}
 	}
 	if counter == 0 {
 		return src, nil, nil, nil // no named groups; leave the source untouched
 	}
+
 	// regexp2 numbers every UNNAMED group before every named one, so once a
 	// pattern mixes the two a `\N` backreference means a different group there
-	// than in ECMAScript. Map each ECMAScript group number to regexp2's.
+	// than in ECMAScript. Unnamed targets are renumbered; a named target becomes
+	// a \k<> reference, which is immune to the reordering.
 	netNum := make([]int, len(order)+1)
-	unnamed := 0
-	for _, named := range order {
-		if !named {
-			unnamed++
-		}
-	}
-	unnamedPtr, namedPtr := 1, unnamed+1
+	unnamedPtr := 1
 	for es, named := range order {
-		if named {
-			netNum[es+1] = namedPtr
-			namedPtr++
-		} else {
+		if !named {
 			netNum[es+1] = unnamedPtr
 			unnamedPtr++
 		}
 	}
 
-	// Pass 2: rewrite definitions and defined backreferences to the internal
-	// names; a \k<name> with no matching definition is left untouched (a
-	// non-Unicode Annex-B literal, or a Unicode-mode error regexp2 will report).
+	// Pass 1b: find the quantified groups whose body defines a name that has
+	// several definitions. ECMAScript clears those captures at the start of every
+	// iteration; .NET does not, but its balancing groups can pop them.
+	resetAt := map[int][]string{} // rune index of '(' -> internal names to clear
+	{
+		type frame struct {
+			start int
+			inner map[string]bool
+		}
+		var stack []frame
+		inClass = false
+		esIdx := 0
+		for i := 0; i < len(rs); i++ {
+			c := rs[i]
+			if c == '\\' {
+				i++
+				continue
+			}
+			if inClass {
+				if c == ']' {
+					inClass = false
+				}
+				continue
+			}
+			switch c {
+			case '[':
+				inClass = true
+			case '(':
+				named := i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
+					!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!'))
+				plain := !(i+1 < len(rs) && rs[i+1] == '?')
+				stack = append(stack, frame{start: i, inner: map[string]bool{}})
+				if named || plain {
+					esIdx++
+					if named && dupCount[defName[esIdx]] > 1 {
+						for k := range stack {
+							stack[k].inner[names[defName[esIdx]]] = true
+							stack[k].inner[markerName(esIdx)] = true
+						}
+					}
+				}
+			case ')':
+				if len(stack) == 0 {
+					break
+				}
+				f := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				if len(f.inner) == 0 {
+					break
+				}
+				if i+1 < len(rs) {
+					switch rs[i+1] {
+					case '*', '+', '?', '{':
+						out := make([]string, 0, len(f.inner))
+						for n := range f.inner {
+							out = append(out, n)
+						}
+						sort.Strings(out)
+						resetAt[f.start] = out
+					}
+				}
+			}
+		}
+	}
+
+	// Pass 2: rewrite the definitions, the backreferences, and the resets.
 	var out strings.Builder
-	var kinds []bool // per capture group, in definition order: true=named
-	defCounter := 0  // named-group definitions seen, matching pass 1's numbering
+	var plan []groupSlot
+	esIdx := 0
+	// openSuffix tracks, for each open group, the text to emit just before its
+	// ')': the zero-width marker of a duplicated definition, and the ')' that
+	// closes the wrapper a reset needs (the reset must apply to EVERY alternative,
+	// so the body is wrapped in its own non-capturing group).
+	var openSuffix []string
 	inClass = false
 	for i := 0; i < len(rs); i++ {
 		c := rs[i]
@@ -302,9 +384,14 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 					return "", nil, nil, err
 				}
 				if in, ok := names[name]; ok {
-					out.WriteString("\\k<")
-					out.WriteString(in)
-					out.WriteByte('>')
+					if dupCount[name] > 1 {
+						// A backreference to a name with several definitions matches
+						// whichever one captured — and the empty string when none did,
+						// which .NET's own \k<> would refuse.
+						out.WriteString("(?(" + in + ")\\k<" + in + ">|)")
+					} else {
+						out.WriteString("\\k<" + in + ">")
+					}
 					i = end
 					continue
 				}
@@ -318,9 +405,12 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 				for j < len(rs) && rs[j] >= '0' && rs[j] <= '9' {
 					j++
 				}
-				if n, err := strconv.Atoi(string(rs[i+1 : j])); err == nil && n >= 1 && n < len(netNum) {
-					out.WriteByte('\\')
-					out.WriteString(strconv.Itoa(netNum[n]))
+				if n, err := strconv.Atoi(string(rs[i+1 : j])); err == nil && n >= 1 && n < len(defName) {
+					if nm := defName[n]; nm != "" {
+						out.WriteString("\\k<" + names[nm] + ">")
+					} else {
+						out.WriteString("\\" + strconv.Itoa(netNum[n]))
+					}
 					i = j - 1
 					continue
 				}
@@ -342,27 +432,85 @@ func translateGroupNames(src string) (string, map[string]string, []bool, error) 
 			out.WriteRune(c)
 			continue
 		}
-		if !inClass && c == '(' {
-			if i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
-				!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
-				_, end, _ := decodeGroupName(rs, i+3)
-				kinds = append(kinds, true)
-				out.WriteString("(?<")
-				out.WriteString("__g" + strconv.Itoa(defCounter))
-				defCounter++
-				out.WriteByte('>')
-				i = end
-				continue
-			}
-			if !(i+1 < len(rs) && rs[i+1] == '?') {
-				kinds = append(kinds, false)
+		if !inClass && c == ')' {
+			if len(openSuffix) > 0 {
+				out.WriteString(openSuffix[len(openSuffix)-1])
+				openSuffix = openSuffix[:len(openSuffix)-1]
 			}
 			out.WriteRune(c)
 			continue
 		}
+		if !inClass && c == '(' {
+			openIdx := i
+			marker := ""
+			if i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == '<' &&
+				!(i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')) {
+				_, end, _ := decodeGroupName(rs, i+3)
+				esIdx++
+				nm := defName[esIdx]
+				slot := groupSlot{netName: names[nm]}
+				if dupCount[nm] > 1 {
+					marker = markerName(esIdx)
+					slot.marker = marker
+				}
+				plan = append(plan, slot)
+				out.WriteString("(?<" + names[nm] + ">")
+				suffix := ""
+				if marker != "" {
+					suffix = "(?<" + marker + ">)"
+				}
+				if rst := resetAt[openIdx]; len(rst) > 0 {
+					writeResets(&out, rst)
+					out.WriteString("(?:")
+					suffix += ")"
+				}
+				openSuffix = append(openSuffix, suffix)
+				i = end
+				continue
+			}
+			if !(i+1 < len(rs) && rs[i+1] == '?') {
+				esIdx++
+				plan = append(plan, groupSlot{})
+			}
+			out.WriteRune(c)
+			// A non-capturing (or lookaround) opening runs to its ':' / '=' / '!';
+			// emit that first so the reset lands inside the body.
+			if i+2 < len(rs) && rs[i+1] == '?' {
+				j := i + 1
+				for ; j < len(rs) && rs[j] != ':' && rs[j] != '<' && rs[j] != '=' && rs[j] != '!'; j++ {
+					out.WriteRune(rs[j])
+				}
+				if j < len(rs) {
+					out.WriteRune(rs[j])
+				}
+				i = j
+			}
+			suffix := ""
+			if rst := resetAt[openIdx]; len(rst) > 0 {
+				writeResets(&out, rst)
+				out.WriteString("(?:")
+				suffix = ")"
+			}
+			openSuffix = append(openSuffix, suffix)
+			continue
+		}
 		out.WriteRune(c)
 	}
-	return out.String(), reverse, kinds, nil
+	return out.String(), reverse, plan, nil
+}
+
+// markerName is the zero-width group that marks the end of one definition of a
+// duplicated ECMAScript group name.
+func markerName(esIdx int) string { return "__m" + strconv.Itoa(esIdx) }
+
+// writeResets emits the balancing groups that empty each named group's capture
+// stack — ECMAScript's per-iteration capture reset, spelled for .NET.
+func writeResets(out *strings.Builder, names []string) {
+	for _, n := range names {
+		// Atomic: without it the engine can backtrack into the pop and simply
+		// choose to keep the previous iteration's capture.
+		out.WriteString("(?>(?<-" + n + ">)*)")
+	}
 }
 
 // isRegexSyntaxChar reports whether c is a SyntaxCharacter: one whose sole

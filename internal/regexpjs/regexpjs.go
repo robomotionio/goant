@@ -39,7 +39,7 @@ type Regexp struct {
 	// named). It is used to reorder regexp2's results, which number all unnamed
 	// groups before all named ones, back into left-to-right order. nil when the
 	// pattern has no named groups (no reordering needed).
-	groupKinds []bool
+	groupPlan []groupSlot
 	// quantParent maps each ECMAScript capture group to a quantified enclosing
 	// capture group (or 0). See quantifiedParents.
 	quantParent []int
@@ -554,7 +554,7 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if gs, gm, gk, gerr := translateGroupNames(src); gerr != nil {
 		return nil, fmt.Errorf("invalid regular expression: %v", gerr)
 	} else {
-		src, r.groupNames, r.groupKinds = gs, gm, gk
+		src, r.groupNames, r.groupPlan = gs, gm, gk
 	}
 	// Under the u/v flag, translate ES Unicode property escapes (\p{…}) into
 	// explicit code-point classes regexp2 can compile.
@@ -761,25 +761,32 @@ func (r *Regexp) exec(input []rune, start int) (*Match, error) {
 			}
 		}
 	}()
-	// regexp2 numbers every unnamed group before every named group; when the
-	// pattern mixes the two, reorder them into ECMAScript left-to-right order.
-	if r.groupKinds != nil && len(r.groupKinds)+1 == len(groups) {
-		unnamedCount := 0
-		for _, named := range r.groupKinds {
-			if !named {
-				unnamedCount++
-			}
-		}
+	// With a plan, the ECMAScript groups are read by name (or by regexp2's
+	// unnamed numbering) rather than by position: regexp2 numbers unnamed groups
+	// first, and several ECMAScript names may share one regexp2 group.
+	if r.groupPlan != nil {
+		out.Groups = make([]Group, len(r.groupPlan)+1)
 		out.Groups[0] = convert(groups[0])
-		unnamedPtr, namedPtr := 1, unnamedCount+1
-		for es, named := range r.groupKinds {
-			src := unnamedPtr
-			if named {
-				src, namedPtr = namedPtr, namedPtr+1
-			} else {
+		unnamedPtr := 1
+		for es, slot := range r.groupPlan {
+			var g regexp2.Group
+			if slot.netName == "" {
+				if gp := m.GroupByNumber(unnamedPtr); gp != nil {
+					g = *gp
+				}
 				unnamedPtr++
+			} else if gp := m.GroupByName(slot.netName); gp != nil {
+				g = *gp
+				// Several definitions share this regexp2 group; the last capture
+				// belongs to the one whose zero-width marker sits at its end.
+				if slot.marker != "" && len(g.Captures) > 0 {
+					mk := m.GroupByName(slot.marker)
+					if mk == nil || len(mk.Captures) == 0 || mk.Index != g.Index+g.Length {
+						g = regexp2.Group{Capture: regexp2.Capture{Index: 0, Length: 0}, Name: slot.netName}
+					}
+				}
 			}
-			out.Groups[es+1] = convert(groups[src])
+			out.Groups[es+1] = convert(g)
 		}
 		return out, nil
 	}
