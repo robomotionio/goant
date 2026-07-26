@@ -346,12 +346,23 @@ func IsWordChar(r rune) bool {
 	//return 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9' || r == '_'
 }
 
-func IsECMAWordChar(r rune) bool {
-	return unicode.In(r,
-		unicode.Categories["L"], unicode.Categories["Mn"],
-		unicode.Categories["Nd"], unicode.Categories["Pc"])
+// ecmaWordCats are the categories an ECMAScript word character belongs to,
+// resolved once. Reaching them through unicode.Categories put four map lookups
+// on the matcher's inner loop, which is where \b and \w land.
+var ecmaWordCats = []*unicode.RangeTable{
+	unicode.Categories["L"], unicode.Categories["Mn"],
+	unicode.Categories["Nd"], unicode.Categories["Pc"],
+}
 
-	//return 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9' || r == '_'
+func IsECMAWordChar(r rune) bool {
+	// Below U+0080 the four categories contain exactly these: L covers the
+	// letters, Nd the digits, Pc the underscore, and Mn nothing at all. Almost
+	// every character a \b or \w is tested against is one of them.
+	if r < 0x80 {
+		return 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' ||
+			'0' <= r && r <= '9' || r == '_'
+	}
+	return unicode.In(r, ecmaWordCats...)
 }
 
 // SingletonChar will return the char from the first range without validation.

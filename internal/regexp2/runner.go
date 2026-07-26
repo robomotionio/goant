@@ -66,6 +66,13 @@ type runner struct {
 	codepos         int
 	rightToLeft     bool
 	caseInsensitive bool
+
+	// codes is code.Codes, and debug is re.Debug(), both read on every single
+	// opcode the matcher steps through. Reaching them through re/code each time
+	// is a pointer chase and a slice-header load per instruction, and the debug
+	// test alone was 2% of Octane's RegExp.
+	codes []int
+	debug bool
 }
 
 // run searches for matches and can continue from the previous match
@@ -102,6 +109,8 @@ func (re *Regexp) run(quick bool, textstart int, input []rune) (*Match, error) {
 // any characters that we know can't match.
 func (r *runner) scan(rt []rune, textstart int, quick bool, timeout time.Duration) (*Match, error) {
 	r.timeout = timeout
+	r.codes = r.code.Codes
+	r.debug = r.re.Debug()
 	r.ignoreTimeout = (time.Duration(math.MaxInt64) == timeout)
 	r.runtextstart = textstart
 	r.runtext = rt
@@ -120,15 +129,17 @@ func (r *runner) scan(rt []rune, textstart int, quick bool, timeout time.Duratio
 
 	r.startTimeoutWatch()
 	for {
-		if r.re.Debug() {
+		if r.debug {
 			//fmt.Printf("\nSearch content: %v\n", string(r.runtext))
 			fmt.Printf("\nSearch range: from 0 to %v\n", r.runtextend)
 			fmt.Printf("Firstchar search starting at %v stopping at %v\n", r.runtextpos, stoppos)
 		}
 
 		if r.findFirstChar() {
-			if err := r.checkTimeout(); err != nil {
-				return nil, err
+			if !r.ignoreTimeout {
+				if err := r.checkTimeout(); err != nil {
+					return nil, err
+				}
 			}
 
 			if !initted {
@@ -136,7 +147,7 @@ func (r *runner) scan(rt []rune, textstart int, quick bool, timeout time.Duratio
 				initted = true
 			}
 
-			if r.re.Debug() {
+			if r.debug {
 				fmt.Printf("Executing engine starting at %v\n\n", r.runtextpos)
 			}
 
@@ -177,12 +188,14 @@ func (r *runner) execute() error {
 
 	for {
 
-		if r.re.Debug() {
+		if r.debug {
 			r.dumpState()
 		}
 
-		if err := r.checkTimeout(); err != nil {
-			return err
+		if !r.ignoreTimeout {
+			if err := r.checkTimeout(); err != nil {
+				return err
+			}
 		}
 
 		switch r.operator {
@@ -977,7 +990,7 @@ func (r *runner) crawlpos() int {
 
 func (r *runner) advance(i int) {
 	r.codepos += (i + 1)
-	r.setOperator(r.code.Codes[r.codepos])
+	r.setOperator(r.codes[r.codepos])
 }
 
 func (r *runner) goTo(newpos int) {
@@ -986,7 +999,7 @@ func (r *runner) goTo(newpos int) {
 		r.ensureStorage()
 	}
 
-	r.setOperator(r.code.Codes[newpos])
+	r.setOperator(r.codes[newpos])
 	r.codepos = newpos
 }
 
@@ -1063,7 +1076,7 @@ func (r *runner) backtrack() {
 	newpos := r.runtrack[r.runtrackpos]
 	r.runtrackpos++
 
-	if r.re.Debug() {
+	if r.debug {
 		if newpos < 0 {
 			fmt.Printf("       Backtracking (back2) to code position %v\n", -newpos)
 		} else {
@@ -1073,9 +1086,9 @@ func (r *runner) backtrack() {
 
 	if newpos < 0 {
 		newpos = -newpos
-		r.setOperator(r.code.Codes[newpos] | syntax.Back2)
+		r.setOperator(r.codes[newpos] | syntax.Back2)
 	} else {
-		r.setOperator(r.code.Codes[newpos] | syntax.Back)
+		r.setOperator(r.codes[newpos] | syntax.Back)
 	}
 
 	// When branching backward, ensure storage
@@ -1150,7 +1163,7 @@ func (r *runner) stackPeekN(i int) int {
 }
 
 func (r *runner) operand(i int) int {
-	return r.code.Codes[r.codepos+i+1]
+	return r.codes[r.codepos+i+1]
 }
 
 func (r *runner) leftchars() int {
