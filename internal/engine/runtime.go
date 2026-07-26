@@ -295,6 +295,7 @@ type Runtime struct {
 type flatString struct {
 	bytes   []byte
 	gostr   string // lazily cached Go view of bytes; see (*Runtime).strGo
+	utf16   []rune // lazily cached UTF-16 code units; see (*Runtime).strUTF16
 	isASCII int8   // STR_ASCII_UNKNOWN/YES/NO
 }
 

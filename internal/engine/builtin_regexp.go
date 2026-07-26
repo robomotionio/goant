@@ -876,7 +876,7 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	if e != nil {
 		return mkundef(), e
 	}
-	input := wtf8ToUTF16Runes(rt.strBytes(s))
+	input := rt.strUTF16(s)
 	re := o.regex
 
 	// lastIndex = ToLength(Get(R, "lastIndex")) — always read (observable via a
@@ -1383,7 +1383,7 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 	if e != nil {
 		return mkundef(), e
 	}
-	Srunes := wtf8ToUTF16Runes(rt.strBytes(sV))
+	Srunes := rt.strUTF16(sV)
 	functional := rt.isCallable(repl)
 	replStr := ""
 	if !functional {
@@ -1578,7 +1578,7 @@ func (rt *Runtime) regexpSymbolSplitGeneric(splitter, strVal, limitV Value, unic
 	if e != nil {
 		return mkundef(), e
 	}
-	S := wtf8ToUTF16Runes(rt.strBytes(sV))
+	S := rt.strUTF16(sV)
 	res := rt.newArray()
 	ro := rt.objPtr(res)
 	lim := int64(1)<<32 - 1
@@ -1715,7 +1715,7 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 			}
 		}
 		hasNamed, lookup := namedFromMap(named)
-		return rt.expandReplacement(rt.strGo(rs), match, index, wtf8ToUTF16Runes(rt.strBytes(s)), groups, hasNamed, lookup)
+		return rt.expandReplacement(rt.strGo(rs), match, index, rt.strUTF16(s), groups, hasNamed, lookup)
 	}
 
 	o := rt.objPtr(pattern)
@@ -1876,7 +1876,7 @@ func (rt *Runtime) stringSplitRegexp(this Value, re *regexpjs.Regexp, limitV Val
 	if e != nil {
 		return mkundef(), e
 	}
-	input := wtf8ToUTF16Runes(rt.strBytes(s))
+	input := rt.strUTF16(s)
 	res := rt.newArray()
 	ro := rt.objPtr(res)
 	// lim = (limit is undefined) ? 2^32-1 : ToUint32(limit); a throwing coercion

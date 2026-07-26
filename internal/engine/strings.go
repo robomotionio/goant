@@ -79,6 +79,26 @@ func (rt *Runtime) strGo(v Value) string {
 	return fs.gostr
 }
 
+// strUTF16 returns the string as UTF-16 code units, cached on the flat string.
+//
+// Regular expressions match over code units, so every exec, replace, split and
+// match converted its subject afresh. A subject is usually matched many times
+// — Octane's RegExp benchmark runs a fixed set of patterns over a fixed set of
+// strings — and the conversion is proportional to the subject each time.
+//
+// The result is shared, so it MUST NOT be mutated. That is safe by
+// construction: JavaScript strings are immutable, and the matcher only reads.
+func (rt *Runtime) strUTF16(v Value) []rune {
+	fs := rt.flatOf(v)
+	if fs == nil {
+		return nil
+	}
+	if fs.utf16 == nil && len(fs.bytes) > 0 {
+		fs.utf16 = wtf8ToUTF16Runes(fs.bytes)
+	}
+	return fs.utf16
+}
+
 // strIsASCII reports whether the flat string is pure ASCII (tri-state cached).
 func (rt *Runtime) strIsASCII(v Value) bool {
 	fs := rt.flatOf(v)
