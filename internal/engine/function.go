@@ -8,6 +8,7 @@ package engine
 // its captured upvalues.
 func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 	oh, obj := rt.objects.alloc()
+	obj.self = oh
 	// Function-kind prototype chain (async/generator functions have their own).
 	obj.proto = rt.functionProto
 	switch {
@@ -121,6 +122,7 @@ func (rt *Runtime) setMethodHome(fnVal, home Value) {
 // newNativeFunc creates a callable built-in function object.
 func (rt *Runtime) newNativeFunc(name string, length int, fn nativeFunc) Value {
 	oh, obj := rt.objects.alloc()
+	obj.self = oh
 	obj.proto = rt.functionProto
 	obj.shape = rt.newShape()
 	obj.typeTag = TFunc
@@ -383,7 +385,17 @@ func (rt *Runtime) callValue(fnVal, thisVal Value, args []Value) (Value, *ThrowE
 			rt.frameDepth--
 			return mkundef(), rt.rangeError("Maximum call stack size exceeded")
 		}
+		// A built-in is an ordinary Go function holding values in ordinary Go
+		// locals, which nothing publishes and no collector can walk. Counting
+		// them is what keeps a collection from running underneath one — the
+		// alternative being to root every intermediate in every built-in in
+		// the engine. See collect.go.
+		rt.nativeDepth++
+		// The arguments were popped off the caller's operand stack into this
+		// slice, so while the built-in runs they are rooted only here. A
+		// built-in that calls back into the interpreter reaches a safepoint.
 		v, e := o.native(rt, thisVal, args)
+		rt.nativeDepth--
 		rt.frameDepth--
 		return v, e
 	}

@@ -50,6 +50,11 @@ type extraSlot struct {
 
 // object is a JavaScript object (ant struct ant_object).
 type object struct {
+	// self is this object's own pool handle. Go code all over the engine holds
+	// objects as *object — and the collector, reaching one that way, has no
+	// other means of naming the cell it must keep. See collect.go.
+	self Handle
+
 	proto Value
 	shape *shape
 
@@ -156,6 +161,7 @@ type nativeFunc func(rt *Runtime, this Value, args []Value) (Value, *ThrowError)
 // newObject allocates a plain object with the given prototype (ant js_mkobj).
 func (rt *Runtime) newObject(proto Value) Value {
 	h, obj := rt.objects.alloc()
+	obj.self = h
 	obj.proto = proto
 	obj.shape = rt.newShape()
 	obj.typeTag = TObj
@@ -166,6 +172,7 @@ func (rt *Runtime) newObject(proto Value) Value {
 // newArray allocates a fast array with the given length capacity hint.
 func (rt *Runtime) newArray() Value {
 	h, obj := rt.objects.alloc()
+	obj.self = h
 	obj.proto = rt.arrayProto
 	obj.shape = rt.newShape()
 	obj.typeTag = TArr

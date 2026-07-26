@@ -65,8 +65,10 @@ type genState struct {
 	genDepth  int
 	// slabs is this coroutine's own per-depth frame storage, held while it is
 	// suspended so the driver cannot reuse the buffers its live frames are
-	// standing on. Starts nil and grows on first use.
-	slabs []frameSlab
+	// standing on. Starts nil and grows on first use. frames is the same
+	// arrangement for what those frames publish to the collector.
+	slabs  []frameSlab
+	frames []vmFrame
 
 	// asyncReqs is the async-generator request queue (AsyncGeneratorRequest
 	// records): next/return/throw calls are serviced one at a time, since an
@@ -141,6 +143,10 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 	// reuse, so the two cannot share the per-depth frame buffers. Each keeps its
 	// own set across the handoff (see frameslab.go).
 	mainSlabs := rt.swapSlabs(g.slabs)
+	// Same reason for the published frames: the coroutine's stay live at depths
+	// the driver reuses, and the collector reads both sets.
+	mainFrames := rt.frames
+	rt.frames = g.frames
 	if !g.started {
 		g.started = true
 		go rt.genRun(g)
@@ -151,6 +157,7 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 	g.running = false
 	g.genDepth = rt.frameDepth
 	g.slabs = rt.swapSlabs(mainSlabs)
+	g.frames, rt.frames = rt.frames, mainFrames
 	rt.curGen = prevGen
 	rt.frameDepth = mainDepth
 	if m.done || m.err != nil {

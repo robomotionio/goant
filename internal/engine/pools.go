@@ -171,3 +171,74 @@ func (p *pool[T]) truncate(h Handle) {
 
 // len returns the number of live cells.
 func (p *pool[T]) len() int { return p.liveN }
+
+// ---- tracing support ----
+//
+// A handle is not a pointer, so the Go collector cannot tell a live cell from a
+// dead one: the chunk holds every cell it ever allocated, and from Go's side
+// they are all reachable. Reclaiming a cell is therefore the engine's job, and
+// these are the two halves of it — a mark bitset keyed by handle, and a sweep
+// that frees everything the mark phase did not reach.
+//
+// Freeing zeroes the cell, so everything hanging off it (a string's bytes, an
+// object's overflow slots and shape) becomes unreachable to the Go collector
+// and is reclaimed by it. Only the cells themselves are managed here.
+
+// markSet is a bitset over handles, sized to the pool's high-water mark.
+type markSet []uint64
+
+func (m markSet) has(h Handle) bool {
+	i := uint32(h) >> 6
+	return int(i) < len(m) && m[i]&(1<<(uint32(h)&63)) != 0
+}
+
+// set records h and reports whether it was already recorded, which is what
+// stops a trace from following a cycle forever.
+func (m markSet) set(h Handle) (already bool) {
+	i := uint32(h) >> 6
+	if int(i) >= len(m) {
+		return true // outside the snapshot: allocated after marking began
+	}
+	bit := uint64(1) << (uint32(h) & 63)
+	if m[i]&bit != 0 {
+		return true
+	}
+	m[i] |= bit
+	return false
+}
+
+// newMarks returns a zeroed bitset covering every handle allocated so far,
+// reusing the previous cycle's storage.
+func (p *pool[T]) newMarks(prev markSet) markSet {
+	n := int(p.next>>6) + 1
+	if cap(prev) >= n {
+		m := prev[:n]
+		clear(m)
+		return m
+	}
+	return make(markSet, n)
+}
+
+// sweep frees every live cell whose handle is not in m, and reports how many it
+// released.
+func (p *pool[T]) sweep(m markSet) int {
+	freed := 0
+	for c := range p.chunks {
+		base := Handle(c << poolChunkShift)
+		for s := range p.chunks[c] {
+			h := base + Handle(s)
+			if h == nullHandle {
+				continue
+			}
+			if h >= p.next {
+				break
+			}
+			if !p.chunks[c][s].live || m.has(h) {
+				continue
+			}
+			p.free(h)
+			freed++
+		}
+	}
+	return freed
+}

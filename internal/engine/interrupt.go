@@ -84,3 +84,19 @@ func (rt *Runtime) checkBackEdge() bool {
 func (rt *Runtime) terminated() *ThrowError {
 	return &ThrowError{Value: mkundef(), rt: rt, control: true, terminate: true}
 }
+
+// backEdgeWantsGC reports that a backward jump has landed on the interpreter's
+// second collection safepoint.
+//
+// A loop that allocates without ever calling a function — building a large
+// array of literals, say — passes no frame entry, so without this the heap
+// would grow until the loop ended. The caller publishes its frame and collects.
+//
+// Deliberately not written as backEdge(sync func()): handing the interpreter's
+// syncFrame closure to a function makes it escape, and with it every frame
+// variable it captures — including the operand stack, which then lives behind a
+// heap pointer for the rest of the loop. That measured as a hang.
+func (rt *Runtime) backEdgeWantsGC() bool {
+	return rt.gc.enabled && rt.nativeDepth == 0 && rt.gc.next != 0 &&
+		rt.objects.liveN >= rt.gc.next
+}

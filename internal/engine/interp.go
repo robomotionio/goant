@@ -91,7 +91,34 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		return mkundef(), rt.terminated()
 	}
 	rt.frameStrict = fn.isStrict
+
+	// Publish what this call was handed. The arguments in particular have no
+	// other reference: the caller popped them off its operand stack into a
+	// fresh slice, so without this a collection during the call would free
+	// them. Doing it here, rather than in the loop, costs nothing on any path
+	// that matters and covers every entry including a tail call.
+	f := rt.publishFrame(rt.frameDepth)
+	f.args, f.thisVal, f.fnVal = args, thisVal, fnVal
+
+	// Frame entry is one of the two points where a collection may happen: the
+	// caller's state is published, the callee has not started, and no native is
+	// between them.
+	rt.maybeCollect()
+
 	return rt.runFrameBody(fn, cl, fnVal, thisVal, args)
+}
+
+// publishFrame returns the slot this depth publishes its live values in,
+// cleared of whatever the previous frame at this depth left there.
+func (rt *Runtime) publishFrame(depth int) *vmFrame {
+	if depth >= len(rt.frames) {
+		grown := make([]vmFrame, depth+16)
+		copy(grown, rt.frames)
+		rt.frames = grown
+	}
+	f := &rt.frames[depth]
+	*f = vmFrame{}
+	return f
 }
 
 func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, args []Value) (Value, *ThrowError) {
@@ -113,7 +140,25 @@ func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 		comp         completion
 		ip           int
 	)
-	push := func(v Value) { stack = append(stack, v) }
+	// syncFrame publishes the values this frame is holding in Go locals, which
+	// no collector can walk. Called where they are settled: at frame entry,
+	// at the loop back edge, and while an unwind is carrying one.
+	syncFrame := func() {
+		f := &rt.frames[rt.frameDepth]
+		f.locals, f.stack, f.withStack = locals, stack, withStack
+		f.varObj, f.newTarget = varObj, newTarget
+		f.pending, f.completed = pendingThrow, comp.value
+	}
+	push := func(v Value) {
+		if len(stack) == cap(stack) {
+			// A grow moves the backing array out from under what was published.
+			stack = append(stack, v)
+			rt.frames[rt.frameDepth].stack = stack
+			return
+		}
+		stack = stack[:len(stack)+1]
+		stack[len(stack)-1] = v
+	}
 	pop := func() Value {
 		v := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
@@ -162,6 +207,7 @@ func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 			handlers = handlers[:i]
 			stack = stack[:h.stackDepth]
 			comp = completion{kind: compReturn, value: r}
+			syncFrame()
 			return h.catchIP, true
 		}
 		return 0, false
@@ -261,6 +307,10 @@ restart:
 		rt.registerGlobalLex(fn, locals)
 		rt.dropFrameLocals(rt.frameDepth)
 	}
+	// Hand the collector this frame's storage. Both are settled by now — a tail
+	// call comes back through here — and the operand stack keeps its backing
+	// array unless it outgrows the compiler's computed depth, which republishes.
+	syncFrame()
 	openUpvals = nil
 	handlers = nil
 	pendingThrow = mkundef()
@@ -1658,17 +1708,29 @@ restart:
 			// A backward jump is a loop iteration: the only place a script can
 			// spin without entering a frame, and so the other interrupt check
 			// point. Forward jumps pay nothing.
-			if t <= ip && rt.checkBackEdge() {
-				thrown = rt.terminated()
-				goto unwind
+			if t <= ip {
+				if rt.checkBackEdge() {
+					thrown = rt.terminated()
+					goto unwind
+				}
+				if rt.backEdgeWantsGC() {
+					syncFrame()
+					rt.collect()
+				}
 			}
 			ip = t
 		case OpJmpFalse:
 			if !rt.toBoolean(pop()) {
 				t := int(readU32(code, ip+1))
-				if t <= ip && rt.checkBackEdge() {
-					thrown = rt.terminated()
-					goto unwind
+				if t <= ip {
+					if rt.checkBackEdge() {
+						thrown = rt.terminated()
+						goto unwind
+					}
+					if rt.backEdgeWantsGC() {
+						syncFrame()
+						rt.collect()
+					}
 				}
 				ip = t
 			} else {
@@ -1677,9 +1739,15 @@ restart:
 		case OpJmpTrue:
 			if rt.toBoolean(pop()) {
 				t := int(readU32(code, ip+1))
-				if t <= ip && rt.checkBackEdge() {
-					thrown = rt.terminated()
-					goto unwind
+				if t <= ip {
+					if rt.checkBackEdge() {
+						thrown = rt.terminated()
+						goto unwind
+					}
+					if rt.backEdgeWantsGC() {
+						syncFrame()
+						rt.collect()
+					}
 				}
 				ip = t
 			} else {
@@ -2356,11 +2424,16 @@ restart:
 				if h.kind == hTryFinally {
 					// Run the finally with the throw pending; OP_FINALLY_RET re-raises.
 					comp = completion{kind: compThrow, value: thrown.Value}
+					syncFrame()
 					thrown = nil
 					ip = h.catchIP
 					goto resumed
 				}
 				pendingThrow = thrown.Value
+				// A finally body runs before this is stored anywhere a trace
+				// can reach, so publish it or the exception may be collected
+				// while it is in flight.
+				syncFrame()
 				thrown = nil
 				ip = h.catchIP
 				goto resumed

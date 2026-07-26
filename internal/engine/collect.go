@@ -1,0 +1,624 @@
+package engine
+
+import (
+	"reflect"
+	"sync"
+)
+
+// Tracing collection over the handle pools.
+//
+// A Value carries a 32-bit handle, not a pointer, so the Go collector never
+// traces the JavaScript heap — which is what keeps a Value eight bytes wide and
+// keeps Go's write barriers out of the interpreter. The price is that Go cannot
+// tell a dead object from a live one either: the pool chunk holds a strong
+// reference to every cell ever allocated. Until this file existed nothing was
+// ever reclaimed inside a single script, and a long-running one simply grew.
+// (Octane's RegExp and EarleyBoyer reached five gigabytes.)
+//
+// So the engine traces its own heap. Only the cells are managed here: freeing
+// one zeroes it, and everything hanging off it — a string's bytes, an object's
+// overflow slots, its shape, a closure's upvalues — becomes unreachable to the
+// Go collector, which reclaims it as usual. This is a collector for handles
+// sitting on top of Go's collector for memory, not a replacement for it.
+//
+// # When a collection may happen
+//
+// Not at an allocation. Native built-ins are ordinary Go functions holding
+// values in ordinary Go locals: `arr := rt.newArray()` followed by another
+// allocation would see arr collected out from under it, and making that safe
+// would mean rooting intermediates in every built-in in the engine.
+//
+// Instead a collection happens only at an interpreter safepoint — a function
+// entry or a loop back edge — and only when no native is on the Go stack. At
+// such a point every value the engine is holding is either published in a
+// vmFrame or reachable from the Runtime, and the collector can find all of it.
+// A program spending all its time inside one native call does not collect, and
+// that is the correct trade: it cannot be made safe cheaply, and it does not
+// happen in practice, because a native that runs long enough to matter calls
+// back into the interpreter.
+//
+// # Roots
+//
+// The Runtime's own fields are found by reflection rather than by a hand-written
+// list. A missed root is a use-after-free that shows up as an unrelated crash
+// much later, and the Runtime carries hundreds of value-bearing fields that
+// change as the engine grows. Reflection cannot forget one. It runs once per
+// collection over a few hundred fields, which does not show up next to the
+// trace, and the walk is pruned by a memoised "can this type reach a Value at
+// all" test so it never descends into bytecode, source text or maps of strings.
+
+// gcState is the collector's persistent state: the mark bitsets (reused
+// between cycles), the trace worklist, and the trigger threshold.
+type gcState struct {
+	objMarks markSet
+	strMarks markSet
+	symMarks markSet
+	cloMarks markSet
+	bigMarks markSet
+
+	work    []Value
+	seenPtr map[uintptr]bool
+
+	// next is the live object count that triggers the next collection, and
+	// floor is the smallest it may be set to. After a cycle the threshold moves
+	// to a multiple of what survived, so a program with a large live set does
+	// not collect continuously, and a small one does not hold on to memory it
+	// has stopped using.
+	next  int
+	floor int
+
+	// enabled turns automatic collection on, which it is by default. A host
+	// that knows its scripts are short — one message, then the whole region is
+	// released — can turn it off and never pay for a trace.
+	enabled bool
+	// cycles counts completed collections, for tests and diagnostics.
+	cycles int
+}
+
+// gcGrowthFactor is how much the live set may grow before the next collection.
+// Two is the usual space/time trade: at most half the heap is garbage when a
+// cycle starts, and the work per cycle stays proportional to what survives.
+const gcGrowthFactor = 2
+
+// gcFloor is the smallest live-object count worth collecting at. A realm's own
+// intrinsics are several thousand objects, so a lower threshold would collect
+// repeatedly before a script had allocated anything of its own.
+const gcFloor = 1 << 16
+
+// maybeCollect runs a collection if the heap has grown past the threshold and
+// the engine is at a point where every live value is published.
+//
+// Called from the interpreter's safepoints only. The native-depth test is what
+// makes the whole scheme sound; see the note above.
+func (rt *Runtime) maybeCollect() {
+	if !rt.gc.enabled || rt.nativeDepth > 0 {
+		return
+	}
+	if rt.gc.next == 0 {
+		rt.gc.next = gcFloor
+	}
+	if rt.objects.liveN < rt.gc.next {
+		return
+	}
+	rt.collect()
+}
+
+// SetGCEnabled turns automatic collection on or off. It is on by default.
+//
+// Turning it off is for a host whose scripts are short and whose memory is
+// reclaimed wholesale at an invocation boundary: such a run never reaches the
+// threshold anyway, and the check costs nothing, but the option makes the
+// intent explicit.
+func (rt *Runtime) SetGCEnabled(on bool) { rt.gc.enabled = on }
+
+// GCCycles reports how many collections have completed. For tests.
+func (rt *Runtime) GCCycles() int { return rt.gc.cycles }
+
+// LiveObjects reports how many object cells are currently allocated.
+func (rt *Runtime) LiveObjects() int { return rt.objects.liveN }
+
+// Collect runs a full mark-and-sweep immediately, whether or not automatic
+// collection is enabled. Exposed for hosts that know they have just finished
+// with a large working set, and used by the tests.
+//
+// It is only safe at a point where the engine is not inside a native call; the
+// interpreter's safepoints are such points, and so is a return to the host.
+func (rt *Runtime) Collect() {
+	if rt.nativeDepth > 0 {
+		return
+	}
+	rt.collect()
+}
+
+func (rt *Runtime) collect() {
+	g := &rt.gc
+	g.objMarks = rt.objects.newMarks(g.objMarks)
+	g.strMarks = rt.strings.newMarks(g.strMarks)
+	g.symMarks = rt.symbols.newMarks(g.symMarks)
+	g.cloMarks = rt.closures.newMarks(g.cloMarks)
+	g.bigMarks = rt.bigints.newMarks(g.bigMarks)
+	g.work = g.work[:0]
+
+	rt.markRoots()
+	rt.drain()
+	rt.sweepWeakTables()
+
+	rt.objects.sweep(g.objMarks)
+	rt.strings.sweep(g.strMarks)
+	rt.symbols.sweep(g.symMarks)
+	rt.closures.sweep(g.cloMarks)
+	rt.bigints.sweep(g.bigMarks)
+
+	// An inline cache holds its prototype holder as a raw *object, which may now
+	// name a freed cell. Retiring every entry is what guarantees it is never
+	// dereferenced again; the caches refill within a few iterations.
+	icEpochBump()
+
+	g.cycles++
+	if g.floor == 0 {
+		g.floor = gcFloor
+	}
+	g.next = rt.objects.liveN * gcGrowthFactor
+	if g.next < g.floor {
+		g.next = g.floor
+	}
+}
+
+// ---- marking ----
+
+// markValue records v's cell and queues it for tracing.
+func (rt *Runtime) markValue(v Value) {
+	if !v.isTagged() {
+		return
+	}
+	g := &rt.gc
+	h := Handle(v.handle())
+	if h == nullHandle {
+		return
+	}
+	switch v.Type() {
+	case TObj, TArr, TFunc, TPromise, TGenerator, TTypedArray, TErr,
+		TMap, TSet, TWeakMap, TWeakSet:
+		if !g.objMarks.set(h) {
+			g.work = append(g.work, v)
+		}
+	case TStr:
+		g.strMarks.set(h)
+	case TSymbol:
+		if !g.symMarks.set(h) {
+			g.work = append(g.work, v)
+		}
+	case TBigInt:
+		g.bigMarks.set(h)
+	}
+}
+
+// drain traces everything reachable from the worklist.
+//
+// Iterative rather than recursive: a long prototype chain or a deep cons list
+// would otherwise decide how much Go stack a collection needs.
+func (rt *Runtime) drain() {
+	g := &rt.gc
+	for len(g.work) > 0 {
+		v := g.work[len(g.work)-1]
+		g.work = g.work[:len(g.work)-1]
+		switch v.Type() {
+		case TSymbol:
+			if s := rt.symbols.get(Handle(v.handle())); s != nil {
+				rt.markValue(s.desc)
+			}
+		default:
+			rt.traceObject(rt.objects.get(Handle(v.handle())))
+		}
+	}
+}
+
+// traceObject marks everything an object refers to.
+func (rt *Runtime) traceObject(o *object) {
+	if o == nil {
+		return
+	}
+	rt.markValue(o.proto)
+	rt.markValue(o.boxed)
+	for i := range o.inobj {
+		rt.markValue(o.inobj[i])
+	}
+	rt.markSlice(o.overflow)
+	rt.markSlice(o.arr)
+	for i := range o.extra {
+		rt.markValue(o.extra[i].value)
+	}
+	// Accessor getters and setters live in the shape, not in a slot, so an
+	// object's own shape has to be walked even though shapes are Go-managed.
+	rt.traceShape(o.shape)
+	for i := range o.priv {
+		rt.tracePrivElem(&o.priv[i])
+	}
+	if o.closure != nullHandle {
+		rt.traceClosure(o.closure)
+	}
+	if o.coll != nil {
+		rt.markSlice(o.coll.keys)
+		rt.markSlice(o.coll.vals)
+	}
+	if o.promise != nil {
+		rt.markValue(o.promise.value)
+		for i := range o.promise.handlers {
+			h := &o.promise.handlers[i]
+			rt.markValue(h.onFulfilled)
+			rt.markValue(h.onRejected)
+			rt.markValue(h.result)
+			rt.markValue(h.capResolve)
+			rt.markValue(h.capReject)
+		}
+	}
+	if o.gen != nil {
+		rt.traceGen(o.gen)
+	}
+	if o.proxy != nil {
+		rt.traceAny(reflect.ValueOf(o.proxy))
+	}
+	if o.argMap != nil {
+		rt.markSlice(o.argMap.locals)
+	}
+	if o.ta != nil || o.dv != nil {
+		// A view's own fields are handles into Go-owned storage plus the buffer
+		// object it reads through; reflection covers both without this file
+		// having to track the view layouts.
+		if o.ta != nil {
+			rt.traceAny(reflect.ValueOf(o.ta))
+		}
+		if o.dv != nil {
+			rt.traceAny(reflect.ValueOf(o.dv))
+		}
+	}
+}
+
+func (rt *Runtime) traceShape(s *shape) {
+	if s == nil {
+		return
+	}
+	for i := range s.props {
+		p := &s.props[i]
+		if p.isAccessor {
+			rt.markValue(p.getter)
+			rt.markValue(p.setter)
+		}
+	}
+}
+
+func (rt *Runtime) tracePrivElem(p *privElem) {
+	rt.traceAny(reflect.ValueOf(p).Elem())
+}
+
+func (rt *Runtime) traceClosure(h Handle) {
+	if rt.gc.cloMarks.set(h) {
+		return
+	}
+	cl := rt.closures.get(h)
+	if cl == nil {
+		return
+	}
+	rt.markValue(cl.home)
+	rt.markSlice(cl.capturedWith)
+	for _, u := range cl.upvalues {
+		if u != nil {
+			rt.markValue(u.get())
+		}
+	}
+	rt.traceFunc(cl.fn)
+	rt.tracePrivScope(cl.privEnv)
+}
+
+// traceFunc marks a compiled function's constant pool.
+//
+// Constants are values — interned names, literal strings, regexp sources — that
+// the bytecode reaches by index and nothing else refers to.
+func (rt *Runtime) traceFunc(fn *svFunc) {
+	for fn != nil {
+		rt.markSlice(fn.constants)
+		for i := range fn.childFuncs {
+			rt.traceFunc(fn.childFuncs[i])
+		}
+		fn = fn.moduleHoistFn
+	}
+}
+
+func (rt *Runtime) tracePrivScope(p *privScope) {
+	if p != nil {
+		rt.traceAny(reflect.ValueOf(p))
+	}
+}
+
+func (rt *Runtime) traceGen(g *genState) {
+	if g == nil {
+		return
+	}
+	rt.markValue(g.fnVal)
+	rt.markValue(g.thisVal)
+	rt.markSlice(g.args)
+	if g.cl != nil {
+		rt.markValue(g.cl.home)
+		rt.markSlice(g.cl.capturedWith)
+		for _, u := range g.cl.upvalues {
+			if u != nil {
+				rt.markValue(u.get())
+			}
+		}
+		rt.traceFunc(g.cl.fn)
+	}
+	rt.traceFunc(g.fn)
+	// A suspended coroutine's frames are live and its per-depth buffers hold
+	// their values, which nothing else refers to while it is parked.
+	rt.markSlabs(g.slabs)
+	rt.markFrames(g.frames)
+	rt.traceAny(reflect.ValueOf(&g.asyncReqs).Elem())
+}
+
+func (rt *Runtime) markSlice(vs []Value) {
+	for i := range vs {
+		rt.markValue(vs[i])
+	}
+}
+
+func (rt *Runtime) markSlabs(slabs []frameSlab) {
+	for i := range slabs {
+		s := &slabs[i]
+		rt.markSlice(s.locals[:cap(s.locals)])
+		rt.markSlice(s.stack[:cap(s.stack)])
+	}
+}
+
+// ---- roots ----
+
+func (rt *Runtime) markFrames(frames []vmFrame) {
+	for i := range frames {
+		f := &frames[i]
+		rt.markSlice(f.locals)
+		rt.markSlice(f.stack[:cap(f.stack)])
+		rt.markSlice(f.args)
+		rt.markSlice(f.withStack)
+		rt.markValue(f.thisVal)
+		rt.markValue(f.fnVal)
+		rt.markValue(f.varObj)
+		rt.markValue(f.newTarget)
+		rt.markValue(f.pending)
+		rt.markValue(f.completed)
+	}
+}
+
+func (rt *Runtime) markRoots() {
+	// Live frames first: their values are the ones with no other reference.
+	rt.markFrames(rt.frames)
+	// Retired frame buffers are scanned too: a frame at a depth the collector
+	// cannot see (past the published range, or one that allocated its own) may
+	// still be running.
+	rt.markSlabs(rt.slabs)
+
+	// The intern table maps text to a string cell by Handle, not by Value, so
+	// the reflective walk cannot see it — a Handle is a bare uint32 and looks
+	// like any other integer. Nothing else refers to an interned string, so
+	// missing it swept every property name in the program, and lookups started
+	// failing against an empty name. Anything else that holds a Handle rather
+	// than a Value belongs here too.
+	for _, h := range rt.interned {
+		rt.gc.strMarks.set(h)
+	}
+
+	if rt.gc.seenPtr == nil {
+		rt.gc.seenPtr = make(map[uintptr]bool, 256)
+	}
+	clear(rt.gc.seenPtr)
+	rt.traceAny(reflect.ValueOf(rt).Elem())
+}
+
+// valueType is what the reflective walk is looking for; objectPtrType and the
+// weak-table key type are the two it has to treat specially.
+var (
+	valueType     = reflect.TypeOf(Value(0))
+	objectPtrType = reflect.TypeOf((*object)(nil))
+)
+
+// traceAny walks an arbitrary Go value and marks every engine Value in it.
+//
+// This is how the Runtime's own fields are rooted, and how the handful of
+// side structures with fiddly layouts (proxies, typed-array views, private
+// scopes) are traced. It is not on any hot path: it runs once per collection.
+func (rt *Runtime) traceAny(rv reflect.Value) {
+	if !canHoldValue(rv.Type()) {
+		return
+	}
+	switch rv.Kind() {
+	case reflect.Uint64:
+		if rv.Type() == valueType {
+			rt.markValue(Value(rv.Uint()))
+		}
+	case reflect.Struct:
+		for i := 0; i < rv.NumField(); i++ {
+			rt.traceAny(rv.Field(i))
+		}
+	case reflect.Array, reflect.Slice:
+		for i := 0; i < rv.Len(); i++ {
+			rt.traceAny(rv.Index(i))
+		}
+	case reflect.Pointer:
+		if rv.IsNil() {
+			return
+		}
+		if rv.Type() == objectPtrType {
+			// A strong reference to an object held as a Go pointer. Only the
+			// object itself knows which cell it is, which is what self is for.
+			rt.markValue(mkval(TObj, uint64((*object)(rv.UnsafePointer()).self)))
+			return
+		}
+		p := rv.Pointer()
+		if rt.gc.seenPtr[p] {
+			return
+		}
+		rt.gc.seenPtr[p] = true
+		rt.traceAny(rv.Elem())
+	case reflect.Interface:
+		if !rv.IsNil() {
+			rt.traceAny(rv.Elem())
+		}
+	case reflect.Map:
+		if rv.Type().Key() == objectPtrType {
+			// An object-keyed side table (iterator state, finalization cells).
+			// These hold state ON BEHALF of an object and must not be what keeps
+			// it alive, or every iterator ever made would be immortal. Handled
+			// after the main trace, in sweepWeakTables.
+			return
+		}
+		iter := rv.MapRange()
+		for iter.Next() {
+			rt.traceAny(iter.Key())
+			rt.traceAny(iter.Value())
+		}
+	}
+}
+
+// canHoldValue reports whether a type can transitively contain a Value, so the
+// walk can stop at bytecode, source text, and every other structure that
+// cannot.
+//
+// A pool is excluded deliberately: it IS the heap, and walking it would mark
+// every cell that ever existed, which is the opposite of collecting. Its live
+// cells are reached through the roots like everything else.
+func canHoldValue(t reflect.Type) bool {
+	if v, ok := valueBearing.Load(t); ok {
+		return v.(bool)
+	}
+	// Assume yes while recursing, so a cyclic type resolves rather than
+	// looping; the entry is corrected on the way out.
+	valueBearing.Store(t, true)
+	r := computeHoldsValue(t)
+	valueBearing.Store(t, r)
+	return r
+}
+
+func computeHoldsValue(t reflect.Type) bool {
+	if t == valueType {
+		return true
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		if isPoolType(t) {
+			return false
+		}
+		for i := 0; i < t.NumField(); i++ {
+			if canHoldValue(t.Field(i).Type) {
+				return true
+			}
+		}
+		return false
+	case reflect.Pointer, reflect.Slice, reflect.Array:
+		if isPoolType(t.Elem()) {
+			return false
+		}
+		return canHoldValue(t.Elem())
+	case reflect.Map:
+		return canHoldValue(t.Key()) || canHoldValue(t.Elem())
+	case reflect.Interface:
+		// An interface's dynamic type is unknown statically, so it has to be
+		// followed. There are few of these and none on a hot path.
+		return true
+	default:
+		return false
+	}
+}
+
+func isPoolType(t reflect.Type) bool {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t.Kind() == reflect.Struct && len(t.Name()) >= 4 && t.Name()[:4] == "pool"
+}
+
+// valueBearing memoises canHoldValue. It is a sync.Map rather than a plain one
+// because the answer depends only on the type, so Runtimes on different
+// goroutines may fill it concurrently.
+var valueBearing sync.Map
+
+
+// sweepWeakTables settles the object-keyed side tables.
+//
+// They hold state on behalf of an object — an iterator's position, a
+// FinalizationRegistry's cells — and are keyed by it. Treating them as ordinary
+// roots would make every object that ever had such state immortal, which for a
+// program that iterates in a loop is most of the heap. So they are weak: an
+// entry survives only if its key survived on its own account, and then whatever
+// the entry refers to is marked too.
+//
+// Marking an entry's value can resurrect a key of another entry, so this
+// repeats until a pass adds nothing. Entries whose key did not survive are
+// deleted, which is what stops the tables themselves from growing without
+// bound.
+func (rt *Runtime) sweepWeakTables() {
+	for {
+		before := len(rt.gc.work)
+		rt.markLiveEntries()
+		if len(rt.gc.work) == before {
+			break
+		}
+		rt.drain()
+	}
+	rt.dropDeadEntries()
+}
+
+func (rt *Runtime) markLiveEntries() {
+	for o, st := range rt.arrIterStates {
+		if rt.objAlive(o) {
+			rt.markValue(st.src)
+		}
+	}
+	for o, st := range rt.collIterStates {
+		if rt.objAlive(o) {
+			rt.traceAny(reflect.ValueOf(st).Elem())
+		}
+	}
+	for o, st := range rt.strIterStates {
+		if rt.objAlive(o) {
+			rt.traceAny(reflect.ValueOf(st).Elem())
+		}
+	}
+	for o, st := range rt.regexpStrIterStates {
+		if rt.objAlive(o) {
+			rt.traceAny(reflect.ValueOf(st).Elem())
+		}
+	}
+	for o, cells := range rt.finRegistries {
+		if rt.objAlive(o) {
+			rt.traceAny(reflect.ValueOf(cells))
+		}
+	}
+}
+
+func (rt *Runtime) dropDeadEntries() {
+	for o := range rt.arrIterStates {
+		if !rt.objAlive(o) {
+			delete(rt.arrIterStates, o)
+		}
+	}
+	for o := range rt.collIterStates {
+		if !rt.objAlive(o) {
+			delete(rt.collIterStates, o)
+		}
+	}
+	for o := range rt.strIterStates {
+		if !rt.objAlive(o) {
+			delete(rt.strIterStates, o)
+		}
+	}
+	for o := range rt.regexpStrIterStates {
+		if !rt.objAlive(o) {
+			delete(rt.regexpStrIterStates, o)
+		}
+	}
+	for o := range rt.finRegistries {
+		if !rt.objAlive(o) {
+			delete(rt.finRegistries, o)
+		}
+	}
+}
+
+func (rt *Runtime) objAlive(o *object) bool { return o != nil && rt.gc.objMarks.has(o.self) }

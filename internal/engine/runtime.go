@@ -246,6 +246,19 @@ type Runtime struct {
 	// of allocating. See frameslab.go.
 	slabs []frameSlab
 
+	// frames is what each live call publishes about the values it holds, so the
+	// collector can root them; entry d belongs to the frame at depth d. See
+	// vmFrame and collect.go.
+	frames []vmFrame
+
+	// nativeDepth counts built-ins currently on the Go stack. A native holds
+	// values in Go locals that nothing has published, so no collection may
+	// happen while one is running. See collect.go.
+	nativeDepth int
+
+	// gc holds the collector's state and its trigger threshold.
+	gc gcState
+
 	// interrupt is the one piece of Runtime state written from another
 	// goroutine — a host's request that the running script stop. See
 	// interrupt.go. backEdges counts loop iterations between flag checks and is
@@ -336,6 +349,7 @@ var ErrNotImplemented = errors.New("goant: not implemented yet")
 // New creates a fresh Runtime with empty pools and an initialized global object.
 func New() *Runtime {
 	rt := &Runtime{
+		gc:       gcState{enabled: true},
 		objects:  newPool[object](),
 		strings:  newPool[flatString](),
 		symbols:  newPool[symbol](),
@@ -498,6 +512,7 @@ func (rt *Runtime) initPrototypes() {
 	// Array.isArray(Array.prototype) is true and it carries array [[DefineOwn]].
 	{
 		h, obj := rt.objects.alloc()
+	obj.self = h
 		obj.proto = rt.objectProto
 		obj.shape = rt.newShape()
 		obj.typeTag = TArr

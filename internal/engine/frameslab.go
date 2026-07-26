@@ -29,6 +29,36 @@ type frameSlab struct {
 	stack  []Value
 }
 
+// vmFrame is what a live call publishes about itself so the collector can find
+// the values it is holding.
+//
+// The interpreter keeps its hot state — the operand stack, the locals, the
+// instruction pointer — in Go locals, which no collector can walk. This is the
+// side channel: written once at frame entry, and again only where a published
+// slice can actually change.
+//
+// stack is scanned to its full capacity rather than its length. That is not
+// laziness: an opcode handler pops its operands before calling out, so at the
+// moment a nested call collects, the receiver and arguments of the call in
+// progress live in exactly that region above the stack pointer. Scanning it
+// retains a little garbage and keeps those alive.
+type vmFrame struct {
+	locals    []Value
+	stack     []Value
+	args      []Value
+	withStack []Value
+	thisVal   Value
+	fnVal     Value
+	varObj    Value
+	newTarget Value
+	// pending and completed are the values in flight during an unwind: a thrown
+	// exception, and the operand of a return or a throw being carried across a
+	// finally block. A finally body runs ordinary code, so a collection can
+	// happen while one of these is the only reference to it.
+	pending   Value
+	completed Value
+}
+
 // slabMaxDepth bounds how deep the cache goes. Beyond it frames allocate
 // normally rather than retaining a buffer per level of a deep recursion, whose
 // peak depth can be thousands of frames.

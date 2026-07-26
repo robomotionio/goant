@@ -436,6 +436,7 @@ func (rt *Runtime) newResizableArrayBuffer(byteLen, maxLen int) Value {
 // newTypedArray builds a view of `kind` from a constructor argument.
 func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError) {
 	h, o := rt.objects.alloc()
+	o.self = h
 	// AllocateTypedArray step 1: GetPrototypeFromConstructor honors a subclass
 	// new.target's prototype and surfaces a throwing "prototype" getter (falls
 	// back to the intrinsic when not constructing, e.g. internal map/filter/
@@ -2467,6 +2468,7 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 // newTypedArrayView allocates a TypedArray sharing t's buffer (subarray).
 func (rt *Runtime) newTypedArrayView(t *typedArray, start, length int) uint32 {
 	h, o := rt.objects.alloc()
+	o.self = h
 	o.proto = rt.typedArrayProtos[t.kind]
 	o.shape = rt.newShape()
 	o.typeTag = TTypedArray
