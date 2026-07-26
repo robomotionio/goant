@@ -93,10 +93,16 @@ type icWay struct {
 // evicts the entry the previous one installed, so the site pays a full lookup
 // AND a refill, which is worse than not caching at all.
 //
-// Four covers the overwhelming majority of real sites while keeping the probe a
-// short scan of adjacent memory. Past that a site is megamorphic and better
-// served by giving up (see icMissLimit).
-const icWays = 4
+// Eight, measured. Four is enough for the majority of sites and was the first
+// choice, but the sites that matter in an object-oriented program are the ones
+// that dispatch over a class hierarchy: DeltaBlue passes six constraint
+// subclasses through the same field reads, Richards five task kinds. Those sat
+// just past four and fell back to the shape lookup on nearly every access —
+// Richards 194 -> 252, DeltaBlue 221 -> 270 on the widening alone. Sixteen is
+// no better and sometimes worse: a hit scans the ways linearly, so width is not
+// free, and past that a site is megamorphic and better served by giving up
+// (see icMissLimit).
+const icWays = 8
 
 // propIC is one inline-cache site: the shapes it has seen and where the name
 // resolved to for each.
