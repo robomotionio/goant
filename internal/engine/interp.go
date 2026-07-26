@@ -2271,9 +2271,9 @@ const (
 
 // tryHandler records a live catch/finally handler (ant handler stack).
 type tryHandler struct {
-	kind       uint8  // hTry / hTryFinally / hFinally
-	catchIP    int    // landing ip (catch tag, finally entry, or post-finally)
-	stackDepth int    // stack length to restore on entry
+	kind       uint8      // hTry / hTryFinally / hFinally
+	catchIP    int        // landing ip (catch tag, finally entry, or post-finally)
+	stackDepth int        // stack length to restore on entry
 	privEnv    *privScope // class private environment to restore on entry
 }
 
