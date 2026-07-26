@@ -1131,6 +1131,41 @@ restart:
 				goto unwind
 			}
 			ip += 5
+		case OpDeleteVar:
+			// Reused as strict-mode ResolveBinding, emitted before a simple
+			// assignment's right-hand side: it records whether the name bound to
+			// anything, and the paired OpPutConst below throws afterwards if it did
+			// not. Resolving first is observable — the RHS may create the binding.
+			nm := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			push(mkbool(rt.lookupGlobalLex(nm) != nil || rt.hasProp(rt.global, nm)))
+			ip += 5
+		case OpPutConst:
+			// Reused as PutValue for the reference OpDeleteVar resolved:
+			// [resolvable, value] -> [value].
+			pcVal := pop()
+			pcOK := pop()
+			pcName := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			if !rt.toBoolean(pcOK) {
+				thrown = rt.referenceError(pcName + " is not defined")
+				goto unwind
+			}
+			if b := rt.lookupGlobalLex(pcName); b != nil {
+				if e := rt.globalLexWrite(b, pcName, pcVal); e != nil {
+					thrown = e
+					goto unwind
+				}
+			} else if !rt.hasProp(rt.global, pcName) {
+				// Object Environment Record SetMutableBinding re-checks HasProperty:
+				// a strict assignment whose right-hand side DELETED the global also
+				// throws, even though the reference resolved.
+				thrown = rt.referenceError(pcName + " is not defined")
+				goto unwind
+			} else if !rt.setProp(rt.global, pcName, pcVal) {
+				thrown = rt.typeError("Cannot assign to read only property '" + pcName + "'")
+				goto unwind
+			}
+			push(pcVal)
+			ip += 5
 		case OpGetLocal:
 			lv := locals[readU16(code, ip+1)]
 			if lv.IsEmpty() {

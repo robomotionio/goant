@@ -526,8 +526,73 @@ func (rt *Runtime) dateFromComponents(args []Value) (float64, *ThrowError) {
 			return math.NaN(), nil
 		}
 	}
-	t := time.Date(int(year), time.Month(int(month)+1), int(day), int(hour), int(minu), int(sec), int(msv)*1e6, time.UTC)
-	return timeClip(float64(t.UnixMilli())), nil
+	return timeClip(makeDate(makeDay(year, month, day), makeTime(hour, minu, sec, msv))), nil
+}
+
+const (
+	msPerSecond = 1000
+	msPerMinute = 60 * msPerSecond
+	msPerHour   = 60 * msPerMinute
+	msPerDay    = 24 * msPerHour
+)
+
+// The MakeTime / MakeDay / MakeDate abstract operations, in IEEE 754 arithmetic
+// and in the spec's exact order. Going through Go's time.Date instead loses both
+// the rounding (the products overflow float64's integer range long before the
+// sum does) and the range (int conversions wrap).
+
+func makeTime(h, m, sec, milli float64) float64 {
+	if !isFiniteNum(h) || !isFiniteNum(m) || !isFiniteNum(sec) || !isFiniteNum(milli) {
+		return math.NaN()
+	}
+	return ((math.Trunc(h)*msPerHour + math.Trunc(m)*msPerMinute) + math.Trunc(sec)*msPerSecond) + math.Trunc(milli)
+}
+
+func makeDay(year, month, date float64) float64 {
+	if !isFiniteNum(year) || !isFiniteNum(month) || !isFiniteNum(date) {
+		return math.NaN()
+	}
+	y, m, dt := math.Trunc(year), math.Trunc(month), math.Trunc(date)
+	ym := y + math.Floor(m/12)
+	if !isFiniteNum(ym) {
+		return math.NaN()
+	}
+	mn := math.Mod(m, 12)
+	if mn < 0 {
+		mn += 12
+	}
+	return dayOfFirstOfMonth(ym, mn) + dt - 1
+}
+
+func makeDate(day, t float64) float64 {
+	if !isFiniteNum(day) || !isFiniteNum(t) {
+		return math.NaN()
+	}
+	tv := day*msPerDay + t
+	if !isFiniteNum(tv) {
+		return math.NaN()
+	}
+	return tv
+}
+
+func isFiniteNum(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
+// dayOfFirstOfMonth is Day(t) for the first day of month mn (0-based) of year y,
+// i.e. days since 1970-01-01 in the proleptic Gregorian calendar.
+func dayOfFirstOfMonth(y, mn float64) float64 {
+	mm := mn + 1 // 1..12
+	if mm <= 2 {
+		y--
+	}
+	era := math.Floor(y / 400)
+	yoe := y - era*400 // [0, 399]
+	mp := mm - 3
+	if mm <= 2 {
+		mp = mm + 9
+	}
+	doy := math.Floor((153*mp + 2) / 5)
+	doe := yoe*365 + math.Floor(yoe/4) - math.Floor(yoe/100) + doy
+	return era*146097 + doe - 719468
 }
 
 // parseDate parses a date string (ISO 8601 + a few common formats).

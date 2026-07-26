@@ -1929,8 +1929,27 @@ func (c *compiler) compileAssign(n *Node) {
 			c.emitWithVarRef(OpWithPutVar, name)
 			return
 		}
+		// In strict code the Reference is RESOLVED before the right-hand side runs
+		// and PutValue throws on an unresolvable one afterwards, so
+		// `undeclared = (this.undeclared = 5)` is a ReferenceError even though the
+		// RHS creates the property: resolve here, throw at the store.
+		strictGlobalRef := false
+		if c.fn.isStrict && slot < 0 && uv < 0 && c.withDepth == 0 {
+			if _, isImport := c.lookupImport(name); !isImport {
+				strictGlobalRef = true
+				c.emit(OpDeleteVar) // reused: resolve, pushing whether it bound
+				c.emitU32(uint32(c.constant(c.rt.internString(name))))
+			}
+		}
 		nameAnon(n.Right)
 		c.compileExpr(n.Right)
+		if strictGlobalRef {
+			// [resolvable, value] -> [value], throwing if the reference was
+			// unresolvable when it was taken.
+			c.emit(OpPutConst)
+			c.emitU32(uint32(c.constant(c.rt.internString(name))))
+			return
+		}
 	} else {
 		op, ok := compoundOpcode(n.Op)
 		if !ok {
