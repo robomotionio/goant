@@ -64,7 +64,25 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		rt.frameDepth--
 		return mkundef(), rt.rangeError("Maximum call stack size exceeded")
 	}
-	defer func() { rt.frameDepth-- }()
+
+	// The three pieces of caller state a frame has to put back, restored by one
+	// defer in this wrapper rather than three inside the interpreter.
+	//
+	// A defer in runFrameBody cannot be open-coded — its returns sit behind a
+	// goto-driven dispatch loop — so each one costs a heap defer record pushed
+	// and popped per call. Between them that was 7% of DeltaBlue. Here the
+	// compiler open-codes the single defer, and the body has none.
+	//
+	// savedStrict is what lets a direct eval() inherit the calling frame's
+	// strictness: eval is a native call, so rt.frameStrict still reflects the
+	// frame that invoked it.
+	savedStrict := rt.frameStrict
+	savedActiveNT := rt.activeNewTarget
+	defer func() {
+		rt.frameDepth--
+		rt.frameStrict = savedStrict
+		rt.activeNewTarget = savedActiveNT
+	}()
 
 	// Function entry is a check point for the host interrupt, so unbounded
 	// recursion is caught without waiting on a loop back-edge. Once terminated,
@@ -72,13 +90,11 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	if rt.interruptPending() {
 		return mkundef(), rt.terminated()
 	}
-
-	// Track the executing frame's strictness so a direct eval() (a native call,
-	// so rt.frameStrict still reflects this frame) can inherit it.
-	savedStrict := rt.frameStrict
 	rt.frameStrict = fn.isStrict
-	defer func() { rt.frameStrict = savedStrict }()
+	return rt.runFrameBody(fn, cl, fnVal, thisVal, args)
+}
 
+func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, args []Value) (Value, *ThrowError) {
 	// Frame state, declared up-front so a proper tail call (OP_TAIL_CALL) can reset
 	// it and reuse this Go frame instead of recursing.
 	var (
@@ -97,9 +113,6 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		comp         completion
 		ip           int
 	)
-	savedActiveNT := rt.activeNewTarget
-	defer func() { rt.activeNewTarget = savedActiveNT }()
-
 	push := func(v Value) { stack = append(stack, v) }
 	pop := func() Value {
 		v := stack[len(stack)-1]
