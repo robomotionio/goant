@@ -104,6 +104,12 @@ func (rt *Runtime) internString(s string) Value {
 	}
 	hv := rt.newString(s)
 	rt.interned[s] = strHandle(hv)
+	if rt.invWatermark != 0 {
+		// The intern table outlives the invocation, so an entry added during one
+		// would point at a freed cell after a release. Recorded so it can be
+		// rolled back; see Invocation.Release.
+		rt.invInterned = append(rt.invInterned, s)
+	}
 	return hv
 }
 

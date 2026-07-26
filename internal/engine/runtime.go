@@ -41,6 +41,10 @@ type Runtime struct {
 	// invDirty records that the run reached below it. See invocation_dirty.go.
 	invWatermark Handle
 	invDirty     bool
+	// invInterned lists intern-table keys added during the running invocation,
+	// so a release can remove them: the table outlives the invocation and would
+	// otherwise point at freed cells.
+	invInterned []string
 
 	// Thrown-value convention (ant thrown_value/thrown_exists).
 	thrownValue  Value

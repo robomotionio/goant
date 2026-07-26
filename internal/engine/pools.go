@@ -130,5 +130,44 @@ func (p *pool[T]) free(h Handle) {
 	p.liveN--
 }
 
+// truncate frees every cell from h upward and rewinds the allocator to h.
+//
+// This is region reclamation: instead of tracing which cells are still
+// reachable, the caller asserts that nothing below h can reach anything above
+// it, and the whole range goes at once. Cells are zeroed so their Go-owned
+// payloads become collectable, and generations are bumped so a stale handle is
+// detectable by anything that checks.
+//
+// The chunks themselves are kept. Reusing them is the point: the next
+// invocation allocates into memory that is already there.
+func (p *pool[T]) truncate(h Handle) {
+	if h < 1 {
+		h = 1
+	}
+	for i := h; i < p.next; i++ {
+		cl := p.cell(i)
+		if cl == nil {
+			continue
+		}
+		if cl.live {
+			p.liveN--
+		}
+		cl.live = false
+		cl.gen++
+		var zero T
+		cl.elem = zero
+	}
+	// A free-list entry at or above the watermark would hand out a handle the
+	// allocator is about to hand out anyway.
+	kept := p.freeList[:0]
+	for _, fh := range p.freeList {
+		if fh < h {
+			kept = append(kept, fh)
+		}
+	}
+	p.freeList = kept
+	p.next = h
+}
+
 // len returns the number of live cells.
 func (p *pool[T]) len() int { return p.liveN }

@@ -81,7 +81,20 @@ func NewContext(opt ...ContextOption) *Context {
 	return c
 }
 
-// Close ends the invocation, discarding the globals the script installed.
+// Close ends the invocation and, when it is safe, frees everything the script
+// allocated — in one step, without tracing.
+//
+// A run allocates a message graph, produces a result, and every object it made
+// dies together, so the allocator simply rewinds. Memory stays flat across any
+// number of messages instead of accumulating until the isolate is retired.
+//
+// It is skipped when the script wrote to state that predates the Context, since
+// something outside the freed region could then point into it. Dirty reports
+// that case and such an isolate should be disposed anyway.
+//
+// Values do not outlive their Context. That is already true under V8, where a
+// Value is context-scoped, so this does not change what a correct caller may
+// do — but it does mean a caller must read what it needs before closing.
 func (c *Context) Close() {
 	if c == nil {
 		return
@@ -94,7 +107,7 @@ func (c *Context) Close() {
 	if already {
 		return
 	}
-	inv.End()
+	inv.Release()
 	c.iso.mu.Lock()
 	if c.iso.contexts > 0 {
 		c.iso.contexts--

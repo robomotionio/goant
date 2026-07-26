@@ -44,7 +44,18 @@ type Invocation struct {
 	prevGlobal   Value
 	prevLex      map[string]*globalLexBinding
 	prevWatermrk Handle
+	prevInterned []string
+	marks        poolMarks
 	ended        bool
+}
+
+// poolMarks is where each pool's allocator stood when the invocation began.
+type poolMarks struct {
+	objects  Handle
+	strings  Handle
+	symbols  Handle
+	closures Handle
+	bigints  Handle
 }
 
 // BeginInvocation starts a run with a fresh global object.
@@ -54,6 +65,14 @@ func (rt *Runtime) BeginInvocation() *Invocation {
 		prevGlobal:   rt.global,
 		prevLex:      rt.globalLex,
 		prevWatermrk: rt.invWatermark,
+		prevInterned: rt.invInterned,
+		marks: poolMarks{
+			objects:  rt.objects.next,
+			strings:  rt.strings.next,
+			symbols:  rt.symbols.next,
+			closures: rt.closures.next,
+			bigints:  rt.bigints.next,
+		},
 	}
 
 	// Arm shared-state detection before allocating anything for this run, so the
@@ -61,6 +80,7 @@ func (rt *Runtime) BeginInvocation() *Invocation {
 	// afterwards would make every write to globalThis look like a write to
 	// shared state.
 	rt.beginDirtyTracking()
+	rt.invInterned = nil
 
 	// The fresh global inherits from the shared one, so every builtin resolves
 	// through the prototype chain while assignments land here and are dropped at
@@ -89,6 +109,61 @@ func (inv *Invocation) End() {
 	inv.rt.global = inv.prevGlobal
 	inv.rt.globalLex = inv.prevLex
 	inv.rt.invWatermark = inv.prevWatermrk
+	inv.rt.invInterned = inv.prevInterned
+}
+
+// Release ends the invocation and frees everything it allocated, in one step
+// and without tracing anything.
+//
+// This is region reclamation, and it fits this workload exactly: a run
+// allocates a message graph, produces a result, and every object it made dies
+// together. There is nothing to mark, no roots to enumerate, no write barriers
+// — the allocator simply rewinds.
+//
+// It is sound only because of the dirty check. If the run never wrote to an
+// object that predates it, then nothing outside the region can point into it,
+// so the whole region is unreachable by construction. A run that did write to
+// shared state cannot be released, and Release reports false without freeing —
+// the caller should discard the Runtime instead.
+//
+// EVERY Value created during the invocation becomes invalid, including the
+// script's result. A caller must extract what it needs — serialise the result
+// to bytes — BEFORE calling this. Reading a Value afterwards reads a recycled
+// cell, which is the one way to get a wrong answer out of this API.
+func (inv *Invocation) Release() bool {
+	if inv == nil || inv.ended {
+		return false
+	}
+	rt := inv.rt
+	if rt.invDirty {
+		inv.End()
+		return false
+	}
+
+	// Side tables keyed by object pointer hold state for iterators, registries
+	// and namespaces created during the run. Their keys are about to be recycled
+	// cells, so a stale entry could be matched by a future object at the same
+	// address.
+	rt.collIterStates = nil
+	rt.arrIterStates = nil
+	rt.strIterStates = nil
+	rt.regexpStrIterStates = nil
+	rt.finRegistries = nil
+	rt.moduleNamespaces = nil
+
+	// The intern table outlives the invocation; drop what this run added.
+	for _, k := range rt.invInterned {
+		delete(rt.interned, k)
+	}
+
+	inv.End()
+
+	rt.objects.truncate(inv.marks.objects)
+	rt.strings.truncate(inv.marks.strings)
+	rt.symbols.truncate(inv.marks.symbols)
+	rt.closures.truncate(inv.marks.closures)
+	rt.bigints.truncate(inv.marks.bigints)
+	return true
 }
 
 // Global returns this invocation's global object, for a host installing
