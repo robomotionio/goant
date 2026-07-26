@@ -370,6 +370,11 @@ func (rt *Runtime) NewRealm() *Runtime {
 		symUnscopables:        rt.symUnscopables,
 		symDispose:            rt.symDispose,
 		symAsyncDispose:       rt.symAsyncDispose,
+
+		// One interrupt flag per isolate, shared by every realm in it: a host
+		// that cancels does not know or care which realm is currently on the
+		// stack, and a realm that ignored the flag would keep the isolate alive.
+		interrupt: rt.interrupt,
 	}
 	r.initRealm()
 	return r

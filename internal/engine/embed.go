@@ -134,9 +134,9 @@ func (rt *Runtime) IsPromise(v Value) bool { return rt.isPromise(v) }
 
 // Promise settlement states, matching the internal encoding.
 const (
-	PromisePending = 0
-	PromiseFulfilled
-	PromiseRejected
+	PromisePending   = iota // 0
+	PromiseFulfilled        // 1
+	PromiseRejected         // 2
 )
 
 // PromiseState returns the settlement state and value of a promise. ok is
