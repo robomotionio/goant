@@ -1767,9 +1767,21 @@ func (c *compiler) compileAssign(n *Node) {
 		c.emitCallTargetRefError()
 		return
 	}
-	// Assignment to a non-reference literal (undefined/null/this/true/…) is a
-	// no-op that yields the RHS (sloppy mode); strict-mode rejection is a
-	// parser concern handled elsewhere.
+	// Bare `undefined` is an IdentifierReference to a non-writable property of the
+	// global object, not a literal keyword — goant just parses it as NUndef — so
+	// assigning to it goes through the global and is a strict-mode TypeError. A
+	// local `var undefined` shadow (sloppy) takes the ordinary path instead.
+	if n.Left != nil && n.Left.Kind == NUndef && n.Op == TokAssign &&
+		c.withDepth == 0 && c.resolveLocal("undefined") < 0 && c.resolveUpvalue("undefined") < 0 {
+		nameAnonExpr(n.Right, "undefined")
+		c.compileExpr(n.Right)
+		c.emit(OpDup)
+		c.emitGlobalPut("undefined")
+		return
+	}
+	// Assignment to a non-reference literal (null/this/true/…) is a no-op that
+	// yields the RHS (sloppy mode); strict-mode rejection is a parser concern
+	// handled elsewhere.
 	if n.Left != nil && (n.Left.Kind == NUndef || n.Left.Kind == NNull ||
 		n.Left.Kind == NThis || n.Left.Kind == NBool || n.Left.Kind == NGlobalThis) {
 		c.compileExpr(n.Right)
@@ -1784,6 +1796,14 @@ func (c *compiler) compileAssign(n *Node) {
 	uv := -1
 	if slot < 0 {
 		uv = c.resolveUpvalue(name)
+	}
+	// NamedEvaluation applies only when the target is an unparenthesized
+	// IdentifierReference: `(fn) = function(){}` leaves the function's name "".
+	namedEval := n.Left.Flags&fnParen == 0
+	nameAnon := func(v *Node) {
+		if namedEval {
+			nameAnonExpr(v, name)
+		}
 	}
 
 	loadVar := func() {
@@ -1851,7 +1871,7 @@ func (c *compiler) compileAssign(n *Node) {
 		skip := c.emitJump(jmpOp)
 		c.emit(OpPop)
 		// NamedEvaluation: `x ||= () => {}` names the anonymous RHS "x".
-		nameAnonExpr(n.Right, name)
+		nameAnon(n.Right)
 		c.compileExpr(n.Right)
 		storeVar()
 		c.patchJump(skip)
@@ -1867,12 +1887,12 @@ func (c *compiler) compileAssign(n *Node) {
 		// a plain assignment performs no [[Get]].
 		if c.nameIsWithRouted(name) && !c.storeKeepsStaticBinding(slot, uv) {
 			c.emitWithVarBase(name)
-			nameAnonExpr(n.Right, name)
+			nameAnon(n.Right)
 			c.compileExpr(n.Right)
 			c.emitWithVarRef(OpWithPutVar, name)
 			return
 		}
-		nameAnonExpr(n.Right, name)
+		nameAnon(n.Right)
 		c.compileExpr(n.Right)
 	} else {
 		op, ok := compoundOpcode(n.Op)

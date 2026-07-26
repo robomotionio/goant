@@ -1126,7 +1126,7 @@ func tailIsCall(n *Node) bool {
 	switch {
 	case n.Kind == NCall, n.Kind == NTaggedTemplate:
 		return true
-	case n.Kind == NBinary && (n.Op == TokLand || n.Op == TokLor):
+	case n.Kind == NBinary && (n.Op == TokLand || n.Op == TokLor || n.Op == TokNullish):
 		return tailIsCall(n.Right)
 	case n.Kind == NTernary:
 		return tailIsCall(n.Left) || tailIsCall(n.Right)
@@ -1178,6 +1178,16 @@ func (c *compiler) compileTailReturn(n *Node) bool {
 		c.compileExpr(n.Left)
 		c.emit(OpDup)
 		jmp := c.emitJump(OpJmpTrue)
+		c.emit(OpPop)
+		c.compileTailReturn(n.Right)
+		c.patchJump(jmp)
+		c.emit(OpReturn)
+		return true
+	case n.Kind == NBinary && n.Op == TokNullish:
+		// `a ?? b`: b is in tail position, a is not.
+		c.compileExpr(n.Left)
+		c.emit(OpDup)
+		jmp := c.emitJump(OpJmpNotNullish)
 		c.emit(OpPop)
 		c.compileTailReturn(n.Right)
 		c.patchJump(jmp)
