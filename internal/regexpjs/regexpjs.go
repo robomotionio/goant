@@ -607,7 +607,8 @@ const wordClassPlain = `0-9A-Za-z_`
 // too wide where a `(?-i:…)` group turns matching case-sensitive again and too
 // narrow where ES's simple case folding pulls in ſ and K.
 func translateWordClass(src string, ignoreCase bool) string {
-	if !strings.Contains(src, `\w`) && !strings.Contains(src, `\W`) {
+	if !strings.Contains(src, `\w`) && !strings.Contains(src, `\W`) &&
+		!strings.Contains(src, `\b`) && !strings.Contains(src, `\B`) {
 		return src
 	}
 	rs := []rune(src)
@@ -641,6 +642,24 @@ func translateWordClass(src string, ignoreCase bool) string {
 					b.WriteString(`\W`)
 				} else {
 					b.WriteString("[^" + set() + "]")
+				}
+				i++
+				continue
+			case 'b', 'B':
+				// A word boundary is defined by the same word set, so it changes with
+				// the region too. Only a region that DISAGREES with the flag needs
+				// spelling out — elsewhere regexp2's own \b is already right, and the
+				// lookaround form is more expensive. (`\b` inside a class is a
+				// backspace, not a boundary.)
+				if inClass > 0 || cur() == ignoreCase {
+					break
+				}
+				w := "[" + set() + "]"
+				nw := "[^" + set() + "]"
+				if rs[i+1] == 'b' {
+					b.WriteString("(?:(?<=" + w + ")(?=" + nw + "|$)|(?<=" + nw + "|^)(?=" + w + "))")
+				} else {
+					b.WriteString("(?:(?<=" + w + ")(?=" + w + ")|(?<=" + nw + "|^)(?=" + nw + "|$))")
 				}
 				i++
 				continue
