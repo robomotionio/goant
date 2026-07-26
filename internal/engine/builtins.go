@@ -53,21 +53,30 @@ func (rt *Runtime) initBuiltins() {
 		if e != nil {
 			return mkundef(), e
 		}
-		src := string(rt.strBytes(sv))
-		prog, perr := Parse("<script>", src)
-		if perr != nil {
-			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
-			return mkundef(), &ThrowError{Value: ev, rt: rt}
-		}
-		fn, cerr := rt.Compile(prog, "<script>", src)
-		if gde, ok := cerr.(*GlobalDeclError); ok {
-			return mkundef(), rt.typeError(gde.Msg)
-		}
-		if cerr != nil {
-			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(cerr.Error())})
-			return mkundef(), &ThrowError{Value: ev, rt: rt}
-		}
-		return rt.runFrame(fn, nil, mkundef(), rt.global, nil)
+		return rt.evalScriptSource(string(rt.strBytes(sv)))
+	}), attrWritable|attrConfigurable)
+
+	// createRealm(): a second realm on the same value pools — a fresh global with
+	// its own intrinsics, while objects still pass freely between the two. A host
+	// capability, like evalScript, and the one Test262's $262.createRealm needs.
+	// The returned object carries the new realm's global and an evalScript bound
+	// to IT (a native is otherwise handed the CALLING runtime, which would compile
+	// into the wrong realm).
+	g.defineOwn("createRealm", rt.newNativeFunc("createRealm", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		realm := rt.NewRealm()
+		out := rt.newObject(rt.objectProto)
+		oo := rt.objPtr(out)
+		oo.defineOwn("global", realm.global, attrWritable|attrEnumerable|attrConfigurable)
+		oo.defineOwn("evalScript", rt.newNativeFunc("evalScript", 1, func(caller *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			sv, e := caller.toStringValue(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			return realm.evalScriptSource(string(caller.strBytes(sv)))
+		}), attrWritable|attrEnumerable|attrConfigurable)
+		cr, _ := realm.getField(realm.global, "createRealm")
+		oo.defineOwn("createRealm", cr, attrWritable|attrEnumerable|attrConfigurable)
+		return out, nil
 	}), attrWritable|attrConfigurable)
 
 	// Timers (HTML setTimeout/setInterval). goant runs a virtual clock: callbacks
@@ -298,4 +307,24 @@ func (rt *Runtime) inspect(v Value, quoted bool) string {
 		}
 		return typeName(v.Type())
 	}
+}
+
+// evalScriptSource evaluates src as a new Script in THIS realm. It is a method
+// rather than an inline closure so createRealm can hand another realm a copy
+// bound to it — a native is otherwise passed the calling runtime.
+func (rt *Runtime) evalScriptSource(src string) (Value, *ThrowError) {
+	prog, perr := Parse("<script>", src)
+	if perr != nil {
+		ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
+		return mkundef(), &ThrowError{Value: ev, rt: rt}
+	}
+	fn, cerr := rt.Compile(prog, "<script>", src)
+	if gde, ok := cerr.(*GlobalDeclError); ok {
+		return mkundef(), rt.typeError(gde.Msg)
+	}
+	if cerr != nil {
+		ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(cerr.Error())})
+		return mkundef(), &ThrowError{Value: ev, rt: rt}
+	}
+	return rt.runFrame(fn, nil, mkundef(), rt.global, nil)
 }

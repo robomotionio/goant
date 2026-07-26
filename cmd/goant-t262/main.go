@@ -20,6 +20,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -491,7 +492,21 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 // $262.global uses globalThis rather than (0,eval)("this") so the harness does
 // not reference `eval` at the script's top level — a test that declares
 // `let eval` would otherwise put that reference in its temporal dead zone.
-const host262JS = "var $262 = { global: globalThis, evalScript: evalScript, gc: function () {}, detachArrayBuffer: function (b) { try { b.transfer(); } catch (e) {} } };\n"
+const host262Body = "var $262 = { global: globalThis, evalScript: evalScript, gc: function () {}, " +
+	"detachArrayBuffer: function (b) { try { b.transfer(); } catch (e) {} }, " +
+	"createRealm: function () { var r = createRealm(); " +
+	"r.evalScript('globalThis.$262src = ' + JSON.stringify(globalThis.$262src) + ';'); " +
+	"r.evalScript(globalThis.$262src); return r.global.$262; } };"
+
+// host262JS installs $262 and keeps its own source in `$262src`, so
+// createRealm() can install the same object in the realm it makes.
+var host262JS = "globalThis.$262src = " + jsQuote(host262Body) + ";\n" + host262Body + "\n"
+
+// jsQuote renders s as a JavaScript string literal.
+func jsQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
 
 func (m meta) variants() []string {
 	switch {

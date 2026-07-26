@@ -84,27 +84,32 @@ func (rt *Runtime) initSymbolBuiltin() {
 	cobj.defineOwn("prototype", proto, 0)
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 
-	// Well-known symbols (shared singletons).
-	wk := func(name string) Value {
-		s := rt.newSymbol(rt.newString("Symbol." + name))
+	// Well-known symbols are shared per AGENT, not per realm: a second realm
+	// created on the same pools reuses the ones it inherited so that, for
+	// instance, Symbol.iterator is one symbol everywhere.
+	wk := func(name string, existing Value) Value {
+		s := existing
+		if s == 0 {
+			s = rt.newSymbol(rt.newString("Symbol." + name))
+		}
 		cobj.defineOwn(name, s, 0)
 		return s
 	}
-	rt.symIterator = wk("iterator")
-	rt.symAsyncIterator = wk("asyncIterator")
-	rt.symHasInstance = wk("hasInstance")
-	rt.symToPrimitive = wk("toPrimitive")
-	rt.symToStringTag = wk("toStringTag")
-	rt.symIsConcatSpreadable = wk("isConcatSpreadable")
-	rt.symSpecies = wk("species")
-	rt.symMatch = wk("match")
-	rt.symMatchAll = wk("matchAll")
-	rt.symReplace = wk("replace")
-	rt.symSearch = wk("search")
-	rt.symSplit = wk("split")
-	rt.symUnscopables = wk("unscopables")
-	rt.symDispose = wk("dispose")
-	rt.symAsyncDispose = wk("asyncDispose")
+	rt.symIterator = wk("iterator", rt.symIterator)
+	rt.symAsyncIterator = wk("asyncIterator", rt.symAsyncIterator)
+	rt.symHasInstance = wk("hasInstance", rt.symHasInstance)
+	rt.symToPrimitive = wk("toPrimitive", rt.symToPrimitive)
+	rt.symToStringTag = wk("toStringTag", rt.symToStringTag)
+	rt.symIsConcatSpreadable = wk("isConcatSpreadable", rt.symIsConcatSpreadable)
+	rt.symSpecies = wk("species", rt.symSpecies)
+	rt.symMatch = wk("match", rt.symMatch)
+	rt.symMatchAll = wk("matchAll", rt.symMatchAll)
+	rt.symReplace = wk("replace", rt.symReplace)
+	rt.symSearch = wk("search", rt.symSearch)
+	rt.symSplit = wk("split", rt.symSplit)
+	rt.symUnscopables = wk("unscopables", rt.symUnscopables)
+	rt.symDispose = wk("dispose", rt.symDispose)
+	rt.symAsyncDispose = wk("asyncDispose", rt.symAsyncDispose)
 
 	// Symbol.for / Symbol.keyFor (global registry).
 	rt.defMethod(cobj, "for", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

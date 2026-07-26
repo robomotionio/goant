@@ -136,8 +136,10 @@ func (rt *Runtime) initNumberBuiltin() {
 			}
 		}
 		// new Number(x) (incl. `super(x)` from a subclass): a Number exotic object
-		// wrapping the primitive in its [[NumberData]] slot.
-		if o := rt.objPtr(this); o != nil {
+		// wrapping the primitive in its [[NumberData]] slot. Keyed on new.target,
+		// not on `this` being an object — a plain call through a property
+		// (`globalThis.Number(5)`) passes one of those too.
+		if o := rt.objPtr(this); o != nil && rt.constructing() {
 			o.boxed = mknum(n)
 			o.setSlot(slotPrimitive, mknum(n)) // [[NumberData]] marker
 			return this, nil
@@ -229,7 +231,8 @@ func (rt *Runtime) initBooleanBuiltin() {
 	ctor := rt.newNativeFunc("Boolean", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b := rt.toBoolean(arg(args, 0))
 		// new Boolean(x) (incl. subclass `super(x)`): a Boolean wrapper object.
-		if o := rt.objPtr(this); o != nil {
+		// Keyed on new.target, as for String/Number.
+		if o := rt.objPtr(this); o != nil && rt.constructing() {
 			o.boxed = mkbool(b)
 			return this, nil
 		}

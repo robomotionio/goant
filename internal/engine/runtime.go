@@ -310,6 +310,51 @@ func New() *Runtime {
 		bigints:  newPool[bigIntCell](),
 		interned: make(map[string]Handle),
 	}
+	rt.initRealm()
+	return rt
+}
+
+// NewRealm creates a second realm on top of this one's value pools: a fresh
+// global object with its own intrinsics, but the SAME representation for values,
+// which is what lets an object made in one realm be used from the other. It is
+// the relationship a V8 context has with its isolate.
+//
+// The pieces the spec shares per AGENT rather than per realm — the interned
+// string table, the Symbol.for registry, and the well-known symbols — are
+// carried over, so `Symbol.iterator` is one symbol everywhere and an object
+// made in one realm is still iterable from the other.
+func (rt *Runtime) NewRealm() *Runtime {
+	r := &Runtime{
+		objects:        rt.objects,
+		strings:        rt.strings,
+		symbols:        rt.symbols,
+		closures:       rt.closures,
+		bigints:        rt.bigints,
+		interned:       rt.interned,
+		symbolRegistry: rt.symbolRegistry,
+		symbolCounter:  rt.symbolCounter,
+
+		symIterator:           rt.symIterator,
+		symAsyncIterator:      rt.symAsyncIterator,
+		symHasInstance:        rt.symHasInstance,
+		symToPrimitive:        rt.symToPrimitive,
+		symToStringTag:        rt.symToStringTag,
+		symMatch:              rt.symMatch,
+		symMatchAll:           rt.symMatchAll,
+		symReplace:            rt.symReplace,
+		symSearch:             rt.symSearch,
+		symSplit:              rt.symSplit,
+		symSpecies:            rt.symSpecies,
+		symIsConcatSpreadable: rt.symIsConcatSpreadable,
+		symUnscopables:        rt.symUnscopables,
+		symDispose:            rt.symDispose,
+		symAsyncDispose:       rt.symAsyncDispose,
+	}
+	r.initRealm()
+	return r
+}
+
+func (rt *Runtime) initRealm() {
 	// Value(0) decodes as the number 0, not undefined; new.target slots must start
 	// as a real undefined so "not constructing" is detectable.
 	rt.pendingNewTarget = mkundef()
@@ -360,7 +405,6 @@ func New() *Runtime {
 	rt.initIntl()
 	rt.initAnnexB()
 	rt.markNativeConstructors()
-	return rt
 }
 
 // markNativeConstructors flags the built-in functions that have a [[Construct]]

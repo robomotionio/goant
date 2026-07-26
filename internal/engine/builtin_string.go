@@ -630,7 +630,10 @@ func (rt *Runtime) initStringBuiltin() {
 
 	// String constructor.
 	ctor := rt.newNativeFunc("String", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		constructing := rt.objPtr(this) != nil
+		// Whether this is `new String(x)` is decided by new.target, NOT by `this`
+		// being an object: a plain call through a property (`globalThis.String(5)`,
+		// or a String from another realm) passes an object `this` too.
+		constructing := rt.constructing() && rt.objPtr(this) != nil
 		var sv Value
 		switch {
 		case len(args) == 0:
