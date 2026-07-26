@@ -129,6 +129,7 @@ func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 		code         []byte
 		ics          []propIC
 		stack        []Value
+		sp           int // operand-stack pointer; stack is kept at full length
 		locals       []Value
 		openUpvals   map[int]*upvalue
 		handlers     []tryHandler
@@ -151,22 +152,26 @@ func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 		f.varObj, f.newTarget = varObj, newTarget
 		f.pending, f.completed = pendingThrow, comp.value
 	}
+	// The operand stack is a fixed-length buffer with an explicit pointer, not a
+	// slice that grows and shrinks. Reslicing wrote the whole slice header — and
+	// `stack` is captured by these closures, so that header lives in memory, not
+	// registers — on every single push and pop. An index writes one int.
 	push := func(v Value) {
-		if len(stack) == cap(stack) {
+		if sp == len(stack) {
 			// A grow moves the backing array out from under what was published.
-			stack = append(stack, v)
+			grown := make([]Value, len(stack)*2+8)
+			copy(grown, stack)
+			stack = grown
 			rt.frames[rt.frameDepth].stack = stack
-			return
 		}
-		stack = stack[:len(stack)+1]
-		stack[len(stack)-1] = v
+		stack[sp] = v
+		sp++
 	}
 	pop := func() Value {
-		v := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		return v
+		sp--
+		return stack[sp]
 	}
-	peek := func() Value { return stack[len(stack)-1] }
+	peek := func() Value { return stack[sp-1] }
 	// captureUpvalue returns the open upvalue for a local slot, creating it on
 	// first use so multiple closures over the same slot share one cell.
 	captureUpvalue := func(slot int) *upvalue {
@@ -207,7 +212,7 @@ func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 			}
 			h := handlers[i]
 			handlers = handlers[:i]
-			stack = stack[:h.stackDepth]
+			sp = h.stackDepth
 			comp = completion{kind: compReturn, value: r}
 			syncFrame()
 			return h.catchIP, true
@@ -226,7 +231,7 @@ func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 				h := handlers[i]
 				used := len(handlers) - i
 				handlers = handlers[:i]
-				stack = stack[:h.stackDepth]
+				sp = h.stackDepth
 				pops := nPop - used
 				if pops < 0 {
 					pops = 0
@@ -278,6 +283,8 @@ restart:
 	// zeroed: the zero Value decodes as the number 0.0, and a reused buffer
 	// still holds the last frame's values.
 	stack = rt.frameStack(rt.frameDepth, fn.maxStack+16)
+	stack = stack[:cap(stack)]
+	sp = 0
 	locals = rt.frameLocals(rt.frameDepth, fn.maxLocals)
 	// Parameters occupy the first slots (ant frame arg layout).
 	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
@@ -1444,8 +1451,8 @@ restart:
 		case OpSetHomeObj:
 			// [obj, method] (unchanged): record the method's [[HomeObject]] as obj
 			// so a super reference in the method resolves against obj's prototype.
-			if len(stack) >= 2 {
-				rt.setMethodHome(stack[len(stack)-1], stack[len(stack)-2])
+			if sp >= 2 {
+				rt.setMethodHome(stack[sp-1], stack[sp-2])
 			}
 			ip++
 		case OpGetSuper:
@@ -1467,8 +1474,8 @@ restart:
 			// class in a computed property — set func.name from the property key
 			// ("[desc]" for a symbol, the key string otherwise). Emitted only when
 			// the compiler statically knows the value is an anonymous definition.
-			if len(stack) >= 2 {
-				rt.setInferredNameFromKey(stack[len(stack)-1], stack[len(stack)-2])
+			if sp >= 2 {
+				rt.setInferredNameFromKey(stack[sp-1], stack[sp-2])
 			}
 			ip++
 		case OpUsingPush, OpUsingPushAsync:
@@ -1984,10 +1991,10 @@ restart:
 			push(resumed)
 			ip++
 		case OpTryPush:
-			handlers = append(handlers, tryHandler{kind: hTry, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack), privEnv: privEnv})
+			handlers = append(handlers, tryHandler{kind: hTry, catchIP: int(readU32(code, ip+1)), stackDepth: sp, privEnv: privEnv})
 			ip += 5
 		case OpTryPushFinally:
-			handlers = append(handlers, tryHandler{kind: hTryFinally, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack), privEnv: privEnv})
+			handlers = append(handlers, tryHandler{kind: hTryFinally, catchIP: int(readU32(code, ip+1)), stackDepth: sp, privEnv: privEnv})
 			ip += 5
 		case OpTryPop:
 			// Pop the innermost catch / try-finally handler (skipping any executing
@@ -2007,7 +2014,7 @@ restart:
 		case OpFinally:
 			// Enter a finally body: install a finally handler whose landing is the
 			// code after OP_FINALLY_RET (the normal-completion continuation).
-			handlers = append(handlers, tryHandler{kind: hFinally, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack), privEnv: privEnv})
+			handlers = append(handlers, tryHandler{kind: hFinally, catchIP: int(readU32(code, ip+1)), stackDepth: sp, privEnv: privEnv})
 			ip += 5
 		case OpFinallyDiscard:
 			// Leave a finally body abnormally (break/continue): drop its handler and
@@ -2429,7 +2436,7 @@ restart:
 					comp = completion{}
 					continue
 				}
-				stack = stack[:h.stackDepth]
+				sp = h.stackDepth
 				privEnv = h.privEnv
 				if h.kind == hTryFinally {
 					// Run the finally with the throw pending; OP_FINALLY_RET re-raises.
