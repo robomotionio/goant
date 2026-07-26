@@ -193,7 +193,31 @@ func (rt *Runtime) objPtr(v Value) *object {
 	if !v.IsObjectType() && v.Type() != TTypedArray {
 		return nil
 	}
-	return rt.objects.get(Handle(v.handle()))
+	// One-entry translation cache. Resolving a handle is two dependent loads
+	// (the chunk vector, then the chunk) before the object is even touched, and
+	// the interpreter does it several times per property access on the same
+	// receiver — `this.x` then `this.y` then `this.z`. A handle is a pure
+	// function of its cell for as long as the cell lives, so remembering the
+	// last one is sound; collect and truncate clear it, since those are the two
+	// places a handle stops naming what it named.
+	h := Handle(v.handle())
+	if h == rt.lastObjH {
+		return rt.lastObjP
+	}
+	o := rt.objects.get(h)
+	rt.lastObjH, rt.lastObjP = h, o
+	return o
+}
+
+// freeObject releases a cell the caller has just allocated and is abandoning —
+// a constructor rolling back after an argument threw. It goes through here
+// rather than the pool directly so the translation cache cannot be left naming
+// a cell that is no longer live.
+func (rt *Runtime) freeObject(h Handle) {
+	if rt.lastObjH == h {
+		rt.lastObjH, rt.lastObjP = 0, nil
+	}
+	rt.objects.free(h)
 }
 
 // ---- slot storage ----

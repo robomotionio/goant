@@ -451,18 +451,18 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 	if !a0.IsObjectType() && a0.Type() != TTypedArray {
 		n, e := rt.toIndex(a0)
 		if e != nil {
-			rt.objects.free(h)
+			rt.freeObject(h)
 			return mkundef(), e
 		}
 		if n > maxByteLen/size {
-			rt.objects.free(h)
+			rt.freeObject(h)
 			return mkundef(), rt.rangeError("Invalid typed array length")
 		}
 		lengthArg, hasLengthArg = n, true
 	}
 	pr, e := rt.newTargetProtoE(rt.typedArrayProtos[kind])
 	if e != nil {
-		rt.objects.free(h)
+		rt.freeObject(h)
 		return mkundef(), e
 	}
 	o.proto = pr

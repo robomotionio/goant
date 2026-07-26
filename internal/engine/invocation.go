@@ -167,6 +167,7 @@ func (inv *Invocation) Release() bool {
 
 	inv.End()
 
+	rt.lastObjH, rt.lastObjP = 0, nil
 	rt.objects.truncate(inv.marks.objects)
 	rt.strings.truncate(inv.marks.strings)
 	rt.symbols.truncate(inv.marks.symbols)
