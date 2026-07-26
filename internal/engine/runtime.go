@@ -74,6 +74,13 @@ type Runtime struct {
 	// Remaining Annex B legacy RegExp static state, updated on every successful
 	// built-in match (RegExp.input/$_, lastParen/$+, leftContext/$`,
 	// rightContext/$', and $1…$9).
+	// regexpInput and the two context strings are built on demand from the last
+	// match's subject and offsets; see buildLegacyRegExpStrings.
+	regexpLegacyInput []rune
+	regexpLegacyStart int
+	regexpLegacyEnd   int
+	regexpLegacyBuilt bool
+
 	regexpInput           string
 	regexpLastParen       string
 	regexpLeftContext     string

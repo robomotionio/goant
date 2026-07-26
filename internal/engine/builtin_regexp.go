@@ -212,7 +212,10 @@ func (rt *Runtime) initRegExpBuiltin() {
 			cobj.defineAccessor(n, g, mkundef(), true, false, attrConfigurable)
 		}
 	}
-	inputGet := legacyGet(func() string { return rt.regexpInput })
+	inputGet := legacyGet(func() string {
+		rt.buildLegacyRegExpStrings()
+		return rt.regexpInput
+	})
 	inputSet := rt.newNativeFunc("set", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if this != rt.regexpCtor {
 			return mkundef(), rt.typeError("RegExp legacy static property setter requires the RegExp constructor as receiver")
@@ -221,6 +224,9 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		// An explicit assignment replaces whatever the last match implied, so
+		// the pending lazy build must not overwrite it.
+		rt.buildLegacyRegExpStrings()
 		rt.regexpInput = rt.strGo(s)
 		return mkundef(), nil
 	})
@@ -229,8 +235,14 @@ func (rt *Runtime) initRegExpBuiltin() {
 	}
 	defLegacyGet([]string{"lastMatch", "$&"}, func() string { return rt.regexpLastMatch })
 	defLegacyGet([]string{"lastParen", "$+"}, func() string { return rt.regexpLastParen })
-	defLegacyGet([]string{"leftContext", "$`"}, func() string { return rt.regexpLeftContext })
-	defLegacyGet([]string{"rightContext", "$'"}, func() string { return rt.regexpRightContext })
+	defLegacyGet([]string{"leftContext", "$`"}, func() string {
+		rt.buildLegacyRegExpStrings()
+		return rt.regexpLeftContext
+	})
+	defLegacyGet([]string{"rightContext", "$'"}, func() string {
+		rt.buildLegacyRegExpStrings()
+		return rt.regexpRightContext
+	})
 	for i := 1; i <= 9; i++ {
 		idx := i - 1
 		cobj.defineAccessor("$"+itoaSmall(i), legacyGet(func() string { return rt.regexpParen[idx] }), mkundef(), true, false, attrConfigurable)
@@ -805,7 +817,19 @@ func (rt *Runtime) setLastIndexOrThrow(this Value, n float64) *ThrowError {
 // leftContext/$`, rightContext/$', and $1…$9. input is the subject as runes and
 // m the match (rune offsets).
 func (rt *Runtime) updateLegacyRegExpState(input []rune, m *regexpjs.Match) {
-	rt.regexpInput = string(input)
+	// The subject and the two context strings are kept as the subject plus a
+	// pair of offsets, and built only if something reads them.
+	//
+	// Building them here cost three copies of the whole subject on every
+	// successful match — and RegExp.input, leftContext and rightContext are
+	// each as long as the subject. On Octane's RegExp benchmark, which matches
+	// hundreds of thousands of times and never reads any of them, that alone
+	// was 31% of the running time. Nothing observes the difference: these are
+	// accessors, so the work happens on the read either way.
+	rt.regexpLegacyInput = input
+	rt.regexpLegacyStart, rt.regexpLegacyEnd = m.Index, m.Index+m.Groups[0].Length
+	rt.regexpInput, rt.regexpLeftContext, rt.regexpRightContext = "", "", ""
+	rt.regexpLegacyBuilt = false
 	rt.regexpLastMatch = m.Groups[0].Value
 	for i := 0; i < 9; i++ {
 		if i+1 < len(m.Groups) && m.Groups[i+1].Index >= 0 {
@@ -821,11 +845,24 @@ func (rt *Runtime) updateLegacyRegExpState(input []rune, m *regexpjs.Match) {
 			break
 		}
 	}
-	start, end := m.Index, m.Index+m.Groups[0].Length
-	if start >= 0 && start <= len(input) {
+}
+
+// buildLegacyRegExpStrings materialises the three whole-subject statics on
+// first read after a match, and caches them until the next one.
+func (rt *Runtime) buildLegacyRegExpStrings() {
+	if rt.regexpLegacyBuilt {
+		return
+	}
+	rt.regexpLegacyBuilt = true
+	input := rt.regexpLegacyInput
+	if input == nil {
+		return
+	}
+	rt.regexpInput = utf16RunesToString(input)
+	if start := rt.regexpLegacyStart; start >= 0 && start <= len(input) {
 		rt.regexpLeftContext = utf16RunesToString(input[:start])
 	}
-	if end >= 0 && end <= len(input) {
+	if end := rt.regexpLegacyEnd; end >= 0 && end <= len(input) {
 		rt.regexpRightContext = utf16RunesToString(input[end:])
 	}
 }
