@@ -368,15 +368,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if this.IsNullish() || !this.IsObjectType() {
 			return mkundef(), rt.typeError("Method RegExp.prototype[Symbol.split] called on incompatible receiver")
 		}
-		// Fast path: an ordinary RegExp whose @@species is the default RegExp ctor
-		// AND whose `exec` is still the built-in — otherwise RegExpExec would hand
-		// the matching to user code, which the internal splitter cannot do.
-		if re := rt.objPtr(this); re != nil && re.regex != nil && rt.hasBuiltinExec(this) {
-			if C, e := rt.speciesConstructor(this, rt.regexpCtor); e == nil && C == rt.regexpCtor {
-				return rt.stringSplitRegexp(arg(args, 0), re.regex, arg(args, 1))
-			}
-		}
-		// Generic path: SpeciesConstructor(this, %RegExp%) supplies the splitter.
+		// SpeciesConstructor(this, %RegExp%) supplies the splitter.
 		C, e := rt.speciesConstructor(this, rt.regexpCtor)
 		if e != nil {
 			return mkundef(), e
@@ -397,6 +389,17 @@ func (rt *Runtime) initRegExpBuiltin() {
 		splitter, e := rt.construct(C, []Value{this, rt.newString(newFlags)})
 		if e != nil {
 			return mkundef(), e
+		}
+		// Fast path: an ordinary RegExp splitter whose `exec` is still the built-in
+		// — otherwise RegExpExec would hand the matching to user code, which the
+		// internal splitter cannot do. Chosen only AFTER Construct, whose IsRegExp
+		// step reads @@match: that getter may recompile the pattern.
+		if re := rt.objPtr(this); re != nil && re.regex != nil && C == rt.regexpCtor &&
+			rt.hasBuiltinExec(this) && rt.hasBuiltinExec(splitter) {
+			// The receiver's own compiled regex, re-read here so a recompile during
+			// Construct is honoured; the splitter differs only by the `y` flag, which
+			// the internal splitter supplies itself.
+			return rt.stringSplitRegexp(arg(args, 0), re.regex, arg(args, 1))
 		}
 		// The splitter is driven through RegExpExec and its own lastIndex — it is
 		// sticky by construction, and the internal split has no way to honour either

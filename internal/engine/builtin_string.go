@@ -522,7 +522,10 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return mknum(float64(strings.Compare(string(b), string(other)))), nil
+		// The result must be zero for canonically equivalent strings, so compare
+		// their NFC forms — 15.5.4.9_CE requires that `o` + combining diaeresis and
+		// precomposed `ö` compare equal. Everything else stays a code-unit order.
+		return mknum(float64(strings.Compare(norm.NFC.String(string(b)), norm.NFC.String(string(other))))), nil
 	})
 	rt.defMethod(proto, "toLocaleLowerCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		b, e := rt.thisStringBytes(this)
