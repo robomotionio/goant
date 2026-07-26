@@ -353,6 +353,7 @@ func (p *parser) escapedIdentName() (string, bool) {
 // consumes it.
 func (p *parser) mkEscapedIdent(name string) *Node {
 	n := mkIdent(name)
+	n.Flags |= nodeEscapedIdent
 	n.SrcOff = uint32(p.toff())
 	n.SrcEnd = uint32(p.toff() + p.tlen())
 	p.consume()
@@ -452,8 +453,12 @@ func (p *parser) parseStmtList(out *[]*Node, stopAtRBrace, directiveCtx bool) {
 			break
 		}
 		if p.tok() == TokErr {
-			p.unexpected()
-			break
+			// An escaped contextual keyword is an ordinary Identifier, so it can
+			// begin an ExpressionStatement or label one (`l\u0065t;`, `aw\u0061it:`).
+			if _, ok := p.escapedIdentName(); !ok {
+				p.unexpected()
+				break
+			}
 		}
 		stmt := p.parseStmt()
 		if stmt != nil {
@@ -856,7 +861,10 @@ func (p *parser) tryParseAsyncArrow() *Node {
 		return nil
 	}
 
-	if la == TokIdentifier {
+	// AsyncArrowBindingIdentifier is a BindingIdentifier, so a contextual keyword
+	// is allowed there: `async of => {}` is an async arrow, which is why
+	// `for (async of => {}; ; )` is a plain for loop and not a for-of.
+	if la == TokIdentifier || isContextualIdentTok(la) || la == TokLet || la == TokStatic {
 		saved := p.lx.save()
 		p.next()
 		p.consume()
@@ -864,6 +872,7 @@ func (p *parser) tryParseAsyncArrow() *Node {
 		if p.la() == TokArrow {
 			p.next()
 			p.consume()
+			p.strictCheckBindingIdent(id.Str)
 			fn := p.mk(NFunc)
 			fn.Flags = fnArrow | fnAsync
 			fn.Args = append(fn.Args, id)
@@ -3118,6 +3127,17 @@ func (p *parser) parseExportStmt() *Node {
 
 // ---- statements ----
 
+// letBeginsDeclaration reports whether a leading `let` token begins a
+// LexicalDeclaration: it does only when followed by `[`, `{`, or a
+// BindingIdentifier. Any other follow token leaves `let` an IdentifierReference
+// (`let;`, `let = 1`, `let.foo`), which sloppy code may use.
+func (p *parser) letBeginsDeclaration() bool {
+	la := p.la()
+	return la == TokLBracket || la == TokLBrace || la == TokIdentifier ||
+		isContextualIdentTok(la) || la == TokLet || la == TokYield ||
+		la == TokAwait || la == TokStatic || la == TokErr
+}
+
 // usingBeginsDeclaration reports whether a leading `using` token begins a
 // UsingDeclaration: it must be directly followed (no line terminator) by a
 // BindingIdentifier. `using [`, `using {`, `using` + newline, `using =`, and
@@ -3203,7 +3223,8 @@ func (p *parser) parseStmt() *Node {
 			if !declStart && !p.lookaheadCrossesLineTerminator() {
 				declStart = la == TokLBrace || la == TokIdentifier ||
 					isContextualIdentTok(la) || la == TokLet ||
-					la == TokYield || la == TokAwait || la == TokStatic
+					la == TokYield || la == TokAwait || la == TokStatic ||
+					la == TokErr // an escaped contextual keyword is a BindingIdentifier
 			}
 			if !declStart {
 				break // `let` is an identifier: fall to the expression statement
@@ -3215,10 +3236,7 @@ func (p *parser) parseStmt() *Node {
 			// (A line terminator is irrelevant here — `let` is not a restricted
 			// production — so `let\nx = 1` is still `let x = 1`. In strict mode `let`
 			// is reserved, so a non-declaration follow routes to parseVarDecl's error.)
-			la := p.la()
-			if la != TokLBracket && la != TokLBrace && la != TokIdentifier &&
-				!isContextualIdentTok(la) && la != TokLet && la != TokYield &&
-				la != TokAwait && la != TokStatic {
+			if !p.letBeginsDeclaration() {
 				break // `let` is an identifier: fall to the expression statement
 			}
 		}
@@ -3398,9 +3416,13 @@ func (p *parser) parseFor() *Node {
 		initNode = p.parseVarDecl(VarUsing, true)
 		p.noIn = false
 	} else if initNode == nil && (p.tok() == TokVar || p.tok() == TokConst ||
-		(p.tok() == TokLet && p.la() != TokIn)) {
+		(p.tok() == TokLet && p.la() != TokIn && (p.lx.strict || p.letBeginsDeclaration()))) {
 		// `for (let in …)` treats `let` as an identifier reference (sloppy mode), not
-		// a lexical declaration — the lookahead after `let` is `in`.
+		// a lexical declaration — the lookahead after `let` is `in`. The only
+		// lookahead restriction on the plain `for ( Expression ; ; )` head is
+		// `let [`, so `for (let; ;)` and `for (let = 1; ;)` are that production
+		// with `let` as an IdentifierReference. (In strict mode `let` is reserved,
+		// so it always routes to the declaration path and its error.)
 		kind := VarVar
 		if p.tok() == TokLet {
 			kind = VarLet
@@ -3459,7 +3481,7 @@ func (p *parser) parseFor() *Node {
 		// bare (unparenthesized) `async` immediately before `of` is a Syntax Error
 		// in a plain for-of, disambiguating it from an async arrow head.
 		if !isForAwait && initNode != nil && initNode.Kind == NIdent &&
-			initNode.Str == "async" && initNode.Flags&fnParen == 0 {
+			initNode.Str == "async" && initNode.Flags&(fnParen|nodeEscapedIdent) == 0 {
 			p.errorf("'async' may not be the left-hand side of a for-of statement")
 		}
 		p.validatePatternTarget(initNode)
