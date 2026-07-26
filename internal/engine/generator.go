@@ -306,6 +306,15 @@ func (rt *Runtime) asyncGenStep(g *genState, kind genResumeKind, val Value) {
 		// "constructor" is observable and its abrupt rejects the request.
 		awaited, e := rt.promiseResolve(rt.promiseCtor, val)
 		if e != nil {
+			// A generator suspended AT A YIELD awaits the return value inside the
+			// body (AsyncGeneratorUnwrapYieldResumption), so an abrupt from that
+			// await surfaces as a throw at the yield — where the body's own
+			// try/catch can see it. One that never started, or is done, has no
+			// yield to throw at, so its request just rejects.
+			if g.started && !g.completed {
+				rt.asyncGenResume(g, genThrow, e.Value)
+				return
+			}
 			rt.rejectPromise(req.po, e.Value)
 			rt.asyncGenFinishReq(g)
 			return
@@ -315,6 +324,11 @@ func (rt *Runtime) asyncGenStep(g *genState, kind genResumeKind, val Value) {
 			return mkundef(), nil
 		})
 		onR := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			// Likewise for a rejected return value: the throw lands at the yield.
+			if g.started && !g.completed {
+				rt.asyncGenResume(g, genThrow, arg(a, 0))
+				return mkundef(), nil
+			}
 			rt.rejectPromise(req.po, arg(a, 0))
 			rt.asyncGenFinishReq(g)
 			return mkundef(), nil
