@@ -338,6 +338,8 @@ func (rt *Runtime) NewRealm() *Runtime {
 		interned:       rt.interned,
 		symbolRegistry: rt.symbolRegistry,
 		symbolCounter:  rt.symbolCounter,
+		// The host resolves a specifier the same way in either realm.
+		moduleDir: rt.moduleDir,
 
 		symIterator:           rt.symIterator,
 		symAsyncIterator:      rt.symAsyncIterator,

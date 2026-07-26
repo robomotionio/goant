@@ -72,10 +72,16 @@ func (rt *Runtime) wrapRealmFunction(other *Runtime, fn Value) Value {
 	// A wrapped function copies the target's `length` and `name` — the only two
 	// of its properties that cross — as non-writable, configurable data.
 	if wo := rt.objPtr(w); wo != nil {
+		// CopyNameAndLength asks HasOwnProperty("length") first, which is what a
+		// Proxy's getOwnPropertyDescriptor trap sees — a throwing one must fail the
+		// wrap, even though a plain [[Get]] would have succeeded.
 		length := float64(0)
-		lv, le := other.getField(fn, "length")
-		if le == nil && lv.Type() == TNum && lv.Number() > 0 {
-			length = lv.Number()
+		hasLen, le := other.hasOwnPropertyOf(fn, "length")
+		if le == nil && hasLen {
+			var lv Value
+			if lv, le = other.getField(fn, "length"); le == nil && lv.Type() == TNum && lv.Number() > 0 {
+				length = lv.Number()
+			}
 		}
 		name := ""
 		nv, ne := other.getField(fn, "name")
