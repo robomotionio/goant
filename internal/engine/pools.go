@@ -33,7 +33,12 @@ type poolCell[T any] struct {
 
 // pool is a chunked non-moving arena of T.
 type pool[T any] struct {
-	chunks   [][]poolCell[T]
+	// chunks holds pointers to fixed-size arrays rather than slices. Resolving
+	// a handle is the single hottest indirection in the engine — every property
+	// access on an object goes through it — and an array pointer makes it one
+	// load and one bounds check instead of a slice header plus two, because the
+	// in-chunk index comes from a mask and is provably in range.
+	chunks   []*[poolChunkSize]poolCell[T]
 	freeList []Handle // stack of freed handles for reuse
 	next     Handle   // next never-used handle (starts at 1)
 	liveN    int
@@ -85,7 +90,7 @@ func (p *pool[T]) alloc() (Handle, *T) {
 func (p *pool[T]) ensure(h Handle) {
 	c, _ := p.locate(h)
 	for len(p.chunks) <= c {
-		p.chunks = append(p.chunks, make([]poolCell[T], poolChunkSize))
+		p.chunks = append(p.chunks, new([poolChunkSize]poolCell[T]))
 	}
 }
 
@@ -225,7 +230,7 @@ func (p *pool[T]) sweep(m markSet) int {
 	freed := 0
 	for c := range p.chunks {
 		base := Handle(c << poolChunkShift)
-		for s := range p.chunks[c] {
+		for s := 0; s < poolChunkSize; s++ {
 			h := base + Handle(s)
 			if h == nullHandle {
 				continue
