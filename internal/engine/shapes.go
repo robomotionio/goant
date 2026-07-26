@@ -97,6 +97,18 @@ type propKey struct {
 func strKey(interned string) propKey { return propKey{str: interned} }
 func symKey(off uint32) propKey      { return propKey{sym: true, off: off} }
 
+// eq compares two keys without going through the compiler's generated struct
+// equality, which the profile showed being called out of line.
+//
+// Names are interned, so the string comparison is settled by the pointer test
+// inside == and never reaches a byte compare.
+func (k propKey) eq(o propKey) bool {
+	if k.sym {
+		return o.sym && k.off == o.off
+	}
+	return !o.sym && k.str == o.str
+}
+
 // childKey keys a shape transition edge (property key + attributes).
 type childKey struct {
 	key   propKey
@@ -114,15 +126,32 @@ type shapeProp struct {
 	setter     Value
 }
 
+// shapeLinearMax is how many properties a shape holds before it builds a hash
+// index. Below it, lookup scans props.
+//
+// props is the source of truth either way; the map is a lookup accelerator that
+// most shapes never need. A JS object usually has a handful of named
+// properties, and for those the map is a pessimisation twice over: the scan
+// compares interned keys by pointer, where the map hashes the whole key string
+// first — that hash alone was 18% of Richards — and the map itself is an
+// allocation per shape, paid on every transition.
+//
+// Sixteen is where a scan of same-cost comparisons stops being obviously
+// cheaper than one hash; the objects that exceed it (the global object, a
+// dictionary built by hand) are exactly the ones that want the map.
+const shapeLinearMax = 16
+
 // shape is a hidden class (ant struct ant_shape).
 type shape struct {
 	refCount   uint32
 	inobjLimit uint8
 	props      []shapeProp
-	index      map[propKey]uint32
-	children   map[childKey]*shape
-	parent     *shape
-	parentKey  childKey
+	// index is nil until props outgrows shapeLinearMax, and complete from then
+	// on. Consult it only through lookup/addKey, which know that.
+	index     map[propKey]uint32
+	children  map[childKey]*shape
+	parent    *shape
+	parentKey childKey
 
 	// trKey/trChild/trSlot memoise the transition most recently taken out of
 	// this shape. Objects are overwhelmingly built the same way as the last one
@@ -162,7 +191,7 @@ func clampInobjLimit(limit uint8) uint8 {
 func (rt *Runtime) newShapeWithLimit(inobjLimit uint8) *shape {
 	c := clampInobjLimit(inobjLimit)
 	if rt.rootShapes[c] == nil {
-		rt.rootShapes[c] = &shape{refCount: 1, inobjLimit: c, index: map[propKey]uint32{}}
+		rt.rootShapes[c] = &shape{refCount: 1, inobjLimit: c}
 	}
 	rt.rootShapes[c].refCount++
 	return rt.rootShapes[c]
@@ -185,12 +214,12 @@ func (s *shape) release() {
 }
 
 func (s *shape) clone() *shape {
-	c := &shape{refCount: 1, inobjLimit: clampInobjLimit(s.inobjLimit), index: map[propKey]uint32{}}
+	c := &shape{refCount: 1, inobjLimit: clampInobjLimit(s.inobjLimit)}
 	if len(s.props) > 0 {
 		c.props = make([]shapeProp, len(s.props))
 		copy(c.props, s.props)
-		for i, p := range c.props {
-			c.index[p.key] = uint32(i)
+		if len(c.props) > shapeLinearMax {
+			c.buildIndex()
 		}
 	}
 	return c
@@ -206,10 +235,27 @@ func (s *shape) lookup(key propKey) int32 {
 	if s == nil {
 		return -1
 	}
+	if s.index == nil {
+		for i := range s.props {
+			if s.props[i].key.eq(key) {
+				return int32(i)
+			}
+		}
+		return -1
+	}
 	if slot, ok := s.index[key]; ok {
 		return int32(slot)
 	}
 	return -1
+}
+
+// buildIndex populates the hash index from props. Called when a shape grows
+// past shapeLinearMax, and when a clone starts out already that large.
+func (s *shape) buildIndex() {
+	s.index = make(map[propKey]uint32, len(s.props)+4)
+	for i := range s.props {
+		s.index[s.props[i].key] = uint32(i)
+	}
 }
 
 func (s *shape) lookupInterned(interned string) int32 { return s.lookup(strKey(interned)) }
@@ -221,17 +267,19 @@ func (s *shape) addKey(key propKey, attrs uint8) (uint32, bool) {
 	if s == nil {
 		return 0, false
 	}
-	if slot, ok := s.index[key]; ok {
+	if slot := s.lookup(key); slot >= 0 {
 		s.props[slot].attrs = attrs
 		icEpochBump()
-		return slot, true
+		return uint32(slot), true
 	}
 	slot := uint32(len(s.props))
 	s.props = append(s.props, shapeProp{key: key, attrs: attrs})
-	if s.index == nil {
-		s.index = map[propKey]uint32{}
+	switch {
+	case s.index != nil:
+		s.index[key] = slot
+	case len(s.props) > shapeLinearMax:
+		s.buildIndex()
 	}
-	s.index[key] = slot
 	return slot, true
 }
 
@@ -358,11 +406,17 @@ func (s *shape) removeSlot(slot uint32) (ok bool) {
 	// memoised transition cannot already be in use — but clearing it keeps that
 	// true for any future caller, since the slots it hands out are about to move.
 	s.trChild = nil
-	delete(s.index, s.props[slot].key)
+	gone := s.props[slot].key
 	copy(s.props[slot:], s.props[slot+1:])
 	s.props = s.props[:len(s.props)-1]
-	for i := int(slot); i < len(s.props); i++ {
-		s.index[s.props[i].key] = uint32(i)
+	if s.index != nil {
+		// Shrinking back below the threshold does not drop the index: a shape
+		// that once needed it is likely to need it again, and lookup works off
+		// whichever representation is present.
+		delete(s.index, gone)
+		for i := int(slot); i < len(s.props); i++ {
+			s.index[s.props[i].key] = uint32(i)
+		}
 	}
 	icEpochBump()
 	return true

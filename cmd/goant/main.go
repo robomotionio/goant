@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/pprof"
 	"strings"
 
 	"github.com/robomotionio/goant/internal/engine"
@@ -24,8 +25,23 @@ func main() {
 		module  = flag.Bool("module", false, "run the file as a Module (strict, this===undefined)")
 		prelude = flag.String("prelude", "", "comma-separated script files to run (as scripts) before the module")
 		modBase = flag.String("module-base", "", "directory that import specifiers resolve against (for scripts using import())")
+		cpuProf = flag.String("cpuprofile", "", "write a CPU profile to this file")
 	)
 	flag.Parse()
+
+	if *cpuProf != "" {
+		f, err := os.Create(*cpuProf)
+		if err != nil {
+			fatal(err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fatal(err)
+		}
+		// Every exit below goes through os.Exit, which skips defers, so the
+		// profile has to be flushed on the way out of each of them instead.
+		defer stopProfile()
+		profiling = true
+	}
 
 	var src, name string
 	switch {
@@ -86,7 +102,19 @@ func main() {
 	}
 }
 
+// profiling records whether a CPU profile is running, so the exit paths know
+// they have to flush it before os.Exit discards the deferred stop.
+var profiling bool
+
+func stopProfile() {
+	if profiling {
+		pprof.StopCPUProfile()
+		profiling = false
+	}
+}
+
 func reportAndExit(err error) {
+	stopProfile()
 	var exit *engine.ExitError
 	if errors.As(err, &exit) {
 		os.Exit(exit.Code)
@@ -96,6 +124,7 @@ func reportAndExit(err error) {
 }
 
 func fatal(err error) {
+	stopProfile()
 	fmt.Fprintln(os.Stderr, "goant:", err)
 	os.Exit(1)
 }
