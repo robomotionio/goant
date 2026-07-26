@@ -222,6 +222,33 @@ func modifiedDotAll(rs []rune, i int, outer bool) bool {
 	return outer
 }
 
+// annexBIdentityEscapes rewrites the escapes regexp2 gives a .NET meaning but
+// ECMAScript's Annex B IdentityEscape leaves as the plain character: `\a` is BEL
+// in .NET and the letter "a" here, and `\A` / `\Z` / `\z` / `\G` are .NET
+// anchors. (In Unicode mode these are early errors, rejected before this.)
+func annexBIdentityEscapes(src string) string {
+	if !strings.Contains(src, `\`) {
+		return src
+	}
+	rs := []rune(src)
+	var out strings.Builder
+	for i := 0; i < len(rs); i++ {
+		if rs[i] != '\\' || i+1 >= len(rs) {
+			out.WriteRune(rs[i])
+			continue
+		}
+		switch rs[i+1] {
+		case 'a', 'e', 'A', 'Z', 'z', 'G':
+			out.WriteRune(rs[i+1])
+		default:
+			out.WriteRune(rs[i])
+			out.WriteRune(rs[i+1])
+		}
+		i++
+	}
+	return out.String()
+}
+
 // maxQuantifier bounds a `{n}` / `{n,}` / `{n,m}` count. ES puts no limit on
 // DecimalDigits, but regexp2 mis-parses anything past its own integer range, and
 // a count this large can only be satisfied by a subject longer than any string
@@ -513,6 +540,7 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	// astral ClassRange endpoint becomes the out-of-order range ES rejects.)
 	if !r.Unicode {
 		src = splitAstralLiterals(src)
+		src = annexBIdentityEscapes(src)
 	} else {
 		src = joinSurrogateEscapes(src)
 	}

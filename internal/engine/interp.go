@@ -1937,13 +1937,21 @@ restart:
 			scopeIdx := int(readU16(code, ip+1))
 			// The high bit marks a call site in tail position (evalTailFlag).
 			evalTail := scopeIdx&evalTailFlag != 0
-			scopeIdx &^= evalTailFlag
+			evalWithThis := scopeIdx&evalWithThisFlag != 0
+			scopeIdx &^= evalTailFlag | evalWithThisFlag
 			argc := int(readU16(code, ip+3))
 			evalArgs := make([]Value, argc)
 			for i := argc - 1; i >= 0; i-- {
 				evalArgs[i] = pop()
 			}
 			callee := pop()
+			// A callee read through a `with` chain carries the WithBaseObject as its
+			// `this`; it only matters when the with-object shadowed %eval% and this
+			// turns out to be an ordinary call.
+			evalThis := mkundef()
+			if evalWithThis {
+				evalThis = pop()
+			}
 			var (
 				ret Value
 				e   *ThrowError
@@ -1957,12 +1965,12 @@ restart:
 						if cl2 := rt.closures.get(o.closure); cl2 != nil &&
 							!cl2.fn.isGenerator && !cl2.fn.isAsync && !cl2.fn.isClassCtor {
 							closeAll()
-							fn, cl, fnVal, thisVal, args = cl2.fn, cl2, callee, mkundef(), evalArgs
+							fn, cl, fnVal, thisVal, args = cl2.fn, cl2, callee, evalThis, evalArgs
 							goto restart
 						}
 					}
 				}
-				ret, e = rt.callValue(callee, mkundef(), evalArgs)
+				ret, e = rt.callValue(callee, evalThis, evalArgs)
 			case argc == 0:
 				ret = mkundef()
 			case !evalArgs[0].IsString():

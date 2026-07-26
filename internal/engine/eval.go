@@ -156,12 +156,10 @@ func (c *compiler) isDirectEvalCall(n *Node) bool {
 	if n.Left == nil || n.Left.Kind != NIdent || n.Left.Str != "eval" {
 		return false
 	}
-	// A with-object may shadow `eval`, so a reference routed through one is not
-	// statically the intrinsic: goant treats it as an ordinary call (which, in tail
-	// position, is a proper tail call).
-	if c.withDepth != 0 || (c.realWith && c.resolveLocal("eval") < 0) {
-		return false
-	}
+	// A with-object may shadow `eval`, but only at RUN time — the call site is
+	// still a direct eval when it does not. The callee is read through the with
+	// chain (leaving its `this`) and OpEval checks it against the intrinsic,
+	// falling back to an ordinary call when the with-object supplied its own.
 	return c.resolveLocal("eval") < 0 && c.resolveUpvalue("eval") < 0
 }
 
@@ -371,7 +369,12 @@ func (c *compiler) compileDirectEvalAt(n *Node, tail bool) {
 		idx |= evalTailFlag
 	}
 
-	c.compileExpr(n.Left) // callee (the `eval` reference) — verified at run time
+	if c.nameIsWithRouted("eval") {
+		idx |= evalWithThisFlag
+		c.emitWithVarCallee("eval") // [this, callee]
+	} else {
+		c.compileExpr(n.Left) // callee (the `eval` reference) — verified at run time
+	}
 	for _, arg := range n.Args {
 		c.compileExpr(arg)
 	}
@@ -380,9 +383,14 @@ func (c *compiler) compileDirectEvalAt(n *Node, tail bool) {
 	c.emitU16(uint16(len(n.Args)))
 }
 
-// evalTailFlag marks an OpEval whose call site is in tail position. Scope
-// indices are per-function and small, so the high bit is free.
-const evalTailFlag = 0x8000
+// evalTailFlag marks an OpEval whose call site is in tail position, and
+// evalWithThisFlag one whose callee was read through a `with` chain, so a
+// WithBaseObject `this` sits under it. Scope indices are per-function and small,
+// so the two high bits are free.
+const (
+	evalTailFlag     = 0x8000
+	evalWithThisFlag = 0x4000
+)
 
 // compileDirectEvalSpread emits a direct eval whose argument list contains a
 // spread (`eval(...iter)`): build the full argument array (which iterates the
@@ -393,7 +401,12 @@ func (c *compiler) compileDirectEvalSpread(n *Node) {
 	idx := len(c.fn.evalScopes)
 	c.fn.evalScopes = append(c.fn.evalScopes, sc)
 
-	c.compileExpr(n.Left)      // callee (the `eval` reference), verified at run time
+	if c.nameIsWithRouted("eval") {
+		idx |= evalWithThisFlag
+		c.emitWithVarCallee("eval") // [this, callee]
+	} else {
+		c.compileExpr(n.Left) // callee (the `eval` reference), verified at run time
+	}
 	c.buildSpreadArray(n.Args) // [callee, argsArray]
 	c.compileNumberLiteral(0)  // [callee, argsArray, 0]
 	c.emit(OpGetElem)          // [callee, argsArray[0] | undefined]
