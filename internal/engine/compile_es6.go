@@ -1099,19 +1099,23 @@ func (c *compiler) compileClass(n *Node) {
 	c.emit(OpPop)
 	c.emit(OpPop)
 
+	// ClassDefinitionEvaluation evaluates every element in source order — which
+	// for a field means only its computed KEY — and runs the static elements'
+	// initializers afterwards, in their own source order. staticElements records
+	// them; keySlot >= 0 names the class-scope local holding a pre-evaluated
+	// computed key.
+	type staticElement struct {
+		m       *Node
+		keySlot int
+		name    string
+	}
+	var staticElements []staticElement
 	// Define methods (skip the constructor; it's already the ctor function).
 	for _, m := range n.Args {
 		if m.Kind == NStaticBlock {
-			// Static initialization block: run its body with this = the class.
-			body := &Node{Kind: NBlock, Args: m.Args}
-			blockFn := &Node{Kind: NFunc, Body: body, Flags: fnClassBody}
-			c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // this
-			c.pendingStaticSuper = true               // a static block's home is the constructor
-			c.pendingClassDerived = n.Left != nil
-			c.compileFunc(blockFn) // func
-			c.emit(OpCallMethod)                      // [this, func] -> result
-			c.emitU16(0)
-			c.emit(OpPop)
+			// A static initialization block runs with the static field initializers,
+			// interleaved with them in source order.
+			staticElements = append(staticElements, staticElement{m: m, keySlot: -1})
 			continue
 		}
 		if m.Kind != NMethod {
@@ -1155,30 +1159,23 @@ func (c *compiler) compileClass(n *Node) {
 				c.emit(OpPop)
 				continue
 			}
-			// Computed data method / field: target[key] = value.
-			c.emitOpU16(OpGetLocal, uint16(target)) // [target]
-			c.compileExpr(m.Left)                   // [target, key]
-			if m.Right != nil && m.Right.Kind == NFunc && m.Right.Flags&fnMethod != 0 {
-				// A computed method is a non-enumerable data property whose name is
-				// the key (DefineMethod → SetFunctionName), not an ordinary [k]=v.
-				c.compileFunc(m.Right)
-				c.emit(OpDefineMethodComp)
-				c.emitByte(0) // data method
-				c.emit(OpPop)
+			// A computed STATIC FIELD: only its key is evaluated here, in source
+			// order; the initializer runs with the other static elements below.
+			if isClassFieldMember(m) {
+				slot := c.addLocal("*sfk"+strconv.Itoa(len(staticElements))+"*", false)
+				c.compileExpr(m.Left)
+				c.emit(OpToPropkey)
+				c.emitOpU16(OpPutLocal, uint16(slot))
+				staticElements = append(staticElements, staticElement{m: m, keySlot: slot})
 				continue
 			}
-			if m.Right != nil && m.Right.Kind == NFunc {
-				c.compileFunc(m.Right)
-			} else {
-				c.compileExpr(m.Right)
-			}
-			// A class field is installed with CreateDataPropertyOrThrow (a
-			// [[DefineOwnProperty]], not a [[Set]]), so a static computed field named
-			// "prototype" — a non-configurable own property of the constructor — throws
-			// a TypeError rather than silently failing. DEFINE_METHOD_COMP flags=3 is
-			// exactly that enumerable-own-data-property define.
+			// Computed data method: a non-enumerable data property whose name is the
+			// key (DefineMethod → SetFunctionName), not an ordinary [k]=v.
+			c.emitOpU16(OpGetLocal, uint16(target)) // [target]
+			c.compileExpr(m.Left)                   // [target, key]
+			c.compileFunc(m.Right)
 			c.emit(OpDefineMethodComp)
-			c.emitByte(3)
+			c.emitByte(0) // data method
 			c.emit(OpPop)
 			continue
 		}
@@ -1194,21 +1191,7 @@ func (c *compiler) compileClass(n *Node) {
 		// where `this` and `super` mean the constructor.
 		if m.Right != nil && isClassFieldMember(m) {
 			if m.Flags&fnStatic != 0 {
-				// A static field initializer is evaluated with this = the class F, so
-				// `this` (and arrows capturing it) see the constructor. Wrap it in a
-				// class-body function invoked with the constructor as receiver, like a
-				// static block. NamedEvaluation still names an anonymous value from key.
-				nameAnonExpr(m.Right, name)
-				initFn := &Node{Kind: NFunc, Flags: fnClassBody, Body: &Node{Kind: NBlock, Args: []*Node{{Kind: NReturn, Right: m.Right}}}}
-				c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // [ctor]  (define target)
-				c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // [ctor, this]
-				c.pendingStaticSuper = true
-				c.pendingClassDerived = n.Left != nil
-				c.compileFunc(initFn)   // [ctor, this, initFn]
-				c.emit(OpCallMethod)    // [ctor, value]
-				c.emitU16(0)
-				c.emitDefineField(name) // ctor[name] = value -> [ctor]
-				c.emit(OpPop)
+				staticElements = append(staticElements, staticElement{m: m, keySlot: -1, name: name})
 				continue
 			}
 			c.emitOpU16(OpGetLocal, uint16(target))
@@ -1240,6 +1223,51 @@ func (c *compiler) compileClass(n *Node) {
 		c.emit(OpDefineMethod)
 		c.emitU32(uint32(idx))
 		c.emitByte(flags)
+		c.emit(OpPop)
+	}
+
+	// Static elements: field initializers and static blocks, in source order,
+	// after every element's key has been evaluated. Each runs with `this` bound to
+	// the constructor, so an arrow inside one captures the class.
+	for _, se := range staticElements {
+		m := se.m
+		if m.Kind == NStaticBlock {
+			body := &Node{Kind: NBlock, Args: m.Args}
+			blockFn := &Node{Kind: NFunc, Body: body, Flags: fnClassBody}
+			c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // this
+			c.pendingStaticSuper = true               // a static block's home is the constructor
+			c.pendingClassDerived = n.Left != nil
+			c.compileFunc(blockFn) // func
+			c.emit(OpCallMethod)   // [this, func] -> result
+			c.emitU16(0)
+			c.emit(OpPop)
+			continue
+		}
+		// A static field initializer is wrapped in a class-body function invoked
+		// with the constructor as receiver, like a static block. NamedEvaluation
+		// still names an anonymous value from the key.
+		if se.keySlot < 0 {
+			nameAnonExpr(m.Right, se.name)
+		}
+		initFn := &Node{Kind: NFunc, Flags: fnClassBody, Body: &Node{Kind: NBlock, Args: []*Node{{Kind: NReturn, Right: m.Right}}}}
+		c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // [ctor] (define target)
+		if se.keySlot >= 0 {
+			c.emitOpU16(OpGetLocal, uint16(se.keySlot)) // [ctor, key]
+		}
+		c.emitOpU16(OpGetLocal, uint16(ctorSlot)) // [… , this]
+		c.pendingStaticSuper = true
+		c.pendingClassDerived = n.Left != nil
+		c.compileFunc(initFn) // [… , this, initFn]
+		c.emit(OpCallMethod)  // [… , value]
+		c.emitU16(0)
+		if se.keySlot >= 0 {
+			// CreateDataPropertyOrThrow on a computed key: a static field named
+			// "prototype" is a TypeError rather than a silent failure.
+			c.emit(OpDefineMethodComp)
+			c.emitByte(3)
+		} else {
+			c.emitDefineField(se.name)
+		}
 		c.emit(OpPop)
 	}
 
