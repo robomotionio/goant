@@ -702,20 +702,49 @@ func (c *compiler) compileSuperCall(n *Node) {
 	// super(...) constructs the parent with the derived class's new.target and
 	// binds the resulting object as `this` (so subclassing an exotic native like
 	// Function/Array/Error yields the native object rather than an ordinary one).
+	// [[Construct]] the parent with the DERIVED constructor's new.target, which an
+	// arrow nested in the constructor reaches through the *newtarget* binding —
+	// its own frame has none.
+	if slot := c.resolveLocal("*newtarget*"); slot >= 0 {
+		c.emitOpU16(OpGetLocal, uint16(slot))
+	} else if uv := c.resolveUpvalue("*newtarget*"); uv >= 0 {
+		c.emitOpU16(OpGetUpval, uint16(uv))
+	} else {
+		c.emit(OpSpecialObj)
+		c.emitByte(2)
+	}
 	// Push the running class's constructor; OpSuperApply takes its [[Prototype]]
 	// so a class whose prototype was reassigned calls the new parent.
-	if !c.resolveClassBinding("*classctor*") { // [classctor]
+	if !c.resolveClassBinding("*classctor*") { // [newtarget, classctor]
 		c.syntaxErrorf("'super' keyword unexpected here")
 		return
 	}
-	c.buildSpreadArray(n.Args) // [superctor, argsArray]
-	c.emit(OpSuperApply)       // -> [constructedThis]
-	c.emitU16(0)
+	c.buildSpreadArray(n.Args) // [newtarget, classctor, argsArray]
+	// BindThisValue: a second super() for the same `this` is a ReferenceError,
+	// but only AFTER the parent has been constructed again (observable). Tell
+	// OpSuperApply which binding holds `this` so it can make that check itself —
+	// reading it raw, since an uninitialised `this` IS the empty value and an
+	// ordinary load would report a temporal dead zone. Naming the same binding
+	// the store below writes covers a super() nested in an arrow, which reaches
+	// the constructor's `this` through an upvalue.
+	thisLocal, thisUpval := c.resolveLocal("*this*"), -1
+	if thisLocal < 0 {
+		thisUpval = c.resolveUpvalue("*this*")
+	}
+	thisRef := uint16(0)
+	switch {
+	case thisLocal >= 0 && thisLocal < superThisIndexMax:
+		thisRef = superThisLocal | uint16(thisLocal)
+	case thisUpval >= 0 && thisUpval < superThisIndexMax:
+		thisRef = superThisUpval | uint16(thisUpval)
+	}
+	c.emit(OpSuperApply) // -> [constructedThis]
+	c.emitU16(thisRef)
 	// Bind the constructed object as `this`, leaving it as the call's value.
-	if slot := c.resolveLocal("*this*"); slot >= 0 {
-		c.emitOpU16(OpSetLocal, uint16(slot))
-	} else if uv := c.resolveUpvalue("*this*"); uv >= 0 {
-		c.emitOpU16(OpSetUpval, uint16(uv))
+	if thisLocal >= 0 {
+		c.emitOpU16(OpSetLocal, uint16(thisLocal))
+	} else if thisUpval >= 0 {
+		c.emitOpU16(OpSetUpval, uint16(thisUpval))
 	}
 	// A derived class initializes its instance fields immediately after super()
 	// binds `this` (InitializeInstanceElements). classFields is set only on the

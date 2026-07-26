@@ -1982,6 +1982,7 @@ restart:
 			// ArgumentListEvaluation, which the spec performs first — is not
 			// observable, and the IsConstructor check that follows is in order.
 			classCtor := pop()
+			superNewTarget := pop()
 			superctor, sce := rt.getPrototypeOfValue(classCtor)
 			if sce != nil {
 				thrown = sce
@@ -2000,19 +2001,28 @@ restart:
 					}
 				}
 			}
-			ret, e := rt.constructWithTarget(superctor, callArgs, rt.activeNewTarget)
+			ret, e := rt.constructWithTarget(superctor, callArgs, superNewTarget)
 			if e != nil {
 				thrown = e
 				goto unwind
 			}
-			// BindThisValue: a second super() in the same derived constructor throws
-			// a ReferenceError (the parent is still constructed first, per spec). The
-			// guard is limited to the constructor frame itself — a super() nested in
-			// an arrow binds the enclosing ctor's `this` via an upvalue, not this
-			// frame's thisSlot.
-			if fn.isDerivedCtor && fn.thisSlot >= 0 && fn.thisSlot < len(locals) && !locals[fn.thisSlot].IsEmpty() {
-				thrown = rt.referenceError("Super constructor may only be called once per derived class constructor")
-				goto unwind
+			// BindThisValue: the constructor's `this` must still be uninitialised.
+			// The compiler names the binding in the inline operand (see
+			// superThisLocal / superThisUpval), read raw because "uninitialised" IS
+			// the empty value here.
+			if ref := readU16(code, ip+1); ref != 0 {
+				idx := int(ref & (superThisIndexMax - 1))
+				bound := false
+				switch ref & superThisKindMask {
+				case superThisLocal:
+					bound = idx < len(locals) && !locals[idx].IsEmpty()
+				case superThisUpval:
+					bound = cl != nil && idx < len(cl.upvalues) && !cl.upvalues[idx].get().IsEmpty()
+				}
+				if bound {
+					thrown = rt.referenceError("Super constructor may only be called once per derived class constructor")
+					goto unwind
+				}
 			}
 			push(ret)
 			ip += 3
@@ -2165,6 +2175,18 @@ restart:
 		continue
 	}
 }
+
+// OpSuperApply's inline operand names the binding holding the constructor's
+// `this`, so it can perform BindThisValue's already-initialised check: the top
+// two bits select local or upvalue, the rest is the index. Zero means "no
+// binding found", which only happens for a super() the compiler could not
+// resolve (and which is an early error anyway).
+const (
+	superThisKindMask uint16 = 0xC000
+	superThisLocal    uint16 = 0x4000
+	superThisUpval    uint16 = 0x8000
+	superThisIndexMax        = 0x4000
+)
 
 // tryHandler records a live catch/finally handler (ant handler stack).
 type tryHandler struct {
