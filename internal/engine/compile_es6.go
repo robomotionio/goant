@@ -318,24 +318,86 @@ func (c *compiler) destructureObject(pattern *Node, src int, kind VarKind) {
 			// { [expr]: target }: read src[ToPropertyKey(expr)]. Evaluate the key
 			// once and remember the resulting property key so a trailing ...rest
 			// excludes it (a computed key may have side effects — no re-evaluation).
-			c.emitOpU16(OpGetLocal, uint16(src)) // [src]
-			c.compileExpr(prop.Left)             // [src, key]
-			c.emit(OpToPropkey)                  // [src, propKey]
+			c.compileExpr(prop.Left) // [key]
+			c.emit(OpToPropkey)      // [propKey]
 			keySlot := c.addLocal("*restkey*", false)
-			c.emit(OpDup)                            // [src, propKey, propKey]
-			c.emitOpU16(OpPutLocal, uint16(keySlot)) // [src, propKey]
+			c.emitOpU16(OpPutLocal, uint16(keySlot)) // []
 			computedKeySlots = append(computedKeySlots, keySlot)
+			// A member target's reference is evaluated BEFORE the source property is
+			// read, so its object and key are observed ahead of the source's getter.
+			tObj, tKey, isMember := c.prepareMemberTarget(target)
+			c.emitOpU16(OpGetLocal, uint16(src))
+			c.emitOpU16(OpGetLocal, uint16(keySlot))
 			c.emit(OpGetElem) // [val]
 			c.applyDefault(defExpr)
-			c.destructureTarget(target, kind)
+			if isMember {
+				c.storeMemberTarget(target, tObj, tKey)
+			} else {
+				c.destructureTarget(target, kind)
+			}
 			continue
 		}
 		priorKeys = append(priorKeys, name)
+		tObj, tKey, isMember := c.prepareMemberTarget(target)
 		c.emitOpU16(OpGetLocal, uint16(src))
 		c.emitFieldOp(OpGetField, name)
 		c.applyDefault(defExpr)
+		if isMember {
+			c.storeMemberTarget(target, tObj, tKey)
+			continue
+		}
 		c.destructureTarget(target, kind)
 	}
+}
+
+// prepareMemberTarget evaluates a destructuring target that is a member
+// reference (`{p: obj[k]} = src`) into temporaries, WITHOUT consuming a value.
+// The reference is evaluated before the source property is read — the spec
+// evaluates the DestructuringAssignmentTarget first — so `obj` and `k` are seen
+// before the source's getter runs. ok is false for any other target shape.
+func (c *compiler) prepareMemberTarget(target *Node) (objSlot, keySlot int, ok bool) {
+	// A name resolved through an object environment has an observable reference
+	// too (the with-object's HasProperty), and it is resolved before the source is
+	// read. Leave its base on the stack for storeMemberTarget's paired write.
+	if target != nil && target.Kind == NIdent && c.nameIsWithRouted(target.Str) {
+		c.emitWithVarBase(target.Str)
+		return -1, -1, true
+	}
+	if target == nil || target.Kind != NMember {
+		return 0, 0, false
+	}
+	objSlot = c.tempLocal()
+	c.compileExpr(target.Left)
+	c.emitOpU16(OpPutLocal, uint16(objSlot))
+	keySlot = -1
+	if target.Flags&1 != 0 { // computed
+		keySlot = c.tempLocal()
+		c.compileExpr(target.Right)
+		c.emit(OpToPropkey)
+		c.emitOpU16(OpPutLocal, uint16(keySlot))
+	}
+	return objSlot, keySlot, true
+}
+
+// storeMemberTarget writes the top-of-stack value through a reference prepared
+// by prepareMemberTarget.
+func (c *compiler) storeMemberTarget(target *Node, objSlot, keySlot int) {
+	if objSlot < 0 { // with-routed identifier: [base, value] on the stack
+		c.emitWithVarRef(OpWithPutVar, target.Str)
+		c.emit(OpPop)
+		return
+	}
+	vSlot := c.tempLocal()
+	c.emitOpU16(OpPutLocal, uint16(vSlot))
+	c.emitOpU16(OpGetLocal, uint16(objSlot))
+	if keySlot >= 0 {
+		c.emitOpU16(OpGetLocal, uint16(keySlot))
+		c.emitOpU16(OpGetLocal, uint16(vSlot))
+		c.emit(OpPutElem)
+		return
+	}
+	c.emitOpU16(OpGetLocal, uint16(vSlot))
+	c.emitFieldOp(OpPutField, target.Right.Str)
 }
 
 // applyDefault replaces the top-of-stack value with defExpr if it is undefined.
