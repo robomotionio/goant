@@ -32,7 +32,11 @@ func newValueOn(r *engine.Runtime, v interface{}) (*Value, error) {
 	case nil:
 		return wrap(r, r.Null()), nil
 	case string:
-		return wrap(r, r.NewString(x)), nil
+		// Deliberately not interned. A host passes arbitrary data through here —
+		// message payloads above all — and the intern table is permanent and
+		// shared by every context on the isolate, so interning would retain every
+		// distinct string the host ever handed over.
+		return wrap(r, r.NewStringData(x)), nil
 	case bool:
 		return wrap(r, r.NewBool(x)), nil
 	case float64:
@@ -86,12 +90,20 @@ func Null(i *Isolate) *Value {
 	return wrap(r, r.Null())
 }
 
-// NewExternalOneByteValue creates a string value from Latin-1 bytes. Under V8
-// this avoided a copy by pinning the caller's buffer, which meant the caller
-// had to keep it alive and unmodified. goant copies, so the buffer is NOT
-// retained — the same call is simply safer here.
+// NewExternalOneByteValue creates a string value from bytes without copying
+// them. Under V8 this pinned the caller's buffer to avoid a copy of a large
+// payload; here the engine stores strings as bytes already, so it can simply
+// take the slice.
+//
+// The contract is the same one V8's external strings had, and it is real: the
+// caller must not modify data afterwards. JS strings are immutable and the
+// engine reads this slice directly.
 func NewExternalOneByteValue(i *Isolate, data []byte) (*Value, error) {
-	return NewValue(i, string(data))
+	r, err := i.runtime()
+	if err != nil {
+		return nil, err
+	}
+	return wrap(r, r.NewStringBytes(data)), nil
 }
 
 // Valuer is anything that can produce a Value.

@@ -200,6 +200,19 @@ func (i *Isolate) ThrowException(v *Value) *Value {
 	return nil
 }
 
+// InternedStrings returns how many strings are pinned in this isolate's intern
+// table. The table is permanent, so this only rises; a host can watch it to
+// tell memory that is merely uncollected from memory that can never be freed.
+func (i *Isolate) InternedStrings() int {
+	i.mu.Lock()
+	rt := i.rt
+	i.mu.Unlock()
+	if rt == nil {
+		return 0
+	}
+	return rt.InternedCount()
+}
+
 // AddNearHeapLimitCallback is a no-op: there is no V8 heap limit to approach.
 // Kept so V8-tuned call sites compile unchanged.
 func (i *Isolate) AddNearHeapLimitCallback() {}

@@ -69,7 +69,28 @@ func (rt *Runtime) Undefined() Value { return mkundef() }
 func (rt *Runtime) Null() Value      { return mknull() }
 
 // NewString interns s and returns it as a JS string.
+//
+// Interning makes the string canonical, which is what property keys and
+// identifiers need — but the intern table is permanent and shared by every
+// realm on this runtime, so an interned string is never reclaimed. Use this
+// only for names, never for data.
 func (rt *Runtime) NewString(s string) Value { return rt.internString(s) }
+
+// NewStringData returns s as a JS string without interning it.
+//
+// This is the right constructor for host data — a message payload, a file's
+// contents, anything large or unbounded in variety. Interning such a string
+// would pin it in the runtime's intern table for the process's life: a host
+// that passes in a distinct 50 MB message per call would retain every one of
+// them forever, which is the difference between a working embedding and one
+// that dies overnight.
+func (rt *Runtime) NewStringData(s string) Value { return rt.newString(s) }
+
+// NewStringBytes returns b as a JS string without interning it, taking
+// ownership of the slice rather than copying it. The caller must not modify b
+// afterwards — JS strings are immutable and the engine will read it directly.
+// This is the zero-copy path a cgo binding could not offer.
+func (rt *Runtime) NewStringBytes(b []byte) Value { return rt.newStringBytes(b) }
 
 // NewNumber and NewBool wrap Go primitives.
 func (rt *Runtime) NewNumber(f float64) Value { return mknum(f) }
@@ -243,6 +264,19 @@ func (rt *Runtime) HeapUsage() (cells int, bytes uint64) {
 		uint64(rt.closures.len())*uint64(unsafe.Sizeof(closure{})) +
 		uint64(rt.bigints.len())*uint64(unsafe.Sizeof(bigIntCell{}))
 	return n, b
+}
+
+// InternedCount returns how many strings are in this runtime's intern table.
+//
+// The table is permanent and shared by every realm, so this number only rises.
+// It is exposed so a host can tell the difference between memory that is merely
+// uncollected and memory that is pinned forever — and so a test can prove that
+// passing data in does not pin it.
+func (rt *Runtime) InternedCount() int {
+	if rt == nil {
+		return 0
+	}
+	return len(rt.interned)
 }
 
 // NewError builds an Error object with the given message, for a host function
