@@ -508,6 +508,19 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		// bare `var x;` binds and eval-created globals are deletable.
 		names := map[string]bool{}
 		collectVarFuncNames(prog.Args, names)
+		// A top-level `class` in eval code is a LEXICAL declaration of the eval's
+		// own declarative environment — it binds nothing on the global object and
+		// is gone once the eval returns.
+		for _, lex := range topLevelLexicalNames(prog.Args) {
+			delete(names, lex)
+		}
+		// EvalDeclarationInstantiation step 5.a.i: a sloppy eval will not create a
+		// global var that a global LEXICAL declaration would shadow.
+		for name := range names {
+			if rt.lookupGlobalLex(name) != nil {
+				return nil, &SyntaxError{Msg: "Identifier '" + name + "' has already been declared"}
+			}
+		}
 		g := rt.objPtr(rt.global)
 		for name := range names {
 			if !g.hasOwn(name) {

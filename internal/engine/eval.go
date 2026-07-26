@@ -31,6 +31,8 @@ type evalBinding struct {
 	isConst   bool
 	selfName  bool // a named function expression's immutable self-reference (reassignment: strict TypeError / sloppy no-op)
 	isLexical bool // a let/const/class binding — an eval `var` may not shadow it
+	catchParam bool // a simple identifier catch parameter: Annex B.3.4 lets an
+	// eval'd `var` (or FunctionDeclaration) of the same name coexist with it
 }
 
 // evalScope is the compile-time snapshot of the lexical context at one direct
@@ -180,7 +182,7 @@ func (c *compiler) captureEvalScope() *evalScope {
 			continue
 		}
 		seen[lv.name] = true
-		sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindLocal, slot: i, isConst: lv.isConst, selfName: lv.selfName, isLexical: lv.blockScoped})
+		sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindLocal, slot: i, isConst: lv.isConst, selfName: lv.selfName, isLexical: lv.blockScoped, catchParam: lv.catchParam})
 	}
 	for i, u := range c.upvalues {
 		if seen[u.name] || !borrowableName(u.name) {
@@ -199,7 +201,7 @@ func (c *compiler) captureEvalScope() *evalScope {
 			}
 			seen[lv.name] = true
 			if uv := c.resolveUpvalue(lv.name); uv >= 0 {
-				sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindUpval, slot: uv, isConst: c.upvalues[uv].isConst, selfName: c.upvalues[uv].selfName, isLexical: lv.blockScoped})
+				sc.bindings = append(sc.bindings, evalBinding{name: lv.name, kind: evalBindUpval, slot: uv, isConst: c.upvalues[uv].isConst, selfName: c.upvalues[uv].selfName, isLexical: lv.blockScoped, catchParam: lv.catchParam})
 			}
 		}
 	}
@@ -621,6 +623,11 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 		var varNames map[string]bool
 		for _, b := range sc.bindings {
 			if !b.isLexical {
+				continue
+			}
+			// Annex B.3.4: the Catch clause's environment record is exempt, so
+			// `catch (err) { eval("var err;") }` is legal.
+			if b.catchParam {
 				continue
 			}
 			if varNames == nil {
