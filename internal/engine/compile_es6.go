@@ -371,9 +371,12 @@ func (c *compiler) prepareMemberTarget(target *Node) (objSlot, keySlot int, ok b
 	c.emitOpU16(OpPutLocal, uint16(objSlot))
 	keySlot = -1
 	if target.Flags&1 != 0 { // computed
+		// The key expression is EVALUATED here, with the reference, but not
+		// coerced: EvaluatePropertyAccessWithExpressionKey leaves the raw value as
+		// the Reference's [[ReferencedName]], and ToPropertyKey runs in the paired
+		// PutValue — after the source property has been read.
 		keySlot = c.tempLocal()
 		c.compileExpr(target.Right)
-		c.emit(OpToPropkey)
 		c.emitOpU16(OpPutLocal, uint16(keySlot))
 	}
 	return objSlot, keySlot, true
@@ -699,7 +702,9 @@ func (c *compiler) compileSuperCall(n *Node) {
 	// super(...) constructs the parent with the derived class's new.target and
 	// binds the resulting object as `this` (so subclassing an exotic native like
 	// Function/Array/Error yields the native object rather than an ordinary one).
-	if !c.resolveClassBinding("*superctor*") { // [superctor]
+	// Push the running class's constructor; OpSuperApply takes its [[Prototype]]
+	// so a class whose prototype was reassigned calls the new parent.
+	if !c.resolveClassBinding("*classctor*") { // [classctor]
 		c.syntaxErrorf("'super' keyword unexpected here")
 		return
 	}
@@ -1062,7 +1067,7 @@ func (c *compiler) compileClass(n *Node) {
 	ctorFn.Flags |= fnClassCtor // must be invoked with `new`
 	// Bind super BEFORE compiling the constructor/methods so their bodies can
 	// capture *superctor* / *superproto* as upvalues (for super() / super.x).
-	superSlot, superProtoSlot := -1, -1
+	superSlot, superProtoSlot, classCtorSlot := -1, -1, -1
 	if n.Left != nil {
 		// Each class needs its OWN *superctor* / *superproto* slot: declareVar
 		// reuses a same-named binding in scope, so two sibling derived classes
@@ -1089,6 +1094,12 @@ func (c *compiler) compileClass(n *Node) {
 		// The protoParent (superclass.prototype) must be an Object or null.
 		c.emitOpU16(OpGetLocal, uint16(superProtoSlot))
 		c.emit(OpChkProto)
+		// GetSuperConstructor reads the RUNNING constructor's [[Prototype]] at each
+		// super() call, not the heritage captured when the class was defined
+		// (`Object.setPrototypeOf(C, X)` redirects it). Declared before the
+		// constructor is compiled so its body captures the slot as an upvalue; the
+		// slot is filled once the constructor exists, below.
+		classCtorSlot = c.addLocal("*classctor*", false)
 	}
 
 	// The private environment is now in scope for the constructor, members, field
@@ -1146,6 +1157,10 @@ func (c *compiler) compileClass(n *Node) {
 
 	c.compileFunc(ctorFn) // [ctor]
 	c.emitOpU16(OpPutLocal, uint16(ctorSlot))
+	if classCtorSlot >= 0 {
+		c.emitOpU16(OpGetLocal, uint16(ctorSlot))
+		c.emitOpU16(OpPutLocal, uint16(classCtorSlot))
+	}
 
 	// Wire the extends prototype chain now that the ctor exists.
 	if n.Left != nil {

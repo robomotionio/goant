@@ -1740,10 +1740,14 @@ func (rt *Runtime) objectToStringTag(v Value) (string, *ThrowError) {
 	// (a proxy get trap or a throwing accessor) and must propagate.
 	if rt.symToStringTag != 0 {
 		lookup := v
-		if !v.IsObjectType() {
+		// IsObjectLike, not IsObjectType: a typed array is an object, and its
+		// @@toStringTag getter on %TypedArray%.prototype is what makes
+		// `Object.prototype.toString.call(new Uint8Array())` say "[object
+		// Uint8Array]" (its builtinTag is plain "Object").
+		if !v.IsObjectLike() {
 			lookup = rt.primitiveProto(v)
 		}
-		if lookup.IsObjectType() {
+		if lookup.IsObjectLike() {
 			tag, e := rt.getFieldSymbol(lookup, rt.symToStringTag.handle())
 			if e != nil {
 				return "", e

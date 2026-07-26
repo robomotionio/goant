@@ -1977,7 +1977,20 @@ restart:
 			// is [[Construct]]ed with the derived class's new.target, and the result
 			// becomes `this` (the compiler stores it into *this*).
 			argsArr := pop()
-			superctor := pop()
+			// GetSuperConstructor: the [[Prototype]] of the running constructor. A
+			// class constructor is never a proxy, so reading it here — after
+			// ArgumentListEvaluation, which the spec performs first — is not
+			// observable, and the IsConstructor check that follows is in order.
+			classCtor := pop()
+			superctor, sce := rt.getPrototypeOfValue(classCtor)
+			if sce != nil {
+				thrown = sce
+				goto unwind
+			}
+			if !rt.isConstructorValue(superctor) {
+				thrown = rt.typeError("Super constructor is not a constructor")
+				goto unwind
+			}
 			var callArgs []Value
 			if ao := rt.objPtr(argsArr); ao != nil {
 				callArgs = make([]Value, ao.arrLen)
