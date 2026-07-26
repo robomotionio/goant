@@ -481,59 +481,11 @@ func (rt *Runtime) getSuperProp(base, key, receiver Value) (Value, *ThrowError) 
 	if ke != nil {
 		return mkundef(), ke
 	}
-	if pk.IsSymbol() {
-		sym := pk.handle()
-		for cur, depth := base, 0; depth < maxProtoChainDepth; depth++ {
-			o := rt.objPtr(cur)
-			if o == nil {
-				break
-			}
-			if o.proxy != nil {
-				return rt.proxyGet(o.proxy, rt.toPropertyKeyValue(pk), receiver)
-			}
-			if slot := o.shape.lookupSymbol(sym); slot >= 0 {
-				if o.isAccessorSlot(uint32(slot)) {
-					if p := o.shape.propAt(uint32(slot)); p.hasGetter {
-						return rt.callValue(p.getter, receiver, nil)
-					}
-					return mkundef(), nil
-				}
-				return o.slotGet(uint32(slot)), nil
-			}
-			cur = o.proto
-		}
-		return mkundef(), nil
-	}
-	name, e := rt.propKeyString(pk)
-	if e != nil {
-		return mkundef(), e
-	}
-	for cur, depth := base, 0; depth < maxProtoChainDepth; depth++ {
-		o := rt.objPtr(cur)
-		if o == nil {
-			break
-		}
-		if o.proxy != nil {
-			return rt.proxyGet(o.proxy, rt.internString(name), receiver)
-		}
-		if cur.Type() == TArr {
-			if idx, ok := canonicalIndex(name); ok && idx < o.arrLen &&
-				int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
-				return o.arr[idx], nil
-			}
-		}
-		if slot := o.shape.lookupInterned(name); slot >= 0 {
-			if o.isAccessorSlot(uint32(slot)) {
-				if p := o.shape.propAt(uint32(slot)); p.hasGetter {
-					return rt.callValue(p.getter, receiver, nil)
-				}
-				return mkundef(), nil
-			}
-			return o.slotGet(uint32(slot)), nil
-		}
-		cur = o.proto
-	}
-	return mkundef(), nil
+	// OrdinaryGet with a Receiver: only an accessor needs it, so this is exactly
+	// getWithReceiver — including its handling of the exotic own properties (an
+	// array's "length", a typed array's elements, a String object's indices) that
+	// a shape-slot walk cannot see.
+	return rt.getWithReceiver(base, pk, receiver)
 }
 
 // putSuperProp implements a super-property write (`super.x = v`): PutValue on a

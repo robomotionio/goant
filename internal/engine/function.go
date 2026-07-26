@@ -306,6 +306,12 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 	// result so a native constructor still falls back to its own intrinsic default.)
 	thisProto := proto
 	if !thisProto.IsObjectType() {
+		// GetPrototypeFromConstructor falls back to the constructor's realm's
+		// intrinsic — and GetFunctionRealm throws for a revoked Proxy, which is the
+		// only way that step is observable in a single-realm engine.
+		if rerr := rt.checkFunctionRealm(newTarget); rerr != nil {
+			return mkundef(), rerr
+		}
 		thisProto = rt.objectProto
 	}
 	thisObj := rt.newObject(thisProto)
@@ -322,6 +328,31 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 		return ret, nil
 	}
 	return thisObj, nil
+}
+
+// checkFunctionRealm performs the observable part of GetFunctionRealm(obj):
+// walking bound functions and proxies to the function underneath, and throwing
+// a TypeError when a Proxy on that path has been revoked.
+func (rt *Runtime) checkFunctionRealm(v Value) *ThrowError {
+	for i := 0; i < maxProtoChainDepth; i++ {
+		o := rt.objPtr(v)
+		if o == nil {
+			return nil
+		}
+		if o.proxy != nil {
+			if o.proxy.revoked {
+				return rt.typeError("Cannot get the realm of a revoked Proxy")
+			}
+			v = o.proxy.target
+			continue
+		}
+		if bt := o.getSlot(slotTargetFunc); bt.IsObjectLike() {
+			v = bt
+			continue
+		}
+		return nil
+	}
+	return nil
 }
 
 // isCallable reports whether v can be called.
