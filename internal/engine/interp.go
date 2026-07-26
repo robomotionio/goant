@@ -20,6 +20,10 @@ type ThrowError struct {
 	Value   Value
 	rt      *Runtime
 	control bool
+	// terminate marks the control throw raised by Interrupt. It rides on top of
+	// control (so catch/finally cannot see it) and is what lets the top level
+	// report ErrTerminated rather than a silent normal completion.
+	terminate bool
 	// rejected marks a [[DefineOwnProperty]]/[[Set]] rejection: DefinePropertyOrThrow
 	// contexts throw it (it is a valid TypeError), but Reflect.defineProperty /
 	// proxy invariant checks treat it as a boolean false instead of throwing.
@@ -40,6 +44,12 @@ const maxFrameDepth = 8192
 func (rt *Runtime) execute(fn *svFunc) (Value, error) {
 	v, terr := rt.runFrame(fn, nil, mkundef(), rt.global, nil)
 	if terr != nil {
+		// A host interrupt unwinds as a control throw with no meaningful value;
+		// report it as such rather than as a JS exception the caller would try
+		// to read a message off.
+		if terr.terminate {
+			return mkundef(), ErrTerminated
+		}
 		return mkundef(), terr
 	}
 	return v, nil
@@ -55,6 +65,13 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		return mkundef(), rt.rangeError("Maximum call stack size exceeded")
 	}
 	defer func() { rt.frameDepth-- }()
+
+	// Function entry is a check point for the host interrupt, so unbounded
+	// recursion is caught without waiting on a loop back-edge. Once terminated,
+	// every subsequent frame refuses to start, which is what unwinds the stack.
+	if rt.interruptPending() {
+		return mkundef(), rt.terminated()
+	}
 
 	// Track the executing frame's strictness so a direct eval() (a native call,
 	// so rt.frameStrict still reflects this frame) can inherit it.
@@ -1588,16 +1605,34 @@ restart:
 			ip++
 
 		case OpJmp:
-			ip = int(readU32(code, ip+1))
+			t := int(readU32(code, ip+1))
+			// A backward jump is a loop iteration: the only place a script can
+			// spin without entering a frame, and so the other interrupt check
+			// point. Forward jumps pay nothing.
+			if t <= ip && rt.checkBackEdge() {
+				thrown = rt.terminated()
+				goto unwind
+			}
+			ip = t
 		case OpJmpFalse:
 			if !rt.toBoolean(pop()) {
-				ip = int(readU32(code, ip+1))
+				t := int(readU32(code, ip+1))
+				if t <= ip && rt.checkBackEdge() {
+					thrown = rt.terminated()
+					goto unwind
+				}
+				ip = t
 			} else {
 				ip += 5
 			}
 		case OpJmpTrue:
 			if rt.toBoolean(pop()) {
-				ip = int(readU32(code, ip+1))
+				t := int(readU32(code, ip+1))
+				if t <= ip && rt.checkBackEdge() {
+					thrown = rt.terminated()
+					goto unwind
+				}
+				ip = t
 			} else {
 				ip += 5
 			}

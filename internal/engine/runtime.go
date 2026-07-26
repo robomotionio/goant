@@ -225,6 +225,13 @@ type Runtime struct {
 	// frameDepth tracks native call depth for the stack-overflow guard.
 	frameDepth int
 
+	// interrupt is the one piece of Runtime state written from another
+	// goroutine — a host's request that the running script stop. See
+	// interrupt.go. backEdges counts loop iterations between flag checks and is
+	// touched only by the interpreter, so it stays a plain field.
+	interrupt *interruptState
+	backEdges uint32
+
 	// frameStrict is the strictness of the currently executing JS frame, so a
 	// direct eval() (native call) inherits the caller's strict mode.
 	frameStrict bool
@@ -314,6 +321,8 @@ func New() *Runtime {
 		closures: newPool[closure](),
 		bigints:  newPool[bigIntCell](),
 		interned: make(map[string]Handle),
+
+		interrupt: &interruptState{},
 	}
 	rt.initRealm()
 	return rt
