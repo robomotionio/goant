@@ -224,6 +224,38 @@ func TestCollectKeepsUnreachedConstants(t *testing.T) {
 	}
 }
 
+// TestCollectAcrossRealms covers realms sharing one set of pools. A handle names
+// the same cell in both, so a collection driven from either has to trace both —
+// otherwise the one that collects frees the other's heap.
+func TestCollectAcrossRealms(t *testing.T) {
+	rt := New()
+	other := rt.NewRealm()
+	if _, err := other.RunString("other.js", `
+		var kept = [];
+		for (var i = 0; i < 1000; i++) kept.push({tag: "sibling-" + i});
+	`); err != nil {
+		t.Fatalf("sibling setup: %v", err)
+	}
+	// Collect from the first realm, which knows nothing about the second.
+	rt.Collect()
+	if _, err := rt.RunString("t.js", `for (var i = 0; i < 5000; i++) ({junk: "j" + i});`); err != nil {
+		t.Fatalf("refill: %v", err)
+	}
+
+	v, err := other.RunString("other2.js", `
+		var bad = 0;
+		for (var i = 0; i < kept.length; i++) if (kept[i].tag !== "sibling-" + i) bad++;
+		bad + "/" + kept.length;
+	`)
+	if err != nil {
+		t.Fatalf("sibling after collect: %v", err)
+	}
+	got, _ := other.toStringValue(v)
+	if s := other.strGo(got); s != "0/1000" {
+		t.Errorf("a sibling realm's heap did not survive: %s corrupted", s)
+	}
+}
+
 // TestCollectDropsDeadIteratorState covers the object-keyed side tables. They
 // hold state on behalf of an object and are keyed by it, so treating them as
 // ordinary roots would make every iterator ever created immortal — which for a

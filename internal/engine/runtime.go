@@ -156,6 +156,11 @@ type Runtime struct {
 	// shared %RegExpStringIteratorPrototype%.next that steps RegExpExec lazily.
 	regexpStrIterStates map[*object]*regexpStrIterState
 
+	// agent is shared by every realm built on these pools. A handle means the
+	// same cell in all of them, so a collection driven from any one realm must
+	// trace the roots of all of them or it frees a sibling's heap.
+	agent *agentState
+
 	// asyncFrames holds the suspended coroutine of every async function that is
 	// parked at an await. Such a function has no generator object, so between
 	// the await and its resumption its whole frame — locals, operand stacks,
@@ -389,6 +394,7 @@ var ErrNotImplemented = errors.New("goant: not implemented yet")
 func New() *Runtime {
 	rt := &Runtime{
 		gc:       gcState{enabled: true},
+		agent:    &agentState{},
 		objects:  newPool[object](),
 		strings:  newPool[flatString](),
 		symbols:  newPool[symbol](),
@@ -398,6 +404,7 @@ func New() *Runtime {
 
 		interrupt: &interruptState{},
 	}
+	rt.agent.realms = append(rt.agent.realms, rt)
 	rt.initRealm()
 	return rt
 }
@@ -449,9 +456,24 @@ func (rt *Runtime) NewRealm() *Runtime {
 		// that cancels does not know or care which realm is currently on the
 		// stack, and a realm that ignored the flag would keep the isolate alive.
 		interrupt: rt.interrupt,
+
+		// Realms of one agent share the pools, so they must also share the list
+		// of who has roots in them: a collection driven from either realm has to
+		// trace both, or it frees the sibling's heap.
+		agent: rt.agent,
 	}
 	r.initRealm()
+	if r.agent != nil {
+		r.agent.realms = append(r.agent.realms, r)
+	}
 	return r
+}
+
+// agentState is what every realm of one agent shares. The pools are the reason
+// it exists: a handle means the same thing in every realm here, so no realm's
+// collector may sweep without tracing all of them.
+type agentState struct {
+	realms []*Runtime
 }
 
 func (rt *Runtime) initRealm() {

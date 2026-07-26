@@ -54,20 +54,18 @@ import (
 // text to string handles, and missing it swept every property name in the
 // program. And a Go closure is opaque: a built-in written as one keeps the
 // spec's internal slots in captured variables that nothing can enumerate, so
-// they are registered separately (holdCaptures, beginDriver, job.roots).
+// they are registered separately (holdCaptures, Runtime.asyncFrames, job.roots).
 //
 // # Debugging
 //
-// A missing root shows up as an unrelated value going wrong much later, so two
-// environment variables, read once at start-up, bring it forward:
+// Two environment variables, read once at start-up:
 //
 //	GOANT_GC_FLOOR=n   collect once n objects are live rather than at the
 //	                   default threshold, so a short program collects often.
 //	GOANT_GC_POISON=1  do not recycle a swept cell; panic at the first use of
-//	                   one instead.
-//
-// Together they turn a corrupted value into a Go stack trace at the exact read
-// that touched the freed cell.
+//	                   one instead. Together these turn a missing root from a
+//	                   corrupted value much later into a Go stack trace at the
+//	                   exact read that used the freed cell.
 
 // gcState is the collector's persistent state: the mark bitsets (reused
 // between cycles), the trace worklist, and the trigger threshold.
@@ -89,9 +87,7 @@ type gcState struct {
 	next  int
 	floor int
 
-	// enabled turns automatic collection on, which it is by default. A host
-	// that knows its scripts are short — one message, then the whole region is
-	// released — can turn it off and never pay for a trace.
+	// enabled turns automatic collection on. It is on by default.
 	enabled bool
 	// cycles counts completed collections, for tests and diagnostics.
 	cycles int
@@ -107,7 +103,6 @@ const gcGrowthFactor = 2
 // repeatedly before a script had allocated anything of its own.
 var gcFloor = 1 << 16
 
-// osGetenvGCPoison reports whether the poison debug mode is on; see pools.go.
 func osGetenvGCPoison() bool { return os.Getenv("GOANT_GC_POISON") != "" }
 
 func init() {
@@ -136,12 +131,9 @@ func (rt *Runtime) maybeCollect() {
 	rt.collect()
 }
 
-// SetGCEnabled turns automatic collection on or off. It is on by default.
-//
-// Turning it off is for a host whose scripts are short and whose memory is
-// reclaimed wholesale at an invocation boundary: such a run never reaches the
-// threshold anyway, and the check costs nothing, but the option makes the
-// intent explicit.
+// SetGCEnabled turns automatic collection on or off. It is on by default; turn
+// it off for a run short enough that nothing needs reclaiming, or one that ends
+// with Invocation.Release.
 func (rt *Runtime) SetGCEnabled(on bool) { rt.gc.enabled = on }
 
 // GCCycles reports how many collections have completed. For tests.
@@ -440,38 +432,53 @@ func (rt *Runtime) markFrames(frames []vmFrame) {
 	}
 }
 
+// forEachRealm runs f over every realm sharing these pools, which is the unit
+// the collector works in: a handle names the same cell in all of them.
+func (rt *Runtime) forEachRealm(f func(*Runtime)) {
+	if rt.agent == nil {
+		f(rt)
+		return
+	}
+	for _, r := range rt.agent.realms {
+		f(r)
+	}
+}
+
 func (rt *Runtime) markRoots() {
-	// Live frames first: their values are the ones with no other reference.
-	rt.markFrames(rt.frames)
-	// Retired frame buffers are scanned too: a frame at a depth the collector
-	// cannot see (past the published range, or one that allocated its own) may
-	// still be running.
-	rt.markSlabs(rt.slabs)
-
-	// The intern table maps text to a string cell by Handle, not by Value, so
-	// the reflective walk cannot see it — a Handle is a bare uint32 and looks
-	// like any other integer. Nothing else refers to an interned string, so
-	// missing it swept every property name in the program, and lookups started
-	// failing against an empty name. Anything else that holds a Handle rather
-	// than a Value belongs here too.
-	for _, h := range rt.interned {
-		rt.gc.strMarks.set(h)
-	}
-
-	// A suspended async function has no object to hang its coroutine off, so
-	// rt.asyncFrames is what keeps it alive; the reflective walk below finds it
-	// by descending into the map's keys. This pass is still needed on top of
-	// that: reflection walks a slice to its length, and a frame's operand stack
-	// has to be scanned to its capacity (see markSlabs).
-	for g := range rt.asyncFrames {
-		rt.traceGen(g)
-	}
-
 	if rt.gc.seenPtr == nil {
 		rt.gc.seenPtr = make(map[uintptr]bool, 256)
 	}
 	clear(rt.gc.seenPtr)
-	rt.traceAny(reflect.ValueOf(rt).Elem())
+
+	rt.forEachRealm(func(r *Runtime) {
+		// Live frames first: their values are the ones with no other reference.
+		rt.markFrames(r.frames)
+		// Retired frame buffers are scanned too: a frame at a depth the collector
+		// cannot see (past the published range, or one that allocated its own) may
+		// still be running.
+		rt.markSlabs(r.slabs)
+
+		// The intern table maps text to a string cell by Handle, not by Value, so
+		// the reflective walk cannot see it — a Handle is a bare uint32 and looks
+		// like any other integer. Nothing else refers to an interned string, so
+		// missing it swept every property name in the program, and lookups started
+		// failing against an empty name. Anything else that holds a Handle rather
+		// than a Value belongs here too.
+		for _, h := range r.interned {
+			rt.gc.strMarks.set(h)
+		}
+
+		// A suspended async function has no object to hang its coroutine off, so
+		// asyncFrames is what keeps it alive; the reflective walk below finds it
+		// by descending into the map's keys. This pass is still needed on top of
+		// that: reflection walks a slice to its length, and a frame's operand
+		// stack has to be scanned to its capacity (see markSlabs).
+		for g := range r.asyncFrames {
+			rt.traceGen(g)
+		}
+
+		rt.traceAny(reflect.ValueOf(r).Elem())
+	})
 }
 
 // valueType is what the reflective walk is looking for; objectPtrType and the
@@ -628,32 +635,38 @@ func (rt *Runtime) sweepWeakTables() {
 }
 
 func (rt *Runtime) markLiveEntries() {
-	for o, st := range rt.arrIterStates {
+	rt.forEachRealm(rt.markRealmLiveEntries)
+}
+
+// markRealmLiveEntries settles one realm's weak tables. The marks belong to the
+// Runtime driving the collection, the tables to the realm being scanned.
+func (rt *Runtime) markRealmLiveEntries(r *Runtime) {
+	for o, st := range r.arrIterStates {
 		if rt.objAlive(o) {
 			rt.markValue(st.src)
 		}
 	}
-	for o, st := range rt.collIterStates {
+	for o, st := range r.collIterStates {
 		if rt.objAlive(o) {
 			rt.traceAny(reflect.ValueOf(st).Elem())
 		}
 	}
-	for o, st := range rt.strIterStates {
+	for o, st := range r.strIterStates {
 		if rt.objAlive(o) {
 			rt.traceAny(reflect.ValueOf(st).Elem())
 		}
 	}
-	for o, st := range rt.regexpStrIterStates {
+	for o, st := range r.regexpStrIterStates {
 		if rt.objAlive(o) {
 			rt.traceAny(reflect.ValueOf(st).Elem())
 		}
 	}
-	for o, cells := range rt.finRegistries {
+	for o, cells := range r.finRegistries {
 		if rt.objAlive(o) {
 			rt.traceAny(reflect.ValueOf(cells))
 		}
 	}
-	for o, groups := range rt.natCaptures {
+	for o, groups := range r.natCaptures {
 		if rt.objAlive(o) {
 			for _, g := range groups {
 				rt.markSlice(g)
@@ -663,34 +676,38 @@ func (rt *Runtime) markLiveEntries() {
 }
 
 func (rt *Runtime) dropDeadEntries() {
-	for o := range rt.arrIterStates {
+	rt.forEachRealm(rt.dropRealmDeadEntries)
+}
+
+func (rt *Runtime) dropRealmDeadEntries(r *Runtime) {
+	for o := range r.arrIterStates {
 		if !rt.objAlive(o) {
-			delete(rt.arrIterStates, o)
+			delete(r.arrIterStates, o)
 		}
 	}
-	for o := range rt.collIterStates {
+	for o := range r.collIterStates {
 		if !rt.objAlive(o) {
-			delete(rt.collIterStates, o)
+			delete(r.collIterStates, o)
 		}
 	}
-	for o := range rt.strIterStates {
+	for o := range r.strIterStates {
 		if !rt.objAlive(o) {
-			delete(rt.strIterStates, o)
+			delete(r.strIterStates, o)
 		}
 	}
-	for o := range rt.regexpStrIterStates {
+	for o := range r.regexpStrIterStates {
 		if !rt.objAlive(o) {
-			delete(rt.regexpStrIterStates, o)
+			delete(r.regexpStrIterStates, o)
 		}
 	}
-	for o := range rt.finRegistries {
+	for o := range r.finRegistries {
 		if !rt.objAlive(o) {
-			delete(rt.finRegistries, o)
+			delete(r.finRegistries, o)
 		}
 	}
-	for o := range rt.natCaptures {
+	for o := range r.natCaptures {
 		if !rt.objAlive(o) {
-			delete(rt.natCaptures, o)
+			delete(r.natCaptures, o)
 		}
 	}
 }
