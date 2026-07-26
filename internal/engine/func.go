@@ -168,7 +168,7 @@ func (c *compiler) emitGlobalGet(name string) {
 	idx := c.constant(c.rt.internString(name))
 	c.emit(OpGetGlobal)
 	c.emitU32(uint32(idx))
-	c.emitU16(0) // inline-cache slot placeholder
+	c.emitU16(c.nextICSlot())
 }
 
 // emitGlobalPut writes a global by name (PUT_GLOBAL: u32 name-const).

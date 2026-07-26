@@ -47,6 +47,13 @@ func (rt *Runtime) registerGlobalLex(fn *svFunc, locals []Value) {
 	for name, d := range fn.globalLex {
 		rt.globalLex[name] = &globalLexBinding{locals: locals, slot: d.slot, isConst: d.isConst}
 	}
+	// GET_GLOBAL caches the global object's own slot for names with no lexical
+	// binding, and shadowing is not visible in that object's shape. A binding
+	// appearing here can shadow a name some site already cached, so those
+	// entries have to go. This runs once per Script frame, not per access.
+	if len(fn.globalLex) > 0 {
+		icEpochBump()
+	}
 }
 
 // globalLexRead is GetBindingValue for a global lexical: reading it before its

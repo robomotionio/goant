@@ -96,6 +96,12 @@ func (rt *Runtime) BeginInvocation() *Invocation {
 	// allocated if the script actually declares something.
 	rt.globalLex = nil
 
+	// Swapping the set of global lexical bindings changes which names the
+	// global object's own slots are visible under, and GET_GLOBAL's cache
+	// records that visibility. Retiring the entries here (and in End) keeps the
+	// two invocations from reading each other's answers.
+	icEpochBump()
+
 	return inv
 }
 
@@ -108,6 +114,7 @@ func (inv *Invocation) End() {
 	inv.ended = true
 	inv.rt.global = inv.prevGlobal
 	inv.rt.globalLex = inv.prevLex
+	icEpochBump()
 	inv.rt.invWatermark = inv.prevWatermrk
 	inv.rt.invInterned = inv.prevInterned
 }

@@ -1121,6 +1121,23 @@ restart:
 			push(ret)
 			ip += 3
 		case OpGetGlobal:
+			// A global read is three lookups on the slow path — the lexical
+			// record, then HasProperty, then [[Get]] — and top-level functions
+			// and constants are read this way in every loop that calls them. The
+			// cache collapses all three to a shape compare, on the same terms as
+			// a field read: an own, non-accessor slot of the global object.
+			//
+			// Shadowing by a Script-level let/const is what the lexical record
+			// answers, and it is not part of the object's shape, so registering
+			// one bumps the IC epoch to retire entries filled before it existed.
+			icx := readU16(code, ip+5)
+			if icx != icNoSlot && ics[icx].shape != nil {
+				if g := rt.objPtr(rt.global); g != nil && ics[icx].hit(g) {
+					push(g.slotGet(ics[icx].slot))
+					ip += 7
+					break
+				}
+			}
 			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			// The global environment's declarative record is consulted first: a
 			// Script-level let/const/class shadows a same-named global property.
@@ -1147,6 +1164,9 @@ restart:
 			if ge != nil {
 				thrown = ge
 				goto unwind
+			}
+			if icx != icNoSlot && !ics[icx].dead() {
+				rt.icFillGet(&ics[icx], rt.objPtr(rt.global), name)
 			}
 			push(v)
 			ip += 7

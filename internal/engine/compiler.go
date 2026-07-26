@@ -1240,7 +1240,9 @@ func (c *compiler) compileExpr(n *Node) {
 				idx := c.constant(c.rt.internString(r.Str))
 				c.emit(OpGetGlobalUndef)
 				c.emitU32(uint32(idx))
-				c.emitU16(0)
+				// The lenient read is not cached — a `typeof` of an undeclared
+				// name is not a hot path, and slot 0 belongs to another site.
+				c.emitU16(icNoSlot)
 			}
 		} else {
 			c.compileExpr(n.Right)
