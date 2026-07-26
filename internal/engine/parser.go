@@ -600,6 +600,9 @@ func pushArrowParamsFromExpr(fn, expr *Node) {
 		return
 	}
 	if expr.Kind == NUndef {
+		if expr.Flags&nodeEmptyParens != 0 {
+			return // `() => …`: no parameters at all
+		}
 		// `(undefined) => …` — `undefined` names the parameter (it is not reserved),
 		// so recover it as an identifier binding rather than the undefined literal.
 		fn.Args = append(fn.Args, &Node{Kind: NIdent, Str: "undefined", SrcOff: expr.SrcOff, SrcEnd: expr.SrcEnd})
@@ -1117,7 +1120,7 @@ func (p *parser) parseParen() *Node {
 			return p.mk(NEmpty)
 		}
 		n := p.mk(NUndef)
-		n.Flags |= fnParen
+		n.Flags |= fnParen | nodeEmptyParens
 		n.SrcOff = parenOff
 		return n
 	}

@@ -122,7 +122,8 @@ const (
 	fnStrHadEscape    = 1 << 23 // a string literal whose raw text contained a backslash (escape or line continuation), so it cannot be a Use Strict Directive
 	fnStrLegacyOctal  = 1 << 24 // a string literal whose raw text contained a LegacyOctalEscapeSequence or NonOctalDecimalEscapeSequence (\1–\9, \0 followed by a digit) — a Syntax Error in strict code
 	nodeDupProto      = 1 << 25 // an object literal with two `__proto__:` data properties — an error only as a literal, allowed once reinterpreted as a destructuring pattern
-	nodeEscapedIdent  = 1 << 26 // an identifier written with a Unicode escape, so it is not the terminal symbol it spells (`\u0061sync` is not `async`)
+	nodeEscapedIdent  = 1 << 26
+	nodeEmptyParens   = 1 << 27 // the `()` of an empty arrow parameter list, parsed as NUndef so it is distinguishable from a parameter actually named `undefined` // an identifier written with a Unicode escape, so it is not the terminal symbol it spells (`\u0061sync` is not `async`)
 )
 
 // Export flags (ant ast.h EX_*).

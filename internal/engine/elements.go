@@ -262,26 +262,12 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 		}
 		return rt.setProp(obj, name, v), nil
 	}
-	// A primitive receiver cannot gain a new data property (OrdinarySet returns
-	// false when Receiver is not an Object — a strict `sym.p = x` throws), but an
-	// inherited accessor's setter still runs with the primitive as `this`.
-	for proto, depth := rt.primitiveProto(obj), 0; depth < maxProtoChainDepth; depth++ {
-		o := rt.objPtr(proto)
-		if o == nil {
-			break
-		}
-		if slot := o.shape.lookupInterned(name); slot >= 0 {
-			if o.isAccessorSlot(uint32(slot)) {
-				if p := o.shape.propAt(uint32(slot)); p.hasSetter {
-					_, e := rt.callValue(p.setter, obj, []Value{v})
-					return true, e
-				}
-			}
-			return false, nil // a data property or setter-less accessor: refused
-		}
-		proto = o.proto
-	}
-	return false, nil
+	// PutValue on a property reference with a primitive base performs
+	// ToObject(base).[[Set]](name, W, base): the walk is the ordinary one — it
+	// dispatches a Proxy's trap and runs an inherited setter with the PRIMITIVE
+	// as `this` — and the final write fails because the Receiver is not an Object
+	// (a strict `sym.p = x` then throws).
+	return rt.ordinarySet(rt.primitiveProto(obj), rt.internString(name), v, obj)
 }
 
 // arrayIndexOf resolves a property key to an array index, accepting both
