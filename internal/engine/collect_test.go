@@ -70,6 +70,45 @@ func TestCollectKeepsReachable(t *testing.T) {
 	}
 }
 
+// TestCollectKeepsComputedStrings covers strings the program built rather than
+// wrote, which are the ones with no other reference.
+//
+// A string Value carries (handle << 2) | tag, not a bare handle, so a trace that
+// marks v.handle() marks a cell that does not exist and every computed string is
+// swept. Literals and property names hide it: they are interned, and the intern
+// table is rooted by handle. The symptom is a live string turning into an
+// unrelated one allocated later.
+func TestCollectKeepsComputedStrings(t *testing.T) {
+	rt := New()
+	if _, err := rt.RunString("t.js", `
+		var kept = [];
+		for (var i = 0; i < 2000; i++) kept.push("computed-" + i + "-" + (i * 7));
+	`); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	rt.Collect()
+	// Allocate over whatever the sweep released, so a freed cell now holds
+	// something else and a stale handle reads it back.
+	if _, err := rt.RunString("t2.js", `for (var i = 0; i < 4000; i++) ("filler-" + i);`); err != nil {
+		t.Fatalf("refill: %v", err)
+	}
+
+	v, err := rt.RunString("t3.js", `
+		var bad = 0;
+		for (var i = 0; i < kept.length; i++) {
+			if (kept[i] !== "computed-" + i + "-" + (i * 7)) bad++;
+		}
+		bad + "/" + kept.length;
+	`)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	got, _ := rt.toStringValue(v)
+	if s := rt.strGo(got); s != "0/2000" {
+		t.Errorf("computed strings did not survive a collection: %s corrupted", s)
+	}
+}
+
 // TestCollectDropsDeadIteratorState covers the object-keyed side tables. They
 // hold state on behalf of an object and are keyed by it, so treating them as
 // ordinary roots would make every iterator ever created immortal — which for a

@@ -183,7 +183,14 @@ func (rt *Runtime) markValue(v Value) {
 			g.work = append(g.work, v)
 		}
 	case TStr:
-		g.strMarks.set(h)
+		// A string Value does not carry a bare handle: its payload is
+		// (handle << 2) | a two-bit flat/rope/builder tag, so the handle has to
+		// be unpacked. Marking v.handle() marks the bit for cell h*4 instead —
+		// which is to say it marks nothing that exists and leaves every string
+		// the program computed unmarked. Interned names survived (markRoots
+		// marks the intern table by handle), which is why this only ever
+		// surfaced as a computed string turning into an unrelated one.
+		g.strMarks.set(strHandle(v))
 	case TSymbol:
 		if !g.symMarks.set(h) {
 			g.work = append(g.work, v)
