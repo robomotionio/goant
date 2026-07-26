@@ -215,7 +215,7 @@ func (rt *Runtime) forInKeys(obj Value) (Value, *ThrowError) {
 }
 
 // jsIn implements the `in` operator: key in obj.
-func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
+func (rt *Runtime) jsIn(key, obj Value, privEnv *privScope) (bool, *ThrowError) {
 	// Private brand check `#x in obj`: the compiler emits the private name as a
 	// string key. RelationalExpression step 3.a still requires an Object on the
 	// right — `#x in 1` is a TypeError, not false.
@@ -224,7 +224,7 @@ func (rt *Runtime) jsIn(key, obj Value) (bool, *ThrowError) {
 			if !obj.IsObjectLike() {
 				return false, rt.typeError("cannot use 'in' operator on a non-object")
 			}
-			return rt.hasPrivate(obj, s), nil
+			return rt.hasPrivate(obj, s, privEnv), nil
 		}
 	}
 	if !obj.IsObjectType() && obj.Type() != TTypedArray {

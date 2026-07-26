@@ -684,7 +684,7 @@ func (rt *Runtime) performDirectEval(src string, sc *evalScope, callerCl *closur
 			upvals[i].location = &upvals[i].closed
 		}
 	}
-	evalCl := &closure{fn: fn, upvalues: upvals}
+	evalCl := &closure{fn: fn, upvalues: upvals, privEnv: rt.callerPrivEnv}
 	if callerCl != nil {
 		evalCl.home = callerCl.home // object-literal method super in eval
 	}

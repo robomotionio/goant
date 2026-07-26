@@ -74,6 +74,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		withStack    []Value
 		varObj       Value
 		newTarget    Value
+		privEnv      *privScope
 		thrown       *ThrowError
 		comp         completion
 		ip           int
@@ -224,6 +225,13 @@ restart:
 		withStack = append([]Value(nil), cl.capturedWith...)
 	} else {
 		withStack = nil
+	}
+	// The class-evaluation tag this function was created under: its private
+	// accesses use the Private Names of that evaluation, not of whichever
+	// evaluation happens to be running now.
+	privEnv = nil
+	if cl != nil {
+		privEnv = cl.privEnv
 	}
 	// A function containing a direct eval carries a dynamic variable object: the
 	// eval's `var` declarations that name nothing this function declared are
@@ -684,6 +692,19 @@ restart:
 					rt.importMeta = rt.newObject(rt.objectProto)
 				}
 				push(rt.importMeta)
+			case 4:
+				// Enter a class body: push a fresh ClassPrivateEnvironment link. Every
+				// closure created while it is in effect (methods, field initializers,
+				// the constructor) captures the chain, which is what gives each
+				// evaluation of the same class body its own Private Names — while a
+				// nested class body still reaches the enclosing class's names.
+				rt.privEnvSeq++
+				privEnv = &privScope{tag: rt.privEnvSeq, parent: privEnv}
+			case 5:
+				// Leave a class body.
+				if privEnv != nil {
+					privEnv = privEnv.parent
+				}
 			default:
 				push(mkundef())
 			}
@@ -801,7 +822,7 @@ restart:
 			val := pop()
 			if o := rt.objPtr(peek()); o != nil {
 				if isPrivateKey(name) {
-					if !o.definePrivateField(name, val) {
+					if !o.definePrivateField(name, privEnv, val) {
 						thrown = rt.typeError("Cannot initialize private field " + privDisplay(name) + " twice on the same object")
 						goto unwind
 					}
@@ -835,11 +856,11 @@ restart:
 					ok := true
 					switch flags {
 					case 1:
-						ok = o.definePrivateAccessor(name, accFn, true)
+						ok = o.definePrivateAccessor(name, privEnv, accFn, true)
 					case 2:
-						ok = o.definePrivateAccessor(name, accFn, false)
+						ok = o.definePrivateAccessor(name, privEnv, accFn, false)
 					default:
-						ok = o.definePrivateMethod(name, accFn)
+						ok = o.definePrivateMethod(name, privEnv, accFn)
 					}
 					if !ok {
 						thrown = rt.typeError("Cannot install private method " + privDisplay(name) + " twice on the same object")
@@ -909,7 +930,7 @@ restart:
 			var v Value
 			var e *ThrowError
 			if isPrivateKey(name) {
-				v, e = rt.getPrivate(obj, name)
+				v, e = rt.getPrivate(obj, name, privEnv)
 			} else {
 				v, e = rt.getField(obj, name)
 			}
@@ -926,7 +947,7 @@ restart:
 			var v Value
 			var e *ThrowError
 			if isPrivateKey(name) {
-				v, e = rt.getPrivate(obj, name)
+				v, e = rt.getPrivate(obj, name, privEnv)
 			} else {
 				v, e = rt.getField(obj, name)
 			}
@@ -941,7 +962,7 @@ restart:
 			val := pop()
 			obj := pop()
 			if isPrivateKey(name) {
-				if e := rt.setPrivate(obj, name, val); e != nil {
+				if e := rt.setPrivate(obj, name, privEnv, val); e != nil {
 					thrown = e
 					goto unwind
 				}
@@ -1377,7 +1398,7 @@ restart:
 		case OpIn:
 			obj := pop()
 			key := pop()
-			res, e := rt.jsIn(key, obj)
+			res, e := rt.jsIn(key, obj, privEnv)
 			if e != nil {
 				thrown = e
 				goto unwind
@@ -1671,10 +1692,10 @@ restart:
 			push(resumed)
 			ip++
 		case OpTryPush:
-			handlers = append(handlers, tryHandler{kind: hTry, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack)})
+			handlers = append(handlers, tryHandler{kind: hTry, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack), privEnv: privEnv})
 			ip += 5
 		case OpTryPushFinally:
-			handlers = append(handlers, tryHandler{kind: hTryFinally, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack)})
+			handlers = append(handlers, tryHandler{kind: hTryFinally, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack), privEnv: privEnv})
 			ip += 5
 		case OpTryPop:
 			// Pop the innermost catch / try-finally handler (skipping any executing
@@ -1694,7 +1715,7 @@ restart:
 		case OpFinally:
 			// Enter a finally body: install a finally handler whose landing is the
 			// code after OP_FINALLY_RET (the normal-completion continuation).
-			handlers = append(handlers, tryHandler{kind: hFinally, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack)})
+			handlers = append(handlers, tryHandler{kind: hFinally, catchIP: int(readU32(code, ip+1)), stackDepth: len(stack), privEnv: privEnv})
 			ip += 5
 		case OpFinallyDiscard:
 			// Leave a finally body abnormally (break/continue): drop its handler and
@@ -1814,6 +1835,13 @@ restart:
 					ncl.capturedWith = append([]Value(nil), withStack...)
 				}
 			}
+			// A function created inside a class body belongs to that evaluation's
+			// private environment (0 — the overwhelmingly common case — costs nothing).
+			if privEnv != nil {
+				if ncl := rt.closureOf(fv); ncl != nil {
+					ncl.privEnv = privEnv
+				}
+			}
 			push(fv)
 			ip += 5
 
@@ -1878,10 +1906,11 @@ restart:
 				// declarations create bindings on. Saved and restored so a nested eval
 				// (or a call made from the eval body) cannot see a stale chain.
 				savedVarObj, savedWithStack := rt.callerVarObj, rt.callerWithStack
-				rt.callerVarObj, rt.callerWithStack = varObj, withStack
+				savedPrivEnv := rt.callerPrivEnv
+				rt.callerVarObj, rt.callerWithStack, rt.callerPrivEnv = varObj, withStack, privEnv
 				ret, e = rt.performDirectEval(string(rt.strBytes(evalArgs[0])), sc, cl,
 					thisVal, newTarget, captureUpvalue)
-				rt.callerVarObj, rt.callerWithStack = savedVarObj, savedWithStack
+				rt.callerVarObj, rt.callerWithStack, rt.callerPrivEnv = savedVarObj, savedWithStack, savedPrivEnv
 			}
 			if e != nil {
 				thrown = e
@@ -2078,6 +2107,7 @@ restart:
 					continue
 				}
 				stack = stack[:h.stackDepth]
+				privEnv = h.privEnv
 				if h.kind == hTryFinally {
 					// Run the finally with the throw pending; OP_FINALLY_RET re-raises.
 					comp = completion{kind: compThrow, value: thrown.Value}
@@ -2100,9 +2130,10 @@ restart:
 
 // tryHandler records a live catch/finally handler (ant handler stack).
 type tryHandler struct {
-	kind       uint8 // hTry / hTryFinally / hFinally
-	catchIP    int   // landing ip (catch tag, finally entry, or post-finally)
-	stackDepth int   // stack length to restore on entry
+	kind       uint8  // hTry / hTryFinally / hFinally
+	catchIP    int    // landing ip (catch tag, finally entry, or post-finally)
+	stackDepth int    // stack length to restore on entry
+	privEnv    *privScope // class private environment to restore on entry
 }
 
 // handler kinds (ant SV_HANDLER_*).

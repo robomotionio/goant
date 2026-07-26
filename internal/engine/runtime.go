@@ -191,6 +191,11 @@ type Runtime struct {
 	// chain its free names resolve against. Set around the OpEval call only.
 	callerVarObj    Value
 	callerWithStack []Value
+	// callerPrivEnv carries the class-evaluation tag of the frame performing a
+	// direct eval, so the eval'd code's private accesses share its identity.
+	callerPrivEnv *privScope
+	// privEnvSeq allocates class-evaluation tags; 0 means "no class".
+	privEnvSeq uint32
 
 	// globalLex is the declarative half of the global environment record: the
 	// Script-level let/const/class bindings, which are not properties of the
@@ -271,6 +276,12 @@ type closure struct {
 	// objects when the function is later called (outside the with). nil for the
 	// common case of a function not nested in a with.
 	capturedWith []Value
+	// privEnv is the class-evaluation tag in effect where this function was
+	// created — its ClassPrivateEnvironment. 0 outside any class body. It gives
+	// the function's private accesses the identity of the evaluation that made
+	// it, so a method from one evaluation of a class factory fails the brand
+	// check of an instance from another.
+	privEnv *privScope
 }
 
 // macrotask is a pending timer callback (setTimeout/setInterval). goant has no

@@ -993,6 +993,9 @@ func fieldKeySlotName(i int) string { return "*fk" + strconv.Itoa(i) + "*" }
 func (c *compiler) compileClass(n *Node) {
 	ctorSlot := c.tempLocal()
 	protoSlot := c.tempLocal()
+	// Whether this class body needs a ClassPrivateEnvironment of its own (the
+	// OpSpecialObj kind 4/5 pair below): only if it declares private names.
+	ownPrivEnv := false
 
 	// This class's private environment is pushed after the heritage is compiled
 	// (below) and popped on exit, so the heritage, siblings, and enclosing code
@@ -1080,7 +1083,18 @@ func (c *compiler) compileClass(n *Node) {
 
 	// The private environment is now in scope for the constructor, members, field
 	// initializers, and static blocks (the heritage above was compiled without it).
-	c.classPrivateEnvs = append(c.classPrivateEnvs, c.mangleClassPrivates(collectClassPrivateNames(n)))
+	classPrivates := c.mangleClassPrivates(collectClassPrivateNames(n))
+	c.classPrivateEnvs = append(c.classPrivateEnvs, classPrivates)
+	// Each *evaluation* of a class body creates a fresh set of Private Names, so
+	// an instance of one evaluation fails another's brand check even though both
+	// were compiled from the same source. The mangled key identifies the body; a
+	// runtime tag, allocated here and restored at the end of the definition,
+	// identifies the evaluation. Every closure created in between captures it.
+	if len(classPrivates) > 0 {
+		ownPrivEnv = true
+		c.emit(OpSpecialObj)
+		c.emitByte(4)
+	}
 
 	// Collect instance fields and hand them to the constructor so it initializes
 	// them per-instance (base: at entry; derived: after super()). They are NOT
@@ -1368,6 +1382,13 @@ func (c *compiler) compileClass(n *Node) {
 		c.emitOpU16(OpPutLocal, uint16(classNameSlot))
 		c.scopeDepth--
 		c.popBlockScope()
+	}
+
+	// Every closure that belongs to this evaluation has been created; restore the
+	// enclosing class's tag (a throw out of the body restores it via the handler).
+	if ownPrivEnv {
+		c.emit(OpSpecialObj)
+		c.emitByte(5)
 	}
 
 	// The class value is the constructor.
