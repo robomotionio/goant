@@ -323,6 +323,42 @@ func isAssignOp(t Token) bool { return t >= TokAssign && t <= TokNullishAssign }
 func mkNum(val float64) *Node { return &Node{Kind: NNumber, Num: val} }
 func mkIdent(s string) *Node  { return &Node{Kind: NIdent, Str: s} }
 
+// escapedIdentName decodes an escaped-keyword token that is nonetheless a valid
+// Identifier. A ReservedWord is a literal sequence of characters, so a word
+// spelled with a Unicode escape is not that keyword: for a CONTEXTUAL one — let,
+// yield, async, await, static, of, … — what remains is an ordinary
+// IdentifierName. A true ReservedWord (`\u0069f`) has nothing it could be and
+// stays an error, as does a name the current mode reserves.
+func (p *parser) escapedIdentName() (string, bool) {
+	if !p.escKeyword() {
+		return "", false
+	}
+	name := p.tokIdentStr()
+	if isReservedWordTok(parseKeyword(name)) {
+		return "", false
+	}
+	if p.lx.strict && isStrictReservedName(name) {
+		return "", false
+	}
+	if name == "yield" && p.inGenerator {
+		return "", false
+	}
+	if name == "await" && (p.lx.module || p.inAsync) {
+		return "", false
+	}
+	return name, true
+}
+
+// mkEscapedIdent builds an identifier node from an escaped-keyword token and
+// consumes it.
+func (p *parser) mkEscapedIdent(name string) *Node {
+	n := mkIdent(name)
+	n.SrcOff = uint32(p.toff())
+	n.SrcEnd = uint32(p.toff() + p.tlen())
+	p.consume()
+	return n
+}
+
 func (p *parser) mkIdentFromTok() *Node {
 	n := mkIdent(p.tokIdentStr())
 	n.SrcOff = uint32(p.toff())
@@ -879,6 +915,14 @@ func (p *parser) parsePrimary() *Node {
 		n := p.mk(NGlobalThis)
 		p.consume()
 		return n
+	case TokErr:
+		// An escaped CONTEXTUAL keyword is an ordinary identifier reference
+		// (`l\u0065t`, `\u0061sync`, `aw\u0061it` outside a module).
+		if name, ok := p.escapedIdentName(); ok {
+			return p.mkEscapedIdent(name)
+		}
+		p.unexpected()
+		return p.mk(NEmpty)
 	case TokIdentifier, TokAs, TokFrom, TokOf, TokUsing, TokWindow:
 		if p.tokIsEscapedReservedWord() {
 			p.errorf("Keyword must not contain escaped characters")
@@ -2390,6 +2434,13 @@ func (p *parser) parseClass() *Node {
 		// context, all of which reserve await.
 		cls.Str = "await"
 		p.consume()
+	} else if p.next() == TokErr && !p.inStaticBlock {
+		// A contextual keyword written with an escape is a plain identifier, so it
+		// can name a class (`class aw\u0061it {}` outside a module).
+		if name, ok := p.escapedIdentName(); ok && !isEvalOrArgumentsName(name) && !isStrictReservedName(name) {
+			cls.Str = name
+			p.consume()
+		}
 	}
 	if p.next() == TokIdentifier && p.tlen() == 7 && p.tokStr() == "extends" {
 		p.consume()
@@ -2674,6 +2725,11 @@ func (p *parser) parseVarDecl(kind VarKind, allowUninitConst bool) *Node {
 			decl.Left = p.parseObject()
 			p.validateObjectPattern(decl.Left)
 		case TokErr:
+			// An escaped contextual keyword is an ordinary BindingIdentifier.
+			if name, ok := p.escapedIdentName(); ok {
+				decl.Left = p.mkEscapedIdent(name)
+				break
+			}
 			p.unexpected()
 			return v
 		default:
@@ -3561,13 +3617,22 @@ func (p *parser) parseWith() *Node {
 func (p *parser) parseExprStmt() *Node {
 	// `yield`/`await` are valid label identifiers where they are not reserved (a
 	// generator/strict context for yield, an async context for await).
-	labelTok := p.tok() == TokIdentifier || isContextualIdentTok(p.tok()) ||
+	escName, escIdent := "", false
+	if p.tok() == TokErr && p.la() == TokColon {
+		// An escaped contextual keyword is a plain identifier, so it can label a
+		// statement (`yi\u0065ld: …` in sloppy code).
+		escName, escIdent = p.escapedIdentName()
+	}
+	labelTok := escIdent || p.tok() == TokIdentifier || isContextualIdentTok(p.tok()) ||
 		(p.tok() == TokYield && !p.inGenerator && !p.lx.strict) ||
 		(p.tok() == TokAwait && !p.inAsync && !p.inStaticBlock)
 	if labelTok {
 		if p.la() == TokColon {
 			label := p.mk(NLabel)
 			label.Str = p.tokIdentStr()
+			if escIdent {
+				label.Str = escName
+			}
 			p.consume()
 			p.next()
 			p.consume()
