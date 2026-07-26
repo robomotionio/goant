@@ -285,22 +285,21 @@ func (c *compiler) destructureObject(pattern *Node, src int, kind VarKind) {
 			// runtime property keys of any computed properties.
 			c.emit(OpObject) // [restObj]
 			c.emit(OpDup)
-			c.emitOpU16(OpGetLocal, uint16(src))
-			c.emit(OpCopyDataProps) // [restObj, restObj]
-			c.emitByte(0)
-			c.emit(OpPop) // [restObj]
+			// The already-bound keys are excludedItems of CopyDataProperties, which
+			// skips them before asking the source for a descriptor — deleting them
+			// afterwards would be observable on a Proxy source.
 			for _, k := range priorKeys {
-				c.emit(OpDup)
 				c.emitConst(c.rt.internString(k))
-				c.emit(OpDelete)
-				c.emit(OpPop)
 			}
 			for _, slot := range computedKeySlots {
-				c.emit(OpDup)
 				c.emitOpU16(OpGetLocal, uint16(slot))
-				c.emit(OpDelete)
-				c.emit(OpPop)
 			}
+			c.emit(OpArray)
+			c.emitU16(uint16(len(priorKeys) + len(computedKeySlots)))
+			c.emitOpU16(OpGetLocal, uint16(src))
+			c.emit(OpCopyDataProps) // [restObj, restObj]
+			c.emitByte(1)
+			c.emit(OpPop) // [restObj]
 			c.destructureTarget(prop.Right, kind)
 			continue
 		}

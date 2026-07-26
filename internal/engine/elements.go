@@ -877,6 +877,13 @@ func (rt *Runtime) propKeyString(key Value) (string, *ThrowError) {
 // copyDataProps copies src's own enumerable properties (array indices, string
 // keys, and symbol keys) into target, invoking getters (object spread / rest).
 func (rt *Runtime) copyDataProps(target, src Value) *ThrowError {
+	return rt.copyDataPropsExcluding(target, src, nil)
+}
+
+// copyDataPropsExcluding is CopyDataProperties with an excludedItems list: the
+// keys a `{a, [k]: b, ...rest}` pattern already bound. They are skipped BEFORE
+// [[GetOwnProperty]], so a Proxy source never sees a descriptor request for one.
+func (rt *Runtime) copyDataPropsExcluding(target, src Value, excluded []Value) *ThrowError {
 	// CopyDataProperties (7.3.25): ToObject(source), then for each own key in
 	// [[OwnPropertyKeys]] order, if [[GetOwnProperty]] reports it enumerable,
 	// CreateDataPropertyOrThrow(target, key, ? Get(source, key)). Every step goes
@@ -894,7 +901,26 @@ func (rt *Runtime) copyDataProps(target, src Value) *ThrowError {
 	if e != nil {
 		return e
 	}
+	// excludedItems are property keys, but a computed one may still be the raw
+	// number the pattern wrote (`{ [1]: a, ...rest }`), so normalise once.
+	for i, ex := range excluded {
+		if !ex.IsString() && !ex.IsSymbol() {
+			excluded[i] = rt.toPropertyKeyValue(ex)
+		}
+	}
 	for _, key := range keys {
+		if len(excluded) > 0 {
+			skip := false
+			for _, ex := range excluded {
+				if rt.sameValue(ex, key) {
+					skip = true
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+		}
 		enum, exists, e := rt.ownKeyEnumerable(from, key)
 		if e != nil {
 			return e

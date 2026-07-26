@@ -809,10 +809,18 @@ restart:
 			ip++
 		case OpCopyDataProps:
 			// Object spread: copy src's enumerable own props into target.
-			// Stack: [target, src] -> [target].
+			// Stack: [target, src] -> [target]. With the inline flag set, an array
+			// of already-bound keys sits under src (object rest): [target,
+			// excludedArray, src].
 			src := pop()
+			var excluded []Value
+			if code[ip+1] == 1 {
+				if eo := rt.objPtr(pop()); eo != nil {
+					excluded = eo.arr[:eo.arrLen]
+				}
+			}
 			target := pop()
-			if e := rt.copyDataProps(target, src); e != nil {
+			if e := rt.copyDataPropsExcluding(target, src, excluded); e != nil {
 				thrown = e
 				goto unwind
 			}
