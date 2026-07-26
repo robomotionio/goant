@@ -1651,7 +1651,30 @@ restart:
 						goto unwind
 					}
 					if !rt.isCallable(returnFn) {
-						// No return method: propagate the return, running any finally.
+						// No return method: an ASYNC delegation still Awaits the
+						// received value before propagating (yield*'s return branch,
+						// step ii.1) — one more tick, and a second `then` read on a
+						// thenable resumption value.
+						if fn.isAsync {
+							awaited, inject := rt.suspend(sent, true)
+							if inject != nil {
+								switch inject.kind {
+								case genThrow:
+									thrown = &ThrowError{Value: inject.val, rt: rt}
+									goto unwind
+								case genReturn:
+									if fip, ok := doReturn(inject.val); ok {
+										ip = fip
+										ipSet = true
+										break yieldStar
+									}
+									closeAll()
+									return inject.val, nil
+								}
+							}
+							sent = awaited
+						}
+						// Propagate the return, running any finally.
 						if fip, ok := doReturn(sent); ok {
 							ip = fip
 							ipSet = true
