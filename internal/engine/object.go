@@ -494,6 +494,22 @@ func (o *object) ownKeysForIn() ([]string, map[string]bool) {
 // orderOwnKeys reorders own string keys into ES OwnPropertyKeys order: canonical
 // array-index keys first (ascending numeric), then the rest in insertion order.
 func orderOwnKeys(keys []string) []string {
+	// A record has no array-index keys at all, and then the order is already
+	// right and the answer is the input unchanged. Establish that before
+	// building anything: partitioning first and discarding the result second
+	// copied every key of every object for nothing, which on a message made of
+	// uniform records is most of what serializing it allocated.
+	hasIdx := false
+	for _, k := range keys {
+		if _, ok := canonicalIndex(k); ok {
+			hasIdx = true
+			break
+		}
+	}
+	if !hasIdx {
+		return keys
+	}
+
 	var idxKeys []string
 	var strKeys []string
 	for _, k := range keys {
@@ -502,9 +518,6 @@ func orderOwnKeys(keys []string) []string {
 		} else {
 			strKeys = append(strKeys, k)
 		}
-	}
-	if len(idxKeys) == 0 {
-		return keys
 	}
 	sort.Slice(idxKeys, func(i, j int) bool {
 		a, _ := canonicalIndex(idxKeys[i])
