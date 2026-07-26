@@ -11,7 +11,9 @@ package regexpjs
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/dlclark/regexp2"
 )
@@ -220,6 +222,153 @@ func modifiedDotAll(rs []rune, i int, outer bool) bool {
 	return outer
 }
 
+// maxQuantifier bounds a `{n}` / `{n,}` / `{n,m}` count. ES puts no limit on
+// DecimalDigits, but regexp2 mis-parses anything past its own integer range, and
+// a count this large can only be satisfied by a subject longer than any string
+// that fits in memory — so clamping is unobservable and keeps the pattern
+// compilable (`b{9007199254740991}` must compile and simply never match).
+const maxQuantifier = 1 << 24
+
+// clampQuantifiers rewrites any repetition count above maxQuantifier down to it.
+func clampQuantifiers(src string) string {
+	if !strings.Contains(src, "{") {
+		return src
+	}
+	rs := []rune(src)
+	var out strings.Builder
+	inClass := false
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' && i+1 < len(rs) {
+			out.WriteRune(c)
+			out.WriteRune(rs[i+1])
+			i++
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		}
+		if c != '{' || inClass {
+			out.WriteRune(c)
+			continue
+		}
+		// Try to read `{ digits (, digits?)? }`; anything else is a literal brace.
+		j := i + 1
+		lo, loN := readDigits(rs, j)
+		if loN == 0 {
+			out.WriteRune(c)
+			continue
+		}
+		j += loN
+		hi, hiN, hasComma := "", 0, false
+		if j < len(rs) && rs[j] == ',' {
+			hasComma = true
+			j++
+			hi, hiN = readDigits(rs, j)
+			j += hiN
+		}
+		if j >= len(rs) || rs[j] != '}' {
+			out.WriteRune(c)
+			continue
+		}
+		out.WriteByte('{')
+		out.WriteString(clampCount(lo))
+		if hasComma {
+			out.WriteByte(',')
+			if hiN > 0 {
+				out.WriteString(clampCount(hi))
+			}
+		}
+		out.WriteByte('}')
+		i = j
+	}
+	return out.String()
+}
+
+func readDigits(rs []rune, i int) (string, int) {
+	j := i
+	for j < len(rs) && rs[j] >= '0' && rs[j] <= '9' {
+		j++
+	}
+	return string(rs[i:j]), j - i
+}
+
+func clampCount(digits string) string {
+	if len(digits) > 9 {
+		return strconv.Itoa(maxQuantifier)
+	}
+	n, err := strconv.Atoi(digits)
+	if err != nil || n > maxQuantifier {
+		return strconv.Itoa(maxQuantifier)
+	}
+	return digits
+}
+
+// hexEscapeAt decodes a `\uXXXX` escape at s[i] (which must be the backslash),
+// returning its value and the number of bytes consumed, or (0, 0).
+func hexEscapeAt(s string, i int) (int, int) {
+	if i+6 > len(s) || s[i] != '\\' || s[i+1] != 'u' {
+		return 0, 0
+	}
+	v := 0
+	for k := i + 2; k < i+6; k++ {
+		var d int
+		switch c := s[k]; {
+		case c >= '0' && c <= '9':
+			d = int(c - '0')
+		case c >= 'a' && c <= 'f':
+			d = int(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			d = int(c-'A') + 10
+		default:
+			return 0, 0
+		}
+		v = v*16 + d
+	}
+	return v, 6
+}
+
+// joinSurrogateEscapes is the inverse of splitAstralLiterals, for Unicode mode:
+// RegExpUnicodeEscapeSequence reads `\u LeadSurrogate \u TrailSurrogate` as the
+// ONE code point they encode (UTF16SurrogatePair), and a `u`/`v` subject is
+// matched as code points — so the pattern has to name the code point too.
+// Applies inside a class as well: `[\ud834\udf06]` is the class of U+1D306.
+func joinSurrogateEscapes(src string) string {
+	if !strings.Contains(src, `\u`) {
+		return src
+	}
+	var b strings.Builder
+	b.Grow(len(src))
+	for i := 0; i < len(src); {
+		if src[i] != '\\' {
+			r, size := utf8.DecodeRuneInString(src[i:])
+			b.WriteRune(r)
+			i += size
+			continue
+		}
+		if lead, n := hexEscapeAt(src, i); n > 0 && lead >= 0xD800 && lead <= 0xDBFF {
+			if trail, n2 := hexEscapeAt(src, i+n); n2 > 0 && trail >= 0xDC00 && trail <= 0xDFFF {
+				b.WriteRune(rune(0x10000 + (lead-0xD800)<<10 + (trail - 0xDC00)))
+				i += n + n2
+				continue
+			}
+		}
+		// Any other escape is copied whole, so a `\\` cannot be mistaken for the
+		// start of one.
+		b.WriteByte('\\')
+		i++
+		if i < len(src) {
+			r, size := utf8.DecodeRuneInString(src[i:])
+			b.WriteRune(r)
+			i += size
+		}
+	}
+	return b.String()
+}
+
 // splitAstralLiterals rewrites every literal astral code point in a pattern as
 // the two \uXXXX escapes for its surrogate pair.
 func splitAstralLiterals(src string) string {
@@ -364,6 +513,8 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	// astral ClassRange endpoint becomes the out-of-order range ES rejects.)
 	if !r.Unicode {
 		src = splitAstralLiterals(src)
+	} else {
+		src = joinSurrogateEscapes(src)
 	}
 	// Under u/v, \w is decided by ES's Canonicalize rather than regexp2's
 	// IgnoreCase option, and an inline modifier group can turn it on or off for a
@@ -371,6 +522,7 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	if r.Unicode {
 		src = translateWordClass(src, r.IgnoreCase)
 	}
+	src = clampQuantifiers(src)
 	src = translateDot(src, r.DotAll)
 	if src == "" {
 		src = "(?:)"

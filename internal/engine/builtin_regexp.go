@@ -1492,6 +1492,13 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 				return mkundef(), e
 			}
 			hasNamed := !gv.IsUndefined()
+			if hasNamed {
+				// GetSubstitution step: namedCaptures is ToObject'd before use, so a
+				// `groups` of null is a TypeError even if the pattern names nothing.
+				if gv, e = rt.toObjectValue(gv); e != nil {
+					return mkundef(), e
+				}
+			}
 			lookup := func(name string) (string, *ThrowError) {
 				v, e := rt.getField(gv, name)
 				if e != nil {

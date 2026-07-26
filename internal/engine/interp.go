@@ -678,11 +678,14 @@ restart:
 					ao.argMap = newArgumentsMap(locals, fn.paramCount, len(args))
 				}
 				ao.defineOwn("length", mknum(float64(len(args))), attrWritable|attrConfigurable)
-				if fn.isStrict {
-					// Strict arguments: `callee` is a poison-pill accessor.
-					ao.defineAccessor("callee", rt.poison, rt.poison, true, true, 0)
-				} else {
+				if fn.mappedArgs {
+					// CreateMappedArgumentsObject: `callee` is the function itself.
 					ao.defineOwn("callee", fnVal, attrWritable|attrConfigurable)
+				} else {
+					// CreateUnmappedArgumentsObject: `callee` is the %ThrowTypeError%
+					// poison pill. Unmapped covers strict code AND a sloppy function
+					// with a non-simple parameter list.
+					ao.defineAccessor("callee", rt.poison, rt.poison, true, true, 0)
 				}
 				// The arguments object has its OWN @@iterator (%Array.prototype.values%).
 				if rt.symIterator != 0 {

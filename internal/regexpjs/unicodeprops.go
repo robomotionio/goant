@@ -68,6 +68,95 @@ func translateUnicodeProps(pattern string, unicodeSets bool) (string, error) {
 // whole orbit, so that `iu` matching honours these special folds that regexp2's
 // IgnoreCase misses. Two-member orbits (ordinary upper/lower pairs) are left to
 // the engine's own case-insensitivity.
+// extraFoldPairs are the CaseFolding.txt "S" (simple) mappings that Go's
+// unicode.SimpleFold orbit does not carry, because they are not case-conversion
+// pairs. ES Canonicalize uses the simple OR common folding, so these characters
+// do match each other under `iu`.
+var extraFoldPairs = map[rune]rune{
+	0x1FD3: 0x0390, 0x0390: 0x1FD3, // ΐ
+	0x1FE3: 0x03B0, 0x03B0: 0x1FE3, // ΰ
+	0xFB05: 0xFB06, 0xFB06: 0xFB05, // ﬅ ﬆ
+}
+
+// foldOrbit is the set of characters that Canonicalize maps together with c.
+func foldOrbit(c rune) []rune {
+	orbit := []rune{c}
+	seen := map[rune]bool{c: true}
+	for i := 0; i < len(orbit); i++ {
+		x := orbit[i]
+		for f := unicode.SimpleFold(x); f != x; f = unicode.SimpleFold(f) {
+			if !seen[f] {
+				seen[f] = true
+				orbit = append(orbit, f)
+			}
+		}
+		if e, ok := extraFoldPairs[x]; ok && !seen[e] {
+			seen[e] = true
+			orbit = append(orbit, e)
+		}
+	}
+	return orbit
+}
+
+// hexEscapeRune decodes a `\uXXXX`, `\u{...}` or `\xXX` escape starting at the
+// backslash rs[i], returning the code point and how many runes it spans.
+func hexEscapeRune(rs []rune, i int) (rune, int) {
+	if i+1 >= len(rs) || rs[i] != '\\' {
+		return 0, 0
+	}
+	hex := func(c rune) (int, bool) {
+		switch {
+		case c >= '0' && c <= '9':
+			return int(c - '0'), true
+		case c >= 'a' && c <= 'f':
+			return int(c-'a') + 10, true
+		case c >= 'A' && c <= 'F':
+			return int(c-'A') + 10, true
+		}
+		return 0, false
+	}
+	switch rs[i+1] {
+	case 'x':
+		if i+3 >= len(rs) {
+			return 0, 0
+		}
+		h, ok1 := hex(rs[i+2])
+		l, ok2 := hex(rs[i+3])
+		if !ok1 || !ok2 {
+			return 0, 0
+		}
+		return rune(h*16 + l), 4
+	case 'u':
+		if i+2 < len(rs) && rs[i+2] == '{' {
+			v, k := 0, i+3
+			for ; k < len(rs) && rs[k] != '}'; k++ {
+				d, ok := hex(rs[k])
+				if !ok || v > 0x10FFFF {
+					return 0, 0
+				}
+				v = v*16 + d
+			}
+			if k >= len(rs) || k == i+3 {
+				return 0, 0
+			}
+			return rune(v), k - i + 1
+		}
+		if i+5 >= len(rs) {
+			return 0, 0
+		}
+		v := 0
+		for k := i + 2; k < i+6; k++ {
+			d, ok := hex(rs[k])
+			if !ok {
+				return 0, 0
+			}
+			v = v*16 + d
+		}
+		return rune(v), 6
+	}
+	return 0, 0
+}
+
 func expandCaseFold(pattern string) string {
 	rs := []rune(pattern)
 	var out strings.Builder
@@ -75,6 +164,16 @@ func expandCaseFold(pattern string) string {
 	for i := 0; i < len(rs); i++ {
 		c := rs[i]
 		if c == '\\' && i+1 < len(rs) {
+			// A hex escape names a character just as a literal does, but expanding
+			// every one of them would also rewrite the range ENDPOINTS of an
+			// expanded \p{…} class. Only the folds regexp2's own IgnoreCase cannot
+			// see are worth the rewrite, and only outside a range.
+			if r, n := hexEscapeRune(rs, i); n > 0 && extraFoldPairs[r] != 0 &&
+				!(i > 0 && rs[i-1] == '-') && !(i+n < len(rs) && rs[i+n] == '-' && i+n+1 < len(rs) && rs[i+n+1] != ']') {
+				writeFoldOrbit(&out, foldOrbit(r), inClass)
+				i += n - 1
+				continue
+			}
 			// \w / \W are handled by translateWordClass, which tracks ignoreCase down
 			// the inline-modifier nesting — a `(?-i:…)` region must get the plain
 			// ASCII word set back, which a whole-pattern rewrite here cannot express.
@@ -97,30 +196,33 @@ func expandCaseFold(pattern string) string {
 			out.WriteRune(c)
 			continue
 		}
-		orbit := []rune{c}
-		for f := unicode.SimpleFold(c); f != c; f = unicode.SimpleFold(f) {
-			orbit = append(orbit, f)
-		}
-		if len(orbit) <= 2 {
+		orbit := foldOrbit(c)
+		if len(orbit) <= 2 && extraFoldPairs[c] == 0 {
 			out.WriteRune(c)
 			continue
 		}
-		if !inClass {
-			out.WriteByte('[')
-		}
-		for _, o := range orbit {
-			out.WriteString(esc(uint32(o)))
-		}
-		if !inClass {
-			out.WriteByte(']')
-		}
+		writeFoldOrbit(&out, orbit, inClass)
 	}
 	return out.String()
 }
 
+// writeFoldOrbit emits the orbit as a character class (or, inside one, as bare
+// members).
+func writeFoldOrbit(out *strings.Builder, orbit []rune, inClass bool) {
+	if !inClass {
+		out.WriteByte('[')
+	}
+	for _, o := range orbit {
+		out.WriteString(esc(uint32(o)))
+	}
+	if !inClass {
+		out.WriteByte(']')
+	}
+}
+
 // isVModeReservedDoublePunct reports whether c is a punctuator whose doubled form
 // (`&&`, `!!`, `##`, `$$`, `%%`, `**`, `++`, `,,`, `..`, `::`, `;;`, `<<`, `==`,
-// `>>`, `??`, `@@`, `^^`, ``` `` ```, `~~`) is a ClassSetReservedDoublePunctuator
+// `>>`, `??`, `@@`, `^^`, ``` “ ```, `~~`) is a ClassSetReservedDoublePunctuator
 // — forbidden as a literal inside a `v`-mode character class.
 func isVModeReservedDoublePunct(c rune) bool {
 	switch c {
