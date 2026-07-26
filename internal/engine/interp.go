@@ -112,6 +112,10 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	captureUpvalue := func(slot int) *upvalue {
 		if openUpvals == nil {
 			openUpvals = map[int]*upvalue{}
+			// An open upvalue points into locals. closeAll copies the value out
+			// on the way to a normal return, but an abrupt exit may not reach
+			// it, so this depth gives up its buffer rather than depend on that.
+			rt.dropFrameLocals(rt.frameDepth)
 		}
 		if u, ok := openUpvals[slot]; ok {
 			return u
@@ -208,13 +212,12 @@ restart:
 	}
 	code = fn.code
 	ics = frameICs(fn)
-	stack = make([]Value, 0, fn.maxStack+16)
-	// Locals start as undefined (the zero Value 0x0 would decode as the number
-	// 0.0, so an unread local must not be left zeroed).
-	locals = make([]Value, fn.maxLocals)
-	for i := range locals {
-		locals[i] = mkundef()
-	}
+	// Both buffers come from the storage this call depth is holding, which the
+	// previous frame at this depth finished with. They start undefined, not
+	// zeroed: the zero Value decodes as the number 0.0, and a reused buffer
+	// still holds the last frame's values.
+	stack = rt.frameStack(rt.frameDepth, fn.maxStack+16)
+	locals = rt.frameLocals(rt.frameDepth, fn.maxLocals)
 	// Parameters occupy the first slots (ant frame arg layout).
 	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
 		if i < len(args) {
@@ -226,19 +229,24 @@ restart:
 	// bindings live. Claimed here, at frame entry, before any nested import runs.
 	// The environment is created by the link-time hoisting frame and ADOPTED by
 	// the body frame, so both halves of the module share one set of bindings.
+	// Both halves of this hand the locals slice to something that outlives the
+	// frame, so this depth's buffer must not be handed out again.
 	if pm := rt.pendingModule; pm != nil && (pm.fn == fn || pm.fn.moduleHoistFn == fn) {
 		if pm.locals != nil {
 			locals = pm.locals
 		} else {
 			pm.locals = locals
 		}
+		rt.dropFrameLocals(rt.frameDepth)
 		rt.pendingModule = nil
 	}
 	// A Script's top-level lexical bindings become global ones here — before any
 	// of them is initialised, so a read from a nested call reaches the temporal
-	// dead zone rather than finding nothing at all.
+	// dead zone rather than finding nothing at all. The bindings read through
+	// this slice for as long as they exist, which is past this frame.
 	if fn.globalLex != nil {
 		rt.registerGlobalLex(fn, locals)
+		rt.dropFrameLocals(rt.frameDepth)
 	}
 	openUpvals = nil
 	handlers = nil
@@ -700,7 +708,11 @@ restart:
 					ao.defineOwn(numberToString(float64(i)), v, attrDefault)
 				}
 				if fn.mappedArgs {
+					// The parameter map writes through to the frame's locals and
+					// the object can outlive the call, so this depth gives up
+					// its buffer.
 					ao.argMap = newArgumentsMap(locals, fn.paramCount, len(args))
+					rt.dropFrameLocals(rt.frameDepth)
 				}
 				ao.defineOwn("length", mknum(float64(len(args))), attrWritable|attrConfigurable)
 				if fn.mappedArgs {

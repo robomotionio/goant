@@ -241,6 +241,11 @@ type Runtime struct {
 	// frameDepth tracks native call depth for the stack-overflow guard.
 	frameDepth int
 
+	// slabs holds the locals and operand stack retained for each call depth, so
+	// a call reuses the storage of the last frame that ran at its depth instead
+	// of allocating. See frameslab.go.
+	slabs []frameSlab
+
 	// interrupt is the one piece of Runtime state written from another
 	// goroutine — a host's request that the running script stop. See
 	// interrupt.go. backEdges counts loop iterations between flag checks and is
