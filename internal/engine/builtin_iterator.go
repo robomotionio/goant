@@ -86,13 +86,18 @@ func (rt *Runtime) newStringIterator(vals []Value) Value {
 // throw. Its `return` closes the source iterator (forwarding the close) and
 // marks the helper done; `done` is shared with the step closure so an exhausted
 // or already-returned helper does not re-close the source.
-func (rt *Runtime) newIteratorObjectE(source Value, done *bool, next func() (Value, bool, *ThrowError)) Value {
+func (rt *Runtime) newIteratorObjectE(source Value, done *bool, next func() (Value, bool, *ThrowError), held ...[]Value) Value {
 	proto := rt.iteratorProto
 	if rt.iterHelperProto != 0 {
 		proto = rt.iterHelperProto
 	}
 	v := rt.newObject(proto)
 	o := rt.objPtr(v)
+	// The step closure is the only thing referring to the source iterator and
+	// whatever else the helper carries (its `next` method, a callback, the
+	// inner iterator of a flatMap). A Go closure is opaque to the collector, so
+	// they are registered as this helper's internal slots. See holdCaptures.
+	rt.holdCaptures(v, append(held, []Value{source})...)
 	running := false // guards re-entrant next while the helper generator is executing
 	rt.defMethod(o, "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if running {
@@ -373,7 +378,7 @@ func (rt *Runtime) initIteratorHelpers() {
 				return mkundef(), false, ce
 			}
 			return r, false, nil
-		}), nil
+		}, []Value{next, cb}), nil
 	})
 	rt.defMethod(proto, "filter", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "filter")
@@ -400,7 +405,7 @@ func (rt *Runtime) initIteratorHelpers() {
 				}
 			}
 			return mkundef(), true, nil
-		}), nil
+		}, []Value{next, cb}), nil
 	})
 	rt.defMethod(proto, "take", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		next, limit, e := rt.iterHelperLimit(this, arg(args, 0))
@@ -426,7 +431,7 @@ func (rt *Runtime) initIteratorHelpers() {
 				return mkundef(), d, e
 			}
 			return v, false, nil
-		}), nil
+		}, []Value{next}), nil
 	})
 	rt.defMethod(proto, "drop", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		next, limit, e := rt.iterHelperLimit(this, arg(args, 0))
@@ -452,7 +457,7 @@ func (rt *Runtime) initIteratorHelpers() {
 				return mkundef(), d, e
 			}
 			return v, false, nil
-		}), nil
+		}, []Value{next}), nil
 	})
 	rt.defMethod(proto, "flatMap", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "flatMap")
@@ -460,12 +465,15 @@ func (rt *Runtime) initIteratorHelpers() {
 			return mkundef(), e
 		}
 		idx, done := 0, false
-		var innerNext Value // the current inner iterator's next method (0 when none)
-		var inner Value
+		// The currently-open inner (mapper-result) iterator and its `next`
+		// method, in a slice rather than two captured variables: the collector
+		// cannot see inside a closure, and these two are reassigned as the
+		// helper advances, so a snapshot taken at creation would go stale.
+		inner := make([]Value, 2)
 		helper := rt.newIteratorObjectE(this, &done, func() (Value, bool, *ThrowError) {
 			for !done {
-				if innerNext != 0 {
-					iv, id, ie := rt.iterStepValue(inner, innerNext)
+				if inner[1] != 0 {
+					iv, id, ie := rt.iterStepValue(inner[0], inner[1])
 					if ie != nil {
 						done = true
 						rt.iteratorClose(this)
@@ -474,7 +482,7 @@ func (rt *Runtime) initIteratorHelpers() {
 					if !id {
 						return iv, false, nil
 					}
-					innerNext = 0
+					inner[1] = 0
 				}
 				v, d, e := rt.iterStepValue(this, next)
 				if e != nil || d {
@@ -494,15 +502,15 @@ func (rt *Runtime) initIteratorHelpers() {
 					rt.iteratorClose(this)
 					return mkundef(), false, ie
 				}
-				inner = it
-				innerNext, ie = rt.getField(it, "next")
+				inner[0] = it
+				inner[1], ie = rt.getField(it, "next")
 				if ie != nil {
 					done = true
 					return mkundef(), false, ie
 				}
 			}
 			return mkundef(), true, nil
-		})
+		}, []Value{next, cb}, inner)
 		// flatMap's Return must also close the currently-open inner (mapper-result)
 		// iterator, not just the source (IteratorCloseAll over « inner, source »).
 		ho := rt.objPtr(helper)
@@ -510,8 +518,8 @@ func (rt *Runtime) initIteratorHelpers() {
 			if !done {
 				done = true
 				var pending *ThrowError
-				if innerNext != 0 {
-					pending = rt.iteratorCloseE(inner)
+				if inner[1] != 0 {
+					pending = rt.iteratorCloseE(inner[0])
 				}
 				if ce := rt.iteratorCloseE(this); ce != nil && pending == nil {
 					pending = ce
@@ -768,6 +776,9 @@ func (rt *Runtime) initIteratorHelpers() {
 		// inner iterators are opened lazily, one segment at a time.
 		type openIter struct{ iterable, method Value }
 		iterables := make([]openIter, 0, len(args))
+		// The same values, flat, so the collector can find them: they live only
+		// in the closures below and a func value is opaque. See holdCaptures.
+		held := make([]Value, 0, 2*len(args))
 		for _, item := range args {
 			if !item.IsObjectType() {
 				return mkundef(), rt.typeError("Iterator.concat argument is not an object")
@@ -780,15 +791,19 @@ func (rt *Runtime) initIteratorHelpers() {
 				return mkundef(), rt.typeError("Iterator.concat argument is not iterable")
 			}
 			iterables = append(iterables, openIter{item, m})
+			held = append(held, item, m)
 		}
 		idx := 0
 		done := false
 		running := false           // guards against re-entrant next/return (generator "executing")
-		var inner, innerNext Value // current inner iterator + its next (0 when none open)
+		// The open inner iterator and its `next`, in a slice rather than two
+		// captured variables: they are reassigned per segment, so a snapshot
+		// taken at creation would go stale. inner[0] is 0 when none is open.
+		inner := make([]Value, 2)
 		next := func() (Value, bool, *ThrowError) {
 			for !done {
-				if innerNext != 0 {
-					v, d, e := rt.iterStepValue(inner, innerNext)
+				if inner[1] != 0 {
+					v, d, e := rt.iterStepValue(inner[0], inner[1])
 					if e != nil {
 						done = true
 						return mkundef(), false, e
@@ -796,7 +811,7 @@ func (rt *Runtime) initIteratorHelpers() {
 					if !d {
 						return v, false, nil
 					}
-					inner, innerNext = 0, 0 // segment exhausted (already closed by IteratorStep)
+					inner[0], inner[1] = 0, 0 // segment exhausted (already closed by IteratorStep)
 				}
 				if idx >= len(iterables) {
 					done = true
@@ -818,7 +833,7 @@ func (rt *Runtime) initIteratorHelpers() {
 					done = true
 					return mkundef(), false, e
 				}
-				inner, innerNext = iter, nx
+				inner[0], inner[1] = iter, nx
 			}
 			return mkundef(), true, nil
 		}
@@ -828,6 +843,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		}
 		hv := rt.newObject(proto)
 		ho := rt.objPtr(hv)
+		rt.holdCaptures(hv, held, inner)
 		rt.defMethod(ho, "next", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
 			if running {
 				return mkundef(), rt.typeError("Iterator.concat generator is already running")
@@ -848,9 +864,9 @@ func (rt *Runtime) initIteratorHelpers() {
 			// first segment starts or after exhaustion there is nothing to close.
 			if !done {
 				done = true
-				if inner != 0 {
+				if inner[0] != 0 {
 					running = true
-					e := rt.iteratorCloseE(inner)
+					e := rt.iteratorCloseE(inner[0])
 					running = false
 					if e != nil {
 						return mkundef(), e
@@ -996,7 +1012,10 @@ func (rt *Runtime) initIteratorHelpers() {
 			}
 			return obj
 		}
-		return rt.newZipIterator(iters, nexts, mode, padding, finish), nil
+		hv := rt.newZipIterator(iters, nexts, mode, padding, finish)
+		// The property keys live only in `finish`, which is a Go closure.
+		rt.holdCaptures(hv, keys)
+		return hv, nil
 	})
 	if rt.symToStringTag != 0 {
 		// %Iterator.prototype%[@@toStringTag] is likewise an accessor: getter
@@ -1202,6 +1221,9 @@ func (rt *Runtime) newZipIterator(iters, nexts []Value, mode string, padding []V
 	}
 	hv := rt.newObject(proto)
 	ho := rt.objPtr(hv)
+	// The sub-iterators, their `next` methods and the padding exist only inside
+	// the closures below, which the collector cannot look into. See holdCaptures.
+	rt.holdCaptures(hv, iters, nexts, padding)
 	rt.defMethod(ho, "next", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
 		if running {
 			return mkundef(), rt.typeError("Iterator.zip generator is already running")
@@ -1244,6 +1266,7 @@ func (rt *Runtime) newZipIterator(iters, nexts []Value, mode string, padding []V
 func (rt *Runtime) wrapIterator(src Value) Value {
 	wrap := rt.newObject(rt.iteratorProto)
 	o := rt.objPtr(wrap)
+	rt.holdCaptures(wrap, []Value{src})
 	rt.defMethod(o, "next", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		nx, e := rt.getField(src, "next")
 		if e != nil {

@@ -323,6 +323,8 @@ func (rt *Runtime) asyncIterLoop(iter Value, onValue func(Value) (bool, *ThrowEr
 			done(arg(a, 0))
 			return mkundef(), nil
 		})
+		rt.holdCaptures(onF, []Value{iter, rp})
+		rt.holdCaptures(onR, []Value{iter, rp})
 		rt.promiseThen(onF, onR, rt.objPtr(rp))
 	}
 	step()
@@ -341,6 +343,7 @@ const (
 func (rt *Runtime) asyncIterTransform(src, fn Value, kind asyncTransformKind) Value {
 	wrap := rt.newObject(rt.asyncIteratorProto)
 	o := rt.objPtr(wrap)
+	rt.holdCaptures(wrap, []Value{src, fn})
 	i := 0
 	rt.defMethod(o, "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		p, pp := rt.makePromise()
@@ -387,6 +390,8 @@ func (rt *Runtime) asyncIterTransform(src, fn Value, kind asyncTransformKind) Va
 				rt.rejectPromise(pp, arg(a, 0))
 				return mkundef(), nil
 			})
+			rt.holdCaptures(onF, []Value{p, rp})
+			rt.holdCaptures(onR, []Value{p, rp})
 			rt.promiseThen(onF, onR, rt.objPtr(rp))
 		}
 		pump()
@@ -400,19 +405,23 @@ func (rt *Runtime) asyncIterTransform(src, fn Value, kind asyncTransformKind) Va
 func (rt *Runtime) asyncIterFlatMap(src, fn Value) Value {
 	wrap := rt.newObject(rt.asyncIteratorProto)
 	o := rt.objPtr(wrap)
-	var inner Value // current inner async iterator, or 0 when between sources
+	// inner[0] is the current inner async iterator, 0 when between sources. It
+	// is a slice, not a captured variable, because it is reassigned as the
+	// helper advances and the collector cannot see inside a closure.
+	inner := make([]Value, 1)
+	rt.holdCaptures(wrap, []Value{src, fn}, inner)
 	i := 0
 	rt.defMethod(o, "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		p, pp := rt.makePromise()
 		var pumpOuter func()
 		var pumpInner func()
 		pumpInner = func() {
-			nextFn, e := rt.getField(inner, "next")
+			nextFn, e := rt.getField(inner[0], "next")
 			if e != nil {
 				rt.rejectPromise(pp, e.Value)
 				return
 			}
-			res, e := rt.callValue(nextFn, inner, nil)
+			res, e := rt.callValue(nextFn, inner[0], nil)
 			if e != nil {
 				rt.rejectPromise(pp, e.Value)
 				return
@@ -421,7 +430,7 @@ func (rt *Runtime) asyncIterFlatMap(src, fn Value) Value {
 			onF := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
 				r := arg(a, 0)
 				if dv, _ := rt.getField(r, "done"); rt.toBoolean(dv) {
-					inner = 0
+					inner[0] = 0
 					pumpOuter()
 					return mkundef(), nil
 				}
@@ -433,6 +442,8 @@ func (rt *Runtime) asyncIterFlatMap(src, fn Value) Value {
 				rt.rejectPromise(pp, arg(a, 0))
 				return mkundef(), nil
 			})
+			rt.holdCaptures(onF, []Value{p, rp})
+			rt.holdCaptures(onR, []Value{p, rp})
 			rt.promiseThen(onF, onR, rt.objPtr(rp))
 		}
 		pumpOuter = func() {
@@ -466,7 +477,7 @@ func (rt *Runtime) asyncIterFlatMap(src, fn Value) Value {
 					rt.rejectPromise(pp, e.Value)
 					return mkundef(), nil
 				}
-				inner = it
+				inner[0] = it
 				pumpInner()
 				return mkundef(), nil
 			})
@@ -474,9 +485,11 @@ func (rt *Runtime) asyncIterFlatMap(src, fn Value) Value {
 				rt.rejectPromise(pp, arg(a, 0))
 				return mkundef(), nil
 			})
+			rt.holdCaptures(onF, []Value{p, rp})
+			rt.holdCaptures(onR, []Value{p, rp})
 			rt.promiseThen(onF, onR, rt.objPtr(rp))
 		}
-		if inner != 0 {
+		if inner[0] != 0 {
 			pumpInner()
 		} else {
 			pumpOuter()
@@ -491,6 +504,7 @@ func (rt *Runtime) asyncIterFlatMap(src, fn Value) Value {
 func (rt *Runtime) asyncIterLimit(src Value, limit int, take bool) Value {
 	wrap := rt.newObject(rt.asyncIteratorProto)
 	o := rt.objPtr(wrap)
+	rt.holdCaptures(wrap, []Value{src})
 	seen := 0
 	rt.defMethod(o, "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		p, pp := rt.makePromise()
@@ -532,6 +546,8 @@ func (rt *Runtime) asyncIterLimit(src Value, limit int, take bool) Value {
 				rt.rejectPromise(pp, arg(a, 0))
 				return mkundef(), nil
 			})
+			rt.holdCaptures(onF, []Value{p, rp})
+			rt.holdCaptures(onR, []Value{p, rp})
 			rt.promiseThen(onF, onR, rt.objPtr(rp))
 		}
 		pump()

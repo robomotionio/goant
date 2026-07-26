@@ -167,8 +167,18 @@ func (rt *Runtime) sortValues(vs []Value, cmp Value) *ThrowError {
 // native cannot suspend on await.
 func (rt *Runtime) arrayFromAsync(C, asyncItems, mapfn, thisArg Value) Value {
 	resultP, resolveCap, rejectCap, _ := rt.newPromiseCapability(rt.promiseCtor)
-	resolve := func(v Value) { rt.callValue(resolveCap, mkundef(), []Value{v}) }
-	reject := func(v Value) { rt.callValue(rejectCap, mkundef(), []Value{v}) }
+	// Everything below runs between promise reactions, held only by Go
+	// closures — including the promise this returns. Roots them until it
+	// settles; both exits go through resolve/reject. See beginDriver.
+	drv := rt.beginDriver(resultP, resolveCap, rejectCap, C, asyncItems, mapfn, thisArg)
+	resolve := func(v Value) {
+		rt.endDriver(drv)
+		rt.callValue(resolveCap, mkundef(), []Value{v})
+	}
+	reject := func(v Value) {
+		rt.endDriver(drv)
+		rt.callValue(rejectCap, mkundef(), []Value{v})
+	}
 
 	mapping := false
 	if !mapfn.IsUndefined() {
@@ -256,6 +266,7 @@ func (rt *Runtime) arrayFromAsync(C, asyncItems, mapfn, thisArg Value) Value {
 			reject(e.Value)
 			return resultP
 		}
+		*drv = append(*drv, iter, nextMethod)
 		var A Value
 		if rt.isCallable(C) {
 			a, e := rt.construct(C, nil)
@@ -267,6 +278,7 @@ func (rt *Runtime) arrayFromAsync(C, asyncItems, mapfn, thisArg Value) Value {
 		} else {
 			A = rt.newArray()
 		}
+		*drv = append(*drv, A)
 		// closeReject performs AsyncIteratorClose(iter, throw) then rejects with the
 		// original reason (the iterator's return result/error is discarded).
 		closeReject := func(reason Value) {
@@ -368,6 +380,7 @@ func (rt *Runtime) arrayFromAsync(C, asyncItems, mapfn, thisArg Value) Value {
 		}
 		A = a
 	}
+	*drv = append(*drv, A, arrayLike)
 	var stepAL func(k int)
 	stepAL = func(k int) {
 		if k >= n {

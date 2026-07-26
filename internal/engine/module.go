@@ -808,17 +808,20 @@ func (rt *Runtime) importModuleDynamic(spec, referrer string) Value {
 			done()
 			return
 		}
-		rt.promiseThen(
-			rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				done()
-				return mkundef(), nil
-			}),
-			rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
-				rt.rejectPromise(cap, arg(a, 0))
-				return mkundef(), nil
-			}),
-			po)
-	})
+		onDone := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			done()
+			return mkundef(), nil
+		})
+		onFail := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			rt.rejectPromise(cap, arg(a, 0))
+			return mkundef(), nil
+		})
+		// Both settle the import()'s promise, and hold it in a Go closure the
+		// collector cannot see into. See holdCaptures.
+		rt.holdCaptures(onDone, []Value{promise})
+		rt.holdCaptures(onFail, []Value{promise})
+		rt.promiseThen(onDone, onFail, po)
+	}, promise)
 	return promise
 }
 

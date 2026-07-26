@@ -254,9 +254,14 @@ func (rt *Runtime) createAsyncFromSyncIterator(syncIt Value) (Value, *ThrowError
 					return mkundef(), &ThrowError{Value: arg(a, 0), rt: rt}
 				})
 			}
+			rt.holdCaptures(unwrap, []Value{syncIt, valP})
+			rt.holdCaptures(onRej, []Value{syncIt, valP})
 			return rt.promiseThen(unwrap, onRej, rt.objPtr(valP)), nil
 		}
 	}
+	// [[SyncIteratorRecord]]: the wrapped sync iterator and its `next` live only
+	// in the step closures above. See holdCaptures.
+	rt.holdCaptures(wrap, []Value{syncIt})
 	rt.defMethod(o, "next", 1, step("next"))
 	rt.defMethod(o, "return", 1, step("return"))
 	rt.defMethod(o, "throw", 1, step("throw"))

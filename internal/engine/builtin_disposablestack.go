@@ -266,6 +266,10 @@ func (rt *Runtime) defineDisposableStack(name string, async bool) {
 func (rt *Runtime) disposeStackAsync(entries Value) Value {
 	recs := rt.drainRecords(entries)
 	result, ro := rt.makePromise()
+	// Between one disposer's await and the next, the pending disposal records,
+	// the completion being carried and the promise this returns exist only in
+	// the closures below. See beginDriver.
+	drv := rt.beginDriver(append([]Value{result}, recs...)...)
 	// DisposeResources: needsAwait tracks whether a null/undefined async resource
 	// was seen; hasAwaited whether any disposer result was actually awaited. If
 	// needsAwait and nothing awaited, one Await(undefined) still runs.
@@ -275,6 +279,7 @@ func (rt *Runtime) disposeStackAsync(entries Value) Value {
 		if needsAwait && !hasAwaited {
 			needsAwait = false
 			p := rt.resolvedPromise(mkundef())
+			*drv = append(*drv, completion)
 			done := rt.newNativeFunc("", 1, func(rt *Runtime, this Value, a []Value) (Value, *ThrowError) {
 				finish(completion)
 				return mkundef(), nil
@@ -282,6 +287,7 @@ func (rt *Runtime) disposeStackAsync(entries Value) Value {
 			rt.promiseThen(done, done, rt.objPtr(p))
 			return
 		}
+		rt.endDriver(drv)
 		if completion.IsUndefined() {
 			rt.resolvePromise(result, ro, mkundef())
 		} else {
@@ -305,6 +311,7 @@ func (rt *Runtime) disposeStackAsync(entries Value) Value {
 			if rt.isPromise(res) {
 				hasAwaited = true
 				idx, comp := i, completion
+				*drv = append(*drv, comp, res) // carried across the await
 				onF := rt.newNativeFunc("", 1, func(rt *Runtime, this Value, a []Value) (Value, *ThrowError) {
 					step(idx, comp)
 					return mkundef(), nil

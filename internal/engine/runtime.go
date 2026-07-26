@@ -126,7 +126,7 @@ type Runtime struct {
 	// microtasks is the promise-reaction job queue (ant microtask ring). It is
 	// drained after the top-level script and after each callback that may have
 	// enqueued jobs.
-	microtasks []func()
+	microtasks []job
 
 	// macrotasks is the timer queue (setTimeout/setInterval). goant has no real
 	// clock: tasks run in (delay, insertion) order after microtasks drain.
@@ -155,6 +155,21 @@ type Runtime struct {
 	// objects (the matcher, the string, the global/unicode flags, and done) for a
 	// shared %RegExpStringIteratorPrototype%.next that steps RegExpExec lazily.
 	regexpStrIterStates map[*object]*regexpStrIterState
+
+	// nativeDrivers holds the working set of a built-in that drives itself
+	// through promise reactions — Array.fromAsync, a module's top-level await.
+	// Such a driver has neither an interpreter frame nor an object of its own,
+	// so between one reaction and the next its whole state lives in Go
+	// closures. An entry is added when it starts and removed when it settles;
+	// the slice is held through a pointer so the driver can extend it as values
+	// come into being. See beginDriver.
+	nativeDrivers map[*[]Value]bool
+
+	// natCaptures holds the values a built-in written as a Go closure keeps on
+	// behalf of an object — the spec's internal slots, which goant mostly stores
+	// as captured Go variables. A func value is opaque, so nothing else can find
+	// them. Keyed by the owning object and swept with it; see holdCaptures.
+	natCaptures map[*object][][]Value
 
 	// indexedProtoIntercept becomes true once any integer-indexed accessor or
 	// non-writable indexed data property is defined anywhere (it may sit on a

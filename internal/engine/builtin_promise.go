@@ -6,18 +6,32 @@ package engine
 // then/catch/finally derive a fresh promise. The host drains the microtask queue
 // after the top-level script (Runtime.drainMicrotasks in runtime.go).
 
-// enqueueMicrotask appends a job to the promise-reaction queue.
-func (rt *Runtime) enqueueMicrotask(fn func()) {
-	rt.microtasks = append(rt.microtasks, fn)
+// job is one queued microtask: the Go closure that runs it, plus the values
+// that closure captured.
+//
+// The roots are not decoration. A pending job is the only thing holding on to
+// the promise it will settle and the value it will settle with, and a closure
+// is opaque — the collector cannot look inside a func. Without them a job that
+// outlives its promise's last JavaScript reference would run against freed
+// cells. See collect.go.
+type job struct {
+	run   func()
+	roots []Value
+}
+
+// enqueueMicrotask appends a job to the promise-reaction queue. Every Value the
+// closure captured must be passed as a root.
+func (rt *Runtime) enqueueMicrotask(fn func(), roots ...Value) {
+	rt.microtasks = append(rt.microtasks, job{run: fn, roots: roots})
 }
 
 // drainMicrotasks runs queued jobs FIFO until the queue empties (jobs may
 // enqueue further jobs).
 func (rt *Runtime) drainMicrotasks() {
 	for len(rt.microtasks) > 0 {
-		job := rt.microtasks[0]
+		j := rt.microtasks[0]
 		rt.microtasks = rt.microtasks[1:]
-		job()
+		j.run()
 	}
 }
 
@@ -157,7 +171,7 @@ func (rt *Runtime) flushReactions(st *promiseState) {
 	rs := st.handlers
 	st.handlers = nil
 	for _, r := range rs {
-		rt.enqueueMicrotask(func() { rt.runReaction(r, st.state, st.value) })
+		rt.enqueueMicrotask(func() { rt.runReaction(r, st.state, st.value) }, r.roots(st.value)...)
 	}
 }
 
@@ -179,7 +193,7 @@ func (rt *Runtime) resolvePromise(p Value, o *object, value Value) {
 			return
 		}
 		if rt.isCallable(then) {
-			rt.enqueueMicrotask(func() { rt.runThenableJob(p, o, value, then) })
+			rt.enqueueMicrotask(func() { rt.runThenableJob(p, o, value, then) }, p, value, then)
 			return
 		}
 	}
@@ -206,6 +220,8 @@ func (rt *Runtime) runThenableJob(p Value, o *object, thenable, then Value) {
 		rt.rejectPromise(o, arg(args, 0))
 		return mkundef(), nil
 	})
+	rt.holdCaptures(res, []Value{p})
+	rt.holdCaptures(rej, []Value{p})
 	if _, e := rt.callValue(then, thenable, []Value{res, rej}); e != nil && !done {
 		done = true
 		rt.rejectPromise(o, e.Value)
@@ -270,7 +286,7 @@ func (rt *Runtime) promiseThenCap(onF, onR Value, o *object, result, capResolve,
 	default:
 		st.handled = true
 		state, value := st.state, st.value
-		rt.enqueueMicrotask(func() { rt.runReaction(r, state, value) })
+		rt.enqueueMicrotask(func() { rt.runReaction(r, state, value) }, r.roots(value)...)
 	}
 	return result
 }
@@ -406,6 +422,7 @@ func (rt *Runtime) initPromiseBuiltin() {
 					return mkundef(), e
 				}
 				thunk := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) { return value, nil })
+				rt.holdCaptures(thunk, []Value{value})
 				return rt.invokeThen1(p, thunk)
 			})
 			catchFinally = rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
@@ -421,8 +438,11 @@ func (rt *Runtime) initPromiseBuiltin() {
 				thrower := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, _ []Value) (Value, *ThrowError) {
 					return mkundef(), &ThrowError{Value: reason, rt: rt}
 				})
+				rt.holdCaptures(thrower, []Value{reason})
 				return rt.invokeThen1(p, thrower)
 			})
+			rt.holdCaptures(thenFinally, []Value{onFinally, C})
+			rt.holdCaptures(catchFinally, []Value{onFinally, C})
 		}
 		return rt.invokeThen(this, thenFinally, catchFinally)
 	})
@@ -469,6 +489,11 @@ func (rt *Runtime) initPromiseBuiltin() {
 			rt.rejectPromise(o, arg(a, 0))
 			return mkundef(), nil
 		})
+		// [[Promise]]: the resolving functions routinely outlive every other
+		// reference to their promise (`new Promise(r => save = r)`), and they
+		// hold it in a Go closure the collector cannot see into.
+		rt.holdCaptures(resolve, []Value{p})
+		rt.holdCaptures(reject, []Value{p})
 		if _, e := rt.callValue(executor, mkundef(), []Value{resolve, reject}); e != nil && !done {
 			done = true
 			rt.rejectPromise(o, e.Value)
@@ -742,6 +767,11 @@ func (rt *Runtime) promiseAll(C, iterable Value, settled bool) (Value, *ThrowErr
 		} else {
 			onR = rejectFn // the shared reject settles the result on the first rejection
 		}
+		// The element functions carry the results array and the capability in Go
+		// closures, and outlive this call; see holdCaptures.
+		held := []Value{result, results, resolveFn, rejectFn}
+		rt.holdCaptures(onF, held)
+		rt.holdCaptures(onR, held)
 		if te := rt.invokePromiseThen(nextP, onF, onR); te != nil {
 			return te // closes the iterator, then rejects below
 		}
@@ -898,6 +928,9 @@ func (rt *Runtime) promiseAllKeyed(C, obj Value, settled bool) (Value, *ThrowErr
 		} else {
 			onR = rejectFn // first rejection settles the result promise
 		}
+		held := []Value{result, resolveFn, rejectFn, k}
+		rt.holdCaptures(onF, held)
+		rt.holdCaptures(onR, held)
 		if te := rt.invokePromiseThen(nextP, onF, onR); te != nil {
 			rt.callValue(rejectFn, mkundef(), []Value{te.Value})
 			return result, nil
@@ -967,6 +1000,9 @@ func (rt *Runtime) promiseRace(C, iterable Value, any bool) (Value, *ThrowError)
 			// race: the shared resolve/reject settle on the first settlement.
 			onF, onR = resolveFn, rejectFn
 		}
+		held := []Value{result, errs, resolveFn, rejectFn}
+		rt.holdCaptures(onF, held)
+		rt.holdCaptures(onR, held)
 		if te := rt.invokePromiseThen(nextP, onF, onR); te != nil {
 			return te // closes the iterator, then rejects below
 		}

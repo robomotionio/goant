@@ -157,6 +157,8 @@ func (inv *Invocation) Release() bool {
 	rt.regexpStrIterStates = nil
 	rt.finRegistries = nil
 	rt.moduleNamespaces = nil
+	rt.natCaptures = nil
+	rt.nativeDrivers = nil
 
 	// The intern table outlives the invocation; drop what this run added.
 	for _, k := range rt.invInterned {

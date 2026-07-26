@@ -52,6 +52,11 @@ func (rt *Runtime) marshalIn(inner *Runtime, v Value) (Value, *ThrowError) {
 // wrapRealmFunction returns a function in rt that calls fn (which belongs to
 // other), marshalling arguments in and the result back out.
 func (rt *Runtime) wrapRealmFunction(other *Runtime, fn Value) Value {
+	// fn belongs to the other Runtime, so this one's collector cannot root it
+	// and holdCaptures — which keys on an object of the owning Runtime — does
+	// not apply. The wrapper can outlive every reference inside that realm, so
+	// the target is rooted there for as long as the realm exists.
+	other.beginDriver(fn)
 	w := rt.newNativeFunc("", 0, func(rt *Runtime, _ Value, args []Value) (Value, *ThrowError) {
 		inner := make([]Value, 0, len(args))
 		for _, a := range args {

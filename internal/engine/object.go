@@ -132,6 +132,12 @@ type promiseState struct {
 	handled  bool
 }
 
+// roots lists every Value a queued job built from this reaction holds, so the
+// job can be rooted while it waits. See job in builtin_promise.go.
+func (r promiseReaction) roots(settled Value) []Value {
+	return []Value{r.onFulfilled, r.onRejected, r.result, r.capResolve, r.capReject, settled}
+}
+
 type promiseReaction struct {
 	onFulfilled Value
 	onRejected  Value

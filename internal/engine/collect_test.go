@@ -109,6 +109,43 @@ func TestCollectKeepsComputedStrings(t *testing.T) {
 	}
 }
 
+// TestCollectKeepsNativeClosureState covers the state a built-in written as a Go
+// closure holds on an object's behalf — an iterator helper's source iterator,
+// here. A func value is opaque, so that state is reachable only through
+// holdCaptures; without it the helper resumes against freed cells.
+func TestCollectKeepsNativeClosureState(t *testing.T) {
+	rt := New()
+	if _, err := rt.RunString("t.js", `
+		// The source iterators exist only inside the helpers' Go closures: the
+		// arrays are literals here and nothing else names the iterators.
+		var helpers = [
+			[1, 2, 3, 4, 5].values().map(function (x) { return x * 2; }),
+			[1, 2, 3, 4, 5].values().filter(function (x) { return x % 2 === 1; }),
+			Iterator.zip([[1, 2, 3].values(), [4, 5, 6].values()]),
+			Iterator.concat([7, 8].values(), [9].values())
+		];
+		helpers.forEach(function (h) { h.next(); });
+	`); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	rt.Collect()
+	if _, err := rt.RunString("t2.js", `for (var i = 0; i < 5000; i++) ({junk: i});`); err != nil {
+		t.Fatalf("refill: %v", err)
+	}
+
+	v, err := rt.RunString("t3.js", `
+		helpers.map(function (h) { return JSON.stringify(h.next().value); }).join("|")
+	`)
+	if err != nil {
+		t.Fatalf("resuming a helper after a collection: %v", err)
+	}
+	got, _ := rt.toStringValue(v)
+	const want = `4|3|[2,5]|8`
+	if s := rt.strGo(got); s != want {
+		t.Errorf("iterator helper state lost across a collection\n got: %s\nwant: %s", s, want)
+	}
+}
+
 // TestCollectDropsDeadIteratorState covers the object-keyed side tables. They
 // hold state on behalf of an object and are keyed by it, so treating them as
 // ordinary roots would make every iterator ever created immortal — which for a

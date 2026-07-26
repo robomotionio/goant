@@ -49,6 +49,13 @@ import (
 // trace, and the walk is pruned by a memoised "can this type reach a Value at
 // all" test so it never descends into bytecode, source text or maps of strings.
 //
+// Two kinds of reference are invisible to that walk and have to be added by
+// hand. A bare Handle looks like any other integer — rt.interned is a map of
+// text to string handles, and missing it swept every property name in the
+// program. And a Go closure is opaque: a built-in written as one keeps the
+// spec's internal slots in captured variables that nothing can enumerate, so
+// they are registered separately (holdCaptures, beginDriver, job.roots).
+//
 // # Debugging
 //
 // A missing root shows up as an unrelated value going wrong much later, so two
@@ -624,6 +631,13 @@ func (rt *Runtime) markLiveEntries() {
 			rt.traceAny(reflect.ValueOf(cells))
 		}
 	}
+	for o, groups := range rt.natCaptures {
+		if rt.objAlive(o) {
+			for _, g := range groups {
+				rt.markSlice(g)
+			}
+		}
+	}
 }
 
 func (rt *Runtime) dropDeadEntries() {
@@ -652,6 +666,57 @@ func (rt *Runtime) dropDeadEntries() {
 			delete(rt.finRegistries, o)
 		}
 	}
+	for o := range rt.natCaptures {
+		if !rt.objAlive(o) {
+			delete(rt.natCaptures, o)
+		}
+	}
 }
 
 func (rt *Runtime) objAlive(o *object) bool { return o != nil && rt.gc.objMarks.has(o.self) }
+
+// beginDriver roots the working set of a self-driving native built-in until
+// endDriver is called, and returns the handle to extend and to release.
+//
+// Unlike holdCaptures there is no object to key this on: a driver like
+// Array.fromAsync exists only as a chain of promise reactions, and even the
+// promise it will settle is reachable only from its own closures. Append to
+// *d as later values appear; call endDriver on every path that settles, or the
+// working set is immortal.
+func (rt *Runtime) beginDriver(vals ...Value) *[]Value {
+	d := &vals
+	if rt.nativeDrivers == nil {
+		rt.nativeDrivers = map[*[]Value]bool{}
+	}
+	rt.nativeDrivers[d] = true
+	return d
+}
+
+// endDriver releases a working set rooted by beginDriver.
+func (rt *Runtime) endDriver(d *[]Value) { delete(rt.nativeDrivers, d) }
+
+// holdCaptures records values that a built-in written as a Go closure keeps on
+// behalf of owner.
+//
+// The spec gives such built-ins internal slots — an iterator helper's
+// [[UnderlyingIterators]], a promise resolve function's [[Promise]]. goant
+// mostly implements them as captured Go variables instead, and a func value is
+// opaque: neither the reflective root walk nor a hand-written trace can see
+// inside one. Registering them here is what makes them findable, and keying by
+// the owning object is what gives them the right lifetime — the state dies with
+// the object it belongs to, and no earlier.
+//
+// The slices are held by reference, so a closure that overwrites an element
+// stays in step with the collector. A closure that reassigns a whole captured
+// variable must keep that variable in a one-element slice registered here, or
+// the collector will keep tracing the value it replaced.
+func (rt *Runtime) holdCaptures(owner Value, groups ...[]Value) {
+	o := rt.objPtr(owner)
+	if o == nil {
+		return
+	}
+	if rt.natCaptures == nil {
+		rt.natCaptures = map[*object][][]Value{}
+	}
+	rt.natCaptures[o] = append(rt.natCaptures[o], groups...)
+}

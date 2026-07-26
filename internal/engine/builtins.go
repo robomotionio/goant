@@ -127,7 +127,7 @@ func (rt *Runtime) initBuiltins() {
 		if !rt.isCallable(fn) {
 			return mkundef(), rt.typeError("queueMicrotask argument is not callable")
 		}
-		rt.enqueueMicrotask(func() { rt.callValue(fn, mkundef(), nil) })
+		rt.enqueueMicrotask(func() { rt.callValue(fn, mkundef(), nil) }, fn)
 		return mkundef(), nil
 	}), attrWritable|attrConfigurable)
 
