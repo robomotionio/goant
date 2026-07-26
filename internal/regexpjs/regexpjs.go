@@ -11,6 +11,7 @@ package regexpjs
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -364,6 +365,225 @@ func clampQuantifiers(src string) string {
 	return out.String()
 }
 
+// deadZeroWidthQuantifiers supplies the half of RepeatMatcher that .NET lacks.
+// ECMAScript DISCARDS an optional (min = 0) iteration that matched the empty
+// string — step 2.b of the RepeatMatcher continuation — so that iteration's
+// captures never survive; .NET simply ends the loop and keeps them. When the
+// quantified atom can only EVER match empty (a lookahead, an anchor, a group
+// built from those), no iteration can survive that rule, so the whole quantified
+// atom is dead. Marking it dead with `(?!)` rather than deleting it preserves
+// group numbering, and the captures inside then correctly read as undefined.
+//
+// The other half — an atom that *can* consume but matched empty this time round,
+// which ECMAScript backtracks for a longer match — is the loop's control flow
+// and is not expressible in .NET syntax.
+func deadZeroWidthQuantifiers(src string) string {
+	rs := []rune(src)
+	type frame struct{ bodyStart int }
+	var stack []frame
+	var inserts []int
+	inClass := false
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		if c == '\\' {
+			i++
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+		case '(':
+			stack = append(stack, frame{bodyStart: groupBodyStart(rs, i)})
+			// A positive lookahead is zero-width whatever it contains, and putting
+			// the marker INSIDE it makes the assertion fail, which is what leaves
+			// zero iterations.
+			if isPositiveLookahead(rs, i) {
+				stack[len(stack)-1].bodyStart = groupBodyStart(rs, i)
+			}
+		case ')':
+			if len(stack) == 0 {
+				continue
+			}
+			f := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if lo, _, ok := quantifierAt(rs, i+1); ok && lo == 0 && zeroWidthRun(rs, f.bodyStart, i) {
+				inserts = append(inserts, f.bodyStart)
+			}
+		}
+	}
+	if len(inserts) == 0 {
+		return src
+	}
+	sort.Ints(inserts)
+	var out strings.Builder
+	prev := 0
+	for _, at := range inserts {
+		out.WriteString(string(rs[prev:at]))
+		out.WriteString("(?!)")
+		prev = at
+	}
+	out.WriteString(string(rs[prev:]))
+	return out.String()
+}
+
+// zeroWidthRun reports whether rs[a:b] can only ever match the empty string.
+// Anything it cannot prove is treated as consuming, so the caller only ever
+// rewrites patterns it is certain about.
+func zeroWidthRun(rs []rune, a, b int) bool {
+	for i := a; i < b; i++ {
+		switch c := rs[i]; {
+		case c == '\\':
+			// Only the word-boundary assertions are zero-width; every other escape
+			// consumes, and a backreference might.
+			if i+1 < b && (rs[i+1] == 'b' || rs[i+1] == 'B') {
+				i++
+				continue
+			}
+			return false
+		case c == '^' || c == '$' || c == '|':
+		case c == '(':
+			j := matchingParen(rs, i, b)
+			if j < 0 {
+				return false
+			}
+			if !isLookaround(rs, i) && !zeroWidthRun(rs, groupBodyStart(rs, i), j) {
+				return false
+			}
+			i = j
+			if _, end, ok := quantifierAt(rs, i+1); ok {
+				i = end - 1
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// groupBodyStart returns the index just past the '(' at i and whatever group
+// prefix follows it (`?:`, `?=`, `?!`, `?<name>`, `?<=`, `?<!`, `?ims-ims:`).
+func groupBodyStart(rs []rune, i int) int {
+	j := i + 1
+	if j >= len(rs) || rs[j] != '?' {
+		return j
+	}
+	j++
+	if j >= len(rs) {
+		return j
+	}
+	switch {
+	case rs[j] == '=' || rs[j] == '!' || rs[j] == ':':
+		return j + 1
+	case rs[j] == '<':
+		if j+1 < len(rs) && (rs[j+1] == '=' || rs[j+1] == '!') {
+			return j + 2
+		}
+		for k := j + 1; k < len(rs); k++ {
+			if rs[k] == '>' {
+				return k + 1
+			}
+		}
+	default: // inline modifiers, which end at the ':' introducing the body
+		for k := j; k < len(rs); k++ {
+			if rs[k] == ':' {
+				return k + 1
+			}
+			if rs[k] == ')' {
+				return k
+			}
+		}
+	}
+	return len(rs)
+}
+
+func isLookaround(rs []rune, i int) bool {
+	if i+2 >= len(rs) || rs[i] != '(' || rs[i+1] != '?' {
+		return false
+	}
+	if rs[i+2] == '=' || rs[i+2] == '!' {
+		return true
+	}
+	return rs[i+2] == '<' && i+3 < len(rs) && (rs[i+3] == '=' || rs[i+3] == '!')
+}
+
+func isPositiveLookahead(rs []rune, i int) bool {
+	return i+2 < len(rs) && rs[i] == '(' && rs[i+1] == '?' && rs[i+2] == '='
+}
+
+// matchingParen returns the index of the ')' closing the '(' at i, or -1.
+func matchingParen(rs []rune, i, limit int) int {
+	depth := 0
+	inClass := false
+	for j := i; j < limit; j++ {
+		c := rs[j]
+		if c == '\\' {
+			j++
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+		case '(':
+			depth++
+		case ')':
+			if depth--; depth == 0 {
+				return j
+			}
+		}
+	}
+	return -1
+}
+
+// quantifierAt reads the quantifier at rs[i], returning its minimum count and
+// the index just past it (including a lazy `?`).
+func quantifierAt(rs []rune, i int) (lo, end int, ok bool) {
+	if i >= len(rs) {
+		return 0, 0, false
+	}
+	switch rs[i] {
+	case '*', '?':
+		lo, end = 0, i+1
+	case '+':
+		lo, end = 1, i+1
+	case '{':
+		digits, n := readDigits(rs, i+1)
+		if n == 0 {
+			return 0, 0, false
+		}
+		j := i + 1 + n
+		if j < len(rs) && rs[j] == ',' {
+			_, hn := readDigits(rs, j+1)
+			j += 1 + hn
+		}
+		if j >= len(rs) || rs[j] != '}' {
+			return 0, 0, false
+		}
+		v, err := strconv.Atoi(digits)
+		if err != nil {
+			return 0, 0, false
+		}
+		lo, end = v, j+1
+	default:
+		return 0, 0, false
+	}
+	if end < len(rs) && rs[end] == '?' {
+		end++
+	}
+	return lo, end, true
+}
+
 func readDigits(rs []rune, i int) (string, int) {
 	j := i
 	for j < len(rs) && rs[j] >= '0' && rs[j] <= '9' {
@@ -549,6 +769,10 @@ func Compile(pattern, flags string) (*Regexp, error) {
 		src = translateAnnexBEscapes(src)
 		src = annexBClassRanges(src)
 	}
+	// Kill quantified atoms that ECMAScript can never let iterate. This reads the
+	// pattern as the author wrote it, so it must run before the rewrites below
+	// start injecting synthetic zero-width constructs of their own.
+	src = deadZeroWidthQuantifiers(src)
 	// Rename named groups / backreferences to regexp2-safe internal names (ES
 	// allows names regexp2's \w+ grammar rejects, and duplicate names).
 	if gs, gm, gk, gerr := translateGroupNames(src); gerr != nil {
