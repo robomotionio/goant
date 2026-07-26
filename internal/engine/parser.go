@@ -2752,7 +2752,7 @@ func (p *parser) validatePrivateNames(cls *Node) bool {
 		total := e.get + e.set + e.other
 		pair := e.other == 0 && e.get == 1 && e.set == 1 && e.getSt == e.setSt
 		if total > 1 && !pair {
-			p.errorf("Duplicate private name " + name)
+			p.errorf("Duplicate private name %s", name)
 			return false
 		}
 	}

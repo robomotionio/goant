@@ -58,7 +58,7 @@ type svFunc struct {
 	// startIP is where the remaining body then begins.
 	moduleHoistFn *svFunc
 	startIP       int
-	isMethod       bool // concise method / getter / setter: no [[Construct]], no .prototype
+	isMethod      bool // concise method / getter / setter: no [[Construct]], no .prototype
 	// isClassElement marks a class constructor / method / accessor / static block:
 	// its `super` resolves via the class's captured *superproto* / *superctor*
 	// bindings, distinguishing it from an object-literal method (whose super uses
@@ -176,7 +176,7 @@ func (c *compiler) emitGlobalPut(name string) {
 // (GET_FIELD / GET_FIELD2 / PUT_FIELD, all size 7).
 func (c *compiler) emitFieldOp(op Opcode, name string) {
 	if len(name) > 0 && name[0] == '#' && !c.privateNameDeclared(name) {
-		c.syntaxErrorf("Private field '" + name + "' must be declared in an enclosing class")
+		c.syntaxErrorf("Private field %s must be declared in an enclosing class", quotedName(name))
 		return
 	}
 	idx := c.constant(c.rt.internString(c.privateKey(name)))
@@ -238,3 +238,8 @@ func readU32(code []byte, ip int) uint32 {
 	return uint32(code[ip]) | uint32(code[ip+1])<<8 |
 		uint32(code[ip+2])<<16 | uint32(code[ip+3])<<24
 }
+
+// quotedName renders an identifier for an error message. It exists so the
+// message stays a constant format string, which `go vet` requires and which
+// keeps a name that happens to contain a percent sign from being read as a verb.
+func quotedName(name string) string { return "'" + name + "'" }

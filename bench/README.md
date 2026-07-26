@@ -9,7 +9,7 @@ Workloads shared by two harnesses, so their numbers mean the same thing:
   which is where `-cpuprofile` and `-benchmem` live. This answers "why".
 
 Each file is a self-contained script that does a fixed amount of work and
-leaves a checksum in the global `RESULT` so a dead-code-eliminating engine
+leaves a checksum in `globalThis.RESULT` so a dead-code-eliminating engine
 cannot skip it. Sizes are chosen so node takes tens of milliseconds — small
 enough that goant, which is currently far slower, still finishes quickly.
 

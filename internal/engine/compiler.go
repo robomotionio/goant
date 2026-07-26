@@ -1447,7 +1447,7 @@ func (c *compiler) compileBinary(n *Node) {
 	if n.Op == TokIn && n.Left != nil && n.Left.Kind == NIdent &&
 		len(n.Left.Str) > 0 && n.Left.Str[0] == '#' {
 		if !c.privateNameDeclared(n.Left.Str) {
-			c.syntaxErrorf("Private field '" + n.Left.Str + "' must be declared in an enclosing class")
+			c.syntaxErrorf("Private field %s must be declared in an enclosing class", quotedName(n.Left.Str))
 			return
 		}
 		c.emitConst(c.rt.internString(c.privateKey(n.Left.Str)))
