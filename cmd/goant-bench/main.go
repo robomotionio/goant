@@ -39,8 +39,37 @@ var candidates = []engine{
 	{name: "bun", bin: "bun", args: []string{"run"}},
 }
 
+// octaneBenchmarks lists Octane 2.0's suites and the files each one needs,
+// concatenated in order ahead of the driver. Octane's own runner needs a shell
+// `load()` builtin that none of these four engines has, so the pieces are
+// joined into one script instead.
+//
+// They are ordered smallest-first: goant is currently far slower than a JIT, so
+// the later entries take minutes rather than seconds. Use -only to pick.
+var octaneBenchmarks = []struct {
+	name  string
+	files []string
+}{
+	{"richards", []string{"richards.js"}},
+	{"deltablue", []string{"deltablue.js"}},
+	{"crypto", []string{"crypto.js"}},
+	{"raytrace", []string{"raytrace.js"}},
+	{"navier-stokes", []string{"navier-stokes.js"}},
+	{"splay", []string{"splay.js"}},
+	{"regexp", []string{"regexp.js"}},
+	{"earley-boyer", []string{"earley-boyer.js"}},
+	{"code-load", []string{"code-load.js"}},
+	{"box2d", []string{"box2d.js"}},
+	{"gbemu", []string{"gbemu-part1.js", "gbemu-part2.js"}},
+	{"zlib", []string{"zlib.js", "zlib-data.js"}},
+	{"pdfjs", []string{"pdfjs.js"}},
+	{"mandreel", []string{"mandreel.js"}},
+	{"typescript", []string{"typescript.js", "typescript-input.js", "typescript-compiler.js"}},
+}
+
 func main() {
 	dir := flag.String("bench", "bench", "directory holding the workload scripts")
+	suite := flag.String("suite", "micro", "which suite to run: micro (bench/*.js) or octane")
 	runner := flag.String("runner", "./goant", "path to the goant binary")
 	reps := flag.Int("n", 3, "runs per workload; the fastest is kept")
 	only := flag.String("only", "", "run only workloads whose name contains this")
@@ -52,6 +81,11 @@ func main() {
 	if len(engines) == 0 {
 		fmt.Fprintln(os.Stderr, "no JavaScript engine found")
 		os.Exit(1)
+	}
+
+	if *suite == "octane" {
+		runOctane(engines, *dir, *only, *reps)
+		return
 	}
 
 	prelude := filepath.Join(*dir, "_prelude.js")
@@ -233,4 +267,129 @@ func median(sorted []float64) float64 {
 		return sorted[n/2]
 	}
 	return (sorted[n/2-1] + sorted[n/2]) / 2
+}
+
+// runOctane scores each Octane benchmark under every engine. Octane reports a
+// SCORE, where higher is faster — the opposite direction from the
+// microbenchmarks, so the comparison column is the other engine over goant.
+func runOctane(engines []engine, benchDir, only string, reps int) {
+	src := filepath.Join(benchDir, "suites", "octane")
+	if _, err := os.Stat(filepath.Join(src, "base.js")); err != nil {
+		fmt.Fprintf(os.Stderr, "octane not fetched: run %s\n", filepath.Join(benchDir, "suites", "fetch.sh"))
+		os.Exit(1)
+	}
+	base, err := os.ReadFile(filepath.Join(src, "base.js"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	driver, err := os.ReadFile(filepath.Join(benchDir, "suites", "_octane-driver.js"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	tmp, err := os.MkdirTemp("", "goant-octane")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(tmp)
+
+	printHeader(engines)
+
+	var ratios []float64
+	for _, b := range octaneBenchmarks {
+		if only != "" && !strings.Contains(b.name, only) {
+			continue
+		}
+		joined := filepath.Join(tmp, b.name+".js")
+		var buf []byte
+		buf = append(buf, base...)
+		for _, f := range b.files {
+			part, err := os.ReadFile(filepath.Join(src, f))
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			buf = append(buf, '\n')
+			buf = append(buf, part...)
+		}
+		buf = append(buf, '\n')
+		buf = append(buf, driver...)
+		if err := os.WriteFile(joined, buf, 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("%-14s", b.name)
+		scores := map[string]float64{}
+		for _, e := range engines {
+			// Octane already repeats internally to reach a stable score, so one run
+			// per engine is enough; -n still raises it for a noisy machine.
+			s, err := bestScore(e, joined, reps)
+			if err != nil {
+				fmt.Printf("  %12s", "error")
+				continue
+			}
+			scores[e.name] = s
+			fmt.Printf("  %12.0f", s)
+		}
+		if best, ok := bestOtherScore(engines, scores); ok && scores["goant"] > 0 && best > 0 {
+			r := best / scores["goant"]
+			ratios = append(ratios, r)
+			fmt.Printf("   %7.0fx", r)
+		}
+		fmt.Println()
+	}
+
+	if len(ratios) > 0 {
+		sort.Float64s(ratios)
+		fmt.Printf("\ngoant vs the fastest other engine: %.0fx median, %.0fx best, %.0fx worst (%d benchmarks)\n",
+			median(ratios), ratios[0], ratios[len(ratios)-1], len(ratios))
+	}
+}
+
+// bestScore runs an Octane benchmark reps times and keeps the highest score.
+func bestScore(e engine, script string, reps int) (float64, error) {
+	best := 0.0
+	for i := 0; i < reps; i++ {
+		args := append(append([]string{}, e.args...), script)
+		cmd := exec.Command(e.bin, args...)
+		cmd.Stderr = os.Stderr
+		out, err := cmd.Output()
+		if err != nil {
+			return 0, err
+		}
+		fields := strings.Fields(strings.TrimSpace(string(out)))
+		if len(fields) == 0 {
+			return 0, fmt.Errorf("%s: no score on stdout", e.name)
+		}
+		s, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+		if err != nil {
+			return 0, fmt.Errorf("%s: unparsable score %q", e.name, fields[len(fields)-1])
+		}
+		if s > best {
+			best = s
+		}
+	}
+	return best, nil
+}
+
+// bestOtherScore returns the highest score among engines other than goant.
+func bestOtherScore(engines []engine, scores map[string]float64) (float64, bool) {
+	best, ok := 0.0, false
+	for _, e := range engines {
+		if e.name == "goant" {
+			continue
+		}
+		s, has := scores[e.name]
+		if !has || s <= 0 {
+			continue
+		}
+		if s > best {
+			best, ok = s, true
+		}
+	}
+	return best, ok
 }
