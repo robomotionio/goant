@@ -158,6 +158,9 @@ type Runtime struct {
 	// is the directory specifiers resolve against at the entry point.
 	modules   map[string]*moduleRecord
 	moduleDir string
+	// moduleEvalStack is the current depth-first descent of Evaluate(); a module
+	// found on it is a cycle edge rather than a shared pending dependency.
+	moduleEvalStack []*moduleRecord
 	// pendingModule is the record whose body is about to start; runFrame hands
 	// it the frame's locals slice so importers keep a live view of its bindings.
 	pendingModule *moduleRecord
