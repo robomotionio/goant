@@ -442,47 +442,50 @@ func (st *jsonStringifier) stringifyObject(v Value, indent string) (bool, *Throw
 // The common case by far is a run of plain ASCII with nothing to escape, so
 // those bytes are copied in bulk rather than one at a time; only a byte that
 // needs attention breaks the run.
+//
+// s is read as a string throughout rather than converted to a byte slice. The
+// conversion copies, and this runs once per string and once per key in the
+// document — on a message of uniform records that was a copy of essentially the
+// whole payload, made only to index bytes that a string indexes just as well.
+//
+// For the same reason the run is flushed inline instead of through a closure: a
+// closure assigning to dst captures it by reference, which forces the slice
+// header to the heap on every call, including the fast path that never runs it.
 func appendJSONQuote(dst []byte, s string) []byte {
 	const hexd = "0123456789abcdef"
 	dst = append(dst, '"')
-	src := []byte(s)
 
 	// Fast path: no byte in s needs escaping or decoding.
 	plain := true
-	for i := 0; i < len(src); i++ {
-		if c := src[i]; c < 0x20 || c == '"' || c == '\\' || c >= 0x80 {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c == '"' || c == '\\' || c >= 0x80 {
 			plain = false
 			break
 		}
 	}
 	if plain {
-		return append(append(dst, src...), '"')
+		return append(append(dst, s...), '"')
 	}
 
 	i := 0
 	run := 0 // start of the current run of bytes that need no escaping
-	flush := func(upto int) {
-		if upto > run {
-			dst = append(dst, src[run:upto]...)
-		}
-	}
-	for i < len(src) {
+	for i < len(s) {
 		start := i
-		c := src[i]
+		c := s[i]
 		// Decode one WTF-8 code point (may be a lone surrogate, unlike UTF-8).
 		var cp rune
 		size := 1
 		switch {
 		case c < 0x80:
 			cp = rune(c)
-		case c < 0xE0 && i+1 < len(src):
-			cp = rune(c&0x1F)<<6 | rune(src[i+1]&0x3F)
+		case c < 0xE0 && i+1 < len(s):
+			cp = rune(c&0x1F)<<6 | rune(s[i+1]&0x3F)
 			size = 2
-		case c < 0xF0 && i+2 < len(src):
-			cp = rune(c&0x0F)<<12 | rune(src[i+1]&0x3F)<<6 | rune(src[i+2]&0x3F)
+		case c < 0xF0 && i+2 < len(s):
+			cp = rune(c&0x0F)<<12 | rune(s[i+1]&0x3F)<<6 | rune(s[i+2]&0x3F)
 			size = 3
-		case i+3 < len(src):
-			cp = rune(c&0x07)<<18 | rune(src[i+1]&0x3F)<<12 | rune(src[i+2]&0x3F)<<6 | rune(src[i+3]&0x3F)
+		case i+3 < len(s):
+			cp = rune(c&0x07)<<18 | rune(s[i+1]&0x3F)<<12 | rune(s[i+2]&0x3F)<<6 | rune(s[i+3]&0x3F)
 			size = 4
 		default:
 			cp = rune(c)
@@ -506,14 +509,18 @@ func appendJSONQuote(dst []byte, s string) []byte {
 			esc = "\\f"
 		}
 		if esc != "" {
-			flush(start)
+			if start > run {
+				dst = append(dst, s[run:start]...)
+			}
 			dst = append(dst, esc...)
 			run = i
 			continue
 		}
 		// Control chars and lone surrogates (ES2019 well-formed JSON) escape.
 		if cp < 0x20 || (cp >= 0xD800 && cp <= 0xDFFF) {
-			flush(start)
+			if start > run {
+				dst = append(dst, s[run:start]...)
+			}
 			dst = append(dst, '\\', 'u',
 				hexd[(cp>>12)&0xF], hexd[(cp>>8)&0xF], hexd[(cp>>4)&0xF], hexd[cp&0xF])
 			run = i
@@ -523,7 +530,9 @@ func appendJSONQuote(dst []byte, s string) []byte {
 		// source is already WTF-8, so re-encoding the code point would only turn
 		// well-formed input back into itself.
 	}
-	flush(len(src))
+	if len(s) > run {
+		dst = append(dst, s[run:]...)
+	}
 	return append(dst, '"')
 }
 
