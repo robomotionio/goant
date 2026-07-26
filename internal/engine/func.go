@@ -120,6 +120,12 @@ type svFunc struct {
 	isDerivedCtor bool
 	thisSlot      int // the *this* local slot for a non-arrow function (else 0)
 
+	// icCount is how many inline-cache slots this function's field opcodes were
+	// assigned; ics is the array itself, allocated on first frame entry and kept
+	// on the function so cached slots survive across calls (see propcache.go).
+	icCount uint16
+	ics     []propIC
+
 	// evalScopes are the compile-time lexical snapshots for this function's direct
 	// eval() call sites, indexed by the OpEval operand. Each records the caller
 	// bindings a direct eval may borrow and which context constructs it may use.
@@ -182,7 +188,18 @@ func (c *compiler) emitFieldOp(op Opcode, name string) {
 	idx := c.constant(c.rt.internString(c.privateKey(name)))
 	c.emit(op)
 	c.emitU32(uint32(idx))
-	c.emitU16(0) // inline-cache slot placeholder
+	c.emitU16(c.nextICSlot())
+}
+
+// nextICSlot hands this field op its own inline-cache entry. Slots are per
+// function and never reused, so two sites can never alias each other's shape.
+func (c *compiler) nextICSlot() uint16 {
+	if c.fn.icCount >= icNoSlot {
+		return icNoSlot
+	}
+	slot := c.fn.icCount
+	c.fn.icCount++
+	return slot
 }
 
 // emitDefineField emits DEFINE_FIELD (u32 name-const, size 5).

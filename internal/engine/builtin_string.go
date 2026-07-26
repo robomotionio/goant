@@ -644,7 +644,7 @@ func (rt *Runtime) initStringBuiltin() {
 			d := rt.symbolDesc(args[0])
 			ds := ""
 			if d.IsString() {
-				ds = string(rt.strBytes(d))
+				ds = rt.strGo(d)
 			}
 			sv = rt.newString("Symbol(" + ds + ")")
 		default:
@@ -693,7 +693,7 @@ func (rt *Runtime) initStringBuiltin() {
 			if e != nil {
 				return mkundef(), e
 			}
-			form = string(rt.strBytes(fv))
+			form = rt.strGo(fv)
 		}
 		var nf norm.Form
 		switch form {

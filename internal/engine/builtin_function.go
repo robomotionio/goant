@@ -144,7 +144,7 @@ func (rt *Runtime) initFunctionBuiltin() {
 		if nv, e := rt.getField(target, "name"); e != nil {
 			return mkundef(), e
 		} else if nv.IsString() {
-			targetName = string(rt.strBytes(nv))
+			targetName = rt.strGo(nv)
 		}
 		bo.defineOwn("name", rt.internString("bound "+targetName), attrConfigurable)
 		return bound, nil
@@ -157,7 +157,7 @@ func (rt *Runtime) initFunctionBuiltin() {
 		}
 		name := ""
 		if nv, ok := o.getOwn("name"); ok && nv.IsString() {
-			name = string(rt.strBytes(nv))
+			name = rt.strGo(nv)
 		}
 		// Native functions render as "function name() { [native code] }".
 		if o.native != nil || o.closure == 0 {
@@ -220,13 +220,13 @@ func (rt *Runtime) dynamicFunctionCtor(keyword string, defaultProto Value) nativ
 				if e != nil {
 					return mkundef(), e
 				}
-				params = append(params, string(rt.strBytes(s)))
+				params = append(params, rt.strGo(s))
 			}
 			bs, e := rt.toStringValue(args[len(args)-1])
 			if e != nil {
 				return mkundef(), e
 			}
-			body = string(rt.strBytes(bs))
+			body = rt.strGo(bs)
 		}
 		// Compile in the global scope and capture the function via a temporary
 		// global binding (the script completion value drops function-expression

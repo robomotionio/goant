@@ -30,6 +30,7 @@ const (
 func (rt *Runtime) newStringBytes(b []byte) Value {
 	h, fs := rt.strings.alloc()
 	fs.bytes = b
+	fs.gostr = "" // the cell may be recycled; drop the previous string's cache
 	fs.isASCII = strAsciiUnknown
 	return mkFlatStr(h)
 }
@@ -53,6 +54,29 @@ func (rt *Runtime) strBytes(v Value) []byte {
 		return fs.bytes
 	}
 	return nil
+}
+
+// strGo returns the bytes of a flat string as a Go string, caching the
+// conversion on the string itself.
+//
+// Converting with string(rt.strBytes(v)) copies the bytes on every call. That is paid
+// per property access — the interpreter turns a name constant into a Go string
+// before every GET_FIELD/PUT_FIELD — and the names in question are interned, so
+// the same handful of strings were being rebuilt millions of times. Caching
+// makes it once per string ever.
+//
+// Safe because a flat string's bytes are written once, in newStringBytes, and
+// never mutated afterwards; that function also clears the cache, since pool
+// cells are recycled.
+func (rt *Runtime) strGo(v Value) string {
+	fs := rt.flatOf(v)
+	if fs == nil {
+		return ""
+	}
+	if fs.gostr == "" && len(fs.bytes) > 0 {
+		fs.gostr = string(fs.bytes)
+	}
+	return fs.gostr
 }
 
 // strIsASCII reports whether the flat string is pure ASCII (tri-state cached).

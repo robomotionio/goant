@@ -865,7 +865,7 @@ func (rt *Runtime) validateImportOptions(options Value) (string, *ThrowError) {
 		// "type" is the only attribute key the spec gives meaning to. Any other
 		// key is one the host does not support, which the spec has it ignore.
 		if k == "type" {
-			typ = string(rt.strBytes(v))
+			typ = rt.strGo(v)
 			if typ != "json" {
 				return "", rt.typeError("import attribute type '" + typ + "' is not supported")
 			}

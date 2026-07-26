@@ -74,7 +74,7 @@ func (rt *Runtime) constRepr(fn *svFunc, idx int) string {
 	case TNum:
 		return numberToString(v.Number())
 	case TStr:
-		return fmt.Sprintf("%q", string(rt.strBytes(v)))
+		return fmt.Sprintf("%q", rt.strGo(v))
 	case TBool:
 		if v.Bool() {
 			return "true"

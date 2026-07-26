@@ -139,7 +139,7 @@ func (rt *Runtime) initShadowRealmBuiltin() {
 		// realm, not as a Script: its top-level let/const belong to that eval, so
 		// two evaluations may declare the same name, and its `var`s are
 		// configurable global bindings.
-		srcText := string(rt.strBytes(src))
+		srcText := rt.strGo(src)
 		// Only a SyntaxError from PARSING this source crosses as a SyntaxError. Once
 		// the code is running, every abrupt completion — including a SyntaxError a
 		// nested eval raises — becomes a TypeError here, since the thrown value
@@ -189,13 +189,13 @@ func (rt *Runtime) initShadowRealmBuiltin() {
 		}
 		// The module is loaded INSIDE the realm, then the one requested export is
 		// marshalled out. The result is a promise in this realm either way.
-		m, le := sr.rt.loadModule(string(rt.strBytes(spec)), "")
+		m, le := sr.rt.loadModule(rt.strGo(spec), "")
 		if le != nil {
 			return rt.rejectedPromise(rt.typeError("ShadowRealm.prototype.importValue could not load the module").Value), nil
 		}
-		inner, ok := m.exportValue(string(rt.strBytes(name)))
+		inner, ok := m.exportValue(rt.strGo(name))
 		if !ok {
-			return rt.rejectedPromise(rt.typeError("the module has no export named '" + string(rt.strBytes(name)) + "'").Value), nil
+			return rt.rejectedPromise(rt.typeError("the module has no export named '" + rt.strGo(name) + "'").Value), nil
 		}
 		out, me := rt.marshalOut(sr.rt, inner)
 		if me != nil {

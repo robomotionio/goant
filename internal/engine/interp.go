@@ -66,6 +66,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	// it and reuse this Go frame instead of recursing.
 	var (
 		code         []byte
+		ics          []propIC
 		stack        []Value
 		locals       []Value
 		openUpvals   map[int]*upvalue
@@ -189,6 +190,7 @@ restart:
 		rt.activeNewTarget = newTarget
 	}
 	code = fn.code
+	ics = frameICs(fn)
 	stack = make([]Value, 0, fn.maxStack+16)
 	// Locals start as undefined (the zero Value 0x0 would decode as the number
 	// 0.0, so an unread local must not be left zeroed).
@@ -366,8 +368,8 @@ restart:
 			push(it)
 			ip++
 		case OpRegexp:
-			flags := string(rt.strBytes(pop()))
-			pattern := string(rt.strBytes(pop()))
+			flags := rt.strGo(pop())
+			pattern := rt.strGo(pop())
 			v, e := rt.newRegExp(pattern, flags)
 			if e != nil {
 				thrown = e
@@ -389,7 +391,7 @@ restart:
 			withStack = withStack[:len(withStack)-1]
 			ip++
 		case OpWithGetVar:
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			// Reference mode (high bit of the fallback-kind byte): also push the
 			// resolved base beneath the value, so a paired OpWithPutVar can write
 			// back to the same base (compound assignment; see emitWithVarRef).
@@ -510,7 +512,7 @@ restart:
 			}
 			ip += 8
 		case OpWithPutVar:
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			refMode := code[ip+7]&0x80 != 0
 			fbKind := code[ip+7] & 0x7f
 			val := pop()
@@ -625,7 +627,7 @@ restart:
 			}
 			ip += 8
 		case OpWithDelVar:
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			done := false
 			for k := len(withStack) - 1; k >= 0; k-- {
 				has, e := rt.hasPropE(withStack[k], name)
@@ -847,7 +849,7 @@ restart:
 			push(arrv)
 			ip += 3
 		case OpDefineField:
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			val := pop()
 			if o := rt.objPtr(peek()); o != nil {
 				if isPrivateKey(name) {
@@ -878,7 +880,7 @@ restart:
 			}
 			ip += 5
 		case OpDefineMethod:
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			flags := code[ip+5]
 			enumerable := flags&4 != 0 // bit 2: object-literal accessor (enumerable)
 			shared := flags&8 != 0     // bit 3: shared private method, already homed
@@ -967,14 +969,24 @@ restart:
 			ip += 2
 
 		case OpGetField:
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			obj := pop()
+			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].shape != nil {
+				if o := rt.icReceiver(obj); o != nil && ics[icx].hit(o) {
+					push(o.slotGet(ics[icx].slot))
+					ip += 7
+					break
+				}
+			}
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			var v Value
 			var e *ThrowError
 			if isPrivateKey(name) {
 				v, e = rt.getPrivate(obj, name, privEnv)
 			} else {
 				v, e = rt.getField(obj, name)
+				if icx := readU16(code, ip+5); icx != icNoSlot && !ics[icx].dead() {
+					rt.icFillGet(&ics[icx], rt.icReceiver(obj), name)
+				}
 			}
 			if e != nil {
 				thrown = e
@@ -984,14 +996,24 @@ restart:
 			ip += 7
 		case OpGetField2:
 			// obj -> obj val (keeps the receiver for a following method call)
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			obj := peek()
+			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].shape != nil {
+				if o := rt.icReceiver(obj); o != nil && ics[icx].hit(o) {
+					push(o.slotGet(ics[icx].slot))
+					ip += 7
+					break
+				}
+			}
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			var v Value
 			var e *ThrowError
 			if isPrivateKey(name) {
 				v, e = rt.getPrivate(obj, name, privEnv)
 			} else {
 				v, e = rt.getField(obj, name)
+				if icx := readU16(code, ip+5); icx != icNoSlot && !ics[icx].dead() {
+					rt.icFillGet(&ics[icx], rt.icReceiver(obj), name)
+				}
 			}
 			if e != nil {
 				thrown = e
@@ -1000,9 +1022,16 @@ restart:
 			push(v)
 			ip += 7
 		case OpPutField:
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
 			val := pop()
 			obj := pop()
+			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].shape != nil {
+				if o := rt.icReceiver(obj); o != nil && ics[icx].hit(o) {
+					o.slotSet(ics[icx].slot, val)
+					ip += 7
+					break
+				}
+			}
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			if isPrivateKey(name) {
 				if e := rt.setPrivate(obj, name, privEnv, val); e != nil {
 					thrown = e
@@ -1019,6 +1048,9 @@ restart:
 			if !ok && fn.isStrict {
 				thrown = rt.typeError("Cannot assign to read only property '" + name + "'")
 				goto unwind
+			}
+			if icx := readU16(code, ip+5); icx != icNoSlot && ok && !ics[icx].dead() {
+				rt.icFillPut(&ics[icx], rt.icReceiver(obj), name)
 			}
 			ip += 7
 		case OpGetElem:
@@ -1068,7 +1100,7 @@ restart:
 			push(ret)
 			ip += 3
 		case OpGetGlobal:
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			// The global environment's declarative record is consulted first: a
 			// Script-level let/const/class shadows a same-named global property.
 			if b := rt.lookupGlobalLex(name); b != nil {
@@ -1101,7 +1133,7 @@ restart:
 			// Lenient global read (typeof of a possibly-undeclared global): absent
 			// names yield undefined rather than a ReferenceError. A global lexical
 			// binding is NOT absent, so its temporal dead zone still throws.
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			if b := rt.lookupGlobalLex(name); b != nil {
 				v, e := rt.globalLexRead(b, name)
 				if e != nil {
@@ -1120,7 +1152,7 @@ restart:
 			push(v)
 			ip += 7
 		case OpPutGlobal:
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			val := pop()
 			if b := rt.lookupGlobalLex(name); b != nil {
 				if e := rt.globalLexWrite(b, name, val); e != nil {
@@ -1145,7 +1177,7 @@ restart:
 			// assignment's right-hand side: it records whether the name bound to
 			// anything, and the paired OpPutConst below throws afterwards if it did
 			// not. Resolving first is observable — the RHS may create the binding.
-			nm := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			nm := rt.strGo(fn.constants[readU32(code, ip+1)])
 			push(mkbool(rt.lookupGlobalLex(nm) != nil || rt.hasProp(rt.global, nm)))
 			ip += 5
 		case OpPutConst:
@@ -1153,7 +1185,7 @@ restart:
 			// [resolvable, value] -> [value].
 			pcVal := pop()
 			pcOK := pop()
-			pcName := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			pcName := rt.strGo(fn.constants[readU32(code, ip+1)])
 			if !rt.toBoolean(pcOK) {
 				thrown = rt.referenceError(pcName + " is not defined")
 				goto unwind
@@ -1429,7 +1461,7 @@ restart:
 				if oe != nil {
 					push(rt.rejectedPromise(oe.Value))
 				} else {
-					push(rt.importModuleDynamic(joinModuleKey(string(rt.strBytes(spec)), typ), fn.filename))
+					push(rt.importModuleDynamic(joinModuleKey(rt.strGo(spec), typ), fn.filename))
 				}
 			}
 			ip++
@@ -1437,7 +1469,7 @@ restart:
 			// Static import: load the requested module and leave its namespace
 			// object on the stack for the importing frame to keep in a local.
 			spec := pop()
-			ns, e := rt.importModuleNamespace(string(rt.strBytes(spec)), fn.filename)
+			ns, e := rt.importModuleNamespace(rt.strGo(spec), fn.filename)
 			if e != nil {
 				thrown = e
 				goto unwind
@@ -1447,7 +1479,7 @@ restart:
 		case OpImportNamed:
 			// Read one binding out of a namespace object. This runs on every
 			// reference to an imported name, which is what keeps the binding live.
-			name := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			name := rt.strGo(fn.constants[readU32(code, ip+1)])
 			ns := pop()
 			v, e := rt.getField(ns, name)
 			if e != nil {
@@ -1583,7 +1615,7 @@ restart:
 		case OpThrowError:
 			// Throw a native error of the given kind (0=TypeError, 1=ReferenceError,
 			// 2=SyntaxError, 3=RangeError) with a constant message.
-			msg := string(rt.strBytes(fn.constants[readU32(code, ip+1)]))
+			msg := rt.strGo(fn.constants[readU32(code, ip+1)])
 			switch code[ip+5] {
 			case 1:
 				thrown = rt.referenceError(msg)
@@ -2014,7 +2046,7 @@ restart:
 				savedVarObj, savedWithStack := rt.callerVarObj, rt.callerWithStack
 				savedPrivEnv := rt.callerPrivEnv
 				rt.callerVarObj, rt.callerWithStack, rt.callerPrivEnv = varObj, withStack, privEnv
-				ret, e = rt.performDirectEval(string(rt.strBytes(evalArgs[0])), sc, cl,
+				ret, e = rt.performDirectEval(rt.strGo(evalArgs[0]), sc, cl,
 					thisVal, newTarget, captureUpvalue)
 				rt.callerVarObj, rt.callerWithStack, rt.callerPrivEnv = savedVarObj, savedWithStack, savedPrivEnv
 			}
@@ -2537,14 +2569,14 @@ func (rt *Runtime) jsRelational(op Opcode, a, b Value) (Value, *ThrowError) {
 	// on a BigInt). An invalid BigInt string, or a NaN Number, makes the result
 	// false.
 	if a.Type() == TBigInt && b.IsString() {
-		n, ok := stringToBigInt(string(rt.strBytes(b)))
+		n, ok := stringToBigInt(rt.strGo(b))
 		if !ok {
 			return mkfalse(), nil
 		}
 		return relBool(op, rt.bigIntVal(a).Cmp(n)), nil
 	}
 	if a.IsString() && b.Type() == TBigInt {
-		n, ok := stringToBigInt(string(rt.strBytes(a)))
+		n, ok := stringToBigInt(rt.strGo(a))
 		if !ok {
 			return mkfalse(), nil
 		}
@@ -2636,10 +2668,10 @@ func (rt *Runtime) abstractEquals(a, b Value) (bool, *ThrowError) {
 	}
 	// number == string
 	if ta == TNum && tb == TStr {
-		return a.Number() == stringToNumber(string(rt.strBytes(b))), nil
+		return a.Number() == stringToNumber(rt.strGo(b)), nil
 	}
 	if ta == TStr && tb == TNum {
-		return stringToNumber(string(rt.strBytes(a))) == b.Number(), nil
+		return stringToNumber(rt.strGo(a)) == b.Number(), nil
 	}
 	// boolean coerces to number, then re-compare
 	if ta == TBool {
@@ -2659,11 +2691,11 @@ func (rt *Runtime) abstractEquals(a, b Value) (bool, *ThrowError) {
 	}
 	// BigInt vs String: parse the string as a BigInt (invalid → not equal).
 	if ta == TBigInt && tb == TStr {
-		n, ok := stringToBigInt(string(rt.strBytes(b)))
+		n, ok := stringToBigInt(rt.strGo(b))
 		return ok && rt.bigIntVal(a).Cmp(n) == 0, nil
 	}
 	if ta == TStr && tb == TBigInt {
-		n, ok := stringToBigInt(string(rt.strBytes(a)))
+		n, ok := stringToBigInt(rt.strGo(a))
 		return ok && rt.bigIntVal(b).Cmp(n) == 0, nil
 	}
 	// object vs primitive (number/string/bigint/symbol): ToPrimitive the object

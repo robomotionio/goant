@@ -34,6 +34,47 @@ func icEpochBump() {
 	}
 }
 
+// propIC is one monomorphic inline-cache entry: the receiver shape a named
+// property access last saw, and the own data slot the name resolved to.
+//
+// Without it every obj.name goes through shape.index, a map[propKey]uint32
+// whose key holds a string — so a property read costs a string hash. That was
+// measured at ~37% of interpreter CPU on a monomorphic read loop.
+//
+// A hit needs shape identity plus a matching epoch. Shape identity alone is not
+// enough because a shape not yet shared (isInTree false) is mutated in place;
+// the mutations that can move or retire an existing slot — removeSlot,
+// setAttrs, clearAccessor, re-adding a live key — all bump icEpoch, while
+// appending a brand new key leaves lower slots where they are and so needs no
+// invalidation.
+type propIC struct {
+	shape  *shape
+	epoch  uint32
+	slot   uint32
+	misses uint8 // shape changes seen; at icMissLimit the site is abandoned
+}
+
+// icMissLimit is how many times a site may see a different shape before it stops
+// caching for good (shape set to nil, which no live object can match).
+//
+// A genuinely polymorphic site cannot be served by a one-entry cache, and every
+// attempt costs a second shape probe on top of the lookup that already happened
+// — measured at +16% on a four-shape read loop. Giving up makes such a site cost
+// what it did before the cache existed. Four is the usual industry cut-off;
+// eight leaves room for a site whose object legitimately grows a few times
+// before settling.
+const icMissLimit = 8
+
+// icMissSlot marks a shape this site has already tried and cannot cache — most
+// often because the property lives on the prototype, which is every method call.
+// Without it a method-dispatch site pays the failed own-shape probe on each
+// access on top of the normal lookup, which measured slower than no cache at all.
+const icMissSlot = ^uint32(0)
+
+// icNoSlot marks a field op that gets no cache (the per-function slot counter
+// saturated). Sites past 65534 in one function fall back to the slow path.
+const icNoSlot = 0xFFFF
+
 // propKey identifies a property: an interned string, or a symbol handle.
 type propKey struct {
 	sym bool
@@ -52,13 +93,13 @@ type childKey struct {
 
 // shapeProp is one property descriptor within a shape (ant ant_shape_prop_t).
 type shapeProp struct {
-	key       propKey
-	attrs     uint8
+	key        propKey
+	attrs      uint8
 	isAccessor bool // an accessor property (may still have an undefined get/set)
-	hasGetter bool
-	hasSetter bool
-	getter    Value
-	setter    Value
+	hasGetter  bool
+	hasSetter  bool
+	getter     Value
+	setter     Value
 }
 
 // shape is a hidden class (ant struct ant_shape).

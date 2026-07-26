@@ -94,9 +94,9 @@ func (rt *Runtime) toBigInt(v Value) (*big.Int, *ThrowError) {
 		}
 		return big.NewInt(0), nil
 	case TStr:
-		bi, ok := stringToBigInt(string(rt.strBytes(p)))
+		bi, ok := stringToBigInt(rt.strGo(p))
 		if !ok {
-			return nil, rt.syntaxError("Cannot convert " + string(rt.strBytes(p)) + " to a BigInt")
+			return nil, rt.syntaxError("Cannot convert " + rt.strGo(p) + " to a BigInt")
 		}
 		return bi, nil
 	case TNum:
@@ -326,7 +326,7 @@ func bigIntAsIntN(bits int, v *big.Int) *big.Int {
 		return big.NewInt(0)
 	}
 	mod := new(big.Int).Lsh(big.NewInt(1), uint(bits)) // 2^bits
-	r := new(big.Int).Mod(v, mod)                       // 0..2^bits-1
+	r := new(big.Int).Mod(v, mod)                      // 0..2^bits-1
 	half := new(big.Int).Lsh(big.NewInt(1), uint(bits-1))
 	if r.Cmp(half) >= 0 {
 		r.Sub(r, mod)

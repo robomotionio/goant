@@ -778,8 +778,8 @@ func (c *compiler) compileSuperMethodCall(n *Node) {
 			c.syntaxErrorf("'super' keyword unexpected here")
 			return
 		}
-		emitMethod()   // [method]
-		emitSuperThis() // [method, this]
+		emitMethod()               // [method]
+		emitSuperThis()            // [method, this]
 		c.buildSpreadArray(n.Args) // [method, this, argsArray]
 		c.emit(OpApply)
 		c.emitU16(0)

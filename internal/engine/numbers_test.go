@@ -128,11 +128,11 @@ func TestCoercions(t *testing.T) {
 	}
 	// ToString
 	s, _ := rt.toStringPrimitive(mknum(1.5))
-	if string(rt.strBytes(s)) != "1.5" {
+	if rt.strGo(s) != "1.5" {
 		t.Errorf("ToString number = %q", rt.strBytes(s))
 	}
 	s, _ = rt.toStringPrimitive(mknull())
-	if string(rt.strBytes(s)) != "null" {
+	if rt.strGo(s) != "null" {
 		t.Error("ToString null")
 	}
 }

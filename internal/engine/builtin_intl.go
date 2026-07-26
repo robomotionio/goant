@@ -28,7 +28,7 @@ func (rt *Runtime) validateLocales(v Value) *ThrowError {
 		if e != nil {
 			return e
 		}
-		str := string(rt.strBytes(s))
+		str := rt.strGo(s)
 		if !langtagRe.MatchString(str) {
 			return &ThrowError{Value: rt.makeError(rt.errors.rangeProto, "RangeError", "Invalid language tag: "+str), rt: rt}
 		}

@@ -25,7 +25,7 @@ func (rt *Runtime) initObjectBuiltin() {
 			return mkfalse(), nil
 		}
 		if !pk.IsSymbol() {
-			if e := rt.namespaceTDZ(obj, string(rt.strBytes(pk))); e != nil {
+			if e := rt.namespaceTDZ(obj, rt.strGo(pk)); e != nil {
 				return mkundef(), e
 			}
 		}
@@ -102,7 +102,7 @@ func (rt *Runtime) initObjectBuiltin() {
 			return mkfalse(), nil
 		}
 		if !pk.IsSymbol() {
-			if e := rt.namespaceTDZ(obj, string(rt.strBytes(pk))); e != nil {
+			if e := rt.namespaceTDZ(obj, rt.strGo(pk)); e != nil {
 				return mkundef(), e
 			}
 		}
@@ -715,7 +715,7 @@ func (rt *Runtime) enumerableOwnKeysE(v Value) ([]string, *ThrowError) {
 				continue
 			}
 			if en, _ := rt.getField(desc, "enumerable"); rt.toBoolean(en) {
-				out = append(out, string(rt.strBytes(kv)))
+				out = append(out, rt.strGo(kv))
 			}
 		}
 		return out, nil
@@ -802,7 +802,7 @@ func (rt *Runtime) enumerableOwnProps(v Value, kind int) (Value, *ThrowError) {
 		}
 		// EnumerableOwnProperties asks [[GetOwnProperty]] for each key, which on a
 		// module namespace reads the binding — one in its temporal dead zone throws.
-		if e := rt.namespaceTDZ(obj, string(rt.strBytes(key))); e != nil {
+		if e := rt.namespaceTDZ(obj, rt.strGo(key)); e != nil {
 			return mkundef(), e
 		}
 		enum, exists, e := rt.ownKeyEnumerable(obj, key)
@@ -855,7 +855,7 @@ func (rt *Runtime) ownKeyEnumerable(v, key Value) (bool, bool, *ThrowError) {
 		d := o.ownDescriptorSym(key.handle())
 		return d.enumerable, d.exists, nil
 	}
-	name := string(rt.strBytes(key))
+	name := rt.strGo(key)
 	if idx, ok := canonicalIndex(name); ok && rt.hasOwnIndex(v, o, idx) {
 		return true, true, nil // array/typed-array/string element: enumerable data
 	}
@@ -906,7 +906,7 @@ func (rt *Runtime) setThrow(to, key, val Value) *ThrowError {
 		o.defineOwnSymbol(sym, val, attrDefault)
 		return nil
 	}
-	name := string(rt.strBytes(key))
+	name := rt.strGo(key)
 	if idx, ok := canonicalIndex(name); ok && (to.Type() == TArr || to.Type() == TTypedArray) {
 		return rt.setElement(to, mknum(float64(idx)), val)
 	}
@@ -1753,7 +1753,7 @@ func (rt *Runtime) objectToStringTag(v Value) (string, *ThrowError) {
 				return "", e
 			}
 			if tag.IsString() {
-				builtin = string(rt.strBytes(tag))
+				builtin = rt.strGo(tag)
 			}
 		}
 	}

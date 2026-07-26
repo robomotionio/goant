@@ -261,7 +261,7 @@ func (rt *Runtime) getStringOption(opts Value, name, dflt string, allowed ...str
 	if !v.IsString() {
 		return "", rt.typeError(name + " option must be a string")
 	}
-	s := string(rt.strBytes(v))
+	s := rt.strGo(v)
 	for _, a := range allowed {
 		if s == a {
 			return s, nil

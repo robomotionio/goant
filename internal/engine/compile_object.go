@@ -252,9 +252,9 @@ func (c *compiler) compileSuperMemberCompound(n *Node) {
 		return
 	}
 	pushRef()
-	c.emit(OpGetSuperVal)   // [old]
-	c.compileExpr(n.Right)  // [old, rhs]
-	c.emit(op)              // [new]
+	c.emit(OpGetSuperVal)  // [old]
+	c.compileExpr(n.Right) // [old, rhs]
+	c.emit(op)             // [new]
 	vSlot := c.tempLocal()
 	c.emitOpU16(OpPutLocal, uint16(vSlot))
 	pushRef()

@@ -155,9 +155,9 @@ func float16FromFloat64(f float64) uint16 {
 		return sign
 	}
 
-	exp := e - 1023  // unbiased binary64 exponent
-	he := exp + 15   // biased half exponent for the normal case
-	if he >= 31 {    // overflow → infinity
+	exp := e - 1023 // unbiased binary64 exponent
+	he := exp + 15  // biased half exponent for the normal case
+	if he >= 31 {   // overflow → infinity
 		return sign | 0x7C00
 	}
 
@@ -1925,7 +1925,7 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 			if e != nil {
 				return mkundef(), e
 			}
-			sep = string(rt.strBytes(sv))
+			sep = rt.strGo(sv)
 		}
 		out := ""
 		for i := 0; i < l; i++ {
@@ -1939,7 +1939,7 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 				if e != nil {
 					return mkundef(), e
 				}
-				out += string(rt.strBytes(s))
+				out += rt.strGo(s)
 			}
 		}
 		return rt.newString(out), nil
@@ -2328,7 +2328,7 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 			if e != nil {
 				return mkundef(), e
 			}
-			out += string(rt.strBytes(s))
+			out += rt.strGo(s)
 		}
 		return rt.newString(out), nil
 	})

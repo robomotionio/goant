@@ -2354,8 +2354,8 @@ func (p *parser) parseFunc() *Node {
 	savedAsync := p.inAsync
 	savedGen := p.inGenerator
 	savedSB := p.inStaticBlock
-	p.inAsync = false      // parameters
-	p.inGenerator = false  // parameters
+	p.inAsync = false       // parameters
+	p.inGenerator = false   // parameters
 	p.inStaticBlock = false // a nested function has its own await context
 	defer func() { p.inAsync = savedAsync; p.inGenerator = savedGen; p.inStaticBlock = savedSB }()
 	if p.next() == TokMul {

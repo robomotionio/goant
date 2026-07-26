@@ -234,7 +234,7 @@ func (rt *Runtime) initDateBuiltin() {
 			}
 			hint := ""
 			if h := arg(args, 0); h.IsString() {
-				hint = string(rt.strBytes(h))
+				hint = rt.strGo(h)
 			}
 			// "string"/"default" try toString first; "number" tries valueOf first;
 			// any other hint is a TypeError. Date defaults to the string form.
@@ -463,7 +463,7 @@ func (rt *Runtime) computeDateMs(args []Value) (float64, *ThrowError) {
 			return o.boxed.Number(), nil
 		}
 		if a.IsString() {
-			return parseDate(string(rt.strBytes(a))), nil
+			return parseDate(rt.strGo(a)), nil
 		}
 		if a.IsObjectType() {
 			p, e := rt.toPrimitive(a, "default")
@@ -471,7 +471,7 @@ func (rt *Runtime) computeDateMs(args []Value) (float64, *ThrowError) {
 				return 0, e
 			}
 			if p.IsString() {
-				return parseDate(string(rt.strBytes(p))), nil
+				return parseDate(rt.strGo(p)), nil
 			}
 			a = p
 		}

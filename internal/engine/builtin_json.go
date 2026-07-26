@@ -54,7 +54,7 @@ func (rt *Runtime) initJSONBuiltin() {
 					}
 				}
 				if have {
-					ks := string(rt.strBytes(item))
+					ks := rt.strGo(item)
 					if !seen[ks] {
 						seen[ks] = true
 						st.propertyList = append(st.propertyList, ks)
@@ -92,7 +92,7 @@ func (rt *Runtime) initJSONBuiltin() {
 				st.gap = strings.Repeat(" ", n)
 			}
 		case sp.IsString():
-			s := string(rt.strBytes(sp))
+			s := rt.strGo(sp)
 			if len(s) > 10 {
 				s = s[:10]
 			}
@@ -115,7 +115,7 @@ func (rt *Runtime) initJSONBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		p := &jsonParser{rt: rt, src: string(rt.strBytes(s))}
+		p := &jsonParser{rt: rt, src: rt.strGo(s)}
 		v, src, perr := p.parse()
 		if perr != nil {
 			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(perr.Error())})
@@ -142,7 +142,7 @@ func (rt *Runtime) initJSONBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		js := string(rt.strBytes(s))
+		js := rt.strGo(s)
 		jsonSyntaxErr := func(msg string) *ThrowError {
 			ev, _ := rt.construct(rt.errors.syntaxErr, []Value{rt.newString(msg)})
 			return &ThrowError{Value: ev, rt: rt}
@@ -273,7 +273,7 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 		}
 		return "false", true, nil
 	case TStr:
-		return jsonQuote(string(rt.strBytes(v))), true, nil
+		return jsonQuote(rt.strGo(v)), true, nil
 	case TNum:
 		if math.IsNaN(v.Number()) || math.IsInf(v.Number(), 0) {
 			return "null", true, nil
@@ -288,7 +288,7 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (string,
 			// A JSON.rawJSON object emits its [[RawJSON]] text verbatim.
 			if o := rt.objPtr(v); o != nil {
 				if raw := o.getSlot(slotRawJSON); raw.Type() == TStr {
-					return string(rt.strBytes(raw)), true, nil
+					return rt.strGo(raw), true, nil
 				}
 			}
 			// A Proxy wrapping an array serializes as an array (via its traps).

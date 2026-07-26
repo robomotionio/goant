@@ -679,7 +679,7 @@ func (rt *Runtime) initArrayBuiltin() {
 			if e != nil {
 				return mkundef(), e
 			}
-			sep = string(rt.strBytes(s))
+			sep = rt.strGo(s)
 		}
 		out := make([]byte, 0, n*4)
 		for i := 0; i < n; i++ {

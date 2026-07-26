@@ -179,7 +179,7 @@ func (rt *Runtime) forInKeys(obj Value) (Value, *ThrowError) {
 				if !kv.IsString() {
 					continue
 				}
-				k := string(rt.strBytes(kv))
+				k := rt.strGo(kv)
 				if seen[k] {
 					continue
 				}
@@ -249,7 +249,7 @@ func (rt *Runtime) jsIn(key, obj Value, privEnv *privScope) (bool, *ThrowError) 
 	// string key. RelationalExpression step 3.a still requires an Object on the
 	// right — `#x in 1` is a TypeError, not false.
 	if key.IsString() {
-		if s := string(rt.strBytes(key)); isPrivateKey(s) {
+		if s := rt.strGo(key); isPrivateKey(s) {
 			if !obj.IsObjectLike() {
 				return false, rt.typeError("cannot use 'in' operator on a non-object")
 			}

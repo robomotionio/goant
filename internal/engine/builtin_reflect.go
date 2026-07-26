@@ -67,7 +67,7 @@ func (rt *Runtime) reflectSet(target, key, val, receiver Value) (bool, *ThrowErr
 	if target.Type() == TTypedArray {
 		fidx, isNum := pk.Number(), pk.IsNumber()
 		if !isNum && pk.IsString() {
-			fidx, isNum = canonicalNumericIndex(string(rt.strBytes(pk)))
+			fidx, isNum = canonicalNumericIndex(rt.strGo(pk))
 		}
 		if isNum && !rt.isValidIntegerIndex(target, fidx) {
 			return true, nil
@@ -90,7 +90,7 @@ func (rt *Runtime) reflectSet(target, key, val, receiver Value) (bool, *ThrowErr
 		if cur != target && cur.Type() == TTypedArray && o.ta != nil {
 			fidx, isNum := pk.Number(), pk.IsNumber()
 			if !isNum && pk.IsString() {
-				fidx, isNum = canonicalNumericIndex(string(rt.strBytes(pk)))
+				fidx, isNum = canonicalNumericIndex(rt.strGo(pk))
 			}
 			if isNum {
 				if cur == receiver {
@@ -306,7 +306,7 @@ func (rt *Runtime) initReflectBuiltin() {
 			return rt.proxyGetOwnPropertyDescriptor(o.proxy, pk)
 		}
 		if pk.IsString() {
-			if nd, ok, ne := rt.namespaceDescriptor(arg(args, 0), string(rt.strBytes(pk))); ok {
+			if nd, ok, ne := rt.namespaceDescriptor(arg(args, 0), rt.strGo(pk)); ok {
 				return nd, ne
 			}
 		}

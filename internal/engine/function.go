@@ -101,10 +101,10 @@ func (rt *Runtime) nameMethodFromKey(fn, k Value, prefix string) {
 	var name string
 	if k.IsSymbol() {
 		if desc := rt.symbolDesc(k); !desc.IsUndefined() {
-			name = "[" + string(rt.strBytes(desc)) + "]"
+			name = "[" + rt.strGo(desc) + "]"
 		}
 	} else {
-		name = string(rt.strBytes(k))
+		name = rt.strGo(k)
 	}
 	o.defineOwn("name", rt.newString(prefix+name), attrConfigurable)
 }
@@ -276,7 +276,7 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 	if o.native != nil && !o.flags.isConstructor {
 		nm := "value"
 		if nv, ok := o.getOwn("name"); ok && nv.IsString() {
-			if s := string(rt.strBytes(nv)); s != "" {
+			if s := rt.strGo(nv); s != "" {
 				nm = s
 			}
 		}

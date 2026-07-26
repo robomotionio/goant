@@ -783,7 +783,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		}
 		idx := 0
 		done := false
-		running := false // guards against re-entrant next/return (generator "executing")
+		running := false           // guards against re-entrant next/return (generator "executing")
 		var inner, innerNext Value // current inner iterator + its next (0 when none open)
 		next := func() (Value, bool, *ThrowError) {
 			for !done {
@@ -1033,7 +1033,7 @@ func (rt *Runtime) zipParseOptions(optionsArg Value) (mode string, paddingOption
 		if !mv.IsString() {
 			return "", mkundef(), rt.typeError("Iterator.zip mode is invalid")
 		}
-		s := string(rt.strBytes(mv))
+		s := rt.strGo(mv)
 		if s != "shortest" && s != "longest" && s != "strict" {
 			return "", mkundef(), rt.typeError("Iterator.zip mode is invalid")
 		}

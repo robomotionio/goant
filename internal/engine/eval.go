@@ -25,12 +25,12 @@ const (
 
 // evalBinding names one caller binding a direct eval body may resolve to.
 type evalBinding struct {
-	name      string
-	kind      evalBindKind
-	slot      int  // caller local slot (evalBindLocal) or upvalue index (evalBindUpval)
-	isConst   bool
-	selfName  bool // a named function expression's immutable self-reference (reassignment: strict TypeError / sloppy no-op)
-	isLexical bool // a let/const/class binding — an eval `var` may not shadow it
+	name       string
+	kind       evalBindKind
+	slot       int // caller local slot (evalBindLocal) or upvalue index (evalBindUpval)
+	isConst    bool
+	selfName   bool // a named function expression's immutable self-reference (reassignment: strict TypeError / sloppy no-op)
+	isLexical  bool // a let/const/class binding — an eval `var` may not shadow it
 	catchParam bool // a simple identifier catch parameter: Annex B.3.4 lets an
 	// eval'd `var` (or FunctionDeclaration) of the same name coexist with it
 }

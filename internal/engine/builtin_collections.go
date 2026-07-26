@@ -14,7 +14,7 @@ import (
 func (rt *Runtime) canonicalKey(v Value) string {
 	switch v.Type() {
 	case TStr:
-		return "s:" + string(rt.strBytes(v))
+		return "s:" + rt.strGo(v)
 	case TNum:
 		d := v.Number()
 		if math.IsNaN(d) {

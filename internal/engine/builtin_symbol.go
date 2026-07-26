@@ -46,7 +46,7 @@ func (rt *Runtime) initSymbolBuiltin() {
 		d := rt.symbolDesc(sym)
 		ds := ""
 		if d.IsString() {
-			ds = string(rt.strBytes(d))
+			ds = rt.strGo(d)
 		}
 		return rt.newString("Symbol(" + ds + ")"), nil
 	})
@@ -117,7 +117,7 @@ func (rt *Runtime) initSymbolBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		key := string(rt.strBytes(s))
+		key := rt.strGo(s)
 		if sym, ok := rt.symbolRegistry[key]; ok {
 			return sym, nil
 		}

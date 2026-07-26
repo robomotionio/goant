@@ -53,7 +53,7 @@ func (rt *Runtime) initBuiltins() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.evalScriptSource(string(rt.strBytes(sv)))
+		return rt.evalScriptSource(rt.strGo(sv))
 	}), attrWritable|attrConfigurable)
 
 	// createRealm(): a second realm on the same value pools — a fresh global with
@@ -141,7 +141,7 @@ func (rt *Runtime) initBuiltins() {
 		if !v.IsString() {
 			return v, nil // eval of a non-string returns it unchanged
 		}
-		return rt.performIndirectEval(string(rt.strBytes(v)))
+		return rt.performIndirectEval(rt.strGo(v))
 	})
 	rt.evalFn = evalFn
 	g.defineOwn("eval", evalFn, attrWritable|attrConfigurable)
@@ -263,7 +263,7 @@ func (rt *Runtime) inspect(v Value, quoted bool) string {
 	case TNum:
 		return numberToString(v.Number())
 	case TStr:
-		s := string(rt.strBytes(v))
+		s := rt.strGo(v)
 		if quoted {
 			return "'" + s + "'"
 		}
@@ -284,7 +284,7 @@ func (rt *Runtime) inspect(v Value, quoted bool) string {
 		name := ""
 		if o != nil {
 			if nv, ok := o.getOwn("name"); ok && nv.IsString() {
-				name = string(rt.strBytes(nv))
+				name = rt.strGo(nv)
 			}
 		}
 		if name == "" {

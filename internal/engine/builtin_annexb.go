@@ -182,14 +182,14 @@ func (rt *Runtime) initAnnexBString() {
 			if e != nil {
 				return mkundef(), e
 			}
-			text := string(rt.strBytes(s))
+			text := rt.strGo(s)
 			open := "<" + tag
 			if attr != "" {
 				av, ae := rt.toStringValue(arg(args, 0))
 				if ae != nil { // a throwing ToString on the attribute value propagates
 					return mkundef(), ae
 				}
-				a := string(rt.strBytes(av))
+				a := rt.strGo(av)
 				// Annex B escapes only double quotes in the attribute value.
 				esc := ""
 				for _, c := range a {
@@ -246,14 +246,14 @@ func (rt *Runtime) initAnnexBRegExp() {
 				if e != nil {
 					return mkundef(), e
 				}
-				pattern = string(rt.strBytes(pv))
+				pattern = rt.strGo(pv)
 			}
 			if f := arg(args, 1); !f.IsUndefined() {
 				fv, e := rt.toStringValue(f)
 				if e != nil {
 					return mkundef(), e
 				}
-				flags = string(rt.strBytes(fv))
+				flags = rt.strGo(fv)
 			}
 		}
 		nv, e := rt.newRegExp(pattern, flags)

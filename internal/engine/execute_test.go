@@ -31,7 +31,7 @@ func runStr(t *testing.T, src, want string) {
 	if !v.IsString() {
 		t.Fatalf("run %q: result type %v not string", src, v.Type())
 	}
-	if got := string(rt.strBytes(v)); got != want {
+	if got := rt.strGo(v); got != want {
 		t.Fatalf("run %q = %q want %q", src, got, want)
 	}
 }

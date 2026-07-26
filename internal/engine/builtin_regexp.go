@@ -104,7 +104,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 			return mkundef(), e
 		}
 		flags, _ := rt.toStringValue(fv)
-		return rt.newString("/" + string(rt.strBytes(src)) + "/" + string(rt.strBytes(flags))), nil
+		return rt.newString("/" + rt.strGo(src) + "/" + rt.strGo(flags)), nil
 	})
 
 	var ctor Value
@@ -145,7 +145,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 				if e != nil {
 					return mkundef(), e
 				}
-				pattern = string(rt.strBytes(sv))
+				pattern = rt.strGo(sv)
 			}
 			if flagsArg.IsUndefined() {
 				fV, e := rt.getField(p, "flags")
@@ -157,7 +157,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 					if e != nil {
 						return mkundef(), e
 					}
-					flags = string(rt.strBytes(fv))
+					flags = rt.strGo(fv)
 				}
 			}
 		} else if !p.IsUndefined() {
@@ -165,14 +165,14 @@ func (rt *Runtime) initRegExpBuiltin() {
 			if e != nil {
 				return mkundef(), e
 			}
-			pattern = string(rt.strBytes(s))
+			pattern = rt.strGo(s)
 		}
 		if !flagsArg.IsUndefined() {
 			s, e := rt.toStringValue(flagsArg)
 			if e != nil {
 				return mkundef(), e
 			}
-			flags = string(rt.strBytes(s))
+			flags = rt.strGo(s)
 		}
 		rv, e := rt.newRegExp(pattern, flags)
 		if e != nil {
@@ -191,7 +191,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if arg(args, 0).Type() != TStr {
 			return mkundef(), rt.typeError("RegExp.escape argument must be a string")
 		}
-		return rt.newString(regExpEscape(string(rt.strBytes(arg(args, 0))))), nil
+		return rt.newString(regExpEscape(rt.strGo(arg(args, 0)))), nil
 	})
 	// Annex B legacy static RegExp properties: accessor properties on the RegExp
 	// constructor, non-enumerable + configurable, whose getter/setter throw a
@@ -221,7 +221,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		rt.regexpInput = string(rt.strBytes(s))
+		rt.regexpInput = rt.strGo(s)
 		return mkundef(), nil
 	})
 	for _, n := range []string{"input", "$_"} {
@@ -252,7 +252,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 		// e.g. "Symbol.replace").
 		name := ""
 		if d := rt.symbolDesc(sym); d.IsString() {
-			name = "[" + string(rt.strBytes(d)) + "]"
+			name = "[" + rt.strGo(d) + "]"
 		}
 		fn := rt.newNativeFunc(name, length, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			return run(this, args)
@@ -381,7 +381,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		newFlags := string(rt.strBytes(flagsS))
+		newFlags := rt.strGo(flagsS)
 		unicode := strings.Contains(newFlags, "u")
 		if !strings.Contains(newFlags, "y") {
 			newFlags += "y"
@@ -446,7 +446,7 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e := rt.setField(matcher, "lastIndex", mknum(liN)); e != nil {
 			return mkundef(), e
 		}
-		flagsStr := string(rt.strBytes(flagsS))
+		flagsStr := rt.strGo(flagsS)
 		global := strings.ContainsRune(flagsStr, 'g')
 		unicode := strings.ContainsRune(flagsStr, 'u') || strings.ContainsRune(flagsStr, 'v')
 		return rt.createRegExpStringIterator(matcher, sv, global, unicode), nil
@@ -1062,7 +1062,7 @@ func (rt *Runtime) initStringRegexpMethods() {
 				if e != nil {
 					return mkundef(), e
 				}
-				if !strings.ContainsRune(string(rt.strBytes(fs)), 'g') {
+				if !strings.ContainsRune(rt.strGo(fs), 'g') {
 					return mkundef(), rt.typeError("String.prototype.matchAll called with a non-global RegExp argument")
 				}
 			}
@@ -1125,7 +1125,7 @@ func (rt *Runtime) initStringRegexpMethods() {
 				if e != nil {
 					return mkundef(), e
 				}
-				if !strings.ContainsRune(string(rt.strBytes(fs)), 'g') {
+				if !strings.ContainsRune(rt.strGo(fs), 'g') {
 					return mkundef(), rt.typeError("replaceAll must be called with a global RegExp")
 				}
 			}
@@ -1147,12 +1147,12 @@ func (rt *Runtime) initStringRegexpMethods() {
 		if e != nil {
 			return mkundef(), e
 		}
-		ss := string(rt.strBytes(s))
+		ss := rt.strGo(s)
 		se, e := rt.toStringValue(search)
 		if e != nil {
 			return mkundef(), e
 		}
-		needle := string(rt.strBytes(se))
+		needle := rt.strGo(se)
 		repl := arg(args, 1)
 		callable := rt.isCallable(repl)
 		var replStr string
@@ -1161,7 +1161,7 @@ func (rt *Runtime) initStringRegexpMethods() {
 			if e != nil {
 				return mkundef(), e
 			}
-			replStr = string(rt.strBytes(rs))
+			replStr = rt.strGo(rs)
 		}
 		inputRunes := []rune(ss)
 		// Enumerate every (non-overlapping) match position of needle in ss; an empty
@@ -1195,7 +1195,7 @@ func (rt *Runtime) initStringRegexpMethods() {
 				if e != nil {
 					return mkundef(), e
 				}
-				rep = string(rt.strBytes(rvs))
+				rep = rt.strGo(rvs)
 			} else {
 				rep, _ = rt.expandReplacement(replStr, needle, utf16pos, inputRunes, []regexpjs.Group{{Index: utf16pos, Value: needle}}, false, nil)
 			}
@@ -1287,7 +1287,7 @@ func (rt *Runtime) coerceRegExp(v Value) (*regexpjs.Regexp, *ThrowError) {
 		if e != nil {
 			return nil, e
 		}
-		pat = string(rt.strBytes(s))
+		pat = rt.strGo(s)
 	}
 	re, err := regexpjs.Compile(pat, "")
 	if err != nil {
@@ -1307,7 +1307,7 @@ func (rt *Runtime) regexpArg(v Value) (Value, *ThrowError) {
 		if e != nil {
 			return mkundef(), e
 		}
-		pat = string(rt.strBytes(s))
+		pat = rt.strGo(s)
 	}
 	return rt.newRegExp(pat, "")
 }
@@ -1354,7 +1354,7 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 		if e != nil {
 			return mkundef(), e
 		}
-		replStr = string(rt.strBytes(rs))
+		replStr = rt.strGo(rs)
 	}
 	// flags = ToString(Get(rx, "flags")); global/fullUnicode derive from it (the
 	// native flags getter itself reads the individual flag getters).
@@ -1366,7 +1366,7 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 	if e != nil {
 		return mkundef(), e
 	}
-	flags := string(rt.strBytes(flagsS))
+	flags := rt.strGo(flagsS)
 	global := strings.ContainsRune(flags, 'g')
 	fullUnicode := strings.ContainsRune(flags, 'u') || strings.ContainsRune(flags, 'v')
 	if global {
@@ -1436,7 +1436,7 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 		if e != nil {
 			return mkundef(), e
 		}
-		matched := string(rt.strBytes(matchedV))
+		matched := rt.strGo(matchedV)
 		idxV, e := rt.getField(result, "index")
 		if e != nil {
 			return mkundef(), e
@@ -1463,7 +1463,7 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 					return mkundef(), e
 				}
 				caps[i-1] = cs
-				groups[i] = regexpjs.Group{Index: 0, Value: string(rt.strBytes(cs))}
+				groups[i] = regexpjs.Group{Index: 0, Value: rt.strGo(cs)}
 			}
 		}
 		var replacement string
@@ -1485,7 +1485,7 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 			if e != nil {
 				return mkundef(), e
 			}
-			replacement = string(rt.strBytes(rs))
+			replacement = rt.strGo(rs)
 		} else {
 			// namedCaptures = ? Get(result, "groups"); if not undefined it is
 			// ToObject'd, and each $<name> resolves via ? Get(groups, name) then
@@ -1514,7 +1514,7 @@ func (rt *Runtime) regexpSymbolReplace(rx, strVal, repl Value) (Value, *ThrowErr
 				if e != nil {
 					return "", e
 				}
-				return string(rt.strBytes(sv)), nil
+				return rt.strGo(sv), nil
 			}
 			replacement, e = rt.expandReplacement(replStr, matched, position, Srunes, groups, hasNamed, lookup)
 			if e != nil {
@@ -1635,7 +1635,7 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 	if e != nil {
 		return mkundef(), e
 	}
-	subject := string(rt.strBytes(s))
+	subject := rt.strGo(s)
 
 	replaceOne := func(match string, groups []regexpjs.Group, index int) (string, *ThrowError) {
 		if rt.isCallable(repl) {
@@ -1656,7 +1656,7 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 			if terr != nil {
 				return "", terr
 			}
-			return string(rt.strBytes(rs)), nil
+			return rt.strGo(rs), nil
 		}
 		rs, terr := rt.toStringValue(repl)
 		if terr != nil {
@@ -1678,7 +1678,7 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 			}
 		}
 		hasNamed, lookup := namedFromMap(named)
-		return rt.expandReplacement(string(rt.strBytes(rs)), match, index, wtf8ToUTF16Runes(rt.strBytes(s)), groups, hasNamed, lookup)
+		return rt.expandReplacement(rt.strGo(rs), match, index, wtf8ToUTF16Runes(rt.strBytes(s)), groups, hasNamed, lookup)
 	}
 
 	o := rt.objPtr(pattern)
@@ -1726,7 +1726,7 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 	if e != nil {
 		return mkundef(), e
 	}
-	pat := string(rt.strBytes(ps))
+	pat := rt.strGo(ps)
 	// A non-callable replaceValue is coerced to a string BEFORE the search (so its
 	// ToString runs even when there is no match). Using the coerced string in
 	// replaceOne is idempotent (toStringValue on a string calls no user code).

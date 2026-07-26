@@ -6,15 +6,15 @@ package engine
 
 // errorCtors caches the runtime's NativeError constructors for internal throws.
 type errorCtors struct {
-	base        Value
-	typeErr     Value
-	rangeErr    Value
-	syntaxErr   Value
-	refErr      Value
-	evalErr     Value
-	uriErr      Value
-	typeProto   Value
-	rangeProto  Value
+	base            Value
+	typeErr         Value
+	rangeErr        Value
+	syntaxErr       Value
+	refErr          Value
+	evalErr         Value
+	uriErr          Value
+	typeProto       Value
+	rangeProto      Value
 	syntaxProto     Value
 	aggProto        Value
 	suppressedProto Value
@@ -44,7 +44,7 @@ func (rt *Runtime) initErrorBuiltin() {
 			if e != nil {
 				return mkundef(), e
 			}
-			name = string(rt.strBytes(s))
+			name = rt.strGo(s)
 		}
 		mv, e := rt.getField(this, "message")
 		if e != nil {
@@ -56,7 +56,7 @@ func (rt *Runtime) initErrorBuiltin() {
 			if e != nil {
 				return mkundef(), e
 			}
-			msg = string(rt.strBytes(s))
+			msg = rt.strGo(s)
 		}
 		if msg == "" {
 			return rt.newString(name), nil
@@ -350,13 +350,13 @@ func (rt *Runtime) errorStackString(err Value) string {
 	name := "Error"
 	if nv, e := rt.getField(err, "name"); e == nil && !nv.IsUndefined() {
 		if sv, e2 := rt.toStringValue(nv); e2 == nil {
-			name = string(rt.strBytes(sv))
+			name = rt.strGo(sv)
 		}
 	}
 	msg := ""
 	if mv, e := rt.getField(err, "message"); e == nil && !mv.IsUndefined() {
 		if sv, e2 := rt.toStringValue(mv); e2 == nil {
-			msg = string(rt.strBytes(sv))
+			msg = rt.strGo(sv)
 		}
 	}
 	head := name

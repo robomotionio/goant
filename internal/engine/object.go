@@ -778,10 +778,10 @@ func (rt *Runtime) setInferredNameFromKey(fn, key Value) {
 	var name string
 	if k.IsSymbol() {
 		if desc := rt.symbolDesc(k); !desc.IsUndefined() {
-			name = "[" + string(rt.strBytes(desc)) + "]"
+			name = "[" + rt.strGo(desc) + "]"
 		}
 	} else if s, e := rt.toStringValue(k); e == nil {
-		name = string(rt.strBytes(s))
+		name = rt.strGo(s)
 	}
 	o.defineOwn("name", rt.newString(name), attrConfigurable)
 }

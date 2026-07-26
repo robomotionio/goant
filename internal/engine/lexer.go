@@ -69,14 +69,14 @@ var singleCharTok = func() [128]Token {
 }()
 
 type lexState struct {
-	pos        int
-	toff       int
-	tlen       int
+	pos  int
+	toff int
+	tlen int
 	// prevEnd is the source offset just past the previous consumed token (set
 	// when next() advances). It gives a concise arrow body's true end, since by
 	// the time its span is recorded the current token is already the following
 	// one (e.g. the `)` after `x=>x+1`).
-	prevEnd int
+	prevEnd    int
 	tval       Value
 	tok        Token
 	consumed   bool

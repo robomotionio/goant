@@ -277,7 +277,7 @@ func (rt *Runtime) arrayIndexOf(key Value) (uint32, bool) {
 		return idx, true
 	}
 	if key.IsString() {
-		return canonicalIndex(string(rt.strBytes(key)))
+		return canonicalIndex(rt.strGo(key))
 	}
 	return 0, false
 }
@@ -409,7 +409,7 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 		// or "length" do not — those remain ordinary named lookups).
 		isCanon := key.IsNumber()
 		if !isCanon && key.IsString() {
-			_, isCanon = canonicalNumericIndex(string(rt.strBytes(key)))
+			_, isCanon = canonicalNumericIndex(rt.strGo(key))
 		}
 		if isCanon {
 			return mkundef(), nil
@@ -690,7 +690,7 @@ func (rt *Runtime) setElementR(obj Value, key, v Value) (bool, *ThrowError) {
 	if obj.Type() == TTypedArray {
 		fidx, isNum := key.Number(), key.IsNumber()
 		if !isNum && key.IsString() {
-			fidx, isNum = canonicalNumericIndex(string(rt.strBytes(key)))
+			fidx, isNum = canonicalNumericIndex(rt.strGo(key))
 		}
 		if isNum {
 			// Integer-indexed exotic [[Set]]: coerce the value first (this can
@@ -856,7 +856,7 @@ func arrayIndex(key Value) (uint32, bool) {
 // for string/number keys; symbol keys land with the Symbol type in Phase 5).
 func (rt *Runtime) propKeyString(key Value) (string, *ThrowError) {
 	if key.IsString() {
-		return string(rt.strBytes(key)), nil
+		return rt.strGo(key), nil
 	}
 	// ToPropertyKey: an object key is taken to a primitive (string hint) first,
 	// honoring Symbol.toPrimitive / valueOf / toString.
@@ -871,7 +871,7 @@ func (rt *Runtime) propKeyString(key Value) (string, *ThrowError) {
 	if !ok {
 		return "", rt.typeError("cannot convert property key to string")
 	}
-	return string(rt.strBytes(s)), nil
+	return rt.strGo(s), nil
 }
 
 // copyDataProps copies src's own enumerable properties (array indices, string

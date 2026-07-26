@@ -44,7 +44,7 @@ func (rt *Runtime) toNumberPrimitive(v Value) (float64, bool) {
 		}
 		return 0, true
 	case TStr:
-		return stringToNumber(string(rt.strBytes(v))), true
+		return stringToNumber(rt.strGo(v)), true
 	default:
 		return 0, false // needs ToPrimitive / throws (symbol, bigint)
 	}
@@ -217,7 +217,7 @@ func (rt *Runtime) sameValueNonNumber(a, b Value) bool {
 		return false
 	}
 	if a.Type() == TStr {
-		return string(rt.strBytes(a)) == string(rt.strBytes(b))
+		return rt.strGo(a) == rt.strGo(b)
 	}
 	if a.Type() == TBigInt {
 		// BigInts compare by value, not by the handle stored in the Value bits.
@@ -240,7 +240,7 @@ func (rt *Runtime) strictEquals(a, b Value) bool {
 		return false
 	}
 	if ta == TStr {
-		return string(rt.strBytes(a)) == string(rt.strBytes(b))
+		return rt.strGo(a) == rt.strGo(b)
 	}
 	if ta == TBigInt {
 		x, y := rt.bigIntVal(a), rt.bigIntVal(b)

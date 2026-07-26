@@ -91,7 +91,7 @@ func (rt *Runtime) propKeyId(k Value) string {
 	if k.IsSymbol() {
 		return "y:" + itoaSmall(int(k.handle()))
 	}
-	return "s:" + string(rt.strBytes(k))
+	return "s:" + rt.strGo(k)
 }
 
 // targetExtensible reports the target's [[IsExtensible]] (proxies recurse).
@@ -234,7 +234,7 @@ func (rt *Runtime) setOnReceiver(receiver, key, val Value) (bool, *ThrowError) {
 	if rt.moduleNamespaces[ro] {
 		k := rt.toPropertyKeyValue(key)
 		if !k.IsSymbol() {
-			if e := rt.namespaceTDZ(receiver, string(rt.strBytes(k))); e != nil {
+			if e := rt.namespaceTDZ(receiver, rt.strGo(k)); e != nil {
 				return false, e
 			}
 		}

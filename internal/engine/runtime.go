@@ -166,10 +166,10 @@ type Runtime struct {
 	// it the frame's locals slice so importers keep a live view of its bindings.
 	pendingModule *moduleRecord
 	// shadowRealms holds the isolated Runtime behind each ShadowRealm instance.
-	shadowRealms     map[*object]*shadowRealm
+	shadowRealms map[*object]*shadowRealm
 	// wrapFailed marks that building a ShadowRealm wrapper hit an abrupt
 	// completion inside the other realm, which surfaces here as a TypeError.
-	wrapFailed bool
+	wrapFailed       bool
 	shadowRealmProto Value
 	// moduleNamespaces marks the module namespace exotic objects. Their exports
 	// are stored as accessors so reads see the live binding, but they must be
@@ -246,7 +246,8 @@ type Runtime struct {
 // flatString is a heap-resident flat string payload (Phase 2 strings).
 type flatString struct {
 	bytes   []byte
-	isASCII int8 // STR_ASCII_UNKNOWN/YES/NO
+	gostr   string // lazily cached Go view of bytes; see (*Runtime).strGo
+	isASCII int8   // STR_ASCII_UNKNOWN/YES/NO
 }
 
 type symbol struct {
