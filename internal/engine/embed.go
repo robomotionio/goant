@@ -12,7 +12,10 @@ package engine
 // paired with the Runtime that produced it. The host wrapper types keep that
 // pairing; nothing here can enforce it.
 
-import "errors"
+import (
+	"errors"
+	"unsafe"
+)
 
 // HostFunc is the signature of a Go function callable from JavaScript. It is
 // the same signature the built-ins use, so a host function is not a second
@@ -212,6 +215,34 @@ func (rt *Runtime) JSONParse(s string) (Value, error) {
 		return mkundef(), terr
 	}
 	return v, nil
+}
+
+// HeapUsage reports this runtime's own allocation, by live cell count and an
+// estimate of the bytes those cells occupy.
+//
+// This is the runtime's occupancy, not the process's: an embedder running many
+// runtimes needs to know which one is growing, and Go's process-wide MemStats
+// cannot tell it. The byte figure is cells times their element size and so
+// excludes payloads hanging off them (string bytes, array backing stores), which
+// makes it a floor rather than a total.
+//
+// It is a meaningful number to retire a pooled runtime on, because there is
+// currently no collector: cells are reclaimed only when the whole Runtime is
+// dropped and Go collects the pools (PLAN.md Phase 7). Until that lands, this
+// count only goes up over a runtime's life, so an embedder that reuses runtimes
+// must watch it.
+func (rt *Runtime) HeapUsage() (cells int, bytes uint64) {
+	if rt == nil {
+		return 0, 0
+	}
+	n := rt.objects.len() + rt.strings.len() + rt.symbols.len() +
+		rt.closures.len() + rt.bigints.len()
+	b := uint64(rt.objects.len())*uint64(unsafe.Sizeof(object{})) +
+		uint64(rt.strings.len())*uint64(unsafe.Sizeof(flatString{})) +
+		uint64(rt.symbols.len())*uint64(unsafe.Sizeof(symbol{})) +
+		uint64(rt.closures.len())*uint64(unsafe.Sizeof(closure{})) +
+		uint64(rt.bigints.len())*uint64(unsafe.Sizeof(bigIntCell{}))
+	return n, b
 }
 
 // NewError builds an Error object with the given message, for a host function

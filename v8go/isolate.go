@@ -145,20 +145,43 @@ func (i *Isolate) IsExecutionTerminating() bool {
 // apply lets an Isolate be passed to NewContext as a ContextOption.
 func (i *Isolate) apply(o *contextOptions) { o.iso = i }
 
-// GetHeapStatistics reports this isolate's memory use. UsedHeapSize is derived
-// from Go's own accounting of heap in use, which for a single-isolate process
-// is a good proxy and for a many-isolate process over-reports — every isolate
-// sees the whole process. Callers using it to decide when to retire a pooled
-// isolate should read it as "memory pressure", not "this isolate's footprint".
+// GetHeapStatistics reports this isolate's memory use.
+//
+// UsedHeapSize is *this isolate's* occupancy — the live cells in its own pools —
+// not a process-wide figure. That distinction is the whole point: callers use
+// this to decide when to retire a pooled isolate, and process-wide Go MemStats
+// would make every isolate in a pool see the same number and retire together
+// the moment any one of them grew.
+//
+// The figure counts cells and their headers, so it excludes payloads hanging off
+// them (string bytes, array backing stores) and is a floor rather than a total.
+// It is still the right signal for retirement, because it tracks how much a
+// script has allocated and never released.
+//
+// It also only rises. goant has no collector yet (PLAN.md Phase 7): cells are
+// reclaimed when the whole isolate is dropped and Go collects its pools, so a
+// long-lived pooled isolate accumulates everything every script it ran ever
+// allocated. Retiring on this number is not a nicety here — it is the only
+// reclamation mechanism there is.
+//
+// TotalHeapSize reports the process figure so a caller that wants overall
+// pressure can still see it.
 func (i *Isolate) GetHeapStatistics() HeapStatistics {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
+
 	i.mu.Lock()
 	n := i.contexts
+	rt := i.rt
 	i.mu.Unlock()
+
+	var used uint64
+	if rt != nil {
+		_, used = rt.HeapUsage()
+	}
 	return HeapStatistics{
 		TotalHeapSize:          ms.HeapSys,
-		UsedHeapSize:           ms.HeapAlloc,
+		UsedHeapSize:           used,
 		HeapSizeLimit:          i.opts.MaxOldSpaceBytes,
 		NumberOfNativeContexts: n,
 	}
