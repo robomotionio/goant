@@ -45,6 +45,31 @@ func (c *Context) ParseJSONBytes(b []byte) (*Value, error) {
 	return wrap(c.r, v), nil
 }
 
+// ParseJSONBytesLazy parses b without building the value graph: objects and
+// arrays come back knowing their own layout, and each property or element is
+// built the first time something reads it. A value nobody reads is never
+// built, and one the host serializes without touching goes back out as the
+// bytes it came in as.
+//
+// For a message pump this is the difference between paying for the message and
+// paying for the part of it the script uses. A pass-through costs a scan; a
+// full traversal costs what the eager parse would have; anything in between
+// lands in between. There is nothing to configure and nothing to predict.
+//
+// The one contract difference from ParseJSONBytes: b IS retained. It must not
+// be modified or reused while the returned value — or any value reachable from
+// it — is still alive.
+func (c *Context) ParseJSONBytesLazy(b []byte) (*Value, error) {
+	if c == nil {
+		return nil, errors.New("v8go: nil context")
+	}
+	v, err := c.r.JSONParseBytesLazy(b)
+	if err != nil {
+		return nil, asJSError(c.r, err)
+	}
+	return wrap(c.r, v), nil
+}
+
 // JSONElementsToBytes serializes each element of an array value, appending
 // every result to dst and returning the extended buffer together with the
 // offset each element ends at. The caller slices the payloads apart without
