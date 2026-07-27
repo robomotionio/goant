@@ -23,7 +23,13 @@ package engine
 // time this file changes.
 func (w *icWay) hit(o *object) bool {
 	return w.shape == o.shape && w.epoch == icEpoch() && w.slot != icMissSlot &&
-		o.proxy == nil && (w.holder == nil || w.protoVal == o.proto)
+		o.proxy == nil &&
+		// The recorded [[Prototype]] must still be the receiver's for any entry
+		// whose answer depended on the chain: one that resolved to a holder up
+		// there, and one that concluded nothing up there claims the name. A
+		// shape does not record the prototype, so two objects with the same
+		// shape may have different ones.
+		((w.holder == nil && w.toShape == nil) || w.protoVal == o.proto)
 }
 
 // read returns the cached property's current value: the receiver's slot for an
@@ -87,6 +93,26 @@ func (ic *propIC) way(o *object) *icWay {
 	}
 	// Full and still useful: replace the oldest.
 	return &ic.ways[0]
+}
+
+// wayIndex is way() for an entry keyed on a shape the receiver no longer has —
+// the pre-store shape of a transition.
+func (ic *propIC) wayIndex(o *object, key *shape) int {
+	for i := 0; i < int(ic.n); i++ {
+		if ic.ways[i].shape == key || ic.ways[i].epoch != icEpoch() {
+			return i
+		}
+	}
+	if int(ic.n) < icWays {
+		ic.n++
+		return int(ic.n) - 1
+	}
+	ic.misses++
+	if ic.dead() {
+		ic.n = 0
+		return -1
+	}
+	return 0
 }
 
 func (ic *propIC) record(o *object, slot uint32) {
@@ -214,10 +240,9 @@ func (rt *Runtime) icProtoHolder(o *object, name string) (*object, uint32, bool)
 // should be unreachable. It is kept because it costs one bit test and because
 // that caller-side guarantee is easy to lose.
 //
-// Note this only ever helps stores to a property that already exists: the fill
-// runs after the store, so a store that *creates* the property records the
-// post-store shape, which the site will not see again until the next object has
-// already been through the slow path.
+// A store that CREATES the property is served by icFillPutTransition instead;
+// this one records the post-store shape, which a site initialising a fresh
+// object never sees again.
 //
 // Nothing here inspects the prototype chain, and it does not need to:
 // OrdinarySet only consults the chain when the receiver has no own property of
@@ -242,6 +267,85 @@ func (rt *Runtime) icFillPut(ic *propIC, o *object, name string) {
 		return
 	}
 	ic.record(o, uint32(slot))
+}
+
+// icFillPutTransition records the layout change a store made when it created
+// the property, so the next object arriving at this site with the same shape
+// takes it directly: set the shape, write the slot.
+//
+// pre is the receiver's shape before the store. The site is keyed on it, which
+// is what makes the entry usable — the shape a fresh object has when the
+// constructor reaches this line is the same every time.
+//
+// What is being cached is not just the slot but the CONCLUSION of the prototype
+// walk: that nothing up the chain claims this name in a way that would change
+// where the value goes. Two things keep that true. Every object the walk passed
+// is flagged usedAsProto, so a later change to any of them bumps the epoch and
+// retires this entry; and the receiver's own [[Prototype]] is recorded, so an
+// object with the same shape but a different chain misses.
+//
+// The hit path still has to test extensibility, because that is a property of
+// the object rather than of its shape: Object.preventExtensions leaves the
+// shape alone.
+func (rt *Runtime) icFillPutTransition(ic *propIC, o *object, pre *shape, name string) {
+	if o == nil || pre == nil || o.shape == pre {
+		return
+	}
+	if o.proxy != nil || o.ta != nil || o.dv != nil || o.argMap != nil || o.typeTag == TArr {
+		return
+	}
+	if _, isIdx := canonicalIndex(name); isIdx {
+		return
+	}
+	// The store must have added an ordinary, writable, non-accessor own slot.
+	slot := o.shape.lookupInterned(name)
+	if slot < 0 || o.isAccessorSlot(uint32(slot)) ||
+		o.shape.attrsAt(uint32(slot))&attrDefault != attrDefault {
+		return
+	}
+	// The resulting shape must be a shared one from the transition tree. A
+	// private shape belongs to this object alone — defineOwn privatizes when it
+	// converts an accessor slot to data — and handing it to a sibling would give
+	// the two of them one mutable layout.
+	if !o.shape.isInTree() {
+		return
+	}
+	if !rt.icProtoChainClean(o, name) {
+		return
+	}
+	if i := ic.wayIndex(o, pre); i >= 0 {
+		ic.ways[i] = icWay{shape: pre, epoch: icEpoch(), slot: uint32(slot),
+			toShape: o.shape, protoVal: o.proto}
+	}
+}
+
+// icProtoChainClean reports whether nothing on o's prototype chain claims name
+// in a way that would redirect a store, flagging every object it passes so a
+// later change to one of them retires the caches that depend on it.
+//
+// An inherited writable data property is clean: OrdinarySet still creates an own
+// property on the receiver. An accessor or a non-writable property is not.
+func (rt *Runtime) icProtoChainClean(o *object, name string) bool {
+	cur := o
+	for depth := 0; depth < maxProtoChainDepth; depth++ {
+		next := rt.objPtr(cur.proto)
+		if next == nil {
+			return true // reached the end of the chain
+		}
+		if next.proxy != nil || next.ta != nil || next.dv != nil || next.argMap != nil {
+			return false
+		}
+		next.flags.usedAsProto = true
+		if slot := next.shape.lookupInterned(name); slot >= 0 {
+			return !next.isAccessorSlot(uint32(slot)) &&
+				next.shape.attrsAt(uint32(slot))&attrWritable != 0
+		}
+		if next.typeTag == TArr {
+			return false
+		}
+		cur = next
+	}
+	return false
 }
 
 // frameICs returns fn's cache array, allocating it on first entry. The array

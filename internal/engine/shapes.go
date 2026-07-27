@@ -78,6 +78,14 @@ type icWay struct {
 	epoch uint32
 	slot  uint32
 
+	// toShape is set only on a store site, and only for the case the cache
+	// could not serve at all before: a store that CREATES the property. Then
+	// shape is the layout the receiver had going in, toShape the one it takes
+	// on, and slot the new property's. See icFillPutTransition — the point is
+	// to skip the prototype-chain walk that OrdinarySet does to look for a
+	// setter, which was 8% of Octane's EarleyBoyer.
+	toShape *shape
+
 	// holder is the prototype the property was found on, nil for an own-slot
 	// entry; protoVal is the receiver's [[Prototype]] the walk started from.
 	holder   *object
