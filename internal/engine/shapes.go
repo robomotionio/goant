@@ -119,10 +119,15 @@ type propIC struct {
 // icMissLimit is how many shapes beyond its ways a site may see before it stops
 // caching for good.
 //
-// A megamorphic site cannot be served by a fixed set of ways, and every attempt
-// costs a probe on top of the lookup that already happened. Giving up makes such
-// a site cost what it did before the cache existed.
-const icMissLimit = 8
+// A truly megamorphic site cannot be served by a fixed set of ways, and every
+// attempt costs a probe on top of the lookup that already happened. Giving up
+// makes such a site cost what it did before the cache existed.
+//
+// Thirty-two, not the eight that suited a four-way cache: with eight ways, a
+// site that sees nine or ten shapes is not megamorphic, it is merely wider than
+// the cache, and replacing the oldest way still hits most of the time. Giving up
+// on those cost DeltaBlue 5%, Splay 9%.
+const icMissLimit = 32
 
 // icMissSlot marks a shape this site has already tried and cannot cache — most
 // often because the property lives on the prototype, which is every method call.
