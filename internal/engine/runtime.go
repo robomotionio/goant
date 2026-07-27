@@ -310,6 +310,11 @@ type Runtime struct {
 	interrupt *interruptState
 	backEdges uint32
 
+	// heapLimit is the live-heap budget in bytes, 0 for none. Checked by
+	// maybeCollect after a collection, so it bounds what a script retains
+	// rather than what it allocates. See SetHeapLimit.
+	heapLimit uint64
+
 	// frameStrict is the strictness of the currently executing JS frame, so a
 	// direct eval() (native call) inherits the caller's strict mode.
 	frameStrict bool

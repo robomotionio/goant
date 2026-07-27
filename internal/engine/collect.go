@@ -131,6 +131,28 @@ func (rt *Runtime) maybeCollect() {
 	rt.collect()
 }
 
+// enforceHeapLimit stops the running script if what survived the collection is
+// over budget.
+//
+// It runs only after a collection, which is the whole design: the question a
+// host actually needs answered is not "has this script allocated a lot" — every
+// script does — but "is this script holding a lot", and only a completed mark
+// and sweep can tell the difference. A loop that builds and discards a million
+// objects passes; one that builds and keeps them does not.
+//
+// Stopping here rather than at the allocation is also what makes the failure
+// reportable. The alternative is Go's own out-of-memory, which is a runtime
+// throw: no panic, no recover, no deferred anything, and the process is gone
+// along with every other flow sharing it.
+func (rt *Runtime) enforceHeapLimit() {
+	if rt.heapLimit == 0 || rt.interrupt == nil {
+		return
+	}
+	if _, bytes := rt.HeapUsage(); bytes > rt.heapLimit {
+		rt.interrupt.flag.Store(interruptMemory)
+	}
+}
+
 // SetGCEnabled turns automatic collection on or off. It is on by default; turn
 // it off for a run short enough that nothing needs reclaiming, or one that ends
 // with Invocation.Release.
@@ -189,6 +211,12 @@ func (rt *Runtime) collect() {
 	if g.next < g.floor {
 		g.next = g.floor
 	}
+
+	// Checked here rather than in maybeCollect so that every collection counts:
+	// a loop that never calls a function collects straight from the back edge
+	// (backEdgeWantsGC) and would otherwise grow unwatched, which is exactly
+	// the shape that runs a host out of memory.
+	rt.enforceHeapLimit()
 }
 
 // ---- marking ----

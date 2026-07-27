@@ -77,7 +77,19 @@ func NewIsolate() *Isolate { return NewIsolateWithOptions(IsolateOptions{}) }
 // NewIsolateWithOptions creates an isolate. The options are recorded but do not
 // bound memory — see IsolateOptions.
 func NewIsolateWithOptions(opts IsolateOptions) *Isolate {
-	return &Isolate{rt: engine.New(), opts: opts}
+	rt := engine.New()
+	// MaxOldSpaceBytes was V8's cap on the old generation. Here it becomes a
+	// budget on the live heap, enforced after a collection: a script that
+	// retains more than this is stopped and the host is told why, instead of
+	// being allowed to run into Go's out-of-memory, which is a runtime throw
+	// that no recover can catch and that takes the whole process with it.
+	//
+	// InitialOldSpaceBytes has no counterpart and is ignored. It existed to
+	// pre-commit pages so a fresh V8 isolate would not have to grow at peak
+	// load, which was a defence against Windows denying the growth. Go's
+	// allocator has no equivalent failure to pre-empt.
+	rt.SetHeapLimit(opts.MaxOldSpaceBytes)
+	return &Isolate{rt: rt, opts: opts}
 }
 
 // Dispose drops the isolate's engine reference. Memory is reclaimed by the Go
@@ -132,6 +144,23 @@ func (i *Isolate) CancelTerminateExecution() { i.ResumeExecution() }
 
 // Close is an alias for Dispose, matching the binding.
 func (i *Isolate) Close() { i.Dispose() }
+
+// HeapLimitExceeded reports that this isolate stopped its script because the
+// live heap passed the budget from IsolateOptions.MaxOldSpaceBytes, rather than
+// because the host terminated it.
+//
+// A caller that treats both the same reports a timeout for what is really a
+// message too large to process — different problem, different fix, and only one
+// of them is the flow designer's to solve.
+func (i *Isolate) HeapLimitExceeded() bool {
+	if i == nil {
+		return false
+	}
+	i.mu.Lock()
+	rt := i.rt
+	i.mu.Unlock()
+	return rt != nil && rt.HeapLimitExceeded()
+}
 
 // IsExecutionTerminating reports whether a termination is in flight or still
 // pending.

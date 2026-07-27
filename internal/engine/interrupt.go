@@ -31,11 +31,49 @@ var ErrTerminated = errors.New("goant: execution terminated")
 // recursion is caught without waiting for a back-edge at all.
 const interruptCheckInterval = 1024
 
+// Interrupt reasons. The flag doubles as the reason so the check on the hot
+// path stays a single atomic load compared against zero.
+const (
+	interruptNone   = 0
+	interruptHost   = 1 // Interrupt() — a timeout, a cancellation, a shutdown
+	interruptMemory = 2 // the heap budget was exceeded; see SetHeapLimit
+)
+
 // interruptState is the cross-goroutine half of the Runtime. It is a separate
 // struct so it can be copied into a realm without dragging the rest along, and
 // so the atomic stays pointer-stable.
 type interruptState struct {
 	flag atomic.Uint32
+}
+
+// SetHeapLimit stops a script once its live heap exceeds limit bytes, instead
+// of letting it run until the Go allocator gives up.
+//
+// This is the difference between a bad script and a dead process. Go's
+// out-of-memory is runtime.throw: no panic, no recover, no deferred anything —
+// the process aborts and takes every other flow on it along. A host cannot
+// defend against that after the fact, so the engine has to decline before it
+// happens, and it is the only party that can, because it owns the allocation.
+//
+// The limit is checked after a collection, never before one, so what it
+// measures is memory that survived being collected rather than garbage on its
+// way out. A script that churns hard but retains little is never stopped by it.
+//
+// Exceeding it terminates the script the same way Interrupt does — a control
+// throw that no catch or finally can swallow — and the host distinguishes the
+// two with HeapLimitExceeded. Pass 0 to disable.
+func (rt *Runtime) SetHeapLimit(limit uint64) { rt.heapLimit = limit }
+
+// HeapLimit reports the current budget, 0 if none.
+func (rt *Runtime) HeapLimit() uint64 { return rt.heapLimit }
+
+// HeapLimitExceeded reports that this Runtime was terminated for exceeding its
+// heap budget rather than by a host Interrupt. The distinction is what lets a
+// caller report "this script needed more memory than it is allowed" instead of
+// "this script was cancelled", which are different problems with different
+// fixes.
+func (rt *Runtime) HeapLimitExceeded() bool {
+	return rt.interrupt != nil && rt.interrupt.flag.Load() == interruptMemory
 }
 
 // Interrupt requests that any script currently running on this Runtime stop as
@@ -45,7 +83,7 @@ func (rt *Runtime) Interrupt() {
 	if rt.interrupt == nil {
 		return
 	}
-	rt.interrupt.flag.Store(1)
+	rt.interrupt.flag.Store(interruptHost)
 }
 
 // ClearInterrupt cancels a pending or delivered interrupt, making the Runtime
@@ -54,7 +92,7 @@ func (rt *Runtime) ClearInterrupt() {
 	if rt.interrupt == nil {
 		return
 	}
-	rt.interrupt.flag.Store(0)
+	rt.interrupt.flag.Store(interruptNone)
 }
 
 // Interrupted reports whether an interrupt is pending or has been delivered.
