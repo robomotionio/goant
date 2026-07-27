@@ -168,7 +168,7 @@ func (rt *Runtime) boundArgsOf(o *object) []Value {
 	out := make([]Value, ao.arrLen)
 	for i := uint32(0); i < ao.arrLen; i++ {
 		if int(i) < len(ao.arr) {
-			out[i] = ao.arr[i]
+			out[i] = ao.arrAt(i)
 		}
 	}
 	return out

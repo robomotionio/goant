@@ -2298,7 +2298,7 @@ restart:
 				callArgs = make([]Value, ao.arrLen)
 				for i := uint32(0); i < ao.arrLen; i++ {
 					if int(i) < len(ao.arr) {
-						callArgs[i] = ao.arr[i]
+						callArgs[i] = ao.arrAt(i)
 					}
 				}
 			}
@@ -2337,7 +2337,7 @@ restart:
 				callArgs = make([]Value, ao.arrLen)
 				for i := uint32(0); i < ao.arrLen; i++ {
 					if int(i) < len(ao.arr) {
-						callArgs[i] = ao.arr[i]
+						callArgs[i] = ao.arrAt(i)
 					}
 				}
 			}
@@ -2357,7 +2357,7 @@ restart:
 				callArgs = make([]Value, ao.arrLen)
 				for i := uint32(0); i < ao.arrLen; i++ {
 					if int(i) < len(ao.arr) {
-						callArgs[i] = ao.arr[i]
+						callArgs[i] = ao.arrAt(i)
 					}
 				}
 			}

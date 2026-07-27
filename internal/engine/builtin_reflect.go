@@ -29,7 +29,7 @@ func (rt *Runtime) ownDescOf(o *object, pk Value) ownDesc {
 			if idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
 				// A frozen array's elements are non-writable; a sealed (or frozen)
 				// array's are non-configurable.
-				return ownDesc{exists: true, writable: !o.flags.frozen, enumerable: true, configable: !o.flags.frozen && !o.flags.sealed, value: o.arr[idx]}
+				return ownDesc{exists: true, writable: !o.flags.frozen, enumerable: true, configable: !o.flags.frozen && !o.flags.sealed, value: o.arrAt(idx)}
 			}
 		case o.boxed.Type() == TStr:
 			b := rt.strBytes(o.boxed)

@@ -457,7 +457,7 @@ func (rt *Runtime) initObjectBuiltin() {
 		case TArr:
 			for i := uint32(0); i < o.arrLen; i++ {
 				if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
-					reso.defineOwn(strconv.Itoa(int(i)), rt.makeDataDescriptor(o.arr[i], !o.flags.frozen, true, !o.flags.frozen && !o.flags.sealed), attrDefault)
+					reso.defineOwn(strconv.Itoa(int(i)), rt.makeDataDescriptor(o.arrAt(i), !o.flags.frozen, true, !o.flags.frozen && !o.flags.sealed), attrDefault)
 				}
 			}
 		case TTypedArray:
@@ -992,7 +992,7 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 		// the value to undefined and drop the element.
 		if !existing.exists && obj.Type() == TArr {
 			if idx, ok := canonicalIndex(name); ok && int(idx) < len(o.arr) && o.arr[idx] != tEmpty {
-				existing = ownDesc{exists: true, value: o.arr[idx], writable: true, enumerable: true, configable: true}
+				existing = ownDesc{exists: true, value: o.arrAt(idx), writable: true, enumerable: true, configable: true}
 			}
 		}
 		// A String exotic object's in-range index is an own NON-writable,

@@ -274,7 +274,7 @@ func (rt *Runtime) inspect(v Value, quoted bool) string {
 		for i := uint32(0); i < o.arrLen; i++ {
 			el := mkundef()
 			if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
-				el = o.arr[i]
+				el = o.arrAt(i)
 			}
 			parts = append(parts, rt.inspect(el, true))
 		}

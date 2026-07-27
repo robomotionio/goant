@@ -32,7 +32,7 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 		if idx, ok := canonicalIndex(name); ok {
 			o := rt.objPtr(obj)
 			if idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
-				return o.arr[idx], nil
+				return o.arrAt(idx), nil
 			}
 		}
 	case TTypedArray:
@@ -382,7 +382,7 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 		case TArr:
 			o := rt.objPtr(obj)
 			if idx < o.arrLen && int(idx) < len(o.arr) && !o.arr[idx].IsEmpty() {
-				return o.arr[idx], nil
+				return o.arrAt(idx), nil
 			}
 			// Not in fast element storage: an index defined with non-default
 			// attributes or as an accessor lives as a named property — fall through

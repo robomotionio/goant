@@ -84,6 +84,11 @@ type object struct {
 	// cannot collide with an ordinary "#x" string property.
 	priv []privElem
 
+	// lazy is set on an object or array parsed out of a JSON document that has
+	// not been built yet (json_lazy.go). It is the document those slots holding
+	// an unparsed span refer to; every other object leaves it nil.
+	lazy *lazyDoc
+
 	// native is set for built-in functions implemented in Go (ant cfunc).
 	native nativeFunc
 
@@ -244,7 +249,32 @@ func (rt *Runtime) freeObject(h Handle) {
 
 func (o *object) inobjLimit() int { return int(o.shape.getInobjLimit()) }
 
+// slotGet reads a shape-assigned slot. Every read of a named property arrives
+// here, including the inline caches' — icWay.read resolves through it — which
+// is what makes it the single place a lazily parsed document has to be taught
+// about. The check is one compare against a constant and a branch that is not
+// taken for any object that was not parsed lazily; see lazyBase in value.go.
 func (o *object) slotGet(slot uint32) Value {
+	limit := o.inobjLimit()
+	var v Value
+	switch idx := int(slot) - limit; {
+	case int(slot) < limit:
+		v = o.inobj[slot]
+	case idx < len(o.overflow):
+		v = o.overflow[idx]
+	default:
+		return mkundef()
+	}
+	if v.isLazy() {
+		return o.forceSlot(slot, v)
+	}
+	return v
+}
+
+// slotGetRaw reads a slot without materialising an unparsed span. Only the
+// lazy machinery itself has any business calling it: everything else wants the
+// value, and would get a sentinel.
+func (o *object) slotGetRaw(slot uint32) Value {
 	limit := o.inobjLimit()
 	if int(slot) < limit {
 		return o.inobj[slot]

@@ -101,6 +101,35 @@ const (
 // tEmpty is the array-hole / empty-slot sentinel (include/internal.h T_EMPTY).
 const tEmpty Value = nanboxPrefix | (Value(TSentinel) << nanboxTypeShift) | 0xDEAD
 
+// DIVERGENCE FROM ant: a second sentinel family, the unparsed JSON span.
+//
+// A lazily parsed document (json_lazy.go) stores an offset into its source
+// bytes where a property's value will eventually go, and materialises it the
+// first time something reads the slot. The offset rides in the payload of the
+// same T_SENTINEL tag as tEmpty, distinguished by bit 46.
+//
+// The bit position is what makes the test one instruction. T_SENTINEL is the
+// largest tag, so every other tagged value sorts below prefix|31<<47, every
+// double sorts at or below the prefix, and tEmpty's 0xDEAD leaves bit 46 clear.
+// So `uint64(v) >= lazyBase` is exactly "this is an unparsed span" — a compare
+// and a not-taken branch on the property-read path, which is why the check can
+// afford to sit inside slotGet.
+const lazyBase Value = nanboxPrefix | (Value(TSentinel) << nanboxTypeShift) | (1 << 46)
+
+// lazyOffsetMask covers the 46 bits below the marker. A document larger than
+// 64 TiB would collide; JSONParseBytesLazy refuses anything over 4 GiB long
+// before that can matter.
+const lazyOffsetMask = uint64(1<<46) - 1
+
+// mklazy boxes a byte offset into the owning document's source.
+func mklazy(off int) Value { return lazyBase | Value(uint64(off)&lazyOffsetMask) }
+
+// isLazy reports whether v is an unparsed JSON span rather than a real value.
+func (v Value) isLazy() bool { return uint64(v) >= uint64(lazyBase) }
+
+// lazyOffset returns the source offset of an unparsed span.
+func (v Value) lazyOffset() int { return int(uint64(v) & lazyOffsetMask) }
+
 // isTagged reports whether v is a tagged (non-double) value.
 func (v Value) isTagged() bool { return uint64(v) > nanboxPrefix }
 

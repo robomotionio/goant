@@ -64,7 +64,7 @@ func (rt *Runtime) JSONStringifyToBytes(v Value, dst []byte) (out []byte, ok boo
 	// Serialize straight into the caller's buffer: the stringifier appends, so
 	// handing it dst means the document is built once, in place, with no
 	// intermediate string and no final copy.
-	st := &jsonStringifier{rt: rt, buf: dst}
+	st := &jsonStringifier{rt: rt, buf: dst, rawSpans: rt.lazyRawSafe()}
 	holder := rt.newPlainObject()
 	rt.objPtr(holder).defineOwn("", v, attrDefault)
 	ok, terr := st.str("", holder, "")

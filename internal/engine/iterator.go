@@ -283,7 +283,7 @@ func (rt *Runtime) iterableValues(v Value) ([]Value, *ThrowError) {
 		out := make([]Value, 0, o.arrLen)
 		for i := uint32(0); i < o.arrLen; i++ {
 			if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
-				out = append(out, o.arr[i])
+				out = append(out, o.arrAt(i))
 			} else {
 				out = append(out, mkundef())
 			}

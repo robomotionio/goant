@@ -199,6 +199,17 @@ type jsonStringifier struct {
 	indent          string
 	stack           []Value // objects/arrays currently being serialized (cycle detection)
 
+	// rawSpans lets a value that a lazily parsed document has never built be
+	// copied out as the source text it arrived as, instead of being parsed only
+	// to be immediately re-serialized. It is set by the host byte entry points
+	// and never by JSON.stringify, because it is not a spec-transparent thing to
+	// do: the span is the original text, so whitespace, number spelling and
+	// \u escapes survive where the spec would normalize them. Semantically the
+	// document is the same one; byte-for-byte it is the input's formatting
+	// rather than the serializer's. For a message pump, which is what the byte
+	// entry points exist for, that is a better answer as well as a free one.
+	rawSpans bool
+
 	// buf is the output. Serializing appends to it rather than returning
 	// strings, so a large document costs one growing buffer instead of a string
 	// per value plus a join per level. A value that turns out to serialize to
@@ -230,6 +241,16 @@ func (st *jsonStringifier) leaveCycle() { st.stack = st.stack[:len(st.stack)-1] 
 // has been appended, so a caller that already wrote a prefix must truncate.
 func (st *jsonStringifier) str(key string, holder Value, indent string) (bool, *ThrowError) {
 	rt := st.rt
+	// An untouched span goes out as the bytes it came in as. The guards are the
+	// three things that would otherwise observe the value on its way past: a
+	// replacer or a property list gets a say in what is written, and a gap means
+	// the output is indented, which spliced source would not be.
+	if st.rawSpans && st.replacerFn == 0 && !st.hasPropertyList && st.gap == "" {
+		if raw, ok := rt.lazySpanRaw(holder, key); ok {
+			st.buf = append(st.buf, raw...)
+			return true, nil
+		}
+	}
 	v, e := rt.getField(holder, key)
 	if e != nil {
 		return false, e
