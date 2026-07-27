@@ -27,7 +27,7 @@ func (rt *Runtime) newFunction(fn *svFunc, upvals []*upvalue) Value {
 	ch, cl := rt.closures.alloc()
 	cl.fn = fn
 	cl.upvalues = upvals
-	obj.closure = ch
+	obj.closure, obj.clPtr = ch, cl
 
 	// .length and .name (non-enumerable, configurable) per spec.
 	obj.defineOwn("length", mknum(float64(fn.fnLength)), attrConfigurable)
@@ -87,7 +87,7 @@ func (rt *Runtime) closureOf(v Value) *closure {
 	if o == nil || o.typeTag != TFunc {
 		return nil
 	}
-	return rt.closures.get(o.closure)
+	return o.clPtr
 }
 
 // nameMethodFromKey performs SetFunctionName on an anonymous method/accessor
@@ -399,7 +399,7 @@ func (rt *Runtime) callValue(fnVal, thisVal Value, args []Value) (Value, *ThrowE
 		rt.frameDepth--
 		return v, e
 	}
-	cl := rt.closures.get(o.closure)
+	cl := o.clPtr
 	if cl == nil {
 		return mkundef(), rt.typeError("value is not a function")
 	}

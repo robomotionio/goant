@@ -65,8 +65,12 @@ type object struct {
 	arr    []Value
 	arrLen uint32
 
-	// T_FUNC closure (ant u.func.closure) — Phase 3.
+	// T_FUNC closure (ant u.func.closure) — Phase 3. clPtr is the same cell
+	// resolved once: the handle is what the collector traces, but every call
+	// through this function resolved it again, and a pool lookup is two
+	// dependent loads. It is written with the handle and never changes.
 	closure Handle
+	clPtr   *closure
 
 	// boxed primitive / misc data cell (ant u.data.value).
 	boxed Value

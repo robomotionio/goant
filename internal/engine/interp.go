@@ -2209,7 +2209,7 @@ restart:
 				// proper one — reuse this frame exactly as OpTailCall does.
 				if evalTail {
 					if o := rt.objPtr(callee); o != nil && o.native == nil && o.proxy == nil {
-						if cl2 := rt.closures.get(o.closure); cl2 != nil &&
+						if cl2 := o.clPtr; cl2 != nil &&
 							!cl2.fn.isGenerator && !cl2.fn.isAsync && !cl2.fn.isClassCtor {
 							closeAll()
 							fn, cl, fnVal, thisVal, args = cl2.fn, cl2, callee, evalThis, evalArgs
@@ -2259,7 +2259,7 @@ restart:
 				tailThis = pop()
 			}
 			if o := rt.objPtr(callee); o != nil && o.native == nil && o.proxy == nil {
-				if cl2 := rt.closures.get(o.closure); cl2 != nil &&
+				if cl2 := o.clPtr; cl2 != nil &&
 					!cl2.fn.isGenerator && !cl2.fn.isAsync && !cl2.fn.isClassCtor {
 					closeAll()
 					fn, cl, fnVal, thisVal, args = cl2.fn, cl2, callee, tailThis, callArgs
