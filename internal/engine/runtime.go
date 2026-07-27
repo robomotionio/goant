@@ -156,10 +156,9 @@ type Runtime struct {
 	// shared %RegExpStringIteratorPrototype%.next that steps RegExpExec lazily.
 	regexpStrIterStates map[*object]*regexpStrIterState
 
-	// lastObjH/lastObjP memoise the most recent handle-to-object translation;
-	// see objPtr. Cleared wherever a handle can stop naming its cell.
-	lastObjH Handle
-	lastObjP *object
+	// objMemo is a direct-mapped handle-to-object translation cache; see objPtr.
+	// Cleared wherever a handle can stop naming its cell.
+	objMemo [objMemoSize]objMemoEntry
 
 	// agent is shared by every realm built on these pools. A handle means the
 	// same cell in all of them, so a collection driven from any one realm must

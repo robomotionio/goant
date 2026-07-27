@@ -174,7 +174,7 @@ func (rt *Runtime) collect() {
 	rt.closures.sweep(g.cloMarks)
 	rt.bigints.sweep(g.bigMarks)
 
-	rt.forEachRealm(func(r *Runtime) { r.lastObjH, r.lastObjP = 0, nil })
+	rt.forEachRealm(func(r *Runtime) { r.objMemo = [objMemoSize]objMemoEntry{} })
 
 	// An inline cache holds its prototype holder as a raw *object, which may now
 	// name a freed cell. Retiring every entry is what guarantees it is never

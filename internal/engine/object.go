@@ -193,20 +193,36 @@ func (rt *Runtime) objPtr(v Value) *object {
 	if !v.IsObjectType() && v.Type() != TTypedArray {
 		return nil
 	}
-	// One-entry translation cache. Resolving a handle is two dependent loads
-	// (the chunk vector, then the chunk) before the object is even touched, and
-	// the interpreter does it several times per property access on the same
-	// receiver — `this.x` then `this.y` then `this.z`. A handle is a pure
-	// function of its cell for as long as the cell lives, so remembering the
-	// last one is sound; collect and truncate clear it, since those are the two
-	// places a handle stops naming what it named.
+	// Translation cache. Resolving a handle is two dependent loads (the chunk
+	// vector, then the chunk) before the object is even touched, and the
+	// interpreter does it several times over for one property access — the
+	// inline-cache probe resolves the receiver, then the read does, and
+	// `this.x` is followed by `this.y`. A handle is a pure function of its cell
+	// for as long as the cell lives, so memoising is sound; collect and
+	// truncate clear it, since those are the two places a handle stops naming
+	// what it named.
+	//
+	// Direct-mapped rather than a single entry: a loop that alternates between
+	// two objects — DeltaBlue walking a constraint and the variable it binds —
+	// evicts a one-entry cache on every access.
 	h := Handle(v.handle())
-	if h == rt.lastObjH {
-		return rt.lastObjP
+	e := &rt.objMemo[h&(objMemoSize-1)]
+	if e.h == h {
+		return e.p
 	}
 	o := rt.objects.get(h)
-	rt.lastObjH, rt.lastObjP = h, o
+	e.h, e.p = h, o
 	return o
+}
+
+// objMemoSize is how many handle translations objPtr remembers. Direct-mapped,
+// so it must be a power of two, and small enough to stay in one cache line's
+// reach; four covers the receivers a tight loop touches.
+const objMemoSize = 4
+
+type objMemoEntry struct {
+	h Handle
+	p *object
 }
 
 // freeObject releases a cell the caller has just allocated and is abandoning —
@@ -214,8 +230,8 @@ func (rt *Runtime) objPtr(v Value) *object {
 // rather than the pool directly so the translation cache cannot be left naming
 // a cell that is no longer live.
 func (rt *Runtime) freeObject(h Handle) {
-	if rt.lastObjH == h {
-		rt.lastObjH, rt.lastObjP = 0, nil
+	if e := &rt.objMemo[h&(objMemoSize-1)]; e.h == h {
+		*e = objMemoEntry{}
 	}
 	rt.objects.free(h)
 }
