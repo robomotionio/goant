@@ -119,3 +119,17 @@ func (v *Value) JSONElementsToBytes(dst []byte, limit int) (out []byte, ends []i
 	}
 	return out, ends, nil
 }
+
+// SetBlobResolver installs the resolver a lazy parse uses for envelopes — the
+// small stand-ins a host leaves in a message for data it keeps elsewhere.
+//
+// Resolving on first read rather than before the parse is what makes the
+// envelope pay: a field the script never mentions is never fetched, so passing
+// a message that references a hundred megabytes costs a few hundred bytes.
+// BlobResolveFailed reports a fetch that could not be satisfied.
+func (c *Context) SetBlobResolver(r func(ref string) ([]byte, error)) {
+	if c == nil || c.r == nil {
+		return
+	}
+	c.r.SetBlobResolver(r)
+}

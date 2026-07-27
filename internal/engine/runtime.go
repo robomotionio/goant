@@ -315,6 +315,12 @@ type Runtime struct {
 	// rather than what it allocates. See SetHeapLimit.
 	heapLimit uint64
 
+	// blobResolver fetches the bytes behind an envelope encountered by a lazy
+	// parse, and blobErr holds the failure that stopped a script when one
+	// could not be fetched. See SetBlobResolver.
+	blobResolver BlobResolver
+	blobErr      error
+
 	// frameStrict is the strictness of the currently executing JS frame, so a
 	// direct eval() (native call) inherits the caller's strict mode.
 	frameStrict bool

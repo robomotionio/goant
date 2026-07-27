@@ -37,6 +37,7 @@ const (
 	interruptNone   = 0
 	interruptHost   = 1 // Interrupt() — a timeout, a cancellation, a shutdown
 	interruptMemory = 2 // the heap budget was exceeded; see SetHeapLimit
+	interruptBlob   = 3 // a referenced blob could not be fetched; see SetBlobResolver
 )
 
 // interruptState is the cross-goroutine half of the Runtime. It is a separate
@@ -74,6 +75,18 @@ func (rt *Runtime) HeapLimit() uint64 { return rt.heapLimit }
 // fixes.
 func (rt *Runtime) HeapLimitExceeded() bool {
 	return rt.interrupt != nil && rt.interrupt.flag.Load() == interruptMemory
+}
+
+// BlobResolveFailed reports that this Runtime was terminated because a lazily
+// parsed envelope named a blob the resolver could not produce. The error itself
+// is BlobResolveError.
+//
+// It is reported rather than swallowed because the alternative is worse than a
+// stopped script: the value would arrive as the raw envelope, and the failure
+// would surface as a type error in the middle of someone's JavaScript with
+// nothing pointing at the missing blob.
+func (rt *Runtime) BlobResolveFailed() bool {
+	return rt.interrupt != nil && rt.interrupt.flag.Load() == interruptBlob
 }
 
 // Interrupt requests that any script currently running on this Runtime stop as

@@ -47,6 +47,22 @@ type lazyDoc struct {
 	rt  *Runtime
 	src string
 
+	// resolver fetches the bytes behind a content-addressed reference, for a
+	// host that stores large fields outside the message and leaves an envelope
+	// in their place. Nil when the host has no such store, which is the case
+	// this file was written for and still the common one.
+	//
+	// Resolving on first read rather than before the parse is what makes the
+	// envelope worth having: a field the script never mentions is never
+	// fetched, so a message that carries a reference to a hundred megabytes
+	// costs a few hundred bytes to pass through.
+	resolver BlobResolver
+
+	// blobs caches what has already been fetched, keyed by reference. Two
+	// envelopes naming the same blob are common — a message that fans out and
+	// rejoins — and re-fetching would decompress it twice.
+	blobs map[string][]byte
+
 	// keys holds engine-owned copies of the property names seen so far. A key
 	// is interned, and the intern table keeps the Go string itself, so handing
 	// it a view of the host's buffer would leave the table pointing at memory
@@ -107,7 +123,7 @@ func (rt *Runtime) JSONParseBytesLazy(b []byte) (Value, error) {
 		return mkundef(), &jsonError{"Unexpected non-whitespace character after JSON"}
 	}
 
-	d := &lazyDoc{rt: rt, src: src}
+	d := &lazyDoc{rt: rt, src: src, resolver: rt.blobResolver}
 	return d.value(start), nil
 }
 
@@ -146,6 +162,99 @@ func (d *lazyDoc) value(off int) Value {
 	}
 }
 
+// BlobResolver returns the bytes behind a content-addressed reference. An
+// error stops the script the way a heap-limit breach does — the read cannot
+// produce a value, and carrying on would hand the script an envelope where it
+// expected data, which surfaces as a type error somewhere unrelated.
+type BlobResolver func(ref string) ([]byte, error)
+
+// SetBlobResolver installs the resolver used by JSONParseBytesLazy for
+// envelopes it encounters. Pass nil to disable, which is the default.
+func (rt *Runtime) SetBlobResolver(r BlobResolver) { rt.blobResolver = r }
+
+// BlobResolveError returns the failure that stopped the last script, if it was
+// stopped by a blob that could not be fetched.
+func (rt *Runtime) BlobResolveError() error { return rt.blobErr }
+
+// Envelope marker keys. An envelope is recognised by carrying both, with
+// __magic holding the agreed constant — the same test the host makes, done
+// here so the check costs a shape lookup rather than a document scan.
+const (
+	blobKeyRef   = "__ref"
+	blobKeyMagic = "__magic"
+	blobMagic    = 20260301
+)
+
+// blobRef reports whether o is an envelope and, if so, what it refers to.
+//
+// The probe is two shape lookups, which is why it can afford to run on every
+// object materialised: an ordinary record fails the first one. Only an object
+// carrying both keys pays for reading them, and by then it is almost certainly
+// an envelope.
+func (d *lazyDoc) blobRef(o *object) (string, bool) {
+	magicSlot := o.shape.lookupInterned(blobKeyMagic)
+	if magicSlot < 0 {
+		return "", false
+	}
+	refSlot := o.shape.lookupInterned(blobKeyRef)
+	if refSlot < 0 {
+		return "", false
+	}
+	magic := o.slotGet(uint32(magicSlot))
+	if magic.Type() != TNum || magic.Number() != blobMagic {
+		return "", false
+	}
+	ref := o.slotGet(uint32(refSlot))
+	if ref.Type() != TStr {
+		return "", false
+	}
+	s := d.rt.strGo(ref)
+	if s == "" {
+		return "", false
+	}
+	return s, true
+}
+
+// resolveBlob fetches a reference and parses its contents lazily, so a blob
+// that turns out to hold an array of records is itself only built as far as
+// the script reads it.
+func (d *lazyDoc) resolveBlob(ref string, envelope Value) Value {
+	if b, ok := d.blobs[ref]; ok {
+		return d.rt.lazyRoot(b, d.resolver, d.blobs)
+	}
+	b, err := d.resolver(ref)
+	if err != nil {
+		// No value can be produced, and returning the envelope would hand the
+		// script an object where it expected the data. Stop instead, the same
+		// way the heap limit does, and let the host report what happened.
+		d.rt.blobErr = err
+		if d.rt.interrupt != nil {
+			d.rt.interrupt.flag.Store(interruptBlob)
+		}
+		return envelope
+	}
+	if d.blobs == nil {
+		d.blobs = make(map[string][]byte, 4)
+	}
+	d.blobs[ref] = b
+	return d.rt.lazyRoot(b, d.resolver, d.blobs)
+}
+
+// lazyRoot parses b as a lazily built document sharing a resolver and blob
+// cache with the document that referred to it.
+func (rt *Runtime) lazyRoot(b []byte, r BlobResolver, blobs map[string][]byte) Value {
+	if len(b) == 0 || len(b) >= maxLazyDoc {
+		return mknull()
+	}
+	src := unsafe.String(unsafe.SliceData(b), len(b))
+	start := skipSpace(src, 0)
+	if _, err := lazyScan(src, start); err != nil {
+		return mknull()
+	}
+	d := &lazyDoc{rt: rt, src: src, resolver: r, blobs: blobs}
+	return d.value(start)
+}
+
 // object builds a lazy object: every key interned and installed in the shape,
 // every value a span. The shape is real, so key-level operations — ownKeys,
 // `in`, for-in, delete, Object.keys — need to know nothing about laziness.
@@ -170,6 +279,14 @@ func (d *lazyDoc) object(off int) Value {
 		if d.src[i] == ',' {
 			i = skipSpace(d.src, i+1)
 			continue
+		}
+		// An envelope stands in for data the host keeps outside the message.
+		// Now that the keys are in the shape, recognising one costs a lookup,
+		// and the value the script gets is the blob rather than the reference.
+		if d.resolver != nil {
+			if ref, ok := d.blobRef(o); ok {
+				return d.resolveBlob(ref, obj)
+			}
 		}
 		return obj // '}'
 	}

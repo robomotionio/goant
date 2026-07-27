@@ -55,7 +55,18 @@ func (rt *Runtime) RunScript(s *Script) (Value, error) {
 		return mkundef(), errors.New("goant: nil script")
 	}
 	rt.filename = s.fn.filename
-	return rt.execute(s.fn)
+	v, err := rt.execute(s.fn)
+	// A blob that could not be fetched raises the interrupt, but a script short
+	// enough to finish before the next check point would carry on and return
+	// normally — the read that failed is not a place that can report. Checking
+	// on the way out means the host always learns, whether the script was
+	// stopped mid-flight or simply finished holding a value it never got.
+	if rt.BlobResolveFailed() {
+		if berr := rt.BlobResolveError(); berr != nil {
+			return mkundef(), berr
+		}
+	}
+	return v, err
 }
 
 // DrainJobs runs the microtask queue to completion.

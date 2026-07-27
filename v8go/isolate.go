@@ -286,3 +286,43 @@ func (i *Isolate) runtime() (*engine.Runtime, error) {
 	}
 	return i.rt, nil
 }
+
+// SetBlobResolver installs the resolver used by ParseJSONBytesLazy for
+// envelopes it encounters on this isolate.
+func (i *Isolate) SetBlobResolver(r func(ref string) ([]byte, error)) {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	rt := i.rt
+	i.mu.Unlock()
+	if rt != nil {
+		rt.SetBlobResolver(r)
+	}
+}
+
+// BlobResolveFailed reports that the isolate stopped its script because a
+// lazily parsed envelope named a blob the resolver could not produce.
+func (i *Isolate) BlobResolveFailed() bool {
+	if i == nil {
+		return false
+	}
+	i.mu.Lock()
+	rt := i.rt
+	i.mu.Unlock()
+	return rt != nil && rt.BlobResolveFailed()
+}
+
+// BlobResolveError returns that failure.
+func (i *Isolate) BlobResolveError() error {
+	if i == nil {
+		return nil
+	}
+	i.mu.Lock()
+	rt := i.rt
+	i.mu.Unlock()
+	if rt == nil {
+		return nil
+	}
+	return rt.BlobResolveError()
+}
