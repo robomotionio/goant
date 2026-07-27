@@ -29,6 +29,7 @@ package engine
 // property read happens to reach it.
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -62,6 +63,11 @@ type lazyDoc struct {
 	// envelopes naming the same blob are common — a message that fans out and
 	// rejoins — and re-fetching would decompress it twice.
 	blobs map[string][]byte
+
+	// pending is set on the document belonging to an array that stands for a
+	// blob nobody has read yet. Such a document has no src: its elements are
+	// indices, not offsets, until the blob arrives and it adopts the blob's.
+	pending *pendingBlob
 
 	// keys holds engine-owned copies of the property names seen so far. A key
 	// is interned, and the intern table keeps the Go string itself, so handing
@@ -182,8 +188,36 @@ func (rt *Runtime) BlobResolveError() error { return rt.blobErr }
 const (
 	blobKeyRef   = "__ref"
 	blobKeyMagic = "__magic"
+	blobKeyType  = "__type"
+	blobKeyLen   = "__len"
 	blobMagic    = 20260301
 )
+
+// maxDeferredElems caps how long an array an envelope may claim to be before
+// the claim stops being taken on trust.
+//
+// __len travels in the message rather than in the content-addressed blob, so
+// unlike the data it is not self-verifying. Believing it is what makes reading
+// a length free; the exposure is one slice of that many Values, so the bound is
+// set where pre-sizing stops being cheaper than reading the blob and counting.
+// Past it, the envelope resolves the old way.
+const maxDeferredElems = 1 << 22 // 4M elements, 32 MB of spans
+
+// errBlobShape reports a blob that did not hold the array its envelope
+// described. It is a corrupt store rather than a script error, so it stops the
+// script rather than surfacing as elements that read as undefined.
+var errBlobShape = errors.New("goant: blob does not hold the array its envelope describes")
+
+// pendingBlob is an array envelope that has been stood up but not read. It
+// holds what is needed to fetch the blob on the first element access, and where
+// the envelope's own text sits in the referring document, so an array that
+// nobody touched can be written back out as the reference it arrived as.
+type pendingBlob struct {
+	ref    string
+	elems  int
+	envDoc *lazyDoc
+	envOff int
+}
 
 // blobRef reports whether o is an envelope and, if so, what it refers to.
 //
@@ -191,28 +225,133 @@ const (
 // object materialised: an ordinary record fails the first one. Only an object
 // carrying both keys pays for reading them, and by then it is almost certainly
 // an envelope.
-func (d *lazyDoc) blobRef(o *object) (string, bool) {
+// elems is the number of elements the envelope says it stands for, or -1 when
+// it describes something other than an array, omits the count, or gives one
+// that cannot be taken on trust.
+func (d *lazyDoc) blobRef(o *object) (ref string, elems int, ok bool) {
 	magicSlot := o.shape.lookupInterned(blobKeyMagic)
 	if magicSlot < 0 {
-		return "", false
+		return "", -1, false
 	}
 	refSlot := o.shape.lookupInterned(blobKeyRef)
 	if refSlot < 0 {
-		return "", false
+		return "", -1, false
 	}
 	magic := o.slotGet(uint32(magicSlot))
 	if magic.Type() != TNum || magic.Number() != blobMagic {
-		return "", false
+		return "", -1, false
 	}
-	ref := o.slotGet(uint32(refSlot))
-	if ref.Type() != TStr {
-		return "", false
+	rv := o.slotGet(uint32(refSlot))
+	if rv.Type() != TStr {
+		return "", -1, false
 	}
-	s := d.rt.strGo(ref)
+	s := d.rt.strGo(rv)
 	if s == "" {
-		return "", false
+		return "", -1, false
 	}
-	return s, true
+	return s, d.envelopeElems(o), true
+}
+
+// envelopeElems reads the element count an array envelope declares.
+//
+// __len is only an element count when __type says "array" — for a string
+// envelope the same key holds a character count — so both are read or neither
+// is believed.
+func (d *lazyDoc) envelopeElems(o *object) int {
+	typeSlot := o.shape.lookupInterned(blobKeyType)
+	if typeSlot < 0 {
+		return -1
+	}
+	tv := o.slotGet(uint32(typeSlot))
+	if tv.Type() != TStr || d.rt.strGo(tv) != "array" {
+		return -1
+	}
+	lenSlot := o.shape.lookupInterned(blobKeyLen)
+	if lenSlot < 0 {
+		return -1
+	}
+	lv := o.slotGet(uint32(lenSlot))
+	if lv.Type() != TNum {
+		return -1
+	}
+	n := lv.Number()
+	elems := int(n)
+	if float64(elems) != n || elems < 1 || elems > maxDeferredElems {
+		return -1
+	}
+	return elems
+}
+
+// deferredArray stands an array envelope up at the length the envelope
+// declares, without fetching anything.
+//
+// The blob is read on the first access to an element, and not before. That is
+// what makes `msg.rows.length` cost a field read rather than a file read, a
+// zstd decompress and a scan of the result — the answer was in the message the
+// whole time, and resolving to find it was reading the book to count its pages.
+//
+// Every element is an unresolved span, so arrLen equals len(arr) and the array
+// is indistinguishable from any other lazily parsed one. Nothing that walks an
+// array has to know this one is different; only forceElem does, and only
+// because it is the place the blob is finally needed.
+func (d *lazyDoc) deferredArray(ref string, elems, envOff int) Value {
+	// The cache is shared with the document that referred here, so a second
+	// envelope naming the same blob finds it already fetched.
+	if d.blobs == nil {
+		d.blobs = make(map[string][]byte, 4)
+	}
+	arr := d.rt.newArray()
+	o := d.rt.objPtr(arr)
+	o.lazy = &lazyDoc{
+		rt:       d.rt,
+		resolver: d.resolver,
+		blobs:    d.blobs,
+		pending:  &pendingBlob{ref: ref, elems: elems, envDoc: d, envOff: envOff},
+	}
+	o.arr = make([]Value, elems)
+	for i := range o.arr {
+		o.arr[i] = mklazy(i)
+	}
+	o.arrLen = uint32(elems)
+	return arr
+}
+
+// fetchPendingBlob reads the blob this array stands for and adopts its layout,
+// keeping the array's own identity — a script may already be holding it.
+//
+// A failure stops the script, the same way resolveBlob's does and for the same
+// reason: there is no value to carry on with, and leaving the elements reading
+// as undefined would turn a missing blob into a wrong answer.
+func (o *object) fetchPendingBlob() bool {
+	d := o.lazy
+	p := d.pending
+	b, ok := d.blobs[p.ref]
+	if !ok {
+		var err error
+		b, err = d.resolver(p.ref)
+		if err != nil {
+			d.rt.blobErr = err
+			if d.rt.interrupt != nil {
+				d.rt.interrupt.flag.Store(interruptBlob)
+			}
+			return false
+		}
+		d.blobs[p.ref] = b
+	}
+	src := d.rt.objPtr(d.rt.lazyRoot(b, d.resolver, d.blobs))
+	if src == nil || src.typeTag != TArr || src.lazy == nil {
+		d.rt.blobErr = errBlobShape
+		if d.rt.interrupt != nil {
+			d.rt.interrupt.flag.Store(interruptBlob)
+		}
+		return false
+	}
+	// The blob is authoritative about its own contents, so its length wins over
+	// the envelope's claim if the two ever disagree.
+	o.lazy = src.lazy
+	o.arr = src.arr
+	o.arrLen = src.arrLen
+	return true
 }
 
 // resolveBlob fetches a reference and parses its contents lazily, so a blob
@@ -284,7 +423,12 @@ func (d *lazyDoc) object(off int) Value {
 		// Now that the keys are in the shape, recognising one costs a lookup,
 		// and the value the script gets is the blob rather than the reference.
 		if d.resolver != nil {
-			if ref, ok := d.blobRef(o); ok {
+			if ref, elems, ok := d.blobRef(o); ok {
+				// An envelope that says how many elements it stands for can be
+				// answered about without being opened.
+				if elems > 0 {
+					return d.deferredArray(ref, elems, off)
+				}
 				return d.resolveBlob(ref, obj)
 			}
 		}
@@ -335,6 +479,19 @@ func (o *object) forceSlot(slot uint32, span Value) Value {
 func (o *object) forceElem(idx uint32, span Value) Value {
 	if o.lazy == nil {
 		return mkundef()
+	}
+	// An array standing in for a blob reads it here — on the first element
+	// anyone asks for, having answered for its length until now without one.
+	if o.lazy.pending != nil {
+		if !o.fetchPendingBlob() {
+			return mkundef()
+		}
+		// The blob's own length won, so an index the envelope promised may not
+		// be there. Reading past the end is undefined, not a panic.
+		if int(idx) >= len(o.arr) {
+			return mkundef()
+		}
+		return o.arrAt(idx)
 	}
 	v := o.lazy.value(span.lazyOffset())
 	o.arr[idx] = v
@@ -397,7 +554,10 @@ func (rt *Runtime) lazySpanRaw(holder Value, key string) (string, bool) {
 		v = o.slotGetRaw(uint32(slot))
 	}
 	if !v.isLazy() {
-		return "", false
+		// An array standing in for a blob nobody read is still exactly the
+		// envelope it was built from, so write that rather than fetching the
+		// data in order to write it out again.
+		return rt.untouchedEnvelopeRaw(v)
 	}
 	off := v.lazyOffset()
 	end, err := lazyScan(o.lazy.src, off)
@@ -405,6 +565,41 @@ func (rt *Runtime) lazySpanRaw(holder Value, key string) (string, bool) {
 		return "", false
 	}
 	return o.lazy.src[off:end], true
+}
+
+// untouchedEnvelopeRaw returns the envelope text an array was stood up from,
+// when the array still stands for the whole of it.
+//
+// "Still" is checked, not tracked. Clearing a flag on every write would only be
+// as good as the list of writes someone remembered to find, and a missed one
+// writes a reference where the script left data — a silent wrong answer in the
+// message, which is the worst failure this code can have. Walking the elements
+// is one comparison each over a slice already in cache, and it cannot be
+// fooled: an element that was read is no longer a span, a push or a truncation
+// changes the length, and anything defined on the array itself lands in its
+// shape.
+func (rt *Runtime) untouchedEnvelopeRaw(v Value) (string, bool) {
+	o := rt.objPtr(v)
+	if o == nil || o.typeTag != TArr || o.lazy == nil || o.lazy.pending == nil {
+		return "", false
+	}
+	p := o.lazy.pending
+	if o.arrLen != uint32(p.elems) || len(o.arr) != p.elems {
+		return "", false
+	}
+	if o.shape != nil && len(o.shape.props) > 0 {
+		return "", false
+	}
+	for i, e := range o.arr {
+		if !e.isLazy() || e.lazyOffset() != i {
+			return "", false
+		}
+	}
+	end, err := lazyScan(p.envDoc.src, p.envOff)
+	if err != nil {
+		return "", false
+	}
+	return p.envDoc.src[p.envOff:end], true
 }
 
 // ---- scanning ----
