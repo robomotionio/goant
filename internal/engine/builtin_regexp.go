@@ -444,9 +444,10 @@ func (rt *Runtime) initRegExpBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if mo := rt.objPtr(matcher); mo == nil || mo.regex == nil {
-			return mkundef(), rt.typeError("RegExp[Symbol.matchAll] species constructor did not return a RegExp")
-		}
+		// No brand check on matcher: step 6 is a plain Construct, and the iterator
+		// drives it through RegExpExec, which uses whatever `exec` the object has.
+		// A species constructor returning something that merely behaves like a
+		// RegExp — the reason to override @@species at all — is the point.
 		li, e := rt.getField(this, "lastIndex")
 		if e != nil {
 			return mkundef(), e
