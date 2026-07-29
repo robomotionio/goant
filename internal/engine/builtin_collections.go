@@ -575,12 +575,15 @@ func (rt *Runtime) getSetRecord(v Value) (*setRecord, *ThrowError) {
 	if e != nil {
 		return nil, e
 	}
+	// The wording follows V8's. The spec fixes the error types but not their
+	// text, and code in the wild — and the tests that come with it — matches on
+	// the text it has seen, so there is no value in being different here.
 	if math.IsNaN(numSize) {
-		return nil, rt.typeError("Set method argument has an invalid size")
+		return nil, rt.typeError("The .size property is NaN")
 	}
 	intSize := math.Trunc(numSize)
 	if intSize < 0 {
-		return nil, rt.rangeError("Set method argument has a negative size")
+		return nil, rt.rangeError("'" + numberToString(numSize) + "' is an invalid size")
 	}
 	has, e := rt.getField(v, "has")
 	if e != nil {
@@ -610,21 +613,45 @@ func (rt *Runtime) recordHas(rec *setRecord, v Value) (bool, *ThrowError) {
 
 // forEachSetRecordKey drives rec.[[Keys]]() as an iterator, calling fn for each
 // value; fn returning stop=true closes the iterator and ends the walk.
-func (rt *Runtime) forEachSetRecordKey(rec *setRecord, fn func(Value) (bool, *ThrowError)) *ThrowError {
+// setKeysIter is an opened GetKeysIterator(setRecord) — the iterator and its
+// next method, resolved.
+//
+// Opening is separate from iterating because the spec separates them: union and
+// symmetricDifference call GetKeysIterator before they copy the receiver's
+// [[SetData]], so a keys() that clears the receiver is observed by the copy. Do
+// both in one step and that ordering is unobservable.
+type setKeysIter struct {
+	iter, next Value
+}
+
+func (rt *Runtime) openSetRecordKeys(rec *setRecord) (setKeysIter, *ThrowError) {
 	iter, e := rt.callValue(rec.keys, rec.obj, nil)
 	if e != nil {
-		return e
+		return setKeysIter{}, e
 	}
 	if !iter.IsObjectType() {
-		return rt.typeError("Set method argument keys() did not return an object")
+		return setKeysIter{}, rt.typeError("Set method argument keys() did not return an object")
 	}
 	next, e := rt.getField(iter, "next")
 	if e != nil {
-		return e
+		return setKeysIter{}, e
 	}
 	if !rt.isCallable(next) {
-		return rt.typeError("Set method argument keys() iterator has no next method")
+		return setKeysIter{}, rt.typeError("Set method argument keys() iterator has no next method")
 	}
+	return setKeysIter{iter: iter, next: next}, nil
+}
+
+func (rt *Runtime) forEachSetRecordKey(rec *setRecord, fn func(Value) (bool, *ThrowError)) *ThrowError {
+	ki, e := rt.openSetRecordKeys(rec)
+	if e != nil {
+		return e
+	}
+	return rt.iterateSetKeys(ki, fn)
+}
+
+func (rt *Runtime) iterateSetKeys(ki setKeysIter, fn func(Value) (bool, *ThrowError)) *ThrowError {
+	iter, next := ki.iter, ki.next
 	const maxEager = 1 << 24
 	for i := 0; i < maxEager; i++ {
 		res, e := rt.callValue(next, iter, nil)
@@ -659,15 +686,6 @@ func (rt *Runtime) forEachSetRecordKey(rec *setRecord, fn func(Value) (bool, *Th
 	return nil
 }
 
-// keySet returns the SameValueZero canonical-key set of a slice of values.
-func (rt *Runtime) keySet(elems []Value) map[string]bool {
-	m := make(map[string]bool, len(elems))
-	for _, v := range elems {
-		m[rt.canonicalKey(v)] = true
-	}
-	return m
-}
-
 // defineSetOperations installs the ES2025 Set-theory methods, following the
 // spec's observable has-vs-keys dispatch (a method that iterates its own,
 // smaller set calls other.has() per element; otherwise it drains other.keys()).
@@ -681,8 +699,15 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		if e != nil {
 			return mkundef(), e
 		}
+		// GetKeysIterator is step 4 and the copy of O.[[SetData]] is step 5, in
+		// that order: a keys() that mutates the receiver does so before the copy
+		// is taken, and the copy must see the result.
+		ki, e := rt.openSetRecordKeys(rec)
+		if e != nil {
+			return mkundef(), e
+		}
 		out := append([]Value(nil), rt.setElements(s)...)
-		if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
+		if e := rt.iterateSetKeys(ki, func(v Value) (bool, *ThrowError) {
 			out = append(out, v)
 			return false, nil
 		}); e != nil {
@@ -712,11 +737,15 @@ func (rt *Runtime) defineSetOperations(po *object) {
 				}
 			}
 		} else {
-			thisKeys := rt.keySet(thisElems)
+			// SetDataHas(O.[[SetData]], nextValue) reads this set as it is now, not
+			// as it was when the branch was chosen: other's keys() runs first and
+			// may have emptied or refilled the receiver, and the elements it left
+			// behind are the ones that count. Only the size comparison above is
+			// taken from before.
 			seen := map[string]bool{}
 			if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
 				ck := rt.canonicalKey(v)
-				if thisKeys[ck] && !seen[ck] {
+				if _, live := s.index[ck]; live && !seen[ck] {
 					seen[ck] = true
 					out = append(out, v)
 				}
@@ -773,17 +802,23 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		// resultSetData starts as a copy of this set's elements (taken after
-		// GetSetRecord). Each key drained from other toggles membership against both
-		// the result and the LIVE this set — other's keys iterator may add to or
-		// delete from this set, and those mutations are observed (SetDataHas).
+		// resultSetData starts as a copy of this set's elements, taken after
+		// GetKeysIterator — calling keys() is step 4 and the copy is step 5, so a
+		// keys() that clears the receiver empties what gets copied. Each key
+		// drained from other then toggles membership against both the result and
+		// the LIVE this set: other's iterator may add to or delete from this set
+		// as it goes, and those mutations are observed too (SetDataHas).
+		ki, e := rt.openSetRecordKeys(rec)
+		if e != nil {
+			return mkundef(), e
+		}
 		var result []Value
 		resultKeys := map[string]bool{}
 		for _, el := range rt.setElements(s) {
 			result = append(result, el)
 			resultKeys[rt.canonicalKey(el)] = true
 		}
-		if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
+		if e := rt.iterateSetKeys(ki, func(v Value) (bool, *ThrowError) {
 			ck := rt.canonicalKey(v)
 			inResult := resultKeys[ck]
 			_, inThis := s.index[ck] // live membership in this set
@@ -847,13 +882,15 @@ func (rt *Runtime) defineSetOperations(po *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		thisKeys := rt.keySet(rt.setElements(s))
-		if float64(len(thisKeys)) < rec.size {
+		// The size comparison is made before other's keys() runs; the membership
+		// tests after it are SetDataHas against this set as it stands then, which
+		// keys() may have rewritten.
+		if float64(len(rt.setElements(s))) < rec.size {
 			return mkfalse(), nil
 		}
 		result := true
 		if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
-			if !thisKeys[rt.canonicalKey(v)] {
+			if _, live := s.index[rt.canonicalKey(v)]; !live {
 				result = false
 				return true, nil // stop
 			}
@@ -892,10 +929,11 @@ func (rt *Runtime) defineSetOperations(po *object) {
 			}
 			return mktrue(), nil
 		}
-		thisKeys := rt.keySet(thisElems)
+		// As in the branch above, SetDataHas reads this set live: other's keys()
+		// runs before the first test and may have changed what is in it.
 		result := true
 		if e := rt.forEachSetRecordKey(rec, func(v Value) (bool, *ThrowError) {
-			if thisKeys[rt.canonicalKey(v)] {
+			if _, live := s.index[rt.canonicalKey(v)]; live {
 				result = false
 				return true, nil // stop
 			}
