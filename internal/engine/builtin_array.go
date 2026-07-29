@@ -2159,7 +2159,7 @@ func (rt *Runtime) initArrayBuiltin() {
 // isArrayValue implements IsArray(v): true for an Array exotic object or a
 // Proxy whose (transitive) target is one (23.1.2.2 / 7.2.2).
 func (rt *Runtime) isArrayValue(v Value) bool {
-	for i := 0; i < maxProtoChainDepth; i++ {
+	for i := 0; i < maxIsArrayUnwrap; i++ {
 		if v.Type() == TArr {
 			return true
 		}
@@ -2172,10 +2172,20 @@ func (rt *Runtime) isArrayValue(v Value) bool {
 	return false
 }
 
+// maxIsArrayUnwrap bounds how deep IsArray will unwrap a chain of proxies.
+//
+// The spec recurses without a bound (7.2.2 step 3.c), so every engine stops
+// where its stack does; V8 answers a 100k-deep chain and throws past 200k. The
+// walk here is a loop and uses no Go stack at all, so the limit exists only to
+// agree with that — and it must be far above maxProtoChainDepth, which was the
+// old bound and made Array.isArray answer `false` for a 100k-deep chain that
+// genuinely wrapped an array.
+const maxIsArrayUnwrap = 128 * 1024
+
 // isArrayE is IsArray(v) with abrupt completion: a revoked proxy in the unwrap
 // chain throws a TypeError (7.2.2 step 3.a) rather than reporting false.
 func (rt *Runtime) isArrayE(v Value) (bool, *ThrowError) {
-	for i := 0; i < maxProtoChainDepth; i++ {
+	for i := 0; i < maxIsArrayUnwrap; i++ {
 		if v.Type() == TArr {
 			return true, nil
 		}
@@ -2188,7 +2198,13 @@ func (rt *Runtime) isArrayE(v Value) (bool, *ThrowError) {
 		}
 		v = o.proxy.target
 	}
-	return false, nil
+	// The chain outran the budget. It cannot be cyclic — a Proxy's target is
+	// fixed when it is built, so the target always predates it — which means the
+	// only way here is a chain long enough that a recursive implementation would
+	// have run out of stack. That is what V8 reports, and reporting it is much
+	// better than the quiet `false` this used to return for a chain that really
+	// did end at an array.
+	return false, rt.rangeError("Maximum call stack size exceeded")
 }
 
 // flattenInto appends the elements of arr into dst, recursing into nested
