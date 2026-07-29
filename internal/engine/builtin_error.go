@@ -82,6 +82,12 @@ func (rt *Runtime) initErrorBuiltin() {
 		if o == nil || o.brandID() != brandError {
 			return mkundef(), nil // no [[ErrorData]] internal slot
 		}
+		// Rendering is deferred to the read so a prepareStackTrace installed after
+		// the error was constructed still governs it — which is the order the
+		// idiom uses: build the error, set the hook, read .stack.
+		if sites := o.getSlot(slotErrorFrames); sites.IsObjectLike() {
+			return rt.formatStack(this, sites)
+		}
 		return rt.newString(rt.errorStackString(this)), nil
 	})
 	setStack := rt.newNativeFunc("set stack", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -133,6 +139,7 @@ func (rt *Runtime) initErrorBuiltin() {
 
 	base := rt.makeErrorCtor("Error", errProto, mknull())
 	rt.errors.base = base
+	rt.installErrorStackAPI(base)
 
 	// NativeError subclasses.
 	mk := func(name string) (Value, Value) {
@@ -314,6 +321,9 @@ func (rt *Runtime) makeErrorCtor(name string, proto, parentCtor Value) Value {
 				rt.objPtr(errObj).defineOwn("cause", cause, attrWritable|attrConfigurable)
 			}
 		}
+		// The trace belongs to where the error was made, not to where .stack is
+		// first read — by then these frames have returned.
+		rt.objPtr(errObj).setSlot(slotErrorFrames, rt.captureCallSites(mkundef()))
 		return errObj, nil
 	})
 	co := rt.objPtr(ctor)
@@ -346,7 +356,7 @@ func (rt *Runtime) makeError(proto Value, name, msg string) Value {
 // Error.prototype.toString would render it) followed by a single synthetic
 // frame. The exact contents are unobservable to the conformance suite, which
 // only requires the result to be a String.
-func (rt *Runtime) errorStackString(err Value) string {
+func (rt *Runtime) errorHeadline(err Value) string {
 	name := "Error"
 	if nv, e := rt.getField(err, "name"); e == nil && !nv.IsUndefined() {
 		if sv, e2 := rt.toStringValue(nv); e2 == nil {
@@ -367,7 +377,14 @@ func (rt *Runtime) errorStackString(err Value) string {
 			head = name + ": " + msg
 		}
 	}
-	return head + "\n    at <anonymous>"
+	return head
+}
+
+// errorStackString synthesizes the value of `stack` for an error that never had
+// a trace captured — one built before the frames existed, or with
+// Error.stackTraceLimit set to 0.
+func (rt *Runtime) errorStackString(err Value) string {
+	return rt.errorHeadline(err)
 }
 
 // brandError marks objects with an [[ErrorData]] internal slot (error instances,

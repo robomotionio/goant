@@ -50,6 +50,8 @@ const (
 	slotRawJSON         // a JSON.rawJSON object's [[RawJSON]] text (a String)
 	slotImmutableBuffer // marks an ArrayBuffer's [[ArrayBufferIsImmutable]] slot
 	slotWeakRefTarget   // a WeakRef's [[WeakRefTarget]] (also its brand)
+	slotErrorFrames     // an error's captured call sites (an Array of CallSite)
+	slotCallSite        // one CallSite's fields (an Array; see builtin_error_stack.go)
 	slotMax             = 255
 )
 

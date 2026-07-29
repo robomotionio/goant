@@ -390,6 +390,7 @@ func (rt *Runtime) callValue(fnVal, thisVal Value, args []Value) (Value, *ThrowE
 		// them is what keeps a collection from running underneath one — the
 		// alternative being to root every intermediate in every built-in in
 		// the engine. See collect.go.
+		rt.claimNonJSFrame()
 		rt.nativeDepth++
 		// The arguments were popped off the caller's operand stack into this
 		// slice, so while the built-in runs they are rooted only here. A

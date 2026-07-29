@@ -60,10 +60,27 @@ func (rt *Runtime) enterRecursion() *ThrowError {
 		rt.frameDepth--
 		return rt.rangeError("Maximum call stack size exceeded")
 	}
+	rt.claimNonJSFrame()
 	return nil
 }
 
 func (rt *Runtime) exitRecursion() { rt.frameDepth-- }
+
+// claimNonJSFrame marks the depth just entered as belonging to something that is
+// not a compiled JS frame — a built-in, or one of the Go-stack recursions
+// enterRecursion guards.
+//
+// Those spend from frameDepth but never publish a vmFrame, so without this the
+// slot still holds whatever JS frame last ran at that depth. Nothing noticed
+// while the slice was only a GC root (a stale entry merely retains garbage a
+// little longer), but a stack trace walks the same slice and would report a
+// function that returned long ago. Clearing the one pointer that identifies the
+// frame is enough, and is cheaper than zeroing the struct on every builtin call.
+func (rt *Runtime) claimNonJSFrame() {
+	if rt.frameDepth < len(rt.frames) {
+		rt.frames[rt.frameDepth].fn = nil
+	}
+}
 
 // execute runs the top-level script function, returning its completion value.
 func (rt *Runtime) execute(fn *svFunc) (Value, error) {
