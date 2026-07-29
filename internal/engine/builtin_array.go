@@ -58,21 +58,25 @@ func (rt *Runtime) relativeIndexE(v Value, n int) (int, *ThrowError) {
 	if e != nil {
 		return 0, e
 	}
-	if math.IsInf(d, -1) {
-		return 0, nil
+	// The clamping happens in float64, before any conversion to int. Converting
+	// first is what a straight reading of the spec suggests, but Go leaves
+	// int(d) undefined when d does not fit, and on amd64 a huge positive like
+	// 1e100 lands on the minimum int — which then reads as a large NEGATIVE
+	// index. `[1,2,3,4,5,6,7].splice(1e100)` emptied the array instead of
+	// removing nothing. Every method taking a relative index shares this.
+	//
+	// ±Infinity is handled by the same comparisons; it is called out separately
+	// only because the spec does.
+	if d < 0 {
+		if d+float64(n) <= 0 { // includes -Infinity
+			return 0, nil
+		}
+		return int(d) + n, nil // |d| < n, so the conversion is in range
 	}
-	if math.IsInf(d, 1) {
+	if d >= float64(n) { // includes +Infinity
 		return n, nil
 	}
-	k := int(d)
-	if k < 0 {
-		if k += n; k < 0 {
-			k = 0
-		}
-	} else if k > n {
-		k = n
-	}
-	return k, nil
+	return int(d), nil // 0 < d < n
 }
 
 // sortCompare implements SortCompare: undefined sorts to the end; otherwise a
