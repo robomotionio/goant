@@ -1047,6 +1047,31 @@ func (c *compiler) compileClass(n *Node) {
 	privDepth := len(c.classPrivateEnvs)
 	defer func() { c.classPrivateEnvs = c.classPrivateEnvs[:privDepth] }()
 
+	// The *superctor* / *superproto* / *classctor* slots this definition is about
+	// to add belong to the class, not to the code around it — but addLocal puts
+	// them in the enclosing function, where they would go on shadowing after the
+	// definition ends. A method that used super and then merely mentioned a class
+	// expression started resolving super against THAT class's parent:
+	//
+	//	class B extends A {
+	//	  static m() { const C = class extends Object {}; return super.ext(); }
+	//	}
+	//
+	// resolved super to Object rather than A. In the heritage position it was
+	// worse — the slot was not filled yet, so super was undefined.
+	//
+	// The class's own methods capture these as upvalues while they compile, so
+	// hiding the slots afterwards costs nothing and restores the enclosing
+	// binding for everything that follows.
+	slotMark := len(c.locals)
+	defer func() {
+		for i := slotMark; i < len(c.locals); i++ {
+			if name := c.locals[i].name; name == "*superctor*" || name == "*superproto*" || name == "*classctor*" {
+				c.locals[i].dead = true
+			}
+		}
+	}()
+
 	// A named class has an inner, immutable binding of its own name scoped to the
 	// class body: methods close over it, and it is unaffected by reassignment of
 	// any outer binding of the same name (class.lexical-name).
@@ -1101,8 +1126,14 @@ func (c *compiler) compileClass(n *Node) {
 		// reuses a same-named binding in scope, so two sibling derived classes
 		// would share one slot and the later class's parent would clobber the
 		// earlier's — turning the earlier's super() into infinite self-recursion.
-		superSlot = c.addLocal("*superctor*", false)
+		// The heritage is compiled BEFORE this class's *superctor* exists. It is
+		// evaluated in the enclosing scope, so a super in it belongs to the code
+		// around the class — `class extends super.extend()` inside a static method
+		// means the method's super, not the one being established here. Declaring
+		// the slot first put an unassigned binding in the way and made that read
+		// undefined.
 		c.compileExpr(n.Left)
+		superSlot = c.addLocal("*superctor*", false)
 		c.emitOpU16(OpPutLocal, uint16(superSlot))
 		// The heritage must be null or a constructor, checked at class definition.
 		c.emitOpU16(OpGetLocal, uint16(superSlot))
