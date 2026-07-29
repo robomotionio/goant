@@ -920,6 +920,13 @@ func (p *jsonParser) parseObject() (Value, *jsonSrc, error) {
 // (a Proxy trap that throws surfaces); an ordinary rejected define/delete (a
 // non-configurable property) is a silent no-op, not a throw.
 func (rt *Runtime) jsonRevive(holder Value, key string, reviver Value, src *jsonSrc) (Value, *ThrowError) {
+	// The reviver runs before its own result is written back, so it can graft a
+	// value into the tree it is still walking and make the walk unbounded. The
+	// parsed JSON is finite; what the reviver builds from it need not be.
+	if e := rt.enterRecursion(); e != nil {
+		return mkundef(), e
+	}
+	defer rt.exitRecursion()
 	val, e := rt.getField(holder, key)
 	if e != nil {
 		return mkundef(), e

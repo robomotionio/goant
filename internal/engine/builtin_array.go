@@ -2182,6 +2182,12 @@ func (rt *Runtime) isArrayE(v Value) (bool, *ThrowError) {
 // large depth (flat(Infinity)) is passed as a saturating int (real arrays can't
 // nest 2^31 deep). depth <= 0 stops flattening.
 func (rt *Runtime) flattenIntoArray(target, source Value, sourceLen, start, depth int, mapper, thisArg Value) (int, *ThrowError) {
+	// An array reachable from itself makes the saturating depth pointless — every
+	// level renews it — so the recursion is bounded on the Go stack instead.
+	if e := rt.enterRecursion(); e != nil {
+		return 0, e
+	}
+	defer rt.exitRecursion()
 	targetIndex := start
 	for i := 0; i < sourceLen; i++ {
 		present, e := rt.hasElemE(source, i)

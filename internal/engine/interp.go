@@ -40,6 +40,31 @@ func (e *ThrowError) Error() string {
 // maxFrameDepth guards native recursion depth (ant maxFrames RangeError guard).
 const maxFrameDepth = 8192
 
+// enterRecursion accounts one level of recursion that runs on the Go stack
+// without pushing a JS call frame, and reports the RangeError to raise when the
+// budget is spent. Callers pair it with exitRecursion.
+//
+// Several engine operations recurse in Go over structure the script controls: a
+// proxy with no trap forwards to its target and may arrive back at itself, and
+// Array.prototype.flat and the JSON.parse reviver both walk a graph a script can
+// make cyclic. None of them push a frame, so none of them are bounded by the
+// guard in runFrame — and Go answers a blown stack with runtime.throw, which no
+// recover catches, so the process dies where V8 throws.
+//
+// The budget is the one JS calls use: what is bounded is depth on the Go stack,
+// and that does not care whether a level arrived as a call frame or as one of
+// these hops.
+func (rt *Runtime) enterRecursion() *ThrowError {
+	rt.frameDepth++
+	if rt.frameDepth > maxFrameDepth {
+		rt.frameDepth--
+		return rt.rangeError("Maximum call stack size exceeded")
+	}
+	return nil
+}
+
+func (rt *Runtime) exitRecursion() { rt.frameDepth-- }
+
 // execute runs the top-level script function, returning its completion value.
 func (rt *Runtime) execute(fn *svFunc) (Value, error) {
 	v, terr := rt.runFrame(fn, nil, mkundef(), rt.global, nil)

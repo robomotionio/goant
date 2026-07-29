@@ -43,6 +43,9 @@ type parser struct {
 	// funcDepth > 0 inside any function/arrow body, so a `return` outside every
 	// function (top-level script or eval code) is a SyntaxError.
 	funcDepth int
+	// nestDepth is the current recursive-descent depth, bounded by maxNestDepth
+	// so deeply nested source fails to parse instead of blowing the Go stack.
+	nestDepth int
 	// newTargetOK is true inside a non-arrow function/method body (where
 	// new.target is meaningful); an arrow inherits the enclosing value, so
 	// `new.target` at the top level or in a top-level arrow is a SyntaxError.
@@ -178,6 +181,48 @@ func (p *parser) errorf(format string, args ...any) {
 		p.err = &SyntaxError{Msg: fmt.Sprintf(format, args...), Offset: p.toff(), Filename: p.filename}
 	}
 }
+
+// maxNestDepth bounds how deeply the parser will descend. The parser is
+// recursive descent, so source nesting maps onto the Go stack, and source
+// nesting is attacker-controlled — but it is also just what generated code
+// looks like: a bundler emitting deeply nested closures, or a minifier chaining
+// conditionals, gets there without trying. Go answers a blown stack with
+// runtime.throw, which no recover catches, so an unguarded parser turns a large
+// input into a dead process.
+//
+// The limit is set from where the stack actually runs out, not from a guess:
+// unguarded, 200,000 nested parentheses parse and 400,000 abort the process, and
+// the same window holds for nested functions, classes and array literals. 50,000
+// sits an order of magnitude under that, which leaves room for the compiler to
+// walk the same tree afterwards on the same stack.
+//
+// Being generous here is the point. Deeply nested source is what generated code
+// looks like, and an earlier draft of this guard capped nesting at 1,500 — which
+// rejected 30,000-level input the parser had handled perfectly well before the
+// guard existed. A bound that turns working programs into SyntaxErrors trades
+// one failure for another.
+const maxNestDepth = 50000
+
+// enterNest reports whether there is depth budget left, recording the error if
+// not. The parser keeps parsing after its first error (it reports only the
+// first), so callers must return immediately rather than descend further.
+//
+// The refusal happens before the increment, so the counter is only ever raised
+// by a level that will be lowered again: a caller that is turned away does not
+// call exitNest, and a rejection must not leak depth that never comes back.
+func (p *parser) enterNest() bool {
+	if p.nestDepth >= maxNestDepth {
+		// Not a SyntaxError in spirit — V8 reports a RangeError here — but the
+		// parser's one error channel is the SyntaxError it already carries, and a
+		// caller that cannot parse the source cannot act on the distinction.
+		p.errorf("Maximum call stack size exceeded")
+		return false
+	}
+	p.nestDepth++
+	return true
+}
+
+func (p *parser) exitNest() { p.nestDepth-- }
 
 func (p *parser) unexpected() {
 	if p.toff() < len(p.code()) && p.tlen() > 0 {
@@ -2164,7 +2209,17 @@ func (p *parser) parseYieldExpr() *Node {
 	return n
 }
 
+// parseAssign is a depth-accounting wrapper; see parseStmt for why it is split.
 func (p *parser) parseAssign() *Node {
+	if !p.enterNest() {
+		return p.mk(NEmpty)
+	}
+	n := p.parseAssignBody()
+	p.exitNest()
+	return n
+}
+
+func (p *parser) parseAssignBody() *Node {
 	if p.inGenerator && p.next() == TokYield {
 		return p.parseYieldExpr()
 	}
@@ -3202,7 +3257,20 @@ func (p *parser) parseSubStmt() *Node {
 	return p.parseStmt()
 }
 
+// parseStmt is a depth-accounting wrapper; parseStmtBody is the parser. The two
+// are split rather than sharing a body with `defer p.exitNest()` because these
+// are the hottest functions in the parser, and a deferred call in either cost
+// 4% of parse throughput on a 5MB script.
 func (p *parser) parseStmt() *Node {
+	if !p.enterNest() {
+		return p.mk(NEmpty)
+	}
+	n := p.parseStmtBody()
+	p.exitNest()
+	return n
+}
+
+func (p *parser) parseStmtBody() *Node {
 	singleStmt := p.singleStmt
 	p.singleStmt = false
 	p.next()
