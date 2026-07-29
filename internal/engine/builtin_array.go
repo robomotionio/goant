@@ -680,6 +680,16 @@ func (rt *Runtime) initArrayBuiltin() {
 	})
 
 	rt.defMethod(proto, "join", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// An array reachable from itself joins forever: each element's ToString
+		// re-enters join. Every engine keeps a set of the arrays currently being
+		// joined and renders a repeat as the empty string, so `a=[1]; a.push(a);
+		// a.join()` is "1," rather than a stack overflow. The spec leaves this to
+		// implementations, and agreeing with them is the whole point.
+		if done, e := rt.enterJoin(this); done {
+			return rt.newString(""), e
+		}
+		defer rt.exitJoin(this)
+
 		// len is captured (step 2) BEFORE the separator's ToString (step 3): a
 		// separator whose coercion resizes the array does not change the count.
 		n, e := rt.lengthOf(this)
@@ -1580,6 +1590,13 @@ func (rt *Runtime) initArrayBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		// Shares join's set: an element's toLocaleString can return an array that
+		// contains the one being formatted, so the cycle crosses between the two
+		// methods and one set has to cover both.
+		if done, e := rt.enterJoin(o); done {
+			return rt.newString(""), e
+		}
+		defer rt.exitJoin(o)
 		n, e := rt.lengthOf(o)
 		if e != nil {
 			return mkundef(), e
@@ -2248,4 +2265,33 @@ func relIndex(rt *Runtime, v Value, length, dflt int) int {
 		i = length
 	}
 	return i
+}
+
+// enterJoin marks an array as being joined and reports whether it already was.
+// A repeat renders as the empty string, which is how every engine terminates a
+// cyclic Array.prototype.join / toLocaleString instead of recursing forever.
+//
+// The set is keyed by object identity and entries are removed on the way out, so
+// it holds only arrays with a live join on the Go stack — each of which is
+// reachable from that frame anyway, and so is not something the collector could
+// have freed.
+func (rt *Runtime) enterJoin(v Value) (bool, *ThrowError) {
+	o := rt.objPtr(v)
+	if o == nil {
+		return false, nil
+	}
+	if rt.joining[o] {
+		return true, nil
+	}
+	if rt.joining == nil {
+		rt.joining = map[*object]bool{}
+	}
+	rt.joining[o] = true
+	return false, nil
+}
+
+func (rt *Runtime) exitJoin(v Value) {
+	if o := rt.objPtr(v); o != nil {
+		delete(rt.joining, o)
+	}
 }

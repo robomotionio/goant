@@ -60,6 +60,10 @@ type Runtime struct {
 	// access and returned identically thereafter (one Module per runner process).
 	importMeta Value
 
+	// joining is the set of arrays with an Array.prototype.join or
+	// toLocaleString in progress, for cycle detection. See enterJoin.
+	joining map[*object]bool
+
 	// callSiteProto is the prototype shared by the CallSite objects
 	// Error.prepareStackTrace receives. See builtin_error_stack.go.
 	callSiteProto Value
