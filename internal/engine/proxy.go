@@ -45,6 +45,36 @@ func (rt *Runtime) toPropertyKeyValue(key Value) Value {
 	return rt.internString(s)
 }
 
+// enterProxy accounts one level of proxy-mediated recursion, and reports the
+// RangeError to raise when there is no budget left.
+//
+// A proxy internal method that finds no trap forwards to its target, and the
+// ordinary forwarding path walks a prototype chain, which can arrive back at a
+// proxy. Every loop that walks a chain already stops at maxProtoChainDepth, but
+// that bound is per-walk: each hop through a proxy starts a fresh walk, so a
+// cycle recurses on the Go stack without any single loop noticing.
+//
+// A cycle is reachable from ordinary code, not just from a hostile handler —
+// OrdinarySetPrototypeOf stops its cycle check at the first proxy, so
+// `Object.setPrototypeOf(p, Object.create(p))` is allowed to build one, and the
+// next read of a missing property recurses forever. Go answers a blown stack
+// with runtime.throw, which no recover can catch, so the process dies where
+// V8 merely throws.
+//
+// The budget is the one JS calls use: what is being bounded is depth on the Go
+// stack, and it makes no difference to that whether a level came from a call
+// frame or from a forwarding hop. Callers pair this with exitProxy.
+func (rt *Runtime) enterProxy() *ThrowError {
+	rt.frameDepth++
+	if rt.frameDepth > maxFrameDepth {
+		rt.frameDepth--
+		return rt.rangeError("Maximum call stack size exceeded")
+	}
+	return nil
+}
+
+func (rt *Runtime) exitProxy() { rt.frameDepth-- }
+
 // trap returns handler[name], or an error if the proxy is revoked.
 func (p *proxyState) trap(rt *Runtime, name string) (Value, *ThrowError) {
 	if p.revoked {
@@ -108,6 +138,10 @@ func (rt *Runtime) targetExtensible(v Value) bool {
 }
 
 func (rt *Runtime) proxyGet(p *proxyState, key, receiver Value) (Value, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return mkundef(), e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "get")
 	if e != nil {
 		return mkundef(), e
@@ -137,6 +171,10 @@ func (rt *Runtime) proxyGet(p *proxyState, key, receiver Value) (Value, *ThrowEr
 }
 
 func (rt *Runtime) proxySet(p *proxyState, key, val, receiver Value) (bool, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return false, e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "set")
 	if e != nil {
 		return false, e
@@ -308,6 +346,10 @@ func (rt *Runtime) setOnReceiver(receiver, key, val Value) (bool, *ThrowError) {
 }
 
 func (rt *Runtime) proxyHas(p *proxyState, key Value) (bool, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return false, e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "has")
 	if e != nil {
 		return false, e
@@ -340,6 +382,10 @@ func (rt *Runtime) proxyHas(p *proxyState, key Value) (bool, *ThrowError) {
 }
 
 func (rt *Runtime) proxyDelete(p *proxyState, key Value) (bool, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return false, e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "deleteProperty")
 	if e != nil {
 		return false, e
@@ -369,6 +415,10 @@ func (rt *Runtime) proxyDelete(p *proxyState, key Value) (bool, *ThrowError) {
 
 // proxyOwnKeys returns the proxy's own string keys (for for-in / ownPropertyNames).
 func (rt *Runtime) proxyOwnKeys(p *proxyState) ([]Value, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return nil, e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "ownKeys")
 	if e != nil {
 		return nil, e
@@ -476,6 +526,10 @@ func (rt *Runtime) targetOwnKeyList(target Value) []Value {
 }
 
 func (rt *Runtime) proxyGetPrototypeOf(p *proxyState) (Value, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return mkundef(), e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "getPrototypeOf")
 	if e != nil {
 		return mkundef(), e
@@ -509,6 +563,10 @@ func (rt *Runtime) proxyGetPrototypeOf(p *proxyState) (Value, *ThrowError) {
 }
 
 func (rt *Runtime) proxyGetOwnPropertyDescriptor(p *proxyState, key Value) (Value, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return mkundef(), e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "getOwnPropertyDescriptor")
 	if e != nil {
 		return mkundef(), e
@@ -636,6 +694,10 @@ func (rt *Runtime) descIsCompatible(descVal Value, cur ownDesc) bool {
 }
 
 func (rt *Runtime) proxyDefineProperty(p *proxyState, key, desc Value) *ThrowError {
+	if e := rt.enterProxy(); e != nil {
+		return e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "defineProperty")
 	if e != nil {
 		return e
@@ -730,6 +792,10 @@ func (rt *Runtime) getPrototypeOfValue(v Value) (Value, *ThrowError) {
 }
 
 func (rt *Runtime) proxySetPrototypeOf(p *proxyState, proto Value) (bool, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return false, e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "setPrototypeOf")
 	if e != nil {
 		return false, e
@@ -766,6 +832,10 @@ func (rt *Runtime) proxySetPrototypeOf(p *proxyState, proto Value) (bool, *Throw
 }
 
 func (rt *Runtime) proxyIsExtensible(p *proxyState) (bool, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return false, e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "isExtensible")
 	if e != nil {
 		return false, e
@@ -793,6 +863,10 @@ func (rt *Runtime) proxyIsExtensible(p *proxyState) (bool, *ThrowError) {
 // the boolean result (the trap's ToBoolean-ed return, or true when no trap) so
 // callers can enforce "throw if false" (Object.*) or return it (Reflect.*).
 func (rt *Runtime) proxyPreventExtensions(p *proxyState) (bool, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return false, e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "preventExtensions")
 	if e != nil {
 		return false, e
@@ -823,6 +897,10 @@ func (rt *Runtime) proxyPreventExtensions(p *proxyState) (bool, *ThrowError) {
 }
 
 func (rt *Runtime) proxyApply(p *proxyState, thisArg Value, args []Value) (Value, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return mkundef(), e
+	}
+	defer rt.exitProxy()
 	trap, e := p.trap(rt, "apply")
 	if e != nil {
 		return mkundef(), e
@@ -839,6 +917,10 @@ func (rt *Runtime) proxyApply(p *proxyState, thisArg Value, args []Value) (Value
 }
 
 func (rt *Runtime) proxyConstruct(p *proxyState, args []Value, newTarget Value) (Value, *ThrowError) {
+	if e := rt.enterProxy(); e != nil {
+		return mkundef(), e
+	}
+	defer rt.exitProxy()
 	// A proxy has a [[Construct]] method only if its target is a constructor.
 	if !rt.isCallable(p.target) {
 		return mkundef(), rt.typeError("proxy target is not a constructor")
