@@ -284,9 +284,17 @@ func (rt *Runtime) iterableValues(v Value) ([]Value, *ThrowError) {
 		for i := uint32(0); i < o.arrLen; i++ {
 			if int(i) < len(o.arr) && !o.arr[i].IsEmpty() {
 				out = append(out, o.arrAt(i))
-			} else {
-				out = append(out, mkundef())
+				continue
 			}
+			// A hole is not undefined. %ArrayIteratorPrototype%.next does an
+			// ordinary Get, so the index is looked up along the prototype chain and
+			// an inherited value — or accessor — answers for it. Only the hole takes
+			// this path, so a dense array still costs nothing.
+			el, e := rt.getElement(v, mknum(float64(i)))
+			if e != nil {
+				return nil, e
+			}
+			out = append(out, el)
 		}
 		return out, nil
 	case TTypedArray:
