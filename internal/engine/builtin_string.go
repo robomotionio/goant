@@ -123,6 +123,12 @@ func (rt *Runtime) thisStringBytes(this Value) ([]byte, *ThrowError) {
 	return rt.strBytes(s), nil
 }
 
+// maxStringLength is the greatest length a String value may have. There is no
+// spec limit — 2^53-1 is the notional maximum — so this matches V8's, which is
+// what the error message and the boundary are observable against: "a".repeat of
+// that many is fine and one more is a RangeError.
+const maxStringLength = 1<<29 - 24
+
 func (rt *Runtime) initStringBuiltin() {
 	proto := rt.objPtr(rt.stringProto)
 	// String.prototype is itself a String wrapper whose [[StringData]] is "" (so
@@ -447,6 +453,22 @@ func (rt *Runtime) initStringBuiltin() {
 		if nf < 0 || math.IsInf(nf, 1) {
 			return mkundef(), rt.rangeError("Invalid count value")
 		}
+		// int(nf) is undefined in Go when nf does not fit, and on amd64 1e100
+		// lands on the minimum int — which reached strings.Repeat as a negative
+		// count and panicked the process. Decide the size in float64, where the
+		// comparison is meaningful, and only convert once it is known to fit.
+		//
+		// Repeating the empty string is exempt: the result is empty however large
+		// the count, and V8 allows it — but it must return before the conversion,
+		// not merely skip the length check, or the same overflow reaches
+		// strings.Repeat.
+		cur := utf16Len(b)
+		if cur == 0 {
+			return rt.newString(""), nil
+		}
+		if nf > float64(maxStringLength/cur) {
+			return mkundef(), rt.rangeError("Invalid string length")
+		}
 		return rt.newStringBytes([]byte(strings.Repeat(string(b), int(nf)))), nil
 	})
 	rt.defMethod(proto, "split", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -552,10 +574,15 @@ func (rt *Runtime) initStringBuiltin() {
 			if e != nil {
 				return mkundef(), e
 			}
+			// Clamping to 0x7FFFFFFF and building the result anyway meant
+			// "a".padStart(1e100) sat there trying to assemble a two-gigabyte
+			// string. A length no String value can have is a RangeError, not a
+			// long wait.
+			if mlF > float64(maxStringLength) {
+				return mkundef(), rt.rangeError("Invalid string length")
+			}
 			targetLen := 0
-			if mlF > 0x7FFFFFFF {
-				targetLen = 0x7FFFFFFF
-			} else if mlF > 0 {
+			if mlF > 0 {
 				targetLen = int(mlF)
 			}
 			cur := utf16Len(b)
