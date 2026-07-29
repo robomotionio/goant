@@ -1097,11 +1097,11 @@ func (rt *Runtime) initStringRegexpMethods() {
 		// GetMethod(searchValue, @@replace) for an Object searchValue; delegate with
 		// the raw receiver O (ToString happens inside @@replace).
 		if pat := arg(args, 0); pat.IsObjectType() {
-			m, e := rt.getElement(pat, rt.symReplace)
+			m, e := rt.getMethodSym(pat, rt.symReplace)
 			if e != nil {
 				return mkundef(), e
 			}
-			if rt.isCallable(m) {
+			if !m.IsUndefined() {
 				return rt.callValue(m, pat, []Value{this, arg(args, 1)})
 			}
 		}
@@ -1136,11 +1136,11 @@ func (rt *Runtime) initStringRegexpMethods() {
 					return mkundef(), rt.typeError("String.prototype.matchAll called with a non-global RegExp argument")
 				}
 			}
-			matcher, e := rt.getElement(regexp, rt.symMatchAll)
+			matcher, e := rt.getMethodSym(regexp, rt.symMatchAll)
 			if e != nil {
 				return mkundef(), e
 			}
-			if rt.isCallable(matcher) {
+			if !matcher.IsUndefined() {
 				sv, e := rt.toStringValue(this)
 				if e != nil {
 					return mkundef(), e
@@ -1300,11 +1300,11 @@ func (rt *Runtime) initStringRegexpMethods() {
 		// raw receiver O (NOT ToString(this) — ToString happens inside @@split).
 		sep := arg(args, 0)
 		if sep.IsObjectType() {
-			m, e := rt.getElement(sep, rt.symSplit)
+			m, e := rt.getMethodSym(sep, rt.symSplit)
 			if e != nil {
 				return mkundef(), e
 			}
-			if rt.isCallable(m) {
+			if !m.IsUndefined() {
 				return rt.callValue(m, sep, []Value{this, arg(args, 1)})
 			}
 		}
@@ -1335,15 +1335,48 @@ func (rt *Runtime) delegateSymbolMethod(sym, pattern, str Value) (Value, bool, *
 	if sym == 0 || !pattern.IsObjectType() {
 		return mkundef(), false, nil
 	}
-	m, e := rt.getElement(pattern, sym)
+	m, e := rt.getMethodSym(pattern, sym)
 	if e != nil {
 		return mkundef(), true, e
 	}
-	if !rt.isCallable(m) {
+	if m.IsUndefined() {
 		return mkundef(), false, nil
 	}
 	r, e := rt.callValue(m, pattern, []Value{str})
 	return r, true, e
+}
+
+// getMethodSym is GetMethod(V, P) for a well-known symbol: the property is read
+// through [[Get]] (so a Proxy trap observes it), a nullish result means "absent"
+// and reports undefined, and anything else that is not callable is a TypeError.
+//
+// That last step is the one worth having a helper for. Every caller here used to
+// treat a present-but-not-callable @@match / @@replace / @@split / @@search /
+// @@matchAll as absent and quietly fall back to the default behaviour, so
+// `p[Symbol.match] = "dumdidum"; "abc".match(p)` returned a match instead of
+// throwing.
+func (rt *Runtime) getMethodSym(v, sym Value) (Value, *ThrowError) {
+	m, e := rt.getElement(v, sym)
+	if e != nil {
+		return mkundef(), e
+	}
+	if m.IsNullish() {
+		return mkundef(), nil
+	}
+	if !rt.isCallable(m) {
+		return mkundef(), rt.typeError(rt.symbolDescription(sym) + " is not a function")
+	}
+	return m, nil
+}
+
+// symbolDescription renders a well-known symbol the way an error message names
+// it, e.g. "Symbol(Symbol.match)".
+func (rt *Runtime) symbolDescription(sym Value) string {
+	d, e := rt.getElement(sym, rt.internString("description"))
+	if e != nil || !d.IsString() {
+		return "method"
+	}
+	return "Symbol(" + rt.strGo(d) + ")"
 }
 
 // coerceRegExp turns a value into a compiled regex (compiling a string pattern).
