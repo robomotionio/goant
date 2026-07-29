@@ -1,6 +1,7 @@
 /goant
 /goant-conf
 /goant-t262
+/goant-mjsunit
 *.test
 *.out
 /out.txt
