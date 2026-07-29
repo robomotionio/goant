@@ -77,25 +77,31 @@ func main() {
 		*jobs = min(16, max(1, runtime.NumCPU()))
 	}
 
-	results := runAll(*runner, *root, tests, string(harness), *timeout, *jobs)
+	status, err := loadStatus(filepath.Join(*root, "mjsunit.status"))
+	if err != nil {
+		fatal(fmt.Errorf("mjsunit.status: %w", err))
+	}
+
+	results := runAll(*runner, *root, tests, string(harness), status, *timeout, *jobs)
 	report(results, *verbose, *showSkip, *failFile)
 }
 
 // ---- discovery ----
 
-// discover walks testDir for *.js files. mjsunit.js is the harness, and the
-// mjsunit-*.js siblings next to it are helper libraries that tests pull in by
-// name; neither is a test.
+// discover walks testDir for tests. A .mjs file is a module test — that is how
+// V8 distinguishes the module goal (testcfg.py falls back from path_js to
+// path_mjs), not by any header. mjsunit.js and mjsunit_numfuzz.js are the
+// harness itself, which testcfg.py excludes by name.
 func discover(testDir, only string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(testDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".js") {
+		if d.IsDir() || (!strings.HasSuffix(path, ".js") && !strings.HasSuffix(path, ".mjs")) {
 			return nil
 		}
-		if base := filepath.Base(path); base == "mjsunit.js" || strings.HasPrefix(base, "mjsunit-") {
+		if base := filepath.Base(path); base == "mjsunit.js" || base == "mjsunit_numfuzz.js" {
 			return nil
 		}
 		if only != "" && !strings.Contains(path, only) {
@@ -106,6 +112,85 @@ func discover(testDir, only string) ([]string, error) {
 	})
 	sort.Strings(out)
 	return out, err
+}
+
+// ---- mjsunit.status ----
+//
+// V8 ships its own expectations file, and it already answers two questions this
+// runner would otherwise have to guess at: which files are import fixtures
+// rather than tests, and which tests need a WebAssembly implementation. Reading
+// it beats hand-maintaining either list.
+//
+// The format is a Python literal: a list of [condition, {glob: [outcome]}]
+// sections. Only the sections whose condition is a statement about the host
+// rather than about V8's internals are honored — ALWAYS, and the WebAssembly
+// ones, which describe goant exactly.
+
+// statusEntryRE matches one `'glob': [OUTCOME, ...],` line of a status section.
+var statusEntryRE = regexp.MustCompile(`^\s*'([^']+)'\s*:\s*\[([A-Z_, ]+)\]`)
+
+// statusSectionRE matches the `['condition', {` line that opens a section.
+var statusSectionRE = regexp.MustCompile(`^\[(ALWAYS|'[^']*')\s*,\s*\{`)
+
+// honoredConditions are the status conditions that hold for goant: it has no
+// WebAssembly at all, so every section predicated on its absence applies.
+var honoredConditions = map[string]bool{
+	"ALWAYS": true,
+	"'not has_webassembly or (variant == jitless and not has_wasm_interpreter)'": true,
+	"'not has_webassembly'":                            true,
+	"'not has_wasm_interpreter or variant != jitless'": true,
+	"'not has_wasm_interpreter'":                       true,
+}
+
+// loadStatus returns the globs V8 itself declares unrunnable, mapped to the
+// reason. A [FAIL] entry (the bugs/ directory) is a test V8 knows fails, so
+// scoring goant against it would be measuring the wrong thing.
+func loadStatus(path string) (map[string]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	honored := false
+	for line := range strings.SplitSeq(string(b), "\n") {
+		if m := statusSectionRE.FindStringSubmatch(line); m != nil {
+			honored = honoredConditions[m[1]]
+			continue
+		}
+		if !honored {
+			continue
+		}
+		m := statusEntryRE.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		switch outcomes := m[2]; {
+		case strings.Contains(outcomes, "SKIP"):
+			out[m[1]] = "v8-status:SKIP"
+		case outcomes == "FAIL":
+			out[m[1]] = "v8-status:FAIL"
+		}
+	}
+	return out, nil
+}
+
+// statusSkip reports the status-file reason a test is unrunnable, or "". Globs
+// are matched against the test name without its extension, which is how the
+// status file spells them.
+func statusSkip(status map[string]string, rel string) string {
+	name := strings.TrimSuffix(strings.TrimSuffix(rel, ".mjs"), ".js")
+	name = filepath.ToSlash(name)
+	for glob, reason := range status {
+		if ok, _ := filepath.Match(glob, name); ok {
+			return reason
+		}
+		// A trailing /* in the status file covers a whole tree, but filepath.Match
+		// will not let * cross a separator.
+		if rest, found := strings.CutSuffix(glob, "/*"); found && strings.HasPrefix(name, rest+"/") {
+			return reason
+		}
+	}
+	return ""
 }
 
 // ---- skip rules ----
@@ -124,22 +209,29 @@ var hostOnlyRE = regexp.MustCompile(`\bWebAssembly\b|\bnew Worker\b|\bRealm\.|\b
 	`d8\.(serializer|wasm|dom|test|profiler|debugger)\b|\basync_hooks\b`)
 
 // skipDirs are the trees that test the shell or the engine's internals rather
-// than the JavaScript language.
-var skipDirs = []string{"wasm", "sandbox", "d8", "shared-memory", "tools", "async-hooks"}
+// than the JavaScript language. A match on any path component counts: the wasm
+// tests live in regress/wasm/ and shared-memory/wasm/ as well as wasm/.
+var skipDirs = map[string]bool{
+	"wasm": true, "sandbox": true, "d8": true, "shared-memory": true,
+	"tools": true, "async-hooks": true,
+}
 
-// skipReason reports why a test cannot be scored, or "" if it can be.
+// skipReason reports why a test cannot be scored, or "" if it can be. src must
+// be the fully assembled source rather than the test file alone: a test that
+// says nothing about WebAssembly still cannot run once d8.file.execute has
+// pulled wasm-module-builder.js in front of it, and the same goes for a preload
+// carrying %Natives syntax.
 func skipReason(rel, src string) string {
-	top, _, _ := strings.Cut(rel, string(filepath.Separator))
-	for _, d := range skipDirs {
-		if top == d {
-			return "host-only dir:" + d
+	for part := range strings.SplitSeq(filepath.ToSlash(filepath.Dir(rel)), "/") {
+		if skipDirs[part] {
+			return "host-only dir:" + part
 		}
 	}
 	if nativesRE.MatchString(src) {
 		return "natives-syntax"
 	}
 	if m := hostOnlyRE.FindString(src); m != "" {
-		return "host-only:" + strings.TrimSuffix(strings.TrimPrefix(m, "\\b"), "\\b")
+		return "host-only:" + m
 	}
 	return ""
 }
@@ -147,18 +239,16 @@ func skipReason(rel, src string) string {
 // ---- assembly ----
 
 // filesRE captures a `// Files: a.js b.js` header. mjsunit's own runner loads
-// each named file before the test.
-var filesRE = regexp.MustCompile(`(?m)^// Files:\s*(.*)$`)
+// each named file before the test, and accepts the header on several lines.
+var filesRE = regexp.MustCompile(`//\s+Files:(.*)`)
+
+// noHarnessRE marks a test that must run without mjsunit.js in front of it.
+var noHarnessRE = regexp.MustCompile(`(?m)^// NO HARNESS$`)
 
 // executeRE captures d8.file.execute('…'), which is d8's `load`. goant has no
 // host file loader, so the runner inlines the named source instead and leaves
 // the call itself to the no-op stub in the shim.
 var executeRE = regexp.MustCompile(`d8\.file\.execute\(\s*['"]([^'"]+)['"]\s*\)`)
-
-// moduleRE detects a test that must run in the module goal. mjsunit marks these
-// with a `// MODULE` header; a bare top-level import/export would otherwise be a
-// SyntaxError in the script goal.
-var moduleRE = regexp.MustCompile(`(?m)^// MODULE\s*$`)
 
 // preloads returns the sources a test pulls in before its own body, in order:
 // the `// Files:` header first, then every d8.file.execute target. Paths in
@@ -168,7 +258,7 @@ var moduleRE = regexp.MustCompile(`(?m)^// MODULE\s*$`)
 // diagnostic than a harness error.
 func preloads(mjsRoot, src string) []string {
 	var names []string
-	if m := filesRE.FindStringSubmatch(src); m != nil {
+	for _, m := range filesRE.FindAllStringSubmatch(src, -1) {
 		names = append(names, strings.Fields(m[1])...)
 	}
 	for _, m := range executeRE.FindAllStringSubmatch(src, -1) {
@@ -214,8 +304,13 @@ func assemble(harness, src string, pre []string) string {
 	var b strings.Builder
 	b.WriteString(shimJS)
 	b.WriteByte('\n')
-	b.WriteString(harness)
-	b.WriteByte('\n')
+	// `// NO HARNESS` means the test provides its own assertions and must not see
+	// mjsunit.js — usually because it is checking something mjsunit.js itself
+	// would perturb.
+	if !noHarnessRE.MatchString(src) {
+		b.WriteString(harness)
+		b.WriteByte('\n')
+	}
 	for _, p := range pre {
 		b.WriteString(p)
 		b.WriteByte('\n')
@@ -246,7 +341,7 @@ type execResult struct {
 	timedOut       bool
 }
 
-func runAll(runner, mjsRoot string, tests []string, harness string, timeout time.Duration, jobs int) []result {
+func runAll(runner, mjsRoot string, tests []string, harness string, status map[string]string, timeout time.Duration, jobs int) []result {
 	results := make([]result, len(tests))
 	scratchDir, err := os.MkdirTemp("", "goant-mjsunit-")
 	if err != nil {
@@ -262,7 +357,7 @@ func runAll(runner, mjsRoot string, tests []string, harness string, timeout time
 			defer wg.Done()
 			scratch := filepath.Join(scratchDir, fmt.Sprintf("w%d.js", w))
 			for i := range work {
-				results[i] = runOne(runner, mjsRoot, tests[i], harness, scratch, timeout)
+				results[i] = runOne(runner, mjsRoot, tests[i], harness, scratch, status, timeout)
 			}
 		}(w)
 	}
@@ -274,23 +369,33 @@ func runAll(runner, mjsRoot string, tests []string, harness string, timeout time
 	return results
 }
 
-func runOne(runner, mjsRoot, path, harness, scratch string, timeout time.Duration) result {
+func runOne(runner, mjsRoot, path, harness, scratch string, status map[string]string, timeout time.Duration) result {
 	rel, _ := filepath.Rel(mjsRoot, path)
+	if r := statusSkip(status, rel); r != "" {
+		return result{rel, outSkip, r}
+	}
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return result{rel, outFail, "read: " + err.Error()}
 	}
-	if r := skipReason(rel, string(src)); r != "" {
+	pre := preloads(mjsRoot, string(src))
+	// The skip decision covers the test and everything it pulls in, so a preload
+	// that drags in WebAssembly or %Natives disqualifies the test that named it.
+	// mjsunit.js is deliberately not scanned: it is present for every test and
+	// mentions %GetOptimizationStatus inside a string literal, which would
+	// otherwise disqualify the whole suite.
+	if r := skipReason(rel, string(src)+"\n"+strings.Join(pre, "\n")); r != "" {
 		return result{rel, outSkip, r}
 	}
+	full := assemble(harness, string(src), pre)
 
-	// A module test is handed to the runner as-is: its own import specifiers must
+	// A .mjs test is handed to the runner as-is: its own import specifiers must
 	// resolve against the real test directory, and the harness rides along as a
 	// prelude script rather than being concatenated in front of it.
-	if moduleRE.MatchString(string(src)) {
-		pre := shimJS + "\n" + harness + "\n" + strings.Join(preloads(mjsRoot, string(src)), "\n")
+	if strings.HasSuffix(path, ".mjs") {
 		preFile := scratch + ".prelude.js"
-		if err := os.WriteFile(preFile, []byte(pre), 0o644); err != nil {
+		body := shimJS + "\n" + harness + "\n" + strings.Join(pre, "\n")
+		if err := os.WriteFile(preFile, []byte(body), 0o644); err != nil {
 			return result{rel, outFail, "write: " + err.Error()}
 		}
 		ex := execRunner(runner, []string{"-module", "-prelude", preFile, path}, timeout)
@@ -300,7 +405,6 @@ func runOne(runner, mjsRoot, path, harness, scratch string, timeout time.Duratio
 		return result{rel, outPass, ""}
 	}
 
-	full := assemble(harness, string(src), preloads(mjsRoot, string(src)))
 	if err := os.WriteFile(scratch, []byte(full), 0o644); err != nil {
 		return result{rel, outFail, "write: " + err.Error()}
 	}
