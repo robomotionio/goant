@@ -356,6 +356,10 @@ type flatString struct {
 	gostr   string // lazily cached Go view of bytes; see (*Runtime).strGo
 	utf16   []rune // lazily cached UTF-16 code units; see (*Runtime).strUTF16
 	isASCII int8   // STR_ASCII_UNKNOWN/YES/NO
+	// extendable marks this string as the sole owner of the unused capacity in
+	// its backing array, so a concatenation may append into it instead of
+	// copying. See (*Runtime).concatStrings.
+	extendable bool
 }
 
 type symbol struct {

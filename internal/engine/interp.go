@@ -2625,7 +2625,7 @@ func (rt *Runtime) jsAdd(a, b Value) (Value, *ThrowError) {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newStringBytes(concatWTF8(rt.strBytes(sa), rt.strBytes(sb))), nil
+		return rt.concatStrings(sa, sb), nil
 	}
 	if pa.Type() == TBigInt || pb.Type() == TBigInt {
 		if pa.Type() != TBigInt || pb.Type() != TBigInt {

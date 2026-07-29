@@ -507,3 +507,94 @@ func utf16ToWTF8(units []uint16) []byte {
 	}
 	return out
 }
+
+// concatGrowThreshold is the result size at which a concatenation starts
+// over-allocating and claiming the spare capacity. Below it the result is built
+// exactly, because a short concatenation is almost always a one-off.
+const concatGrowThreshold = 64
+
+// concatStrings implements the string case of `+`.
+//
+// The obvious implementation — allocate len(a)+len(b) and copy both — makes the
+// commonest string idiom in JavaScript quadratic:
+//
+//	let s = ""; for (…) s += chunk;
+//
+// Every iteration copies everything accumulated so far, so building an n-byte
+// string costs O(n^2). goant took 854ms for 80k single-character appends and
+// died at 110k having allocated 2.7GB; node does the same loop in 5ms because
+// V8 builds a cons string and flattens lazily.
+//
+// Ropes would mean a second string representation and a flatten check in every
+// consumer of string bytes. This gets the same asymptotics without one: a
+// concatenation over-allocates, and the string it produces owns the leftover
+// capacity. The next concatenation whose LEFT side is that owner appends in
+// place and hands ownership on.
+//
+// Immutability survives because appending only ever writes ABOVE the owner's
+// length. Every existing string keeps its own shorter slice of the same array,
+// and the bytes below its length never change. Ownership is what makes it safe
+// to write there at all: it passes to the result and is cleared on the source,
+// so two different strings can never both extend from the same offset. A stale
+// reference simply takes the copying path.
+func (rt *Runtime) concatStrings(sa, sb Value) Value {
+	fa, fb := rt.flatOf(sa), rt.flatOf(sb)
+	if fa == nil || fb == nil {
+		return rt.newStringBytes(concatWTF8(rt.strBytes(sa), rt.strBytes(sb)))
+	}
+	a, b := fa.bytes, fb.bytes
+	if len(a) == 0 {
+		return sb
+	}
+	if len(b) == 0 {
+		return sa
+	}
+	// A high surrogate meeting a low surrogate has to be re-encoded as one code
+	// point, which rewrites the tail of `a` rather than appending after it. Rare,
+	// and the generic path already handles it.
+	if joinsSurrogatePair(a, b) {
+		return rt.newStringBytes(concatWTF8(a, b))
+	}
+
+	if fa.extendable && cap(a)-len(a) >= len(b) {
+		fa.extendable = false
+		// Same backing array: within capacity, append cannot reallocate.
+		return rt.newExtendableString(append(a, b...))
+	}
+
+	n := len(a) + len(b)
+	// Below the threshold, allocate exactly and do not claim ownership. Most
+	// concatenations are one-offs — a message, a key, a path — and doubling for
+	// those is pure waste: it cost 4% on the string microbenchmark for no gain,
+	// because nothing ever appends to the result.
+	//
+	// An accumulator passes the threshold within its first few iterations and
+	// from then on doubles, which is what makes the loop amortised linear. The
+	// copying done below the threshold is bounded by the threshold itself.
+	if n < concatGrowThreshold {
+		return rt.newStringBytes(concatWTF8(a, b))
+	}
+	buf := make([]byte, 0, 2*n)
+	buf = append(append(buf, a...), b...)
+	return rt.newExtendableString(buf)
+}
+
+// joinsSurrogatePair reports whether a's last code unit and b's first form a
+// surrogate pair, which concatWTF8 must merge into a single code point.
+func joinsSurrogatePair(a, b []byte) bool {
+	if len(a) < 3 || len(b) < 3 {
+		return false
+	}
+	ha, lo3 := a[len(a)-3:], b[:3]
+	return ha[0] == 0xED && ha[1] >= 0xA0 && ha[1] <= 0xAF &&
+		lo3[0] == 0xED && lo3[1] >= 0xB0 && lo3[1] <= 0xBF
+}
+
+// newExtendableString creates a flat string that owns the spare capacity of b.
+func (rt *Runtime) newExtendableString(b []byte) Value {
+	v := rt.newStringBytes(b)
+	if fs := rt.flatOf(v); fs != nil {
+		fs.extendable = true
+	}
+	return v
+}
