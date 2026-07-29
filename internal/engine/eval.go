@@ -41,6 +41,14 @@ type evalBinding struct {
 type evalScope struct {
 	bindings []evalBinding
 
+	// imports carries the module's static import bindings by local name. An
+	// import is not a local and so is not in bindings: it compiles to a read of
+	// the source module's namespace off a hidden `*mod:…*` local. That hidden
+	// local IS borrowed (see captureEvalScope), so handing the eval compiler this
+	// map lets the ordinary import emit path resolve it as an upvalue and the
+	// binding stays live — `set_a("foo"); eval("a")` sees "foo".
+	imports map[string]importBinding
+
 	// context-construct permissions (Script static-semantics early errors):
 	// eval code may contain new.target/super/arguments only when the enclosing
 	// (non-arrow, for new.target/arguments) function code permits them.
@@ -209,6 +217,34 @@ func (c *compiler) captureEvalScope() *evalScope {
 			}
 		}
 	}
+	// Module imports. An import is not a local — every reference compiles to a
+	// read off the source module's namespace object, held in a hidden `*mod:…*`
+	// local that borrowableName deliberately excludes. Borrow that local anyway
+	// (under its own name, so nothing in the eval body can reach it) and carry
+	// the name->binding map; compileImportRead then resolves it exactly as it
+	// does in module code, through resolveUpvalue -> resolveBorrowed.
+	//
+	// Without this, `import {a} from "m"; eval("a")` is a ReferenceError while
+	// every other module binding — let, var, function — is visible.
+	for e := c; e != nil; e = e.enclosing {
+		for name, b := range e.importBindings {
+			if _, dup := sc.imports[name]; dup || seen[name] {
+				continue
+			}
+			if sc.imports == nil {
+				sc.imports = map[string]importBinding{}
+			}
+			if slot := c.resolveLocal(b.modName); slot >= 0 {
+				sc.bindings = append(sc.bindings, evalBinding{name: b.modName, kind: evalBindLocal, slot: slot})
+			} else if uv := c.resolveUpvalue(b.modName); uv >= 0 {
+				sc.bindings = append(sc.bindings, evalBinding{name: b.modName, kind: evalBindUpval, slot: uv})
+			} else {
+				continue // the namespace is unreachable from here; leave the name free
+			}
+			sc.imports[name] = b
+		}
+	}
+
 	// Context permissions: inside function code (not the top-level script/eval),
 	// new.target/arguments are permitted unless the immediately enclosing function
 	// is an arrow; super is permitted when the function carries a home object or
@@ -504,6 +540,9 @@ func (rt *Runtime) compileDirectEvalBody(prog *Node, filename, source string, sc
 		isEval:     true,
 		usingStack: -1,
 		borrowed:   sc,
+		// The module's imports, so a free name that names one compiles to the
+		// same namespace read it would in module code.
+		importBindings: sc.imports,
 		// A sloppy global-scope eval's `var`/function declarations bind on the
 		// global object. A strict eval always has its own variable environment
 		// (declarations never leak); a function-scope sloppy eval keeps new names
