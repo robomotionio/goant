@@ -676,15 +676,23 @@ func parseJSFloat(s string) (float64, error) {
 }
 
 func parseRadix(buf string, radix float64, start int, isDigit func(byte) bool) (int, float64) {
-	var val float64
+	// The digits are collected first and converted once. Accumulating into a
+	// float64 as it goes rounds at every digit past 2^53 and the errors compound:
+	// 0x1000000000000081 is 2^60+129 and must round to 2^60+256, the nearest
+	// double, but came out a full ULP low at 2^60. See parseRadixString, which
+	// does the conversion and had the same bug on the ToNumber("0x…") path.
 	i := start
+	digits := make([]byte, 0, 16)
 	for i < len(buf) && (isDigit(buf[i]) || buf[i] == '_') {
 		if buf[i] != '_' {
-			val = val*radix + float64(digitVal(buf[i]))
+			digits = append(digits, buf[i])
 		}
 		i++
 	}
-	return i, val
+	if len(digits) == 0 {
+		return i, 0
+	}
+	return i, parseRadixString(string(digits), int(radix))
 }
 
 func digitVal(c byte) int {

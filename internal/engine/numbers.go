@@ -172,15 +172,49 @@ func parseRadixString(s string, radix int) float64 {
 	if s == "" {
 		return math.NaN()
 	}
-	var val float64
+	// Accumulating in a float64 (val = val*radix + d) rounds at every digit once
+	// the value passes 2^53, and those roundings compound: 0x1000000000000081 is
+	// 2^60+129, which must round up to 2^60+256 — the nearest double — but came
+	// out as 2^60, off by a full ULP. The exact integer has to be built first and
+	// rounded once, at the end.
+	//
+	// A uint64 is exact while the digits cannot overflow it, and Go's
+	// uint64->float64 conversion rounds to nearest even, which is the rule the
+	// spec wants. Only a longer literal needs the slow path.
+	var bits int
+	switch radix {
+	case 2:
+		bits = 1
+	case 8:
+		bits = 3
+	case 16:
+		bits = 4
+	}
+	if bits != 0 && len(s)*bits <= 64 {
+		var u uint64
+		for i := 0; i < len(s); i++ {
+			d := digitVal(s[i])
+			if d < 0 || d >= radix || !isRadixDigit(s[i], radix) {
+				return math.NaN()
+			}
+			u = u<<uint(bits) | uint64(d)
+		}
+		return float64(u)
+	}
+	acc := new(big.Int)
+	base := big.NewInt(int64(radix))
 	for i := 0; i < len(s); i++ {
 		d := digitVal(s[i])
 		if d < 0 || d >= radix || !isRadixDigit(s[i], radix) {
 			return math.NaN()
 		}
-		val = val*float64(radix) + float64(d)
+		acc.Mul(acc, base)
+		acc.Add(acc, big.NewInt(int64(d)))
 	}
-	return val
+	// Float64 rounds to nearest even and reports ±Inf on overflow, which is the
+	// correct result for a literal too large to represent.
+	f, _ := new(big.Float).SetInt(acc).Float64()
+	return f
 }
 
 func isRadixDigit(c byte, radix int) bool {
@@ -266,6 +300,56 @@ func ratRoundHalfAway(r *big.Rat) *big.Int {
 	return q
 }
 
+// ratPow10 returns 10^n as an exact rational (n may be negative).
+func ratPow10(n int) *big.Rat {
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	p := new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(n)), nil))
+	if neg {
+		p.Inv(p)
+	}
+	return p
+}
+
+// roundSignificant returns the sig-significant-digit decimal for x > 0 as a
+// digit string of exactly sig characters, plus the exponent e such that the
+// value is 0.<digits> x 10^(e+1) — that is, the first digit has place value
+// 10^e.
+//
+// toExponential and toPrecision both say: "let n be an integer for which
+// n / 10^(e-p+1) - x is as close to zero as possible; if there are two such n,
+// pick the larger n". Go's FormatFloat rounds half to even instead, so it
+// disagrees on every exact tie — (1.25).toPrecision(2) is "1.3", not "1.2".
+// x is a double, so the tie is a fact about its exact binary value and has to be
+// decided in exact arithmetic.
+func roundSignificant(x float64, sig int) (string, int) {
+	r := new(big.Rat).SetFloat64(x)
+	// e must be the exact floor(log10(x)), not the exponent of the shortest
+	// round-trip form. They differ just below a power of ten: the double nearest
+	// 1e-21 is a shade under it, so the shortest form says -21 while the true
+	// exponent is -22. Rounding under the wrong e yields 1.000000000000000e-21
+	// where the spec — which searches over e as well as n — wants
+	// 9.999999999999999e-22, the genuinely closer answer.
+	_, es, _ := strings.Cut(strconv.FormatFloat(x, 'e', -1, 64), "e")
+	e, _ := strconv.Atoi(es)
+	for r.Cmp(ratPow10(e)) < 0 {
+		e--
+	}
+	for r.Cmp(ratPow10(e+1)) >= 0 {
+		e++
+	}
+	s := ratRoundHalfAway(new(big.Rat).Mul(r, ratPow10(sig-1-e))).String()
+	if len(s) > sig {
+		// Rounding carried into a new digit (9.99 at 2 digits -> 10), which is
+		// exactly 10^sig: drop the trailing zero and raise the exponent.
+		e++
+		s = s[:sig]
+	}
+	return s, e
+}
+
 // toPrecisionStr implements Number.prototype.toPrecision.
 func toPrecisionStr(x float64, p int) string {
 	if math.IsNaN(x) {
@@ -287,11 +371,7 @@ func toPrecisionStr(x float64, p int) string {
 	if neg {
 		x = -x
 	}
-	// p significant digits via 'e' with p-1 fraction digits.
-	es := strconv.FormatFloat(x, 'e', p-1, 64)
-	mantissa, expStr, _ := strings.Cut(es, "e")
-	exp, _ := strconv.Atoi(expStr)
-	digits := strings.Replace(mantissa, ".", "", 1)
+	digits, exp := roundSignificant(x, p)
 
 	var out string
 	switch {
@@ -352,14 +432,53 @@ func absInt(n int) int {
 // strconvFixed implements Number.prototype.toFixed formatting. toFixed's sign is
 // applied only when x < 0, which is false for -0, so an exact -0 formats without
 // a sign (unlike a small negative that rounds to -0, e.g. (-0.4).toFixed(0)).
+// The rounding rule is the spec's, not Go's. Step 5 strips the sign before
+// anything else, and step 7.a then picks "an integer n for which n / 10^f - x is
+// as close to zero as possible. If there are two such n, pick the larger n" — so
+// an exact tie rounds up in magnitude. strconv.FormatFloat rounds half to even,
+// which disagrees on precisely the ties: (0.5).toFixed(0) is "1", not "0", and
+// (2.5).toFixed(0) is "3", not "2".
+//
+// The comparison is against x, the exact binary value of the double, so it has
+// to be done exactly — big.Rat holds a float64 without loss. Deciding the tie in
+// floating point is what makes engines disagree on this method.
 func strconvFixed(n float64, digits int) string {
 	if n == 0 {
 		n = 0 // normalize -0 to +0
 	}
-	if math.Abs(n) >= 1e21 {
-		return numberToString(n)
+	sign := ""
+	if n < 0 {
+		sign, n = "-", -n
 	}
-	return strconv.FormatFloat(n, 'f', digits, 64)
+	if n >= 1e21 {
+		return sign + numberToString(n)
+	}
+
+	// n * 10^digits, exactly.
+	r := new(big.Rat).SetFloat64(n)
+	if r == nil { // NaN or ±Inf never reach here, but SetFloat64 reports them this way
+		return strconv.FormatFloat(n, 'f', digits, 64)
+	}
+	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(digits)), nil)
+	r.Mul(r, new(big.Rat).SetInt(scale))
+
+	// floor(r + 1/2): for a non-negative r this is round-half-up, which is "pick
+	// the larger n" once the sign has been taken off.
+	r.Add(r, big.NewRat(1, 2))
+	i := new(big.Int).Quo(r.Num(), r.Denom())
+	if r.Sign() < 0 && new(big.Int).Mul(i, r.Denom()).Cmp(r.Num()) != 0 {
+		i.Sub(i, big.NewInt(1))
+	}
+
+	s := i.String()
+	if digits == 0 {
+		return sign + s
+	}
+	// Insert the point, left-padding when the value is smaller than one unit.
+	if len(s) <= digits {
+		s = strings.Repeat("0", digits-len(s)+1) + s
+	}
+	return sign + s[:len(s)-digits] + "." + s[len(s)-digits:]
 }
 
 // jsParseFloat implements parseFloat: parse the longest leading decimal prefix.
