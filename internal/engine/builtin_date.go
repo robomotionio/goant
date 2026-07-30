@@ -3,9 +3,9 @@ package engine
 // Date constructor + Date.prototype (ant modules/date.c). Time is stored as a
 // float64 millisecond offset from the Unix epoch in the object's boxed cell.
 //
-// To keep conformance timezone-robust, "local" time is treated as UTC
-// (getTimezoneOffset() === 0), so local and UTC accessors agree — matching the
-// common TZ=UTC test environment.
+// The stored value is always UTC. Local accessors resolve it against the host
+// zone (see localtime.go); UTC accessors, Date.UTC, toISOString and toUTCString
+// do not. Conformance is run with TZ=UTC so the two coincide there.
 
 import (
 	"math"
@@ -39,8 +39,10 @@ func (rt *Runtime) initDateBuiltin() {
 		return mknum(nm), nil
 	})
 
-	// Component getters (UTC == local here).
-	getter := func(name string, f func(t time.Time) int) {
+	// Component getters. Each field has a local and a UTC reading; they differ by
+	// the host zone's offset at that instant, so the pair only coincides on a
+	// UTC host.
+	getter := func(name string, conv func(float64) time.Time, f func(t time.Time) int) {
 		g := func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			v, e := rt.dateMs(this)
 			if e != nil {
@@ -50,26 +52,22 @@ func (rt *Runtime) initDateBuiltin() {
 			if math.IsNaN(ms) {
 				return mknum(math.NaN()), nil
 			}
-			return mknum(float64(f(msToTime(ms)))), nil
+			return mknum(float64(f(conv(ms)))), nil
 		}
 		rt.defMethod(proto, name, 0, g)
 	}
-	getter("getFullYear", func(t time.Time) int { return t.Year() })
-	getter("getUTCFullYear", func(t time.Time) int { return t.Year() })
-	getter("getMonth", func(t time.Time) int { return int(t.Month()) - 1 })
-	getter("getUTCMonth", func(t time.Time) int { return int(t.Month()) - 1 })
-	getter("getDate", func(t time.Time) int { return t.Day() })
-	getter("getUTCDate", func(t time.Time) int { return t.Day() })
-	getter("getDay", func(t time.Time) int { return int(t.Weekday()) })
-	getter("getUTCDay", func(t time.Time) int { return int(t.Weekday()) })
-	getter("getHours", func(t time.Time) int { return t.Hour() })
-	getter("getUTCHours", func(t time.Time) int { return t.Hour() })
-	getter("getMinutes", func(t time.Time) int { return t.Minute() })
-	getter("getUTCMinutes", func(t time.Time) int { return t.Minute() })
-	getter("getSeconds", func(t time.Time) int { return t.Second() })
-	getter("getUTCSeconds", func(t time.Time) int { return t.Second() })
-	getter("getMilliseconds", func(t time.Time) int { return t.Nanosecond() / 1e6 })
-	getter("getUTCMilliseconds", func(t time.Time) int { return t.Nanosecond() / 1e6 })
+	field := func(local, utc string, f func(t time.Time) int) {
+		getter(local, msToLocal, f)
+		getter(utc, msToTime, f)
+	}
+	field("getFullYear", "getUTCFullYear", func(t time.Time) int { return t.Year() })
+	field("getMonth", "getUTCMonth", func(t time.Time) int { return int(t.Month()) - 1 })
+	field("getDate", "getUTCDate", func(t time.Time) int { return t.Day() })
+	field("getDay", "getUTCDay", func(t time.Time) int { return int(t.Weekday()) })
+	field("getHours", "getUTCHours", func(t time.Time) int { return t.Hour() })
+	field("getMinutes", "getUTCMinutes", func(t time.Time) int { return t.Minute() })
+	field("getSeconds", "getUTCSeconds", func(t time.Time) int { return t.Second() })
+	field("getMilliseconds", "getUTCMilliseconds", func(t time.Time) int { return t.Nanosecond() / 1e6 })
 	rt.defMethod(proto, "getTimezoneOffset", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		v, e := rt.dateMs(this)
 		if e != nil {
@@ -78,7 +76,10 @@ func (rt *Runtime) initDateBuiltin() {
 		if math.IsNaN(v.Number()) {
 			return mknum(math.NaN()), nil
 		}
-		return mknum(0), nil // UTC == local in this environment
+		// Positive west of Greenwich, so it is the negation of the zone's offset.
+		// The "+ 0" is not redundant: negating a zero offset would otherwise
+		// yield -0, and test262's without-utc-offset.js compares with SameValue.
+		return mknum(-localOffsetMs(v.Number())/msPerMinute + 0), nil
 	})
 
 	// pick returns the i-th coerced component value (as an int) if it was
@@ -94,7 +95,7 @@ func (rt *Runtime) initDateBuiltin() {
 	// ToNumber'd in order, exactly once, propagating an abrupt completion — before
 	// the date's validity is consulted. A non-finite component makes the result
 	// NaN; for setFullYear/setUTCFullYear an invalid Date is first reset to +0.
-	setter := func(name string, length int, nanToZero bool, apply func(t time.Time, v []float64) time.Time) {
+	setter := func(name string, length int, nanToZero bool, loc *time.Location, apply func(t time.Time, v []float64, loc *time.Location) time.Time) {
 		s := func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			cur, e := rt.dateMs(this)
 			if e != nil {
@@ -135,53 +136,57 @@ func (rt *Runtime) initDateBuiltin() {
 				rt.setDateMs(this, math.NaN())
 				return mknum(math.NaN()), nil
 			}
-			newMs := timeClip(float64(apply(msToTime(base), v).UnixMilli()))
+			// The components are read and rewritten in loc's wall clock, so a local
+			// setter that crosses a DST boundary shifts the instant by the offset
+			// change, as it should.
+			newMs := timeClip(float64(apply(time.UnixMilli(int64(base)).In(loc), v, loc).UnixMilli()))
 			rt.setDateMs(this, newMs)
 			return mknum(newMs), nil
 		}
 		rt.defMethod(proto, name, length, s)
 	}
-	setFullYear := func(t time.Time, v []float64) time.Time {
+	setFullYear := func(t time.Time, v []float64, loc *time.Location) time.Time {
 		return time.Date(pick(v, 0, t.Year()), time.Month(pick(v, 1, int(t.Month())-1)+1), pick(v, 2, t.Day()),
-			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
 	}
-	setMonth := func(t time.Time, v []float64) time.Time {
+	setMonth := func(t time.Time, v []float64, loc *time.Location) time.Time {
 		return time.Date(t.Year(), time.Month(pick(v, 0, int(t.Month())-1)+1), pick(v, 1, t.Day()),
-			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
 	}
-	setDate := func(t time.Time, v []float64) time.Time {
-		return time.Date(t.Year(), t.Month(), pick(v, 0, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+	setDate := func(t time.Time, v []float64, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), pick(v, 0, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
 	}
-	setHours := func(t time.Time, v []float64) time.Time {
+	setHours := func(t time.Time, v []float64, loc *time.Location) time.Time {
 		return time.Date(t.Year(), t.Month(), t.Day(), pick(v, 0, t.Hour()), pick(v, 1, t.Minute()),
-			pick(v, 2, t.Second()), pick(v, 3, t.Nanosecond()/1e6)*1e6, time.UTC)
+			pick(v, 2, t.Second()), pick(v, 3, t.Nanosecond()/1e6)*1e6, loc)
 	}
-	setMinutes := func(t time.Time, v []float64) time.Time {
+	setMinutes := func(t time.Time, v []float64, loc *time.Location) time.Time {
 		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), pick(v, 0, t.Minute()),
-			pick(v, 1, t.Second()), pick(v, 2, t.Nanosecond()/1e6)*1e6, time.UTC)
+			pick(v, 1, t.Second()), pick(v, 2, t.Nanosecond()/1e6)*1e6, loc)
 	}
-	setSeconds := func(t time.Time, v []float64) time.Time {
+	setSeconds := func(t time.Time, v []float64, loc *time.Location) time.Time {
 		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(),
-			pick(v, 0, t.Second()), pick(v, 1, t.Nanosecond()/1e6)*1e6, time.UTC)
+			pick(v, 0, t.Second()), pick(v, 1, t.Nanosecond()/1e6)*1e6, loc)
 	}
-	setMillis := func(t time.Time, v []float64) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), pick(v, 0, t.Nanosecond()/1e6)*1e6, time.UTC)
+	setMillis := func(t time.Time, v []float64, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), pick(v, 0, t.Nanosecond()/1e6)*1e6, loc)
 	}
-	setter("setFullYear", 3, true, setFullYear)
-	setter("setMonth", 2, false, setMonth)
-	setter("setDate", 1, false, setDate)
-	setter("setHours", 4, false, setHours)
-	setter("setMinutes", 3, false, setMinutes)
-	setter("setSeconds", 2, false, setSeconds)
-	setter("setMilliseconds", 1, false, setMillis)
-	// UTC setters share the implementations (local == UTC here).
-	setter("setUTCFullYear", 3, true, setFullYear)
-	setter("setUTCMonth", 2, false, setMonth)
-	setter("setUTCDate", 1, false, setDate)
-	setter("setUTCHours", 4, false, setHours)
-	setter("setUTCMinutes", 3, false, setMinutes)
-	setter("setUTCSeconds", 2, false, setSeconds)
-	setter("setUTCMilliseconds", 1, false, setMillis)
+	local, utc := localLoc(), time.UTC
+	setter("setFullYear", 3, true, local, setFullYear)
+	setter("setMonth", 2, false, local, setMonth)
+	setter("setDate", 1, false, local, setDate)
+	setter("setHours", 4, false, local, setHours)
+	setter("setMinutes", 3, false, local, setMinutes)
+	setter("setSeconds", 2, false, local, setSeconds)
+	setter("setMilliseconds", 1, false, local, setMillis)
+	// The UTC setters run the same field arithmetic against UTC's wall clock.
+	setter("setUTCFullYear", 3, true, utc, setFullYear)
+	setter("setUTCMonth", 2, false, utc, setMonth)
+	setter("setUTCDate", 1, false, utc, setDate)
+	setter("setUTCHours", 4, false, utc, setHours)
+	setter("setUTCMinutes", 3, false, utc, setMinutes)
+	setter("setUTCSeconds", 2, false, utc, setSeconds)
+	setter("setUTCMilliseconds", 1, false, utc, setMillis)
 
 	// String conversions.
 	rt.defMethod(proto, "toISOString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -222,7 +227,7 @@ func (rt *Runtime) initDateBuiltin() {
 		if math.IsNaN(v.Number()) {
 			return rt.internString("Invalid Date"), nil
 		}
-		return rt.newString(msToTime(v.Number()).Format("Mon Jan 02 2006 15:04:05 GMT+0000 (Coordinated Universal Time)")), nil
+		return rt.newString(localDateTimeString(v.Number())), nil
 	}
 	rt.defMethod(proto, "toString", 0, toStr)
 	// Date.prototype[Symbol.toPrimitive]: default and string hints use toString
@@ -268,7 +273,7 @@ func (rt *Runtime) initDateBuiltin() {
 		if math.IsNaN(v.Number()) {
 			return rt.internString("Invalid Date"), nil
 		}
-		return rt.newString(msToTime(v.Number()).Format("Mon Jan 02 2006")), nil
+		return rt.newString(msToLocal(v.Number()).Format("Mon Jan 02 2006")), nil
 	})
 	rt.defMethod(proto, "toTimeString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		v, e := rt.dateMs(this)
@@ -278,24 +283,30 @@ func (rt *Runtime) initDateBuiltin() {
 		if math.IsNaN(v.Number()) {
 			return rt.internString("Invalid Date"), nil
 		}
-		return rt.newString(msToTime(v.Number()).Format("15:04:05 GMT+0000 (Coordinated Universal Time)")), nil
+		t := msToLocal(v.Number())
+		return rt.newString(t.Format("15:04:05 GMT-0700") + " (" + zoneDisplayName(t) + ")"), nil
 	})
-	// toLocale* aliases (locale-free environment).
-	rt.defMethod(proto, "toLocaleString", 0, toStr)
-	rt.defMethod(proto, "toLocaleDateString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		v, e := rt.dateMs(this)
-		if e != nil {
-			return mkundef(), e
+	// The toLocale* trio formats through the same locale data as Intl (see
+	// builtin_intl.go), against local time.
+	localeFmt := func(kind dateTimeKind) func(*Runtime, Value, []Value) (Value, *ThrowError) {
+		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			v, e := rt.dateMs(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			if math.IsNaN(v.Number()) {
+				return rt.internString("Invalid Date"), nil
+			}
+			li, e := rt.resolveLocaleArg(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.newString(li.formatDateTime(kind, msToLocal(v.Number()))), nil
 		}
-		return rt.newString(msToTime(v.Number()).Format("01/02/2006")), nil
-	})
-	rt.defMethod(proto, "toLocaleTimeString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		v, e := rt.dateMs(this)
-		if e != nil {
-			return mkundef(), e
-		}
-		return rt.newString(msToTime(v.Number()).Format("15:04:05")), nil
-	})
+	}
+	rt.defMethod(proto, "toLocaleString", 0, localeFmt(dtDateTime))
+	rt.defMethod(proto, "toLocaleDateString", 0, localeFmt(dtDate))
+	rt.defMethod(proto, "toLocaleTimeString", 0, localeFmt(dtTime))
 	// Annex-B legacy methods.
 	rt.defMethod(proto, "getYear", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		v, e := rt.dateMs(this)
@@ -305,16 +316,16 @@ func (rt *Runtime) initDateBuiltin() {
 		if math.IsNaN(v.Number()) {
 			return mknum(math.NaN()), nil
 		}
-		return mknum(float64(msToTime(v.Number()).Year() - 1900)), nil
+		return mknum(float64(msToLocal(v.Number()).Year() - 1900)), nil
 	})
 	rt.defMethod(proto, "setYear", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		cur, e := rt.dateMs(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		t := msToTime(cur.Number())
+		t := msToLocal(cur.Number())
 		if math.IsNaN(cur.Number()) {
-			t = msToTime(0)
+			t = msToLocal(0)
 		}
 		// y = ToNumber(year) (called exactly once, after reading the date value; may
 		// throw). A NaN/infinite year — or one outside the representable range —
@@ -332,7 +343,7 @@ func (rt *Runtime) initDateBuiltin() {
 			rt.setDateMs(this, math.NaN())
 			return mknum(math.NaN()), nil
 		}
-		nt := time.Date(int(yyyy), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+		nt := time.Date(int(yyyy), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), localLoc())
 		ms := timeClip(float64(nt.UnixMilli()))
 		rt.setDateMs(this, ms)
 		return mknum(ms), nil
@@ -373,7 +384,7 @@ func (rt *Runtime) initDateBuiltin() {
 		if !this.IsObjectType() {
 			// Called as a function: return a string (current time). The arguments are
 			// ignored and not coerced.
-			return rt.newString(msToTime(float64(time.Now().UnixMilli())).Format("Mon Jan 02 2006 15:04:05 GMT+0000 (Coordinated Universal Time)")), nil
+			return rt.newString(localDateTimeString(float64(time.Now().UnixMilli()))), nil
 		}
 		ms, e := rt.computeDateMs(args)
 		if e != nil {
@@ -399,7 +410,9 @@ func (rt *Runtime) initDateBuiltin() {
 		return mknum(float64(time.Now().UnixMilli())), nil
 	})
 	rt.defMethod(cobj, "UTC", 7, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		ms, e := rt.dateFromComponents(args)
+		// Date.UTC reads its components as UTC; the constructor reads the same
+		// components as local time. That is the only difference between them.
+		ms, e := rt.dateFromComponents(args, false)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -423,9 +436,19 @@ func msToTime(ms float64) time.Time {
 	return time.UnixMilli(int64(ms)).UTC()
 }
 
+// localDateTimeString is Date.prototype.toString()'s format: the local wall
+// clock, the numeric UTC offset, and the zone's long name in parentheses.
+func localDateTimeString(ms float64) string {
+	t := msToLocal(ms)
+	return t.Format("Mon Jan 02 2006 15:04:05 GMT-0700") + " (" + zoneDisplayName(t) + ")"
+}
+
+// maxTimeValue is the largest magnitude a Date can hold, 100 million days.
+const maxTimeValue = 8.64e15
+
 // timeClip implements the ECMAScript TimeClip abstract operation.
 func timeClip(ms float64) float64 {
-	if math.IsNaN(ms) || math.Abs(ms) > 8.64e15 {
+	if math.IsNaN(ms) || math.Abs(ms) > maxTimeValue {
 		return math.NaN()
 	}
 	// TimeClip returns ToInteger(time) + (+0), which converts -0 to +0.
@@ -481,7 +504,7 @@ func (rt *Runtime) computeDateMs(args []Value) (float64, *ThrowError) {
 		}
 		return timeClip(n), nil
 	default:
-		return rt.dateFromComponents(args)
+		return rt.dateFromComponents(args, true)
 	}
 }
 
@@ -490,7 +513,11 @@ func (rt *Runtime) computeDateMs(args []Value) (float64, *ThrowError) {
 // argument is ToNumber'd in order (exactly once, propagating abrupt
 // completions); the year (argument 0) is always read (undefined → NaN). A
 // non-finite component yields NaN.
-func (rt *Runtime) dateFromComponents(args []Value) (float64, *ThrowError) {
+//
+// When local is set the components denote a wall clock in the host zone and the
+// result is shifted to UTC, which is what `new Date(2026, 6, 30)` does; Date.UTC
+// clears it and reads the very same components as UTC.
+func (rt *Runtime) dateFromComponents(args []Value, local bool) (float64, *ThrowError) {
 	count := min(len(args), 7)
 	if count < 1 {
 		count = 1 // the year is always read
@@ -526,7 +553,11 @@ func (rt *Runtime) dateFromComponents(args []Value) (float64, *ThrowError) {
 			return math.NaN(), nil
 		}
 	}
-	return timeClip(makeDate(makeDay(year, month, day), makeTime(hour, minu, sec, msv))), nil
+	tv := makeDate(makeDay(year, month, day), makeTime(hour, minu, sec, msv))
+	if local {
+		tv = utcFromLocalMs(tv)
+	}
+	return timeClip(tv), nil
 }
 
 const (
@@ -612,22 +643,53 @@ func parseDate(s string) float64 {
 			}
 		}
 	}
-	formats := []string{
-		"2006-01-02T15:04:05.000Z07:00",
-		"2006-01-02T15:04:05Z07:00",
-		"2006-01-02T15:04Z07:00",
-		"2006-01-02T15:04:05",
-		"2006-01-02T15:04",
-		"2006-01-02",
+	// Order matters: the first layout that consumes the whole string wins, so the
+	// zero-padded ISO forms have to precede the lenient ones that would also
+	// match them but with the wrong zone rule.
+	//
+	// A missing zone offset means UTC for the ISO date-only forms and local time
+	// everywhere else. That split is not arbitrary: the spec fixes date-only
+	// forms at UTC and date-time forms at local time, and the non-ISO formats are
+	// implementation-defined, where V8 has always chosen local.
+	formats := []struct {
+		layout string
+		local  bool
+	}{
+		{"2006-01-02T15:04:05.000Z07:00", false},
+		{"2006-01-02T15:04:05Z07:00", false},
+		{"2006-01-02T15:04Z07:00", false},
+		{"2006-01-02T15:04:05", true},
+		{"2006-01-02T15:04", true},
+		{"2006-01-02", false},
 		// Date-only ISO forms may omit the day and the month: YYYY-MM and YYYY are
 		// complete Date Time Strings, interpreted as UTC.
-		"2006-01",
-		"2006",
-		"2006/01/02",
-		time.RFC1123,
-		"Mon Jan 02 2006 15:04:05 GMT-0700",
-		"Jan 02 2006",
-		"January 2, 2006",
+		{"2006-01", false},
+		{"2006", false},
+		// Everything below is outside the Date Time String Format, matched for
+		// compatibility with what V8 accepts.
+		{"2006-01-02 15:04:05", true},
+		{"2006-01-02 15:04", true},
+		{"2006/01/02 15:04:05", true},
+		{"2006/01/02", true},
+		{"2006.01.02", true},
+		{"2006-1-2", true},
+		{time.RFC1123, false},
+		{time.RFC1123Z, false},
+		{"Mon Jan 02 2006 15:04:05 GMT-0700", false},
+		{"Mon Jan 2 2006 15:04:05", true},
+		{"Mon Jan 2 2006", true},
+		{"Jan 2, 2006 15:04:05", true},
+		{"Jan 2, 2006", true},
+		{"Jan 02 2006", true},
+		{"Jan-2-2006", true},
+		{"January 2, 2006 15:04:05", true},
+		{"January 2, 2006", true},
+		{"2 Jan 2006 15:04:05", true},
+		{"2 Jan 2006", true},
+		{"2-Jan-2006", true},
+		{"2 January 2006", true},
+		{"1/2/2006 15:04:05", true},
+		{"1/2/2006", true},
 	}
 	// Extended-year ISO 8601 (±YYYYYY-MM-DD…): Go's time.Parse has no 6-digit
 	// signed-year layout, so pull the year off, parse the remainder with a
@@ -641,7 +703,7 @@ func parseDate(s string) float64 {
 			yr = -yr
 		}
 		for _, f := range formats {
-			if t, err := time.Parse(f, "2000"+s[7:]); err == nil {
+			if t, err := time.Parse(f.layout, "2000"+s[7:]); err == nil {
 				u := time.Date(yr, t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
 				return float64(u.UTC().UnixMilli())
 			}
@@ -649,9 +711,16 @@ func parseDate(s string) float64 {
 		return math.NaN()
 	}
 	for _, f := range formats {
-		if t, err := time.Parse(f, s); err == nil {
-			return float64(t.UTC().UnixMilli())
+		t, err := time.Parse(f.layout, s)
+		if err != nil {
+			continue
 		}
+		if f.local {
+			// time.Parse hands back UTC for a layout carrying no zone, so the wall
+			// clock it read has to be re-seated in the host zone.
+			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), localLoc())
+		}
+		return float64(t.UTC().UnixMilli())
 	}
 	return math.NaN()
 }

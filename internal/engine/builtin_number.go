@@ -117,7 +117,13 @@ func (rt *Runtime) initNumberBuiltin() {
 		if !ok {
 			return mkundef(), rt.typeError("Number.prototype.toLocaleString requires a number")
 		}
-		return rt.newString(numberToString(n)), nil
+		// Grouped and capped at three fraction digits, the same as
+		// Intl.NumberFormat's defaults (see intl_format.go).
+		li, e := rt.resolveLocaleArg(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newString(li.formatNumber(n)), nil
 	})
 
 	ctor := rt.newNativeFunc("Number", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

@@ -1,6 +1,10 @@
 package engine
 
-import "regexp"
+import (
+	"math"
+	"regexp"
+	"time"
+)
 
 // Minimal Intl: the constructors exist, work with and without `new`, expose the
 // expected prototype methods, and validate BCP 47 language tags. Actual
@@ -64,25 +68,29 @@ func (rt *Runtime) initIntl() {
 	rt.setStringTag(intl, "Intl")
 
 	// defineService installs an Intl service constructor: callable with or without
-	// `new` (both yield an instance), validating its locales argument, with the
+	// `new` (both yield an instance), resolving its locales argument, with the
 	// given prototype methods.
 	defineService := func(name string, methods func(po *object)) {
 		proto := rt.newObject(rt.objectProto)
 		po := rt.objPtr(proto)
 		ctor := rt.newNativeFunc(name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			if e := rt.validateLocales(arg(args, 0)); e != nil {
+			_, tag, e := rt.resolveLocaleArgTag(arg(args, 0))
+			if e != nil {
 				return mkundef(), e
 			}
 			// A fresh instance whose [[Prototype]] honours new.target (both `new
-			// Intl.X()` and `Intl.X()` return an instance).
-			return rt.newObject(rt.newTargetProto(proto)), nil
+			// Intl.X()` and `Intl.X()` return an instance). The tag it resolved to
+			// rides along in a slot so format() and resolvedOptions() agree.
+			inst := rt.newObject(rt.newTargetProto(proto))
+			rt.objPtr(inst).setSlot(slotIntlLocale, rt.newString(tag))
+			return inst, nil
 		})
 		co := rt.objPtr(ctor)
 		co.defineOwn("prototype", proto, 0)
 		po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 		rt.setStringTag(proto, "Intl."+name)
 		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			return rt.newPlainObject(), nil
+			return rt.intlResolvedOptions(this, name), nil
 		})
 		if methods != nil {
 			methods(po)
@@ -106,35 +114,74 @@ func (rt *Runtime) initIntl() {
 	})
 	defineService("NumberFormat", func(po *object) {
 		getter := rt.newNativeFunc("get format", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			li := rt.intlLocaleOf(this)
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 				n, e := rt.toNumber(arg(args, 0))
 				if e != nil {
 					return mkundef(), e
 				}
-				return rt.newString(numberToString(n)), nil
+				return rt.newString(li.formatNumber(n)), nil
 			}), nil
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
 	})
 	defineService("DateTimeFormat", func(po *object) {
 		getter := rt.newNativeFunc("get format", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			li := rt.intlLocaleOf(this)
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-				return rt.newString(""), nil
+				// With no argument the spec formats the current time.
+				ms := float64(time.Now().UnixMilli())
+				if a := arg(args, 0); !a.IsUndefined() {
+					n, e := rt.toNumber(a)
+					if e != nil {
+						return mkundef(), e
+					}
+					ms = timeClip(n)
+				}
+				if math.IsNaN(ms) {
+					return mkundef(), rt.rangeError("Invalid time value")
+				}
+				return rt.newString(li.formatDateTime(dtDate, msToLocal(ms))), nil
 			}), nil
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
-		// resolvedOptions reports the resolved timeZone (defaulting to the host's,
-		// which this runtime treats as UTC) and calendar/numberingSystem.
-		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			o := rt.newPlainObject()
-			oo := rt.objPtr(o)
-			oo.defineOwn("locale", rt.newString("en-US"), attrDefault)
-			oo.defineOwn("calendar", rt.newString("gregory"), attrDefault)
-			oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
-			oo.defineOwn("timeZone", rt.newString("UTC"), attrDefault)
-			return o, nil
-		})
 	})
 
 	rt.defGlobal("Intl", intl)
+}
+
+// intlLocaleOf reads back the locale a service instance was constructed with,
+// falling back to the pinned default when `format` is pulled off the prototype
+// rather than an instance.
+func (rt *Runtime) intlLocaleOf(this Value) localeInfo {
+	if o := rt.objPtr(this); o != nil {
+		if v := o.getSlot(slotIntlLocale); v.IsString() {
+			li, _ := lookupLocale(rt.strGo(v))
+			return li
+		}
+	}
+	return localeTable[defaultLocale]
+}
+
+// intlResolvedOptions reports what the instance actually resolved to. The
+// calendar and numbering system are fixed because localeTable only carries
+// Gregorian, Latin-digit locales; anything else resolved to the default.
+func (rt *Runtime) intlResolvedOptions(this Value, service string) Value {
+	tag := defaultLocale
+	if o := rt.objPtr(this); o != nil {
+		if v := o.getSlot(slotIntlLocale); v.IsString() {
+			tag = rt.strGo(v)
+		}
+	}
+	o := rt.newPlainObject()
+	oo := rt.objPtr(o)
+	oo.defineOwn("locale", rt.newString(tag), attrDefault)
+	oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
+	if service == "DateTimeFormat" {
+		li, _ := lookupLocale(tag)
+		oo.defineOwn("calendar", rt.newString("gregory"), attrDefault)
+		oo.defineOwn("timeZone", rt.newString(localZoneID()), attrDefault)
+		oo.defineOwn("hourCycle", rt.newString(li.hourCycle), attrDefault)
+	}
+	return o
 }
