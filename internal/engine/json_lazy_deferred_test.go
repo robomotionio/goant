@@ -135,23 +135,33 @@ func TestDeferredArrayUntouchedRoundTripsAsItsEnvelope(t *testing.T) {
 // test: every one of these mutates the array without reading an element, and
 // every one of them must stop the envelope being written back — otherwise the
 // message would carry a reference where the script left data.
+//
+// Both halves are asserted. "Not written back as its envelope" on its own says
+// only that the output is data; it does not say the output is the data the
+// script produced, and a mutation that the fetch then discarded satisfies it
+// just as well. That is not hypothetical — `pushed` passed this test for as
+// long as the push was being dropped, because 200 rows without the pushed one
+// is still not an envelope. want is what the mutation should be visible as.
 func TestDeferredArrayMutatedIsWrittenAsData(t *testing.T) {
 	msg, blob := deferredFixture(200)
 
 	for _, tc := range []struct {
 		name   string
 		script string
+		want   string // empty when the mutation is not observable in JSON
 	}{
-		{"element assigned", `msg.rows[0] = {id: -1, amount: -1}; msg`},
-		{"pushed", `msg.rows.push({id: -1, amount: -1}); msg`},
-		{"popped", `msg.rows.pop(); msg`},
-		{"truncated", `msg.rows.length = 5; msg`},
-		{"lengthened", `msg.rows.length = 400; msg`},
-		{"element deleted", `delete msg.rows[0]; msg`},
-		{"property defined on the array", `Object.defineProperty(msg.rows, "tag", {value: 1, enumerable: true}); msg`},
-		{"named property set", `msg.rows.tag = 1; msg`},
-		{"reversed", `msg.rows.reverse(); msg`},
-		{"sorted", `msg.rows.sort((a, b) => b.id - a.id); msg`},
+		{"element assigned", `msg.rows[0] = {id: -1, amount: -1}; msg`, `"rows":[{"id":-1,"amount":-1},{"id":1,`},
+		{"pushed", `msg.rows.push({id: -1, amount: -1}); msg`, `{"id":199,"amount":398},{"id":-1,"amount":-1}]`},
+		{"popped", `msg.rows.pop(); msg`, `{"id":198,"amount":396}]`},
+		{"truncated", `msg.rows.length = 5; msg`, `{"id":4,"amount":8}]`},
+		{"lengthened", `msg.rows.length = 400; msg`, `{"id":199,"amount":398},null,`},
+		{"element deleted", `delete msg.rows[0]; msg`, `"rows":[null,{"id":1,`},
+		// A named property is not part of an array's JSON, so there is nothing to
+		// look for in the output; the envelope check is the whole assertion.
+		{"property defined on the array", `Object.defineProperty(msg.rows, "tag", {value: 1, enumerable: true}); msg`, ""},
+		{"named property set", `msg.rows.tag = 1; msg`, ""},
+		{"reversed", `msg.rows.reverse(); msg`, `"rows":[{"id":199,"amount":398},`},
+		{"sorted", `msg.rows.sort((a, b) => b.id - a.id); msg`, `"rows":[{"id":199,"amount":398},`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rt, out, _ := runDeferred(t, msg, blob, tc.script)
@@ -160,8 +170,141 @@ func TestDeferredArrayMutatedIsWrittenAsData(t *testing.T) {
 				t.Fatalf("stringify: ok=%v err=%v", ok, err)
 			}
 			if strings.Contains(string(b), "__magic") {
-				t.Errorf("a mutated array was written back as its envelope, losing the "+
+				t.Fatalf("a mutated array was written back as its envelope, losing the "+
 					"mutation — the untouched check let a write through:\n%s", truncate(string(b)))
+			}
+			if tc.want != "" && !strings.Contains(string(b), tc.want) {
+				t.Errorf("the output is data, but not the script's data: %q is missing, "+
+					"so the mutation was made and then dropped\n%s", tc.want, truncate(string(b)))
+			}
+		})
+	}
+}
+
+// A parked array can be written to without ever being opened — push appends at
+// a length the envelope already knows, and neither a truncation nor an
+// assignment past the end needs to look at an element either. So the fetch,
+// when something finally does read one, lands on an array the script has
+// already changed, and has to merge under those changes rather than over them.
+//
+// This is the failure that took the longest to find in the field: five pushes
+// followed by one element write left the array back at its original length with
+// the pushes gone, and the message went on to the next node that way. Nothing
+// errored; the rows were simply fewer than the script had made them.
+func TestDeferredArrayKeepsWritesMadeBeforeItWasOpened(t *testing.T) {
+	const pushFive = `for (var i = 0; i < 5; i++) { r.push({id: 900000 + i, amount: 7}); }`
+
+	for _, tc := range []struct {
+		name      string
+		script    string
+		want      string
+		wantCalls int
+	}{
+		{
+			// The field report, reduced: push, then touch.
+			"push, then write an element",
+			`var r = msg.rows; var n0 = r.length; ` + pushFive + ` r[0].amount = 999999;
+			 n0 + "/" + r.length + "/" + r[0].amount + "/" + r[504].id`,
+			"500/505/999999/900004", 1,
+		},
+		{
+			"push, then read an element",
+			`var r = msg.rows; var n0 = r.length; ` + pushFive + ` var got = r[0].amount;
+			 n0 + "/" + r.length + "/" + got + "/" + r[504].id`,
+			"500/505/0/900004", 1,
+		},
+		{
+			// Reading first is the order that always worked; it must still work.
+			"read an element, then push",
+			`var r = msg.rows; var got = r[0].amount; var n0 = r.length; ` + pushFive + `
+			 n0 + "/" + r.length + "/" + got + "/" + r[504].id`,
+			"500/505/0/900004", 1,
+		},
+		{
+			// Never reads an element at all: the fetch comes from serializing.
+			"push, then serialize",
+			`var r = msg.rows; ` + pushFive + `
+			 var j = JSON.stringify(r);
+			 r.length + "/" + (j.indexOf("900004") >= 0 ? "kept" : "lost")`,
+			"505/kept", 1,
+		},
+		{
+			"assign past the end, then read",
+			`var r = msg.rows; r[600] = {id: 42}; var got = r[0].amount;
+			 r.length + "/" + r[600].id + "/" + (r[550] === undefined ? "hole" : "filled")`,
+			"601/42/hole", 1,
+		},
+		{
+			"truncate, then read",
+			`var r = msg.rows; r.length = 10; var got = r[0].amount;
+			 r.length + "/" + got + "/" + (r[10] === undefined ? "gone" : "still there")`,
+			"10/0/gone", 1,
+		},
+		{
+			"push, then read nothing",
+			`var r = msg.rows; ` + pushFive + ` String(r.length)`,
+			"505", 0, // the length still comes from the envelope plus the pushes
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msg, blob := deferredFixture(500)
+			rt, out, calls := runDeferred(t, msg, blob, tc.script)
+			got, serr := rt.ToString(out)
+			if serr != nil {
+				t.Fatalf("ToString: %v", serr)
+			}
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+			if calls != tc.wantCalls {
+				t.Errorf("fetched the blob %d times, want %d", calls, tc.wantCalls)
+			}
+		})
+	}
+}
+
+// A wrong __len and a script that writes are the two hard cases meeting: the
+// writes were made at indices chosen against a length that was not real, and
+// the blob then arrives disagreeing about how many elements there are.
+//
+// There is no reading of that which is right in every sense — a push made at
+// the length the envelope claimed went to an index chosen from a lie, and no
+// later correction moves it somewhere better. So the two things that must hold
+// are narrower: nothing the script wrote is dropped because the envelope was
+// wrong, and the blob's own rows are still there to be read.
+func TestDeferredArrayKeepsWritesWhenTheEnvelopeLiedAboutTheLength(t *testing.T) {
+	_, blob := deferredFixture(50) // the truth: 50 rows
+
+	for _, tc := range []struct {
+		name  string
+		claim string
+		want  string // length / id of the last pushed row / id of blob row 0
+	}{
+		// Pushed at 500-504, so the length has to reach past the 50 real rows to
+		// cover them; 50-499 are holes.
+		{"claimed more than there are", "500", "505/900004/0"},
+		// Pushed at 3-7, over real rows the script was told did not exist. The
+		// pushes are what survives there, because they are what it wrote.
+		{"claimed fewer than there are", "3", "55/900004/0"},
+		{"claimed exactly right", "50", "55/900004/0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := []byte(fmt.Sprintf(
+				`{"rows":{"__ref":"xxh3:abc","__magic":20260301,"__type":"array","__len":%s}}`,
+				tc.claim))
+			rt, out, _ := runDeferred(t, msg, blob, `
+				var r = msg.rows;
+				for (var i = 0; i < 5; i++) { r.push({id: 900000 + i}); }
+				var row0 = r[0].id;   // opens the blob, under the pushes
+				var last = -1;
+				for (var j = 0; j < r.length; j++) { if (r[j] && r[j].id === 900004) { last = j; } }
+				r.length + "/" + (last >= 0 ? r[last].id : "LOST") + "/" + row0`)
+			got, serr := rt.ToString(out)
+			if serr != nil {
+				t.Fatalf("ToString: %v", serr)
+			}
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
 	}
