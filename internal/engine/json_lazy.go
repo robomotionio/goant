@@ -203,6 +203,10 @@ const (
 // Past it, the envelope resolves the old way.
 const maxDeferredElems = 1 << 22 // 4M elements, 32 MB of spans
 
+// maxArrayIndex is ECMAScript's ceiling on an array's length (2^32 - 1). It
+// bounds the length a blob and the script's own change to it can add up to.
+const maxArrayIndex = 1<<32 - 1
+
 // errBlobShape reports a blob that did not hold the array its envelope
 // described. It is a corrupt store rather than a script error, so it stops the
 // script rather than surfacing as elements that read as undefined.
@@ -317,7 +321,19 @@ func (d *lazyDoc) deferredArray(ref string, elems, envOff int) Value {
 }
 
 // fetchPendingBlob reads the blob this array stands for and adopts its layout,
-// keeping the array's own identity — a script may already be holding it.
+// keeping the array's own identity — a script may already be holding it — and
+// keeping whatever the script wrote to it before the blob arrived.
+//
+// That last part is the whole difficulty. An array is stood up deferred and
+// opened on the first element anyone reads, so a script that only writes —
+// `rows.push(...)`, `rows.length = 0`, `rows[n] = x` past the end — gets no
+// further than the envelope, and the fetch it eventually triggers lands
+// underneath work that is already done. Adopting the blob's elements wholesale
+// discarded that work: five pushes followed by one read left an array back at
+// its original length with the pushes gone, and the same array written back to
+// the message that way. The blob is authoritative about its own contents, but
+// it is a snapshot from before the script ran, so it is merged under the
+// script's writes rather than over them.
 //
 // A failure stops the script, the same way resolveBlob's does and for the same
 // reason: there is no value to carry on with, and leaving the elements reading
@@ -346,11 +362,61 @@ func (o *object) fetchPendingBlob() bool {
 		}
 		return false
 	}
-	// The blob is authoritative about its own contents, so its length wins over
-	// the envelope's claim if the two ever disagree.
+	// What the script has done to the array so far. Every slot it has not
+	// written is still the placeholder deferredArray put there, whose offset is
+	// its own index; a slot holding anything else is the script's.
+	//
+	// Which slots those are is worked out by walking them, for the reason
+	// untouchedEnvelopeRaw walks them: a flag set on write is only as good as
+	// the list of writes someone remembered to find, and a missed one here
+	// silently drops data the script produced. The walk is one comparison per
+	// element over a slice already in cache, against a fetch that has just read
+	// a file and decompressed it.
+	mut, mutLen := o.arr, o.arrLen
+
 	o.lazy = src.lazy
 	o.arr = src.arr
 	o.arrLen = src.arrLen
+
+	// The script's writes go back at the indices it made them. Storage grows to
+	// reach one only when there is one, so an array the script made sparse
+	// (`rows[1e6] = x`) stays sparse rather than becoming a million holes.
+	written := 0
+	for i, e := range mut {
+		if e.isLazy() && e.lazyOffset() == i {
+			continue // never written; the blob's own span for it stands
+		}
+		for len(o.arr) <= i {
+			o.arr = append(o.arr, tEmpty)
+		}
+		o.arr[i] = e
+		written = i + 1
+	}
+
+	// The blob is authoritative about its own contents, so its length wins over
+	// the envelope's claim if the two ever disagree. What the script did to the
+	// length is a change of its own, applied on top of whatever the blob turned
+	// out to hold rather than competing with it.
+	//
+	// The two only need reconciling when the envelope was wrong, which is a
+	// corrupt store rather than anything a script can cause, and then the delta
+	// is the best available reading of an intent expressed against a length
+	// that was not real. The floor is what matters there: however the count
+	// works out, it covers every element the script wrote, because dropping one
+	// would be losing data to a bad envelope.
+	n := int64(src.arrLen)
+	if int(mutLen) != p.elems {
+		n += int64(mutLen) - int64(p.elems)
+	}
+	if n < int64(written) {
+		n = int64(written)
+	} else if n > maxArrayIndex {
+		n = maxArrayIndex
+	}
+	o.arrLen = uint32(n)
+	if int64(len(o.arr)) > n {
+		o.arr = o.arr[:n]
+	}
 	return true
 }
 
