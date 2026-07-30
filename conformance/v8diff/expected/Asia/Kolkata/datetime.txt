@@ -1,0 +1,33 @@
+typeof Intl                     | object
+getTimezoneOffset() winter      | -330
+getTimezoneOffset() summer      | -330
+FIXED.toString()                | Thu Jan 01 2026 05:30:00 GMT+0530 (India Standard Time)
+FIXED.toDateString()            | Thu Jan 01 2026
+FIXED.toTimeString()            | 05:30:00 GMT+0530 (India Standard Time)
+FIXED.toUTCString()             | Thu, 01 Jan 2026 00:00:00 GMT
+FIXED.toISOString()             | 2026-01-01T00:00:00.000Z
+FIXED.toLocaleDateString()      | 1/1/2026
+FIXED.toLocaleTimeString()      | 5:30:00 AM
+FIXED.toLocaleString()          | 1/1/2026, 5:30:00 AM
+FIXED.getFullYear()             | 2026
+FIXED.getMonth()                | 0
+FIXED.getDate()                 | 1
+FIXED.getDay()                  | 4
+FIXED.getHours()                | 5
+FIXED.getUTCHours()             | 0
+new Date(2026,6,30).toISOString | 2026-07-29T18:30:00.000Z
+new Date(2026,6,30,9).toISOString| 2026-07-30T03:30:00.000Z
+Date.UTC(2026,6,30)             | 1785369600000
+parse '2026-07-30'              | 2026-07-30T00:00:00.000Z
+parse '2026-07-30T09:00'        | 2026-07-30T03:30:00.000Z
+parse '2026-07-30T09:00Z'       | 2026-07-30T09:00:00.000Z
+parse '2026/07/30'              | 2026-07-29T18:30:00.000Z
+parse 'Jul 30, 2026'            | 2026-07-29T18:30:00.000Z
+parse 'July 30, 2026'           | 2026-07-29T18:30:00.000Z
+parse '30 Jul 2026'             | 2026-07-29T18:30:00.000Z
+parse(FIXED.toString())         | 2026-01-01T00:00:00.000Z
+setDate roundtrip (rollover)    | 2026-01-01T00:00:00.000Z
+(1234.5).toLocaleString()       | 1,234.5
+CUSTOMER str (2026-01-01T00Z)   | 1/1/2026
+CUSTOMER todayDate              | undefined.00.undefined
+CUSTOMER file_format            | undefined-00-undefined
