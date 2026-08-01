@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/goant-gopher.png" alt="goant" width="300">
+</p>
+
 # goant
 
 A JavaScript engine in pure Go. No cgo, nothing to fetch at build time, one
