@@ -210,3 +210,38 @@ Two things the measurement does not include, both expected to be small: generate
 code here runs on the goroutine stack rather than a dedicated one, which will add
 a register save and restore rather than a stack switch, and there is no
 back-edge preemption poll yet, which is a load and a compare.
+
+## Phase 3, begun
+
+`jitCompile` compiles straight-line Number arithmetic — locals, numeric
+constants, `+ - * /`, return — and refuses everything else. It is narrow so that
+bailing out is trivially correct: nothing it emits has a side effect, so a failed
+guard means the interpreter re-runs the function from the top with no state to
+reconstruct. Deoptimisation that has to rebuild a frame is the hardest part of a
+JavaScript JIT, and a tier that never needs it is the right place to prove the
+rest of the machinery.
+
+`(a+b)*(a-b)/b+a*b`, on the same machine as everything above:
+
+| | ns/op | |
+| --- | --- | --- |
+| compiled | 8.4 | including the 3.2 to enter and leave |
+| interpreted, whole call | 163.8 | |
+| interpreted, call overhead alone | 95.7 | body of `return a` |
+
+The expression body is about 68 ns interpreted against about 5 ns compiled,
+so roughly **13x** on the arithmetic itself. The remaining 95.7 ns is frame
+setup, which this tier does not touch and a later one will have to.
+
+Two findings worth keeping.
+
+A NaN produced by generated code has to be canonicalised. x86 hands back
+0xFFF8000000000000 for `0/0`, which is numerically above the tag threshold, so
+storing it raw would give the rest of the engine a number that reads as a tagged
+object. `tov` folds it for the same reason; compiled code has to do the same, at
+the cost of a compare and a never-taken branch.
+
+The correctness gate is bit equality with the interpreter, not numeric equality.
+The two differ exactly where it matters — the first NaN test written against
+`math.NaN()` failed, because Go's NaN is 0x7FF8000000000001 and neither the
+interpreter nor the compiler produces that one.

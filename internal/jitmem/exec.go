@@ -6,10 +6,10 @@ import "unsafe"
 // trampoline. Zero means "finished"; everything else means the runtime has to do
 // something and then resume.
 const (
-	ExitReturn uint64 = iota // the compiled function is done; Ret holds its value
-	ExitHelper               // run Helper with Args, put the result in Ret, resume
-	ExitPreempt              // Go wants this goroutine to yield
-	ExitDeopt                // a guard failed; fall back to the interpreter
+	ExitReturn  uint64 = iota // the compiled function is done; Ret holds its value
+	ExitHelper                // run Helper with Args, put the result in Ret, resume
+	ExitPreempt               // Go wants this goroutine to yield
+	ExitDeopt                 // a guard failed; fall back to the interpreter
 )
 
 // ExecContext is the state that generated code and the runtime share.

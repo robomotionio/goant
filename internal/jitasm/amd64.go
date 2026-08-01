@@ -225,7 +225,7 @@ func (a *Asm) PatchUint64(off int, v uint64) {
 	binary.LittleEndian.PutUint64(a.buf[off:], v)
 }
 
-func (a *Asm) MovRegReg(dst, src Reg)  { a.emitRM(true, []byte{0x89}, uint8(src), uint8(dst)) }
+func (a *Asm) MovRegReg(dst, src Reg) { a.emitRM(true, []byte{0x89}, uint8(src), uint8(dst)) }
 func (a *Asm) MovRegMem(dst, base Reg, disp int32) {
 	a.emitMem(true, []byte{0x8B}, uint8(dst), uint8(base), disp)
 }
