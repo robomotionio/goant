@@ -1,5 +1,7 @@
 package engine
 
+import "math"
+
 // %IteratorPrototype% and the built-in iterator objects returned by
 // Array/Map/Set entries/keys/values (ant modules/iterator.c). Each iterator is
 // an ordinary object whose `next` is a Go closure over a cursor; it inherits
@@ -170,9 +172,10 @@ func (rt *Runtime) iterHelperCallback(this, cb Value, name string) (Value, Value
 
 // iterHelperLimit validates the receiver and a numeric limit for take/drop, in
 // spec order: ToNumber(limit) first (closing the source on an abrupt completion),
-// then reject NaN and a negative ToIntegerOrInfinity with a RangeError (closing
-// first), and only THEN GetIteratorDirect (read "next"). +∞ / a huge value maps
-// to an unbounded limit; a fractional value truncates toward zero.
+// then reject — each closing the source first — NaN, a finite limit above
+// 2**53-1, and a negative ToIntegerOrInfinity, all with a RangeError; and only
+// THEN GetIteratorDirect (read "next"). +∞ maps to an unbounded limit; a
+// fractional value truncates toward zero.
 func (rt *Runtime) iterHelperLimit(this, limitArg Value) (Value, int, *ThrowError) {
 	if !this.IsObjectType() {
 		return mkundef(), 0, rt.typeError("Iterator.prototype method called on a non-object")
@@ -186,6 +189,12 @@ func (rt *Runtime) iterHelperLimit(this, limitArg Value) (Value, int, *ThrowErro
 		rt.iteratorClose(this)
 		return mkundef(), 0, rt.rangeError("limit must not be NaN")
 	}
+	// A limit that cannot be represented exactly is rejected rather than
+	// silently rounded — but +∞ stays legal and means "no limit".
+	if !math.IsInf(num, 0) && num > 9007199254740991 { // 2**53-1
+		rt.iteratorClose(this)
+		return mkundef(), 0, rt.rangeError("limit must not exceed 2**53 - 1")
+	}
 	// ToIntegerOrInfinity truncates toward zero, so only a value ≤ -1 is negative
 	// (e.g. -0.5 becomes 0 and is accepted).
 	if num <= -1 {
@@ -196,11 +205,76 @@ func (rt *Runtime) iterHelperLimit(this, limitArg Value) (Value, int, *ThrowErro
 	if e != nil {
 		return mkundef(), 0, e
 	}
-	limit := int(^uint(0) >> 1) // +∞ (or huge) → effectively unbounded
+	limit := int(^uint(0) >> 1) // +∞ → effectively unbounded
 	if num < float64(limit) {
 		limit = int(num) // truncates toward zero
 	}
 	return next, limit, nil
+}
+
+// iterChunkSize validates the chunkSize/windowSize argument of
+// Iterator.prototype.chunks and .windows. Like includes' skippedElements — and
+// unlike take/drop's limit — it is never coerced: a non-Number is a TypeError
+// and its valueOf/toString are not called. NaN and ±∞ are not integral and so
+// are TypeErrors too, leaving RangeError for a whole number outside the
+// inclusive interval [1, 2**32-1]. Every rejection closes the source first.
+func (rt *Runtime) iterChunkSize(this, sizeArg Value, what string) (uint64, *ThrowError) {
+	if !sizeArg.IsNumber() {
+		rt.iteratorClose(this)
+		return 0, rt.typeError(what + " must be a Number")
+	}
+	n := sizeArg.Number()
+	if math.IsInf(n, 0) || n != math.Trunc(n) { // Trunc(NaN) is NaN, so NaN lands here
+		rt.iteratorClose(this)
+		return 0, rt.typeError(what + " must be an integral Number")
+	}
+	if n < 1 || n > 4294967295 { // 2**32-1; -0 is below 1 and so rejected
+		rt.iteratorClose(this)
+		return 0, rt.rangeError(what + " must be between 1 and 2**32 - 1")
+	}
+	return uint64(n), nil
+}
+
+// copyArrayPrefix materialises a fresh Array holding src's first arrLen
+// elements. Both objects are resolved after the allocation, never across it.
+func (rt *Runtime) copyArrayPrefix(src Value) Value {
+	out := rt.newArray()
+	so, oo := rt.objPtr(src), rt.objPtr(out)
+	for i := uint32(0); i < so.arrLen; i++ {
+		rt.arraySet(oo, i, so.arr[i])
+	}
+	return out
+}
+
+// iterSkipCount validates the optional skippedElements argument of
+// Iterator.prototype.includes. Unlike take/drop's limit it is deliberately NOT
+// coerced — a non-Number is a TypeError and its valueOf/toString are never
+// called — and only ±∞ or an integral Number is accepted. A negative count is a
+// RangeError (but -0 is not negative), as is a finite count above 2**53-1.
+// Every rejection closes the source iterator first.
+func (rt *Runtime) iterSkipCount(this, skipArg Value) (float64, *ThrowError) {
+	if skipArg.IsUndefined() {
+		return 0, nil
+	}
+	if !skipArg.IsNumber() {
+		rt.iteratorClose(this)
+		return 0, rt.typeError("skippedElements must be an integral Number")
+	}
+	n := skipArg.Number()
+	// NaN falls out here too: Trunc(NaN) is NaN and NaN != NaN.
+	if !math.IsInf(n, 0) && n != math.Trunc(n) {
+		rt.iteratorClose(this)
+		return 0, rt.typeError("skippedElements must be an integral Number")
+	}
+	if n < 0 { // -∞ and -1 reject; -0 < 0 is false, so -0 is accepted
+		rt.iteratorClose(this)
+		return 0, rt.rangeError("skippedElements must not be negative")
+	}
+	if !math.IsInf(n, 0) && n > 9007199254740991 { // 2**53-1
+		rt.iteratorClose(this)
+		return 0, rt.rangeError("skippedElements must not exceed 2**53 - 1")
+	}
+	return n, nil
 }
 
 // getIteratorFlattenable implements GetIteratorFlattenable(obj, reject-primitives)
@@ -459,6 +533,119 @@ func (rt *Runtime) initIteratorHelpers() {
 			return v, false, nil
 		}, []Value{next}), nil
 	})
+	// chunks and windows are the only helpers that accumulate their input, so
+	// unlike the rest they need somewhere to put it that the collector can see.
+	// A Go slice will not do: appending past its capacity reallocates, and
+	// holdCaptures only ever recorded the original header, so everything added
+	// after the first growth would be invisible. The buffer is a JS array,
+	// reached through a one-element slot mutated in place — the same trick
+	// flatMap uses for its inner iterator.
+	rt.defMethod(proto, "chunks", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Iterator.prototype.chunks called on a non-object")
+		}
+		size, e := rt.iterChunkSize(this, arg(args, 0), "chunkSize")
+		if e != nil {
+			return mkundef(), e
+		}
+		next, e := rt.getField(this, "next") // GetIteratorDirect, after the size is valid
+		if e != nil {
+			return mkundef(), e
+		}
+		done := false
+		buf := []Value{rt.newArray()}
+		return rt.newIteratorObjectE(this, &done, func() (Value, bool, *ThrowError) {
+			if done {
+				return mkundef(), true, nil
+			}
+			for {
+				v, d, se := rt.iterStepValue(this, next)
+				if se != nil {
+					done = true
+					return mkundef(), false, se
+				}
+				if d {
+					// Running the source dry is not a close: `return` is never read.
+					done = true
+					if bo := rt.objPtr(buf[0]); bo.arrLen > 0 {
+						return buf[0], false, nil // the short final chunk
+					}
+					return mkundef(), true, nil
+				}
+				bo := rt.objPtr(buf[0])
+				rt.arraySet(bo, bo.arrLen, v)
+				if uint64(bo.arrLen) == size {
+					full := buf[0]
+					buf[0] = rt.newArray() // every chunk is a distinct array
+					return full, false, nil
+				}
+			}
+		}, []Value{next}, buf), nil
+	})
+	rt.defMethod(proto, "windows", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Iterator.prototype.windows called on a non-object")
+		}
+		size, e := rt.iterChunkSize(this, arg(args, 0), "windowSize")
+		if e != nil {
+			return mkundef(), e
+		}
+		// undersized is an exact string, not a coerced one.
+		allowPartial := false
+		switch u := arg(args, 1); {
+		case u.IsUndefined(): // omitted means "only-full"
+		case !u.IsString():
+			rt.iteratorClose(this)
+			return mkundef(), rt.typeError(`undersized must be "only-full" or "allow-partial"`)
+		case rt.strGo(u) == "allow-partial":
+			allowPartial = true
+		case rt.strGo(u) == "only-full":
+		default:
+			rt.iteratorClose(this)
+			return mkundef(), rt.typeError(`undersized must be "only-full" or "allow-partial"`)
+		}
+		next, e := rt.getField(this, "next") // GetIteratorDirect, after both arguments are valid
+		if e != nil {
+			return mkundef(), e
+		}
+		done := false
+		buf := []Value{rt.newArray()}
+		return rt.newIteratorObjectE(this, &done, func() (Value, bool, *ThrowError) {
+			if done {
+				return mkundef(), true, nil
+			}
+			for {
+				v, d, se := rt.iterStepValue(this, next)
+				if se != nil {
+					done = true
+					return mkundef(), false, se
+				}
+				if d {
+					done = true
+					// A tail too short to fill a window is yielded once, and only
+					// when the caller asked for partials.
+					if bo := rt.objPtr(buf[0]); allowPartial && bo.arrLen > 0 && uint64(bo.arrLen) < size {
+						return rt.copyArrayPrefix(buf[0]), false, nil
+					}
+					return mkundef(), true, nil
+				}
+				bo := rt.objPtr(buf[0])
+				rt.arraySet(bo, bo.arrLen, v)
+				if uint64(bo.arrLen) != size {
+					continue
+				}
+				out := rt.copyArrayPrefix(buf[0])
+				// Slide by one. Re-resolve the buffer: allocating the window above
+				// is the kind of call after which a stale *object is a bug.
+				bo = rt.objPtr(buf[0])
+				n := bo.arrLen
+				copy(bo.arr[:n-1], bo.arr[1:n])
+				bo.arr[n-1] = tEmpty
+				bo.arrLen = n - 1
+				return out, false, nil
+			}
+		}, []Value{next}, buf), nil
+	})
 	rt.defMethod(proto, "flatMap", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "flatMap")
 		if e != nil {
@@ -671,6 +858,40 @@ func (rt *Runtime) initIteratorHelpers() {
 					return mkundef(), ce
 				}
 				return v, nil
+			}
+		}
+	})
+	rt.defMethod(proto, "includes", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Iterator.prototype.includes called on a non-object")
+		}
+		toSkip, e := rt.iterSkipCount(this, arg(args, 1))
+		if e != nil {
+			return mkundef(), e
+		}
+		next, e := rt.getField(this, "next") // GetIteratorDirect, after the count is valid
+		if e != nil {
+			return mkundef(), e
+		}
+		search, skipped := arg(args, 0), 0.0
+		for {
+			v, d, se := rt.iterStepValue(this, next)
+			if se != nil {
+				return mkundef(), se
+			}
+			if d {
+				// Running the source dry is not a close: `return` is never read.
+				return mkfalse(), nil
+			}
+			if skipped < toSkip { // never true once toSkip is 0; always true for +∞
+				skipped++
+				continue
+			}
+			if rt.sameValueZero(search, v) {
+				if ce := rt.iteratorCloseE(this); ce != nil {
+					return mkundef(), ce
+				}
+				return mktrue(), nil
 			}
 		}
 	})

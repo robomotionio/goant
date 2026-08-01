@@ -5,8 +5,9 @@ package engine
 // Everything the engine does internally is unexported, on purpose: the
 // interpreter is free to change shape as long as the spec-visible behaviour
 // holds. This file is the one place that promises stability to a host program,
-// so it is deliberately narrow — object/property access, value conversion,
-// host functions, promises and the job queue, and nothing else.
+// so it is deliberately narrow — object and property access, array and index
+// access, construction, value conversion, host functions, promises and the job
+// queue, and nothing else.
 //
 // Values are handles into this Runtime's pools, so a Value is only meaningful
 // paired with the Runtime that produced it. The host wrapper types keep that
@@ -14,6 +15,7 @@ package engine
 
 import (
 	"errors"
+	"math/big"
 	"unsafe"
 )
 
@@ -315,4 +317,236 @@ func ExceptionValue(err error) (Value, bool) {
 		return terr.Value, true
 	}
 	return mkundef(), false
+}
+
+// --- containers -------------------------------------------------------------
+
+// NewArray returns a fresh Array holding vals.
+func (rt *Runtime) NewArray(vals ...Value) Value {
+	a := rt.newArray()
+	o := rt.objPtr(a)
+	for i, v := range vals {
+		rt.arraySet(o, uint32(i), v)
+	}
+	return a
+}
+
+// GetIndex reads obj[i], honouring getters, the prototype chain and exotic
+// index behaviour (arrays, strings, typed arrays).
+func (rt *Runtime) GetIndex(obj Value, i int) (Value, error) {
+	v, terr := rt.getElement(obj, mknum(float64(i)))
+	if terr != nil {
+		return mkundef(), terr
+	}
+	return v, nil
+}
+
+// SetIndex writes obj[i].
+func (rt *Runtime) SetIndex(obj Value, i int, v Value) error {
+	if terr := rt.setElement(obj, mknum(float64(i)), v); terr != nil {
+		return terr
+	}
+	return nil
+}
+
+// LengthOf reads obj.length and coerces it the way the array built-ins do. It
+// is the length of an array, a string or an array-like; anything without a
+// numeric length reports 0.
+func (rt *Runtime) LengthOf(obj Value) (int, error) {
+	n, terr := rt.lengthOf(obj)
+	if terr != nil {
+		return 0, terr
+	}
+	return n, nil
+}
+
+// HasProp reports whether obj.name resolves, own or inherited — the `in`
+// operator. A Proxy's has trap can throw, so this can fail.
+func (rt *Runtime) HasProp(obj Value, name string) (bool, error) {
+	has, terr := rt.hasPropE(obj, name)
+	if terr != nil {
+		return false, terr
+	}
+	return has, nil
+}
+
+// DeleteProp removes obj.name, returning whether it is gone afterwards — the
+// `delete` operator, which reports false for a non-configurable property
+// rather than throwing (outside strict mode).
+func (rt *Runtime) DeleteProp(obj Value, name string) (bool, error) {
+	ok, terr := rt.deleteElement(obj, rt.internString(name))
+	if terr != nil {
+		return false, terr
+	}
+	return ok, nil
+}
+
+// OwnKeys returns obj's own enumerable string keys, in property order: integer
+// indices ascending, then the rest in insertion order. This is Object.keys, so
+// it excludes symbols, inherited properties and non-enumerable ones.
+func (rt *Runtime) OwnKeys(obj Value) ([]string, error) {
+	keys, terr := rt.enumerableOwnKeysE(obj)
+	if terr != nil {
+		return nil, terr
+	}
+	return keys, nil
+}
+
+// Construct invokes fn as a constructor — `new fn(args...)`.
+func (rt *Runtime) Construct(fn Value, args []Value) (Value, error) {
+	if !rt.isConstructorValue(fn) {
+		return mkundef(), errors.New("goant: value is not a constructor")
+	}
+	v, terr := rt.construct(fn, args)
+	if terr != nil {
+		return mkundef(), terr
+	}
+	return v, nil
+}
+
+// --- further type predicates ------------------------------------------------
+
+// IsSymbol and IsBigInt cover the two primitives the basic predicates omit.
+func (rt *Runtime) IsSymbol(v Value) bool { return v.IsSymbol() }
+func (rt *Runtime) IsBigInt(v Value) bool { return v.Type() == TBigInt }
+
+// IsTypedArray reports whether v is an integer-indexed exotic object. Such a
+// value is not IsObject — it has its own tag — so a host walking a graph must
+// test for it separately.
+func (rt *Runtime) IsTypedArray(v Value) bool { return v.Type() == TTypedArray }
+
+// IsDate reports whether v is a Date object, by its internal slot rather than
+// by its prototype, so an object merely inheriting from Date.prototype is not
+// mistaken for one.
+func (rt *Runtime) IsDate(v Value) bool {
+	o := rt.objPtr(v)
+	return o != nil && o.brandID() == brandDate
+}
+
+// IsError reports whether v inherits from Error.prototype.
+func (rt *Runtime) IsError(v Value) bool {
+	return v.IsObjectType() && rt.hasInProtoChain(v, rt.errorProto)
+}
+
+// StrictEquals applies ===.
+func (rt *Runtime) StrictEquals(a, b Value) bool { return rt.strictEquals(a, b) }
+
+// --- dates, bigints, bytes --------------------------------------------------
+
+// DateMillis returns a Date's time value in milliseconds since the epoch. ok is
+// false if v is not a Date; the value is NaN for an invalid one.
+func (rt *Runtime) DateMillis(v Value) (ms float64, ok bool) {
+	o := rt.objPtr(v)
+	if o == nil || o.brandID() != brandDate {
+		return 0, false
+	}
+	return o.boxed.Number(), true
+}
+
+// NewDate builds a Date from milliseconds since the epoch, through the Date
+// constructor so it gets the running realm's prototype.
+func (rt *Runtime) NewDate(ms float64) (Value, error) {
+	ctor, terr := rt.getField(rt.global, "Date")
+	if terr != nil {
+		return mkundef(), terr
+	}
+	return rt.Construct(ctor, []Value{mknum(ms)})
+}
+
+// BigInt returns a BigInt's value. The returned big.Int is a copy, so the
+// caller may keep or modify it.
+func (rt *Runtime) BigInt(v Value) (*big.Int, bool) {
+	if v.Type() != TBigInt {
+		return nil, false
+	}
+	cell := rt.bigints.get(Handle(v.handle()))
+	if cell == nil || cell.v == nil {
+		return nil, false
+	}
+	return new(big.Int).Set(cell.v), true
+}
+
+// NewBigIntValue boxes a big.Int. The engine copies it, so the caller keeps
+// ownership of x.
+func (rt *Runtime) NewBigIntValue(x *big.Int) Value {
+	if x == nil {
+		return rt.newBigInt(new(big.Int))
+	}
+	return rt.newBigInt(new(big.Int).Set(x))
+}
+
+// NewUint8Array wraps b as a Uint8Array without copying it: the returned view
+// reads and writes the caller's slice directly. Like NewStringBytes this trades
+// a copy for a contract — b is now the array's backing store, and a host that
+// keeps writing to it is writing into live JavaScript state.
+//
+// Pass a copy if that is not what you want.
+func (rt *Runtime) NewUint8Array(b []byte) Value {
+	buf := rt.newObject(rt.arrayBufferProto)
+	bo := rt.objPtr(buf)
+	bo.abuf = b
+	bo.abMax = len(b)
+	bo.abObj = true
+
+	h, o := rt.objects.alloc()
+	o.self = h
+	o.proto = rt.typedArrayProtos[taUint8]
+	o.shape = rt.newShape()
+	o.typeTag = TTypedArray
+	o.flags.extensible = true
+	o.ta = &typedArray{buf: buf, kind: taUint8, length: len(b)}
+	return mkval(TTypedArray, uint64(h))
+}
+
+// IsByteArray reports whether v is a value whose contents are unambiguously
+// bytes: an ArrayBuffer, or a one-byte-per-element view of one. A Float64Array
+// has bytes too, but they are not what it holds, so it is excluded — a host
+// deciding how to represent a value should not turn its numbers into a blob.
+func (rt *Runtime) IsByteArray(v Value) bool {
+	o := rt.objPtr(v)
+	if o == nil {
+		return false
+	}
+	if o.abObj {
+		return true
+	}
+	if o.ta == nil {
+		return false
+	}
+	switch o.ta.kind {
+	case taInt8, taUint8, taUint8Clamped:
+		return true
+	}
+	return false
+}
+
+// Bytes returns the bytes behind an ArrayBuffer or any typed-array view of one,
+// without copying. ok is false for anything else, and for a detached buffer.
+//
+// For a view the slice covers only that view's window. The bytes are live: a
+// write through the returned slice is visible to the script.
+func (rt *Runtime) Bytes(v Value) ([]byte, bool) {
+	o := rt.objPtr(v)
+	if o == nil {
+		return nil, false
+	}
+	if o.abObj {
+		if o.abuf == nil {
+			return nil, false
+		}
+		return o.abuf, true
+	}
+	if o.ta == nil || rt.taDetached(o) {
+		return nil, false
+	}
+	buf := rt.taBytes(o.ta)
+	start := o.ta.byteOffset
+	end := len(buf)
+	if !o.ta.track {
+		end = start + o.ta.length*o.ta.size()
+	}
+	if start > len(buf) || end > len(buf) || start > end {
+		return nil, false
+	}
+	return buf[start:end:end], true
 }
