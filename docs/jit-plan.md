@@ -1,0 +1,212 @@
+# The JIT
+
+goant runs a switch-dispatched bytecode interpreter. On Octane it scores between
+23x and 430x behind the JIT engines. This document records what the profiles
+actually say, why the plan in PLAN.md (port MIR, then port swarm.c onto it) is
+not the first thing to build, and what replaces it.
+
+## What the interpreter spends its time on
+
+CPU profiles of five Octane benchmarks, 8 vCPU non-burstable, idle machine:
+
+| cost centre | Richards / DeltaBlue | Crypto / NavierStokes |
+| --- | --- | --- |
+| dispatch (`runFrameBody` flat) | 29–31% | 30–34% |
+| operand stack push/pop | 13–15% | 13% |
+| handle to pointer (`objPtr`, pool) | 10–12% | 3–6% |
+| tag checks (`isTagged`, `Type`) | ~7% | ~8% |
+| inline-cache probe | 5–9% | — |
+| number coercion helpers | small | 30–40% |
+
+Half of Richards and DeltaBlue is dispatch, operand-stack traffic and tag
+testing. A third of Crypto and NavierStokes is generic number coercion: `OpAdd`
+has no inline double path, so `1.5 + 2.5` goes out of line through `toPrimitive`
+twice, two string tests, two BigInt tests, `toNumberPrimitive` twice, and
+`mknum`.
+
+## The value representation is the thing that matters
+
+`lucasdss/v8go` is a clean-room JavaScript engine in pure Go with a complete
+two-tier JIT: a Sparkplug-style baseline and a TurboFan-style optimiser with an
+SSA sea-of-nodes IR, escape analysis, GVN and nine passes. It is the only
+comparable prior art, and its results are the most useful number in this
+document:
+
+| | interpreter | Sparkplug | TurboFan |
+| --- | --- | --- | --- |
+| loop, 100 iterations | 11.8 µs | 6.8 µs (1.7x) | 6.8 µs (1.7x) |
+| object creation | 209 ns | 111 ns (2.0x) | — |
+
+An entire optimising tier for no gain over the baseline. Their own analysis
+(`docs/PERFORMANCE-DEEP-DIVE.md`) explains it, and marks the first two causes
+"Irreducible: Yes — root cause: Go GC architecture":
+
+- No tagged integers, because "Go's garbage collector scans every 8-byte aligned
+  value for valid heap pointers. If we used tagged integers, Go's GC would
+  interpret them as corrupted pointers and crash." Their value is a 48-byte
+  struct, so `1 + 2` reads 48 bytes, computes, writes 48 bytes and allocates.
+- No compressed references, because "Go's GC only traces full 64-bit pointers."
+
+goant is not subject to either. `Value` is a NaN-boxed `uint64`; object
+references are 32-bit handles into chunked non-moving pools; nothing the
+interpreter manipulates is a Go pointer, so Go's collector never traces a value
+and never needs to be told about one. What caps their JIT at 1.7x does not exist
+here. It also means goant needs no shadow stack to keep values visible to the Go
+collector, which they carry as `AMD64ShadowStack`.
+
+The corollary is a constraint, not a licence. Their third cause is that
+"most property operations delegate to Go helper functions", and they name the
+fix they did not implement: "True inline property access would require emitting
+the full guard chain in assembly." A JIT that removes dispatch and calls a Go
+helper for everything else lands on their number regardless of value
+representation. Generated code has to inline the guard chain, the double
+arithmetic path and the tag tests, or there is no point emitting code at all.
+
+## Why not MIR first
+
+`ant/src/silver/swarm.c` emits 38 distinct `MIR_*` symbols, and the distribution
+shows what MIR is being asked for:
+
+```
+285 MIR_MOV    103 MIR_JMP     59 MIR_BNE     53 MIR_BEQ
+ 44 MIR_URSH    20 MIR_OR      13 MIR_AND      ← NaN-box pack and unpack
+  9 MIR_DADD     9 MIR_DSUB     6 MIR_DMUL     6 MIR_DDIV   ← all the JS arithmetic
+```
+
+About 25 real instructions. Porting mir.c, mir-gen.c and two backends — roughly
+30k lines of dense C — to obtain an emitter for 25 instructions is a poor trade.
+MIR does do work beyond emission: swarm creates around 1,445 virtual registers
+and leans on `-O3` copy propagation, DCE and live-range allocation to clean up
+deliberately naive IR. But that is SSA plus copy-prop plus DCE plus linear scan,
+not the loop optimiser the other 25k lines pay for.
+
+Two further problems. MIR models neither deoptimisation nor GC safepoints, so
+the hard parts of a JavaScript JIT remain to be designed either way. And in C a
+`jit_helper_*` call is an ordinary `CALL`, while in Go generated code cannot call
+a Go function directly — `morestack` would run with an unknown return PC — so
+each of swarm's 72 helpers becomes an exit and re-entry through a trampoline.
+swarm's code fires helpers on every inline-cache miss. Whether that is affordable
+is unknown, and it decides the whole design. Phase 2 measures it before anything
+depends on the answer.
+
+## Shape of the work
+
+| phase | what | gate |
+| --- | --- | --- |
+| 0 | Inline double fast paths in the interpreter | conformance unchanged, Octane up |
+| 1 | Per-site type feedback recorded by the interpreter | feedback matches a reference interpretation |
+| 2 | `jitmem`: executable memory, entry trampoline, helper round trip | runs on all five targets; round-trip cost measured |
+| 3 | Baseline JIT for amd64 and arm64 | zero interpreter/JIT differentials |
+| 4 | Optimising tier, backend chosen on phase 2's evidence | — |
+
+Phase 1 is a prerequisite for every possible phase 3 and pays off in the
+interpreter first. Phase 2 is where the project either de-risks or dies, and it
+is small.
+
+### Phase 0, done
+
+Four inline guards. Octane, median of three, the two binaries interleaved on an
+idle machine so drift cannot favour either:
+
+| | before | after | |
+| --- | --- | --- | --- |
+| Crypto | 133 | 236 | +77% |
+| NavierStokes | 311 | 435 | +40% |
+| Richards | 197 | 215 | +9% |
+| RayTrace | 374 | 391 | +5% |
+| RegExp | 143 | 148 | +3% |
+| DeltaBlue | 233 | 240 | +3% |
+| EarleyBoyer | 599 | 612 | +2% |
+| Splay | 1919 | 1944 | +1% |
+| **geomean** | | | **+15.3%** |
+
+test262 core unchanged at 42739/42740.
+
+## Platforms
+
+Five targets — windows/amd64, linux/amd64, darwin/amd64, darwin/arm64,
+linux/arm64 — but two backends. Generated code never uses the platform C ABI, so
+the calling convention is goant's own and identical across operating systems for
+a given architecture. What differs is confined to obtaining executable memory:
+
+| | reserve and commit | make executable |
+| --- | --- | --- |
+| linux, darwin | `mmap` PROT_READ\|PROT_WRITE | `mprotect` PROT_READ\|PROT_EXEC |
+| windows | `VirtualAlloc` PAGE_READWRITE | `VirtualProtect` PAGE_EXECUTE_READ |
+
+Write-then-flip rather than a permanently writable-and-executable mapping, which
+is what makes this work on Apple Silicon without `MAP_JIT` and keeps the pages
+acceptable to hardened runtimes. None of it needs cgo: on Windows, `kernel32` is
+reached through `syscall.NewLazyDLL`, which is how Go's own standard library
+calls Win32.
+
+wazero is the existence proof for the approach — a pure-Go compiler backend in
+production on linux/amd64, linux/arm64, windows/amd64 and darwin/arm64 with zero
+cgo. `lucasdss/v8go` is the cautionary one: it has a working baseline JIT that
+builds on linux/arm64 and no other target.
+
+The interpreter remains the fallback tier on every platform, so a target without
+a backend is slow, never broken.
+
+### Hazards that are not optional
+
+- **Reserve the goroutine register.** R14 on amd64, R28 on arm64. Go's runtime
+  and signal handling find the current goroutine through it; generated code that
+  clobbers it turns the next signal into a crash.
+- **Poll `g.stackguard0` for preemption.** Go sets it to `0xfffffffffffffade`
+  when a goroutine should yield. Reading it from generated code at back edges is
+  how JIT'd loops stay preemptible; it is a real integration with Go's scheduler
+  rather than an approximation of one.
+- **Flush the instruction cache on arm64.** D-cache and I-cache are not coherent,
+  so code written through a read-write mapping is not necessarily visible to the
+  fetcher. Needs a short assembly routine per platform.
+- **Do not grow the goroutine stack.** Generated code runs on its own stack, and
+  the trampoline that enters it is `NOSPLIT`.
+- **macOS notarisation** requires `com.apple.security.cs.allow-jit` and
+  `com.apple.security.cs.allow-unsigned-executable-memory` on the shipped app.
+  This applies to any JIT, V8 included.
+- **Profilers go blind** through generated frames. Symbolisation is a later
+  concern but the frame layout should not make it impossible.
+
+## Phase 2 in detail
+
+The spike that settles the design:
+
+1. `CodeBuf` — allocate, write, make executable, free. Five targets.
+2. An entry trampoline in Go assembly per architecture: switch to the JIT stack,
+   enter generated code, return a value.
+3. A hand-assembled function proving the path end to end.
+4. A helper protocol: generated code leaves, a Go function runs, execution
+   resumes. Measured, because the number decides phase 3 and 4.
+
+The answer to look for: an ordinary Go call is a few nanoseconds. If the round
+trip is comparable, generated code can lean on helpers and swarm.c's structure
+ports. If it is an order of magnitude worse, the baseline JIT must inline far
+more aggressively and porting swarm's helper-heavy output is the wrong shape.
+
+### What it measured
+
+8 vCPU non-burstable, idle, three runs each, all within 1%:
+
+| | ns/op | |
+| --- | --- | --- |
+| direct Go call | 1.44 | what a `jit_helper_*` costs in C ant |
+| enter generated code and return | 3.19 | the trampoline alone |
+| full helper round trip | 7.60 | exit, dispatch in Go, re-enter |
+
+Leaving generated code and coming back costs about six nanoseconds more than an
+ordinary call. That is affordable — an inline-cache miss already costs several
+times this in shape lookup and hashing, so delegating slow paths to helpers is
+fine, and the exit-and-re-enter protocol is not the obstacle it might have been.
+
+It is also a bound on what may be delegated. Interpreted `a + b` now costs on the
+order of two nanoseconds, so an `OpAdd` compiled into a helper call would be
+*slower* than not compiling it at all. This is the same conclusion
+`lucasdss/v8go` reached from the other direction, with a number attached: the
+arithmetic fast paths and the inline-cache hit path have to be emitted as
+machine code, and helpers are for the cases that were already expensive.
+
+Two things the measurement does not include, both expected to be small: generated
+code here runs on the goroutine stack rather than a dedicated one, which will add
+a register save and restore rather than a stack switch, and there is no
+back-edge preemption poll yet, which is a load and a compare.

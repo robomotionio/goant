@@ -1419,6 +1419,18 @@ restart:
 
 		case OpAdd:
 			b, a := pop(), pop()
+			// Two Numbers is the overwhelmingly common case and the whole of
+			// jsAdd is unreachable for it: ToPrimitive on a Number is the
+			// identity, neither operand can be a String or a BigInt, and
+			// ToNumber is the identity again. Reaching that conclusion cost two
+			// out-of-line calls and eight tag tests, which is 30-40% of Crypto
+			// and NavierStokes. An untagged Value IS a double, so the guard is
+			// two compares.
+			if a.IsNumber() && b.IsNumber() {
+				push(tov(a.Number() + b.Number()))
+				ip++
+				continue
+			}
 			v, e := rt.jsAdd(a, b)
 			if e != nil {
 				thrown = e
@@ -1428,6 +1440,26 @@ restart:
 			ip++
 		case OpSub, OpMul, OpDiv, OpMod, OpExp:
 			b, a := pop(), pop()
+			// Same reasoning as OpAdd. Exponentiation is left to jsArith: jsExp
+			// has ES-specific NaN and sign rules that are not worth restating
+			// here for an operator this rare.
+			if a.IsNumber() && b.IsNumber() && op != OpExp {
+				x, y := a.Number(), b.Number()
+				var r float64
+				switch op {
+				case OpSub:
+					r = x - y
+				case OpMul:
+					r = x * y
+				case OpDiv:
+					r = x / y
+				default: // OpMod
+					r = jsMod(x, y)
+				}
+				push(tov(r))
+				ip++
+				continue
+			}
 			v, e := rt.jsArith(op, a, b)
 			if e != nil {
 				thrown = e
@@ -2572,6 +2604,13 @@ type completion struct {
 // ---- operator semantics ----
 
 func (rt *Runtime) toNumber(v Value) (float64, *ThrowError) {
+	// ToNumber of a Number is the identity. Saying so here rather than
+	// discovering it inside toNumberPrimitive removes a call and a tag dispatch
+	// from every arithmetic site the OpAdd/OpSub guards do not already cover —
+	// compound assignment, increment, array indices, the relational operators.
+	if v.IsNumber() {
+		return v.Number(), nil
+	}
 	if v.IsObjectType() || v.Type() == TTypedArray {
 		p, e := rt.toPrimitive(v, "number")
 		if e != nil {
@@ -2687,6 +2726,13 @@ func (rt *Runtime) jsArith(op Opcode, a, b Value) (Value, *ThrowError) {
 // apply it to each operand BEFORE dispatching the BigInt-vs-Number path, so an
 // object whose valueOf/@@toPrimitive yields a BigInt is not misread as a mix.
 func (rt *Runtime) toNumeric(v Value) (Value, *ThrowError) {
+	// A Number is already a numeric primitive, and mknum(tod(v)) would hand back
+	// the same bits — tov only rewrites a NaN whose pattern collides with the
+	// tag space, and no Value in circulation carries one. This is the fast path
+	// for the bitwise operators, which is most of Crypto.
+	if v.IsNumber() {
+		return v, nil
+	}
 	p, e := rt.toPrimitive(v, "number")
 	if e != nil {
 		return mkundef(), e
