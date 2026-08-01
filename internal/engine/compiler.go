@@ -552,9 +552,52 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 	// Everything emitted so far is InitializeEnvironment, which for a Module runs
 	// at LINK time rather than at evaluation.
 	hoistEnd := len(c.fn.code)
+
+	// A `using`/`await using` at the top level of a Module or Script disposes when
+	// evaluation finishes — the same scaffolding a function body and a nested
+	// block use, and the reason it is emitted below hoistEnd: the disposal stack
+	// must be created when the module is EVALUATED, not when it is linked.
+	bodyUsing := blockHasUsing(prog.Args)
+	dispose, disposeSuppressed := OpUsingDispose, OpUsingDisposeSuppressed
+	if blockHasAwaitUsing(prog.Args) {
+		// Only a Module can carry `await using` here; a Script has no top-level
+		// await, so the parser has already rejected it.
+		dispose, disposeSuppressed = OpUsingDisposeAsync, OpUsingDisposeAsyncSuppressed
+		c.fn.usesAwait = true
+	}
+	var usingStackLocal, usingErrLocal, usingCatch, usingEnd int
+	savedUsingStack := c.usingStack
+	if bodyUsing {
+		c.emit(OpArray)
+		c.emitU16(0)
+		usingStackLocal = c.addLocal("*using*", false)
+		c.emitOpU16(OpPutLocal, uint16(usingStackLocal))
+		usingErrLocal = c.addLocal("*usingerr*", false)
+		c.usingStack = usingStackLocal
+		usingCatch = c.emitJump(OpTryPush)
+	}
 	c.compileStmts(prog.Args)
 	if c.err != nil {
 		return nil, c.err
+	}
+	if bodyUsing {
+		// Normal completion: dispose, leaving the completion value untouched.
+		c.emit(OpTryPop)
+		c.emitOpU16(OpGetLocal, uint16(usingStackLocal))
+		c.emit(dispose)
+		c.emit(OpPop)
+		usingEnd = c.emitJump(OpJmp)
+		// Abrupt completion (throw): dispose-suppressed, then re-throw.
+		c.patchJump(usingCatch)
+		c.emit(OpCatch)
+		c.emitU32(0)
+		c.emitOpU16(OpPutLocal, uint16(usingErrLocal))
+		c.emitOpU16(OpGetLocal, uint16(usingStackLocal))
+		c.emitOpU16(OpGetLocal, uint16(usingErrLocal))
+		c.emit(disposeSuppressed)
+		c.emit(OpThrow)
+		c.patchJump(usingEnd)
+		c.usingStack = savedUsingStack
 	}
 	if isModule {
 		// Resolve each export to the top-level slot holding it, while the module
