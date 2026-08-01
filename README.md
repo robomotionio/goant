@@ -213,7 +213,7 @@ goant  1
 ```
 
 On the same Test262 core profile, from the same checkout and through the same
-harness, **goant passes 42,620 of 42,758 and goja passes 33,304** — a gap of
+harness, **goant passes 42,739 of 42,740 and goja passes 33,303** — a gap of
 over nine thousand tests. It is not spread thin, either. It is `for await…of`
 (1,142), async generators (1,608), classes containing them (2,016), `import()`
 (475), top-level `await` (250), iterator helpers (495), `\p{…}` property
@@ -230,6 +230,17 @@ models change what they emit, and it cannot be explained in a tooltip.
 So the requirement was never "pure Go" on its own. It was **pure Go and current**
 — which in practice means chasing the specification itself rather than a feature
 list. That is why the target is 100% of Test262's core profile.
+
+There is a second reason, and for a robot runtime it matters as much as the
+first: **goja has no heap limit.** Its `Runtime` exposes `SetMaxCallStackSize`,
+which bounds recursion depth, and nothing that bounds memory. A script that
+retains more than the host can give it allocates until the Go runtime cannot
+satisfy an allocation, and Go's out-of-memory is a runtime throw rather than a
+panic — no `recover`, no deferred anything, and every other goroutine in the
+process goes with it. That is the same failure that took V8 down for us, arrived
+at by a different road. goant's answer is
+[`WithMemoryLimit`](#what-the-memory-limit-counts): a budget, and an error the
+host can route to a Catch node.
 
 None of this is a knock on goja: it is a good engine, it is faster than goant on
 tight loops, and it starts faster. It is aimed at a different problem.
@@ -253,7 +264,7 @@ What happened after was not a port any more:
    ESNext, as the first bar. → 1511/1511.
 2. **Then chase the specification.** Test262's ECMA-262 core profile, because
    that is the only bar that answers "will this run what my users write". →
-   42,620 of 42,758, against goja's 33,304.
+   42,739 of 42,740, against goja's 33,303.
 3. **Then find the bugs conformance does not.** V8's own `mjsunit` corpus — a
    decade and a half of real bug reports — run as a crash hunt rather than for
    a score. → 2,653/3,149, and nothing in it crashes the engine any more.
