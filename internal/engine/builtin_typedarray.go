@@ -413,9 +413,18 @@ func (rt *Runtime) newArrayBuffer(byteLen int) Value {
 	if byteLen < 0 {
 		byteLen = 0
 	}
+	// Deliberately NOT reserve-checked. A refusal here could only be reported
+	// by stopping the script, and a script with no safepoint left to reach —
+	// `var b = new ArrayBuffer(2e9)` and nothing after it — would sail past the
+	// stop and be handed a silently truncated buffer, which is a wrong answer
+	// where there was going to be an error. The post-sweep check covers this
+	// safely instead: cap(o.abuf) is counted in liveePayload, so a buffer that
+	// is actually USED is caught at the next collection, and one that is never
+	// touched costs untouched zero pages and no resident memory.
 	o.abuf = make([]byte, byteLen)
 	o.abMax = byteLen
 	o.abObj = true
+	rt.chargeBytes(uint64(byteLen))
 	return v
 }
 
@@ -426,10 +435,19 @@ func (rt *Runtime) newArrayBuffer(byteLen int) Value {
 func (rt *Runtime) newResizableArrayBuffer(byteLen, maxLen int) Value {
 	v := rt.newObject(rt.arrayBufferProto)
 	o := rt.objPtr(v)
+	// Deliberately NOT reserve-checked. A refusal here could only be reported
+	// by stopping the script, and a script with no safepoint left to reach —
+	// `var b = new ArrayBuffer(2e9)` and nothing after it — would sail past the
+	// stop and be handed a silently truncated buffer, which is a wrong answer
+	// where there was going to be an error. The post-sweep check covers this
+	// safely instead: cap(o.abuf) is counted in liveePayload, so a buffer that
+	// is actually USED is caught at the next collection, and one that is never
+	// touched costs untouched zero pages and no resident memory.
 	o.abuf = make([]byte, byteLen)
 	o.abMax = maxLen
 	o.abResizable = true
 	o.abObj = true
+	rt.chargeBytes(uint64(byteLen))
 	return v
 }
 

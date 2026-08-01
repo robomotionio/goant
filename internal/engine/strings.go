@@ -26,11 +26,38 @@ const (
 	strAsciiNo      = 2
 )
 
-// newStringBytes creates a flat string from raw WTF-8 bytes.
+// newStringBytes creates a flat string from raw WTF-8 bytes, charging the
+// collector for them. Every caller but one hands over a buffer it has just
+// allocated; the exception is the concat fast path, which appends into a buffer
+// already charged for and so builds its cell with newStringBytesRaw instead.
+//
+// The limit test is inline and the charge is the call behind it, rather than
+// letting chargeBytes do both: this is on the path of every string the engine
+// creates, so a run with no limit set pays one compare and never a call. The
+// body is duplicated in newStringBytesRaw for the same reason — delegating cost
+// measurable time on string-building code that had set no limit at all.
+//
+// Note it must go through chargeBytes and not just add to allocBytes. Charging
+// is what lowers gc.next when the byte budget runs out, and that is the only
+// thing that brings a string-heavy script to a collection; incrementing the
+// counter alone leaves it growing forever with nothing ever testing the limit.
 func (rt *Runtime) newStringBytes(b []byte) Value {
+	if rt.heapLimit != 0 {
+		rt.chargeBytes(uint64(cap(b)))
+	}
 	h, fs := rt.strings.alloc()
 	fs.bytes = b
 	fs.gostr = "" // the cell may be recycled; drop the previous string's cache
+	fs.isASCII = strAsciiUnknown
+	return mkFlatStr(h)
+}
+
+// newStringBytesRaw is newStringBytes without the charge, for a caller that has
+// accounted for the bytes itself.
+func (rt *Runtime) newStringBytesRaw(b []byte) Value {
+	h, fs := rt.strings.alloc()
+	fs.bytes = b
+	fs.gostr = ""
 	fs.isASCII = strAsciiUnknown
 	return mkFlatStr(h)
 }
@@ -558,8 +585,16 @@ func (rt *Runtime) concatStrings(sa, sb Value) Value {
 
 	if fa.extendable && cap(a)-len(a) >= len(b) {
 		fa.extendable = false
-		// Same backing array: within capacity, append cannot reallocate.
-		return rt.newExtendableString(append(a, b...))
+		// Same backing array: within capacity, append cannot reallocate. Only
+		// len(b) is new memory — charging cap would re-charge the whole
+		// accumulator on every append and make an O(n) loop trigger O(n^2)
+		// bytes' worth of collections.
+		rt.chargeBytes(uint64(len(b)))
+		v := rt.newStringBytesRaw(append(a, b...))
+		if fs := rt.flatOf(v); fs != nil {
+			fs.extendable = true
+		}
+		return v
 	}
 
 	n := len(a) + len(b)
@@ -573,6 +608,13 @@ func (rt *Runtime) concatStrings(sa, sb Value) Value {
 	// copying done below the threshold is bounded by the threshold itself.
 	if n < concatGrowThreshold {
 		return rt.newStringBytes(concatWTF8(a, b))
+	}
+	// The doubling below is the allocation most likely to be the one that does
+	// not fit. Ask before taking it; on refusal the script is already stopping,
+	// so returning the left operand only supplies something type-correct for
+	// the unwind to discard.
+	if !rt.reserveBytes(uint64(2 * n)) {
+		return sa
 	}
 	buf := make([]byte, 0, 2*n)
 	buf = append(append(buf, a...), b...)

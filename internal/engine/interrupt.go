@@ -147,6 +147,16 @@ func (rt *Runtime) terminated() *ThrowError {
 // syncFrame closure to a function makes it escape, and with it every frame
 // variable it captures — including the operand stack, which then lives behind a
 // heap pointer for the rest of the loop. That measured as a hang.
+// Byte for byte what it was before the memory limit existed, and that is the
+// point: this runs on every loop back edge in the engine, so a script that sets
+// no limit must not read one extra field here. Reading a second one is not free
+// — it is another cache line in the interpreter's working set, and it measured
+// 7-10% on an idle machine.
+//
+// A loop that calls nothing still reaches a collection when all its memory is
+// in string bytes, which is the case this whole exercise was about. chargeBytes
+// lowers gc.next when the byte budget runs out, so growth in bytes arrives here
+// already converted into the cell count this has always tested.
 func (rt *Runtime) backEdgeWantsGC() bool {
 	return rt.gc.enabled && rt.nativeDepth == 0 && rt.gc.next != 0 &&
 		rt.objects.liveN >= rt.gc.next

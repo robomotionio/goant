@@ -60,23 +60,20 @@ func TestHostStringsAreNotInterned(t *testing.T) {
 			grew, internedBefore, internedAfter)
 	}
 
-	// Cell occupancy counts headers, not payload bytes, so the ceiling here is
-	// about how many *cells* leak, not how many bytes. Interning would add a
-	// permanent map entry per distinct string on top of the cell; not interning
-	// still allocates a cell per string (there is no collector yet), so the
-	// check is that growth stays proportional to the strings created and does
-	// not carry the extra interned-table retention.
+	// Reported occupancy covers the cell AND the bytes it points at, so one
+	// non-interned string of this size costs its payload plus a header — and
+	// that is the whole budget here. Interning would add a map entry keyed by
+	// the string, retaining a second copy of the same bytes on top; the map is
+	// not visible from here, so the observable half is that per-run growth
+	// stays at roughly one copy rather than two.
 	perRun := float64(after-before) / runs
-	t.Logf("occupancy %d -> %d over %d runs (%.0f bytes/run of cell headers)",
-		before, after, runs, perRun)
+	t.Logf("occupancy %d -> %d over %d runs (%.0f bytes/run for a %d-byte string)",
+		before, after, runs, perRun, payload)
 
-	// A non-interned string is one flat-string cell. Interning adds a map entry
-	// keyed by the whole string, which retains the Go string too. We cannot see
-	// the map from here, so assert the observable half: the runtime must not be
-	// accumulating more than a small number of cells per call.
-	if perRun > 512 {
-		t.Fatalf("growth of %.0f bytes/run suggests more than a cell per string "+
-			"is being retained", perRun)
+	if ceiling := float64(payload) * 1.5; perRun > ceiling {
+		t.Fatalf("growth of %.0f bytes/run against a %d-byte payload (ceiling %.0f) "+
+			"suggests each string is being retained more than once",
+			perRun, payload, ceiling)
 	}
 }
 

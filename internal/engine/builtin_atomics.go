@@ -32,6 +32,7 @@ func (rt *Runtime) initSharedArrayBuffer() {
 		nb := rt.newObject(proto)
 		no := rt.objPtr(nb)
 		no.abuf = make([]byte, end-start)
+		rt.chargeBytes(uint64(end - start))
 		copy(no.abuf, o.abuf[start:end])
 		return nb, nil
 	})
@@ -44,6 +45,7 @@ func (rt *Runtime) initSharedArrayBuffer() {
 		}
 		v := rt.newObject(proto)
 		rt.objPtr(v).abuf = make([]byte, n)
+		rt.chargeBytes(uint64(n))
 		return v, nil
 	})
 	rt.objPtr(ctor).defineOwn("prototype", proto, 0)

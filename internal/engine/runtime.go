@@ -345,6 +345,28 @@ type Runtime struct {
 	randState uint64
 
 	filename string
+
+	// allocBytes counts out-of-line payload handed out since the last
+	// collection: string bytes, array element storage, ArrayBuffer stores. It
+	// exists because the collection trigger used to be a cell COUNT, and bytes
+	// are not cells — a script pushing 100 KB strings runs a host out of memory
+	// having allocated a few thousand cells, far below any count threshold, so
+	// nothing collected and the limit was never tested. Reset by collect.
+	//
+	// All three are placed LAST deliberately, and none of them live in gcState.
+	// Runtime is 1.7 KB of mostly hot fields and gcState sits in the middle of
+	// it, so widening either in place moves every field below onto a different
+	// cache line — a wide blast radius for state that only a configured limit
+	// reads. Appending here cannot move anything.
+	//
+	// nextBytes is the byte counterpart of gc.next: allocate this much
+	// out-of-line payload since the last cycle and collect regardless of the
+	// cell count, because a count cannot see a script whose memory is in string
+	// bytes rather than cells. liveBytes is that payload as it stood after the
+	// last sweep, and is what the heap limit is judged against.
+	allocBytes uint64
+	nextBytes  uint64
+	liveBytes  uint64
 }
 
 // flatString is a heap-resident flat string payload (Phase 2 strings).

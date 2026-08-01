@@ -245,6 +245,7 @@ func (p *pool[T]) newMarks(prev markSet) markSet {
 
 // sweep frees every live cell whose handle is not in m, and reports how many it
 // released.
+
 func (p *pool[T]) sweep(m markSet) int {
 	freed := 0
 	for c := range p.chunks {
