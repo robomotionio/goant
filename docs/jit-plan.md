@@ -153,10 +153,13 @@ a backend is slow, never broken.
 - **Reserve the goroutine register.** R14 on amd64, R28 on arm64. Go's runtime
   and signal handling find the current goroutine through it; generated code that
   clobbers it turns the next signal into a crash.
-- **Poll `g.stackguard0` for preemption.** Go sets it to `0xfffffffffffffade`
-  when a goroutine should yield. Reading it from generated code at back edges is
-  how JIT'd loops stay preemptible; it is a real integration with Go's scheduler
-  rather than an approximation of one.
+- **Give compiled loops a safepoint.** Generated code has no PC the Go runtime
+  can attribute to a function, so it cannot be preempted and a loop that never
+  returned would hold up the collector for as long as it ran. Two ways to do it:
+  read `g.stackguard0` (R14+16 on amd64) and look for Go's `0xfffffffffffffade`,
+  which integrates with the real scheduler but depends on a layout no compatibility
+  promise covers; or count iterations and return. Phase 3 counts, because being
+  wrong about the offset would mean a hang rather than a slowdown.
 - **Flush the instruction cache on arm64.** D-cache and I-cache are not coherent,
   so code written through a read-write mapping is not necessarily visible to the
   fetcher. Needs a short assembly routine per platform.
@@ -213,25 +216,39 @@ back-edge preemption poll yet, which is a load and a compare.
 
 ## Phase 3, begun
 
-`jitCompile` compiles straight-line Number arithmetic — locals, numeric
-constants, `+ - * /`, return — and refuses everything else. It is narrow so that
-bailing out is trivially correct: nothing it emits has a side effect, so a failed
-guard means the interpreter re-runs the function from the top with no state to
-reconstruct. Deoptimisation that has to rebuild a frame is the hardest part of a
-JavaScript JIT, and a tier that never needs it is the right place to prove the
-rest of the machinery.
+`jitCompile` compiles numeric functions — locals, numeric constants, `+ - * /`,
+comparisons, branches and counted loops — and refuses everything else.
 
-`(a+b)*(a-b)/b+a*b`, on the same machine as everything above:
+What makes it tractable is an invariant rather than a restriction on shape.
+Parameters are checked once on entry, before anything has been written; every
+value the compiled code then produces is the result of double arithmetic and so
+is a Number by construction; and every local it reads is either one of those
+checked parameters or one it assigned itself. Nothing in the body can fail a
+type check, so no guard is needed after entry and the only way out is the one at
+the top — before a single store. Bailing therefore means the interpreter runs the
+function from the beginning with no state to reconstruct.
 
-| | ns/op | |
-| --- | --- | --- |
-| compiled | 8.4 | including the 3.2 to enter and leave |
-| interpreted, whole call | 163.8 | |
-| interpreted, call overhead alone | 95.7 | body of `return a` |
+Two consequences worth stating. Compiled code contains no safepoint the Go
+runtime can recognise, so a loop counts iterations and returns to Go every
+20,000; at a back edge the operand stack is empty and every live value is already
+in the locals array, so resuming needs nothing but an address. And a local
+assigned only inside a branch is refused rather than read, because the
+straight-line prefix cannot prove it initialised on every path — lifting that
+needs a definite-assignment pass over the whole control-flow graph.
 
-The expression body is about 68 ns interpreted against about 5 ns compiled,
-so roughly **13x** on the arithmetic itself. The remaining 95.7 ns is frame
-setup, which this tier does not touch and a later one will have to.
+Measured on the same machine as everything above:
+
+| | compiled | interpreted | |
+| --- | --- | --- | --- |
+| `(a+b)*(a-b)/b+a*b` | 8.0 ns | 128.1 ns | |
+| the call alone (`return a`) | | 70.2 ns | not this tier's problem |
+| the expression, less the call | ~4.8 ns | ~57.9 ns | **12x** |
+| `while (i<n) { s=s+i*m; i=i+1 }`, n=1000 | 4.3 µs | 76.8 µs | **18x** |
+
+The loop is the honest number: at a thousand iterations the call overhead has
+gone to nothing, so 18x is the arithmetic and the dispatch, which is what a
+baseline JIT is for. The remaining 70 ns of frame setup per call is a later
+tier's work.
 
 Two findings worth keeping.
 
@@ -245,3 +262,14 @@ The correctness gate is bit equality with the interpreter, not numeric equality.
 The two differ exactly where it matters — the first NaN test written against
 `math.NaN()` failed, because Go's NaN is 0x7FF8000000000001 and neither the
 interpreter nor the compiler produces that one.
+
+## Still to do
+
+Nothing calls `jitCompile`. Tiering, and the counters that decide when a function
+is worth compiling, belong with the type feedback of phase 1; wiring an untiered
+compiler into the interpreter would be the wrong order. After that, in rough
+order of what the profiles say is worth having: definite assignment over the CFG,
+so a local declared inside a loop stops being a refusal; property access with the
+inline-cache guard chain emitted inline, which is where the remaining Octane gap
+lives; calls, which is the 70 ns above; and an arm64 emitter, for which jitmem is
+already in place.

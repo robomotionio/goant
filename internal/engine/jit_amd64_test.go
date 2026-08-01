@@ -27,55 +27,123 @@ func jitFn(t testing.TB, src string) *svFunc {
 	return top.childFuncs[0]
 }
 
+// interpret runs src's function f through the whole engine with exactly these
+// argument Values, so the comparison below is against goant itself rather than
+// against Go arithmetic that merely ought to agree with it.
+func interpret(t testing.TB, src string, args ...Value) Value {
+	t.Helper()
+	rt := New()
+	fnVal, err := rt.RunString("interp.js", src+"; f;")
+	if err != nil {
+		t.Fatalf("run %q: %v", src, err)
+	}
+	v, e := rt.callValue(fnVal, mkundef(), args)
+	if e != nil {
+		t.Fatalf("call %q: threw", src)
+	}
+	return v
+}
+
+// jitStraightLine programs have no loop, so they can be fed the pathological
+// values — infinities, NaN, signed zero, the extremes of the range.
+var jitStraightLine = []string{
+	"function f(a,b){ return a+b; }",
+	"function f(a,b){ return a-b; }",
+	"function f(a,b){ return a*b; }",
+	"function f(a,b){ return a/b; }",
+	"function f(a,b){ return (a+b)*(a-b); }",
+	"function f(a,b){ return a*b+a; }",
+	"function f(a,b){ return a+1; }",
+	"function f(a,b){ return a/b/b; }",
+	"function f(a,b){ a = a*2; return a+b; }",
+	"function f(a,b){ var t = a*b; return t+t; }",
+}
+
+// jitLoops are counted loops, so their inputs have to be values they terminate
+// on — an infinity as the bound would hang the interpreter just as surely as the
+// compiled code.
+var jitLoops = []string{
+	"function f(n,m){ var s=0, i=0; while (i<n) { s=s+i; i=i+1; } return s; }",
+	"function f(n,m){ var s=1, i=0; while (i<n) { s=s*m; i=i+1; } return s; }",
+	"function f(n,m){ var s=0, i=n; while (i>0) { s=s+m; i=i-1; } return s; }",
+	"function f(n,m){ var s=0; for (var i=0; i<n; i=i+1) { s=s+i*m; } return s; }",
+	"function f(n,m){ var s=0, i=0; while (i<=n) { s=s+m; i=i+1; } return s; }",
+}
+
+var jitWildInputs = []struct{ a, b float64 }{
+	{1, 2}, {2.5, 0.5}, {-3, 7}, {0, 0}, {1, 0}, {-1, 0},
+	{math.Inf(1), math.Inf(1)}, {math.Inf(1), math.Inf(-1)},
+	{math.NaN(), 1}, {1, math.NaN()},
+	{math.MaxFloat64, math.MaxFloat64}, {math.SmallestNonzeroFloat64, 2},
+	{-0, 5}, {5, -0}, {10, 3}, {3.5, 1.25},
+}
+
+var jitLoopInputs = []struct{ a, b float64 }{
+	{0, 1}, {1, 1}, {2, 3}, {7, 0.5}, {10, -2}, {-1, 4}, {5, math.NaN()},
+	{0.5, 2}, {33, 1.25},
+}
+
 // TestJITAgreesWithTheInterpreter is the gate. Compiled code has to produce not
 // merely the right number but the same Value the interpreter would have pushed,
-// bit for bit — which is a stricter claim, and the one that catches a NaN whose
-// pattern strays into the tag space.
+// bit for bit — a stricter claim, and the one that catches a NaN whose pattern
+// strays into the tag space.
 func TestJITAgreesWithTheInterpreter(t *testing.T) {
-	cases := []struct {
-		src  string
-		want func(a, b float64) float64
-	}{
-		{"function f(a,b){ return a+b; }", func(a, b float64) float64 { return a + b }},
-		{"function f(a,b){ return a-b; }", func(a, b float64) float64 { return a - b }},
-		{"function f(a,b){ return a*b; }", func(a, b float64) float64 { return a * b }},
-		{"function f(a,b){ return a/b; }", func(a, b float64) float64 { return a / b }},
-		{"function f(a,b){ return (a+b)*(a-b); }", func(a, b float64) float64 { return (a + b) * (a - b) }},
-		{"function f(a,b){ return a*b+a; }", func(a, b float64) float64 { return a*b + a }},
-		{"function f(a,b){ return a+1; }", func(a, b float64) float64 { return a + 1 }},
-		{"function f(a,b){ return a/b/b; }", func(a, b float64) float64 { return a / b / b }},
-	}
-
-	inputs := []struct{ a, b float64 }{
-		{1, 2}, {2.5, 0.5}, {-3, 7}, {0, 0}, {1, 0}, {-1, 0},
-		{math.Inf(1), math.Inf(1)}, {math.Inf(1), math.Inf(-1)},
-		{math.NaN(), 1}, {1, math.NaN()},
-		{math.MaxFloat64, math.MaxFloat64}, {math.SmallestNonzeroFloat64, 2},
-		{-0, 5}, {5, -0},
-	}
-
-	for _, tc := range cases {
-		fn := jitFn(t, tc.src)
+	check := func(src string, inputs []struct{ a, b float64 }) {
+		fn := jitFn(t, src)
 		c := jitCompile(fn)
 		if c == nil {
-			t.Errorf("%s: refused to compile", tc.src)
-			continue
+			t.Errorf("%s: refused to compile", src)
+			return
 		}
+		defer c.free()
 		for _, in := range inputs {
+			av, bv := tov(in.a), tov(in.b)
 			locals := make([]Value, fn.maxLocals)
-			locals[0], locals[1] = tov(in.a), tov(in.b)
+			locals[0], locals[1] = av, bv
 			got, ok := c.jitRun(locals)
 			if !ok {
-				t.Errorf("%s(%v,%v): bailed on two Numbers", tc.src, in.a, in.b)
+				t.Errorf("%s(%v,%v): bailed on two Numbers", src, in.a, in.b)
 				continue
 			}
-			want := tov(tc.want(in.a, in.b))
+			want := interpret(t, src, av, bv)
 			if uint64(got) != uint64(want) {
-				t.Errorf("%s(%v,%v) = %#016x (%v), interpreter would give %#016x (%v)",
-					tc.src, in.a, in.b, uint64(got), got.Number(), uint64(want), want.Number())
+				t.Errorf("%s(%v,%v) = %#016x (%v), interpreter gives %#016x (%v)",
+					src, in.a, in.b, uint64(got), got.Number(), uint64(want), want.Number())
 			}
 		}
-		c.free()
+	}
+	for _, src := range jitStraightLine {
+		check(src, jitWildInputs)
+	}
+	for _, src := range jitLoops {
+		check(src, jitLoopInputs)
+	}
+}
+
+// TestJITLoopOutlivesItsFuel drives a loop past the point where compiled code
+// hands control back, which is the only safepoint it has. Getting this wrong
+// shows up as a wrong answer rather than a hang, because the resume path has to
+// re-establish the pinned registers and pick up where it left off.
+func TestJITLoopOutlivesItsFuel(t *testing.T) {
+	const src = "function f(n,m){ var s=0, i=0; while (i<n) { s=s+i; i=i+1; } return s; }"
+	fn := jitFn(t, src)
+	c := jitCompile(fn)
+	if c == nil {
+		t.Fatal("refused to compile")
+	}
+	defer c.free()
+
+	for _, n := range []float64{0, 1, 10, jitFuel - 1, jitFuel, jitFuel + 1, 3*jitFuel + 7} {
+		locals := make([]Value, fn.maxLocals)
+		locals[0], locals[1] = tov(n), tov(0)
+		got, ok := c.jitRun(locals)
+		if !ok {
+			t.Fatalf("n=%v bailed", n)
+		}
+		want := n * (n - 1) / 2
+		if got.Number() != want {
+			t.Errorf("sum to %v = %v, want %v", n, got.Number(), want)
+		}
 	}
 }
 
@@ -151,12 +219,16 @@ func TestJITRefusesWhatItCannotModel(t *testing.T) {
 	for _, src := range []string{
 		"function f(a,b){ return g(a); }",               // a call
 		"function f(a,b){ if (a) return 1; return 2; }", // a branch
-		"function f(a,b){ a = 1; return a; }",           // a store
 		"function f(a,b){ return a.x; }",                // a property
 		"function f(a,b){ return 'x'; }",                // a String constant
 		"function f(a,b){ }",                            // falls off the end
 		"function f(a,b){ return a%b; }",                // modulo is not in this tier
-		"function f(a,b){ return -a; }",                 // negation is not in this tier
+		// Assigned inside the loop rather than before it, so the prefix rule
+		// cannot prove it is initialised on every path that reads it. Lifting
+		// this needs a definite-assignment pass over the whole control-flow
+		// graph, not the straight-line prefix.
+		"function f(n,m){ var s=0, i=0; while (i<n) { var t=i*m; s=s+t; i=i+1; } return s; }",
+		"function f(a,b){ return -a; }", // negation is not in this tier
 	} {
 		if c := jitCompile(jitFn(t, src)); c != nil {
 			c.free()
@@ -235,16 +307,44 @@ func BenchmarkJITvsInterpreter(b *testing.B) {
 	})
 }
 
-func benchInterpretedCall(b *testing.B, src string) {
+// BenchmarkJITLoop is the shape the tier was extended for: hot numeric code
+// that spends its time going round rather than being called.
+func BenchmarkJITLoop(b *testing.B) {
+	const src = "function f(n,m){ var s=0, i=0; while (i<n) { s=s+i*m; i=i+1; } return s; }"
+	fn := jitFn(b, src)
+	c := jitCompile(fn)
+	if c == nil {
+		b.Fatal("refused to compile")
+	}
+	defer c.free()
+
+	locals := make([]Value, fn.maxLocals)
+	locals[0], locals[1] = tov(1000), tov(1.5)
+
+	b.Run("compiled", func(b *testing.B) {
+		for b.Loop() {
+			if _, ok := c.jitRun(locals); !ok {
+				b.Fatal("bailed")
+			}
+		}
+	})
+	b.Run("interpreted", func(b *testing.B) {
+		benchInterpretedCall(b, src, tov(1000), tov(1.5))
+	})
+}
+
+func benchInterpretedCall(b *testing.B, src string, args ...Value) {
 	b.Helper()
 	rt := New()
-	a, bb := tov(7), tov(3)
+	if len(args) == 0 {
+		args = []Value{tov(7), tov(3)}
+	}
 	fnVal, err := rt.RunString("bench.js", src+"; f;")
 	if err != nil {
 		b.Fatal(err)
 	}
 	for b.Loop() {
-		if _, e := rt.callValue(fnVal, mkundef(), []Value{a, bb}); e != nil {
+		if _, e := rt.callValue(fnVal, mkundef(), args); e != nil {
 			b.Fatal("throw")
 		}
 	}

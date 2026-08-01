@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"encoding/binary"
 	"runtime"
 	"unsafe"
 
@@ -10,21 +11,30 @@ import (
 	"github.com/robomotionio/goant/internal/jitmem"
 )
 
-// The first tier compiles straight-line Number arithmetic and nothing else.
+// The first tier compiles numeric functions: locals, numeric constants, the four
+// arithmetic operators, comparisons, branches, and loops. It refuses everything
+// else.
 //
-// That is narrow on purpose. Everything it does emit is side-effect-free — no
-// stores, no calls, no branches — which makes bailing out trivially correct:
-// the interpreter re-runs the function from the top and no state has to be
-// reconstructed. Deoptimisation that has to rebuild a frame is the hardest part
-// of a JavaScript JIT, and a tier that never needs it is the right place to
-// prove the rest of the machinery works.
+// What makes it tractable is an invariant rather than a restriction on shape.
+// Parameters are checked once, on entry, before anything has been written; every
+// value the compiled code then produces is the result of double arithmetic, and
+// so is a Number by construction; and every local it reads is either one of
+// those checked parameters or a local it assigned itself. Nothing inside the
+// body can therefore fail a type check, which means no guard is needed after
+// entry, and the only way out is the one at the top — before a single store has
+// happened.
+//
+// That is what makes deoptimisation trivial here. Bailing means the interpreter
+// runs the function from the beginning, and there is no state to reconstruct
+// because none was changed. Rebuilding an interpreter frame from a half-executed
+// compiled one is the hardest part of a JavaScript JIT, and a tier that cannot
+// need it is the right place to prove the rest of the machinery.
 //
 // Registers. R13 carries the ExecContext and R14 the goroutine, both fixed by
-// jitmem. R12 holds the base of the locals array and R15 the NaN-box threshold,
-// which is compared against on every value that enters the compiled code. What
-// is left is the operand stack: a template compiler assigns it positionally
-// rather than allocating, so a function whose expressions nest deeper than this
-// simply is not compiled.
+// jitmem. R12 holds the base of the locals array and R15 the NaN-box threshold.
+// What is left is the operand stack, which a template compiler assigns
+// positionally rather than allocating: an expression that nests deeper than this
+// is simply not compiled.
 var jitStackRegs = []jitasm.Reg{
 	jitasm.RAX, jitasm.RCX, jitasm.RDX, jitasm.RBX,
 	jitasm.RSI, jitasm.RDI, jitasm.R8, jitasm.R9,
@@ -36,42 +46,102 @@ const (
 	jitRegGuard  = jitasm.R15
 )
 
+// jitFuel is how many loop iterations compiled code runs before returning to Go.
+//
+// Generated code contains no safepoint the Go runtime can recognise, so a
+// compiled loop that never came back would keep the collector and the scheduler
+// waiting for as long as it ran. Counting iterations and leaving is portable in
+// a way that reading Go's internal g fields is not, and it costs a decrement and
+// a not-taken branch per iteration.
+//
+// The exit is a resumption, not a bailout: at a back edge the operand stack is
+// empty and every live value is already in the locals array, so re-entering
+// needs nothing but the address to re-enter at.
+const jitFuel = 20000
+
 // jitCode is a compiled function and the block its code lives in.
 type jitCode struct {
 	block *jitmem.Block
 	entry uintptr
 }
 
+// jitResumeFixup records a resume address that could not be written until the
+// code had somewhere to live.
+type jitResumeFixup struct {
+	immOff int
+	label  *jitasm.Label
+}
+
 // jitCompile compiles fn, or reports that it will not.
 //
 // Refusing is the common answer and costs nothing: the caller keeps
-// interpreting. Every reason to refuse is a shape this tier does not model, not
-// an error.
+// interpreting. Every reason to refuse is a shape this tier does not model,
+// never an error.
 func jitCompile(fn *svFunc) *jitCode {
-	a := jitasm.NewAsm()
-	bail := a.NewLabel()
-
-	// Prologue. The locals base arrives in Args[0]; the threshold is a constant
-	// worth a register because every guard and every NaN canonicalisation
-	// compares against it.
-	a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
-	a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
-
-	sp := 0
-	returned := false
 	code := fn.code
 	ip := fn.startIP
 
-	// A non-arrow function body opens by binding `this` to a local. Skipping it
-	// is sound rather than merely convenient: the only way compiled code could
-	// observe the slot is by reading it, and a slot holding `this` is not a
-	// Number, so the load guard would bail and the interpreter would run the
-	// prologue itself.
+	// A non-arrow body opens by binding `this` to a local. Skipping it is sound
+	// rather than convenient: the slot is left out of the assigned set below, so
+	// any read of it refuses to compile, and on the interpreted path the
+	// prologue runs as usual.
 	if ip+3 < len(code) && Opcode(code[ip]) == OpThis && Opcode(code[ip+1]) == OpPutLocal {
 		ip += 4
 	}
+	start := ip
 
-	for ip < len(code) && !returned {
+	targets, ok := jitScanTargets(fn, start)
+	if !ok {
+		return nil
+	}
+	assigned, ok := jitPrefixAssigned(fn, start, targets)
+	if !ok {
+		return nil
+	}
+
+	a := jitasm.NewAsm()
+	bail := a.NewLabel()
+	labels := make(map[int]*jitasm.Label, len(targets))
+	for t := range targets {
+		labels[t] = a.NewLabel()
+	}
+	var fixups []jitResumeFixup
+
+	// Entry. The locals base arrives in Args[0] and the fuel in Args[1]; the
+	// threshold is worth a register because every parameter check and every NaN
+	// canonicalisation compares against it.
+	a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
+	a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
+	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
+		// Anything above the threshold is tagged — a String, an object, a
+		// binding still in its temporal dead zone — and all of them mean the
+		// interpreter. Checking here, once, is what buys an unguarded body.
+		a.MovRegMem(jitasm.RAX, jitRegLocals, int32(i)*8)
+		a.CmpRegReg(jitasm.RAX, jitRegGuard)
+		a.Jcc(jitasm.CondA, bail)
+		assigned[i] = true
+	}
+
+	sp := 0
+	returned := false
+
+	for ip < len(code) {
+		if l, isTarget := labels[ip]; isTarget {
+			// Every branch target is reached with an empty operand stack in the
+			// code goant's compiler emits. Requiring it rather than tracking a
+			// per-block depth keeps the register assignment positional, and a
+			// function that violates it is refused rather than mis-compiled.
+			if sp != 0 {
+				return nil
+			}
+			a.Bind(l)
+			returned = false
+		}
+		if returned {
+			// Unreachable trailer after a return, most often RETURN_UNDEF.
+			break
+		}
+
 		switch op := Opcode(code[ip]); op {
 		case OpConstI8:
 			if sp >= len(jitStackRegs) {
@@ -97,20 +167,31 @@ func jitCompile(fn *svFunc) *jitCode {
 			ip += 5
 
 		case OpGetLocal:
-			i := readU16(code, ip+1)
-			if int(i) >= fn.maxLocals || sp >= len(jitStackRegs) {
+			i := int(readU16(code, ip+1))
+			if i >= fn.maxLocals || sp >= len(jitStackRegs) || !assigned[i] {
 				return nil
 			}
-			r := jitStackRegs[sp]
-			a.MovRegMem(r, jitRegLocals, int32(i)*8)
-			// Anything above the threshold is tagged: a String, an object, a
-			// binding still in its temporal dead zone. All of them mean the
-			// interpreter, and guarding here rather than at each operator keeps
-			// the arithmetic itself unconditional.
-			a.CmpRegReg(r, jitRegGuard)
-			a.Jcc(jitasm.CondA, bail)
+			a.MovRegMem(jitStackRegs[sp], jitRegLocals, int32(i)*8)
 			sp++
 			ip += 3
+
+		case OpPutLocal, OpSetLocal:
+			i := int(readU16(code, ip+1))
+			if i >= fn.maxLocals || sp < 1 || !assigned[i] {
+				return nil
+			}
+			a.MovMemReg(jitRegLocals, int32(i)*8, jitStackRegs[sp-1])
+			if op == OpPutLocal {
+				sp-- // PUT_LOCAL consumes the value; SET_LOCAL leaves it
+			}
+			ip += 3
+
+		case OpPop:
+			if sp < 1 {
+				return nil
+			}
+			sp--
+			ip++
 
 		case OpAdd, OpSub, OpMul, OpDiv:
 			if sp < 2 {
@@ -134,6 +215,54 @@ func jitCompile(fn *svFunc) *jitCode {
 			sp--
 			ip++
 
+		case OpLt, OpLe, OpGt, OpGe:
+			// A comparison produces a Boolean, which this tier has no way to
+			// represent. It only compiles one when the very next instruction
+			// consumes it as a branch, so the Boolean never exists.
+			next := ip + 1
+			if next >= len(code) || sp < 2 {
+				return nil
+			}
+			nop := Opcode(code[next])
+			if nop != OpJmpFalse && nop != OpJmpTrue {
+				return nil
+			}
+			if _, isTarget := labels[next]; isTarget {
+				return nil // something branches between the compare and its use
+			}
+			target := int(readU32(code, next+1))
+			l, known := labels[target]
+			if !known {
+				return nil
+			}
+			a.MovqXReg(jitasm.X0, jitStackRegs[sp-2])
+			a.MovqXReg(jitasm.X1, jitStackRegs[sp-1])
+			a.UcomisdXX(jitasm.X0, jitasm.X1)
+			jitCompareBranch(a, op, nop == OpJmpTrue, l)
+			sp -= 2
+			if sp != 0 {
+				return nil
+			}
+			if target <= next {
+				// A backward conditional branch is a do-while, whose target is
+				// reached with the stack in a shape this tier does not model.
+				return nil
+			}
+			ip = next + 5
+
+		case OpJmp:
+			target := int(readU32(code, ip+1))
+			l, known := labels[target]
+			if !known || sp != 0 {
+				return nil
+			}
+			if target <= ip {
+				jitBackEdge(a, l, &fixups)
+			} else {
+				a.Jmp(l)
+			}
+			ip += 5
+
 		case OpReturn:
 			if sp != 1 {
 				return nil
@@ -142,6 +271,7 @@ func jitCompile(fn *svFunc) *jitCode {
 			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitReturn))
 			a.MovRegImm64(jitasm.RAX, jitmem.ExitReturn)
 			a.Ret()
+			sp = 0
 			returned = true
 			ip++
 
@@ -150,8 +280,8 @@ func jitCompile(fn *svFunc) *jitCode {
 		}
 	}
 	if !returned {
-		// Falling off the end means an implicit `return undefined`, which is not
-		// a Number and so is not this tier's business.
+		// Falling off the end is an implicit `return undefined`, which is not a
+		// Number and so is not this tier's business.
 		return nil
 	}
 
@@ -165,6 +295,13 @@ func jitCompile(fn *svFunc) *jitCode {
 	if err != nil {
 		return nil
 	}
+	// Resume addresses are absolute and the code had no address until now.
+	// Patching rather than regenerating is safe because MovRegImm64 always emits
+	// the same ten bytes, so nothing has moved.
+	base := uint64(block.Addr())
+	for _, f := range fixups {
+		binary.LittleEndian.PutUint64(buf[f.immOff:], base+uint64(f.label.Offset()))
+	}
 	if _, err := block.Write(buf); err != nil {
 		block.Free()
 		return nil
@@ -176,8 +313,140 @@ func jitCompile(fn *svFunc) *jitCode {
 	return &jitCode{block: block, entry: block.Addr()}
 }
 
-// jitCanonicalizeNaN folds a NaN result into the one bit pattern the NaN box
-// can hold.
+// jitScanTargets collects every branch target, which the emitter needs before it
+// starts so that a forward branch has a label to name.
+//
+// It refuses a target that is not on an instruction boundary. That cannot arise
+// from goant's compiler, but a mis-decoded stream would otherwise be compiled
+// into a wild branch rather than declined.
+func jitScanTargets(fn *svFunc, start int) (map[int]bool, bool) {
+	code := fn.code
+	targets := map[int]bool{}
+	boundary := map[int]bool{}
+	for ip := start; ip < len(code); {
+		boundary[ip] = true
+		op := Opcode(code[ip])
+		size := int(opTable[op].Size)
+		if size <= 0 || ip+size > len(code) {
+			return nil, false
+		}
+		switch op {
+		case OpJmp, OpJmpFalse, OpJmpTrue:
+			targets[int(readU32(code, ip+1))] = true
+		}
+		ip += size
+	}
+	for t := range targets {
+		if !boundary[t] {
+			return nil, false
+		}
+	}
+	return targets, true
+}
+
+// jitPrefixAssigned reports which locals are certainly assigned by the time any
+// branch can be taken.
+//
+// Only the straight-line run from the start of the body to the first jump or the
+// first branch target counts, because that run always executes. A local assigned
+// only inside a branch is not in the set, and reading one refuses the function
+// rather than reading whatever the slot happened to hold — which for a `var` not
+// yet reached is undefined, and for a `let` is a value that should have thrown.
+func jitPrefixAssigned(fn *svFunc, start int, targets map[int]bool) ([]bool, bool) {
+	code := fn.code
+	assigned := make([]bool, fn.maxLocals)
+	for ip := start; ip < len(code); {
+		if targets[ip] {
+			return assigned, true
+		}
+		op := Opcode(code[ip])
+		size := int(opTable[op].Size)
+		if size <= 0 || ip+size > len(code) {
+			return nil, false
+		}
+		switch op {
+		case OpJmp, OpJmpFalse, OpJmpTrue:
+			return assigned, true
+		case OpPutLocal, OpSetLocal:
+			i := int(readU16(code, ip+1))
+			if i >= fn.maxLocals {
+				return nil, false
+			}
+			assigned[i] = true
+		}
+		ip += size
+	}
+	return assigned, true
+}
+
+// jitCompareBranch emits the branch for a fused compare.
+//
+// The parity flag comes first in both directions. UCOMISD sets it when either
+// operand is NaN, and every JavaScript relational operator is false then — which
+// the ordered condition codes do not encode, so a compiler that emitted only
+// "below" for `<` would report NaN < 1 as true.
+func jitCompareBranch(a *jitasm.Asm, op Opcode, whenTrue bool, target *jitasm.Label) {
+	if whenTrue {
+		skip := a.NewLabel()
+		a.Jcc(jitasm.CondP, skip)
+		switch op {
+		case OpLt:
+			a.Jcc(jitasm.CondB, target)
+		case OpLe:
+			a.Jcc(jitasm.CondBE, target)
+		case OpGt:
+			a.Jcc(jitasm.CondA, target)
+		case OpGe:
+			a.Jcc(jitasm.CondAE, target)
+		}
+		a.Bind(skip)
+		return
+	}
+	a.Jcc(jitasm.CondP, target) // unordered: the comparison is false
+	switch op {
+	case OpLt:
+		a.Jcc(jitasm.CondAE, target)
+	case OpLe:
+		a.Jcc(jitasm.CondA, target)
+	case OpGt:
+		a.Jcc(jitasm.CondBE, target)
+	case OpGe:
+		a.Jcc(jitasm.CondB, target)
+	}
+}
+
+// jitBackEdge emits a loop's backward jump with the fuel check in front of it.
+//
+// The operand stack is empty here and every live value is in the locals array,
+// so leaving is free of consequence: the resume point re-establishes the two
+// pinned registers and carries on. Only the registers need restoring because
+// nothing else lives in one across an iteration.
+func jitBackEdge(a *jitasm.Asm, top *jitasm.Label, fixups *[]jitResumeFixup) {
+	cont := a.NewLabel()
+	resume := a.NewLabel()
+
+	a.MovRegMem(jitasm.RAX, jitasm.RegCtx, jitmem.CtxOffArgs+8)
+	a.SubRegImm32(jitasm.RAX, 1)
+	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+8, jitasm.RAX) // MOV leaves the flags alone
+	a.Jcc(jitasm.CondNE, cont)
+
+	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitPreempt))
+	immOff := a.MovRegImm64At(jitasm.RAX, 0)
+	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume})
+	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitasm.RAX)
+	a.MovRegImm64(jitasm.RAX, jitmem.ExitPreempt)
+	a.Ret()
+
+	a.Bind(resume)
+	a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
+	a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
+
+	a.Bind(cont)
+	a.Jmp(top)
+}
+
+// jitCanonicalizeNaN folds a NaN result into the one bit pattern the NaN box can
+// hold.
 //
 // Not optional, and not obvious. x86 produces 0xFFF8000000000000 as its default
 // quiet NaN — for 0/0 among others — and that is numerically above the tag
@@ -194,22 +463,38 @@ func jitCanonicalizeNaN(a *jitasm.Asm, r jitasm.Reg) {
 }
 
 // jitRun enters compiled code with the frame's locals and reports whether it
-// produced an answer. A false return means the code bailed and the caller must
-// interpret instead; because this tier emits nothing with a side effect, that
-// is always safe.
+// produced an answer.
+//
+// A false return means the code declined the arguments it was given and the
+// caller must interpret instead. That is always safe: the only exit that reports
+// it is the entry check, which runs before the compiled code has written
+// anything.
 func (c *jitCode) jitRun(locals []Value) (Value, bool) {
 	if len(locals) == 0 {
 		return mkundef(), false
 	}
-	ctx := jitmem.ExecContext{Args: [4]uint64{uint64(uintptr(unsafe.Pointer(&locals[0])))}}
-	jitmem.Enter(c.entry, &ctx)
-	// The locals slice reaches compiled code as an integer, so nothing in the
-	// call graph keeps it reachable for the collector.
-	runtime.KeepAlive(locals)
-	if ctx.Exit != jitmem.ExitReturn {
-		return mkundef(), false
+	ctx := jitmem.ExecContext{Args: [4]uint64{
+		uint64(uintptr(unsafe.Pointer(&locals[0]))),
+		jitFuel,
+	}}
+	pc := c.entry
+	for {
+		jitmem.Enter(pc, &ctx)
+		// The locals slice reaches compiled code as an integer, so nothing in
+		// the call graph keeps it reachable for the collector.
+		runtime.KeepAlive(locals)
+		switch ctx.Exit {
+		case jitmem.ExitReturn:
+			return Value(ctx.Ret), true
+		case jitmem.ExitPreempt:
+			// Being here is the safepoint: this is ordinary Go, so the runtime
+			// can collect and preempt before the loop is re-entered.
+			ctx.Args[1] = jitFuel
+			pc = ctx.Resume
+		default:
+			return mkundef(), false
+		}
 	}
-	return Value(ctx.Ret), true
 }
 
 // free releases the code block. A jitCode must outlive every entry into it.

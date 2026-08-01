@@ -126,6 +126,10 @@ func (a *Asm) NewLabel() *Label {
 	return l
 }
 
+// Offset is where a bound label sits in the emitted code, for a caller that has
+// to turn it into an absolute address once the code has somewhere to live.
+func (l *Label) Offset() int { return l.off }
+
 // Bind fixes a label at the current offset.
 func (a *Asm) Bind(l *Label) {
 	l.bound = true
@@ -256,6 +260,13 @@ func (a *Asm) TestRegReg(x, y Reg)    { a.emitRM(true, []byte{0x85}, uint8(y), u
 
 func (a *Asm) ShrRegImm(dst Reg, n uint8) { a.emitRM(true, []byte{0xC1}, 5, uint8(dst)); a.emit(n) }
 func (a *Asm) ShlRegImm(dst Reg, n uint8) { a.emitRM(true, []byte{0xC1}, 4, uint8(dst)); a.emit(n) }
+
+// SubRegImm32 subtracts a sign-extended 32-bit immediate and sets the flags,
+// which is how a back-edge fuel counter is decremented and tested at once.
+func (a *Asm) SubRegImm32(r Reg, v uint32) {
+	a.emitRM(true, []byte{0x81}, 5, uint8(r))
+	a.emit32(v)
+}
 
 // CmpRegImm32 compares against a sign-extended 32-bit immediate.
 func (a *Asm) CmpRegImm32(r Reg, v uint32) {
