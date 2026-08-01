@@ -32,8 +32,13 @@ type engine struct {
 
 // candidates lists the engines worth comparing against, in the order they are
 // reported. One that is not installed is skipped rather than failing the run.
+// goja is the comparison that matters most, being the other pure-Go engine and
+// so the one measured under the same constraints. It is reached through a
+// separate `goja-run` binary rather than linked in, which keeps goja out of
+// this module's dependencies — see bench/README.md for how to build it.
 var candidates = []engine{
 	{name: "goant", bin: "./goant"},
+	{name: "goja", bin: "goja-run"},
 	{name: "node", bin: "node"},
 	{name: "deno", bin: "deno", args: []string{"run", "--quiet", "--allow-read"}},
 	{name: "bun", bin: "bun", args: []string{"run"}},
@@ -303,7 +308,13 @@ func runOctane(engines []engine, benchDir, only string, reps int) {
 		if only != "" && !strings.Contains(b.name, only) {
 			continue
 		}
-		joined := filepath.Join(tmp, b.name+".js")
+		// .cjs, not .js: Octane is 2013-era sloppy-mode code and crypto.js
+		// assigns an implicit global (`setupEngine = function …`), which is a
+		// ReferenceError under strict mode. deno and bun treat a .js file as a
+		// module and so run it strict, node does not — which would score the
+		// choice of goal rather than the engine. The extension pins every
+		// engine to the script goal Octane was written for.
+		joined := filepath.Join(tmp, b.name+".cjs")
 		var buf []byte
 		buf = append(buf, base...)
 		for _, f := range b.files {
