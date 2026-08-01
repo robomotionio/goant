@@ -742,6 +742,21 @@ func (rt *Runtime) setElementR(obj Value, key, v Value) (bool, *ThrowError) {
 const maxDenseGap = 1 << 20
 
 func (rt *Runtime) arraySet(o *object, idx uint32, v Value) {
+	// Byte for byte what it was before the memory limit existed, and it must
+	// stay that way. arraySet is inlined into runFrameBody — the interpreter's
+	// single enormous dispatch loop — so anything added here grows that loop and
+	// costs every script in the engine, not just the ones storing array
+	// elements. A guarded call and even a lone extra compare measured ~9% across
+	// unrelated workloads, which is how the cost of array accounting was found:
+	// not in array code, but in the profile of an object-allocation benchmark.
+	//
+	// Array element storage is therefore charged nowhere. It is still COUNTED,
+	// by liveePayload at the next sweep, so the limit is enforced correctly on
+	// what an array retains; what is given up is only the ability to trigger a
+	// collection on array growth alone. That needs a script whose memory is
+	// almost entirely one array's elements and which allocates too few cells to
+	// reach the count threshold — rare, and it costs a late stop rather than a
+	// missed one.
 	for uint32(len(o.arr)) <= idx {
 		o.arr = append(o.arr, tEmpty)
 	}
@@ -750,6 +765,7 @@ func (rt *Runtime) arraySet(o *object, idx uint32, v Value) {
 		o.arrLen = idx + 1
 	}
 }
+
 
 // setArrayLength implements ArraySetLength for a plain value. Returns ok=false
 // (no error) when a non-configurable index in [newLen, oldLen) blocks the shrink

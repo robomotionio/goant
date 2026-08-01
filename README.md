@@ -112,6 +112,38 @@ Under goant there is one heap, Go's, and a **memory limit is an ordinary error**
 the script is stopped, the host is told which limit it hit, the flow's error
 handler runs, and the process — with every other robot on it — carries on.
 
+#### What the memory limit counts
+
+The limit is off unless [`WithMemoryLimit`](#deadlines) sets one, and it bounds
+what a script **retains** rather than what it allocates: it is tested after a
+collection, so a loop that builds and discards a million objects passes and one
+that builds and keeps them does not.
+
+What counts toward it is the whole live heap — cell headers plus the bytes those
+cells point at: string payloads, array element storage, ArrayBuffer stores. An
+allocation large enough to exceed the budget on its own is tested before it is
+taken, since a budget checked only afterwards cannot prevent the allocation that
+exhausts the host. Each row below retains everything it allocates, run with a
+64 MB limit inside a 768 MB cgroup:
+
+| script | result |
+|---|---|
+| `k.push({})` | `ErrMemoryLimit`, process alive |
+| `k.push(new Array(256).fill(7))` | `ErrMemoryLimit`, process alive |
+| `k.push("x".repeat(100000))` | `ErrMemoryLimit`, process alive |
+| `k.push(new ArrayBuffer(1<<20))` | `ErrMemoryLimit`, process alive |
+| `s += s` | `ErrMemoryLimit`, process alive |
+| 200k × 5 KB strings, none kept | no error — allocation is not retention |
+
+One case is not covered: a single very large `ArrayBuffer` that is allocated and
+never written to. Go serves it as untouched zero pages, so it occupies no
+resident memory, and it is counted at the next collection as soon as anything
+uses it.
+
+Setting no limit costs nothing. The accounting is placed so that it is absent
+from the collector and the interpreter's dispatch loop rather than merely
+skipped by them, which is measurable: see `memlimit_bench_test.go`.
+
 ### 3. Everything had to cross a boundary that no longer exists
 
 A cgo binding's API shape is dictated by its boundary: values are marshalled

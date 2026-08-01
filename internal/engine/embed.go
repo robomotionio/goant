@@ -276,6 +276,17 @@ func (rt *Runtime) HeapUsage() (cells int, bytes uint64) {
 		uint64(rt.symbols.len())*uint64(unsafe.Sizeof(symbol{})) +
 		uint64(rt.closures.len())*uint64(unsafe.Sizeof(closure{})) +
 		uint64(rt.bigints.len())*uint64(unsafe.Sizeof(bigIntCell{}))
+	// Cell headers are only half the story, and for most scripts the smaller
+	// half: the bytes are in string payloads, array element storage and
+	// ArrayBuffer stores hanging off those cells. With a limit set this is the
+	// figure the last sweep judged it against, so the two always agree; without
+	// one it is not maintained per cycle and is totalled here instead, since a
+	// host asking for Stats is asking for the number, not for the cheap half.
+	if rt.heapLimit != 0 {
+		b += rt.liveBytes
+	} else {
+		b += rt.liveePayload()
+	}
 	return n, b
 }
 
