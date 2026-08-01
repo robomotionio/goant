@@ -59,6 +59,14 @@ const (
 // needs nothing but the address to re-enter at.
 const jitFuel = 20000
 
+// refuse records why a function was declined and returns the nil that says so.
+func refuse(why *string, reason string) *jitCode {
+	if why != nil {
+		*why = reason
+	}
+	return nil
+}
+
 // jitCode is a compiled function and the block its code lives in.
 type jitCode struct {
 	block *jitmem.Block
@@ -77,7 +85,14 @@ type jitResumeFixup struct {
 // Refusing is the common answer and costs nothing: the caller keeps
 // interpreting. Every reason to refuse is a shape this tier does not model,
 // never an error.
-func jitCompile(fn *svFunc) *jitCode {
+// why, when not nil, receives the reason a function was refused. Only the
+// unsupported-opcode case is named individually, because that is the one that
+// says what to build next; everything else is a shape this tier declines and is
+// reported as such.
+func jitCompile(fn *svFunc, why *string) *jitCode {
+	if why != nil {
+		*why = "shape"
+	}
 	code := fn.code
 	ip := fn.startIP
 
@@ -132,7 +147,7 @@ func jitCompile(fn *svFunc) *jitCode {
 			// per-block depth keeps the register assignment positional, and a
 			// function that violates it is refused rather than mis-compiled.
 			if sp != 0 {
-				return nil
+				return refuse(why, "stack-at-target")
 			}
 			a.Bind(l)
 			returned = false
@@ -145,7 +160,7 @@ func jitCompile(fn *svFunc) *jitCode {
 		switch op := Opcode(code[ip]); op {
 		case OpConstI8:
 			if sp >= len(jitStackRegs) {
-				return nil
+				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegImm64(jitStackRegs[sp], uint64(tov(float64(int8(code[ip+1])))))
 			sp++
@@ -154,13 +169,13 @@ func jitCompile(fn *svFunc) *jitCode {
 		case OpConst:
 			idx := readU32(code, ip+1)
 			if int(idx) >= len(fn.constants) || sp >= len(jitStackRegs) {
-				return nil
+				return refuse(why, "stack-too-deep")
 			}
 			c := fn.constants[idx]
 			if !c.IsNumber() {
 				// A String or an object constant would mean the generic
 				// operators, which is the next tier's problem.
-				return nil
+				return refuse(why, "non-numeric-constant")
 			}
 			a.MovRegImm64(jitStackRegs[sp], uint64(c))
 			sp++
@@ -169,7 +184,7 @@ func jitCompile(fn *svFunc) *jitCode {
 		case OpGetLocal:
 			i := int(readU16(code, ip+1))
 			if i >= fn.maxLocals || sp >= len(jitStackRegs) || !assigned[i] {
-				return nil
+				return refuse(why, "local-not-assigned")
 			}
 			a.MovRegMem(jitStackRegs[sp], jitRegLocals, int32(i)*8)
 			sp++
@@ -178,7 +193,7 @@ func jitCompile(fn *svFunc) *jitCode {
 		case OpPutLocal, OpSetLocal:
 			i := int(readU16(code, ip+1))
 			if i >= fn.maxLocals || sp < 1 || !assigned[i] {
-				return nil
+				return refuse(why, "local-not-assigned")
 			}
 			a.MovMemReg(jitRegLocals, int32(i)*8, jitStackRegs[sp-1])
 			if op == OpPutLocal {
@@ -225,7 +240,7 @@ func jitCompile(fn *svFunc) *jitCode {
 			}
 			nop := Opcode(code[next])
 			if nop != OpJmpFalse && nop != OpJmpTrue {
-				return nil
+				return refuse(why, "compare-not-branched")
 			}
 			if _, isTarget := labels[next]; isTarget {
 				return nil // something branches between the compare and its use
@@ -276,19 +291,30 @@ func jitCompile(fn *svFunc) *jitCode {
 			ip++
 
 		default:
+			if why != nil {
+				*why = "op:" + opTable[op].Name
+			}
 			return nil
 		}
 	}
 	if !returned {
 		// Falling off the end is an implicit `return undefined`, which is not a
 		// Number and so is not this tier's business.
-		return nil
+		return refuse(why, "falls-off-end")
 	}
 
 	a.Bind(bail)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitDeopt))
 	a.MovRegImm64(jitasm.RAX, jitmem.ExitDeopt)
 	a.Ret()
+
+	// Emission stops at the first unreachable trailer, so a branch target beyond
+	// it never got bound. That is a function this tier does not understand the
+	// shape of rather than an error, and declining is the answer — jitasm would
+	// otherwise panic, correctly, rather than emit a branch to nowhere.
+	if a.Unresolved() {
+		return refuse(why, "unreachable-target")
+	}
 
 	buf := a.Code()
 	block, err := jitmem.Alloc(len(buf))
@@ -309,6 +335,9 @@ func jitCompile(fn *svFunc) *jitCode {
 	if err := block.Protect(); err != nil {
 		block.Free()
 		return nil
+	}
+	if why != nil {
+		*why = ""
 	}
 	return &jitCode{block: block, entry: block.Addr()}
 }

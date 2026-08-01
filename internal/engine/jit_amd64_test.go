@@ -90,7 +90,7 @@ var jitLoopInputs = []struct{ a, b float64 }{
 func TestJITAgreesWithTheInterpreter(t *testing.T) {
 	check := func(src string, inputs []struct{ a, b float64 }) {
 		fn := jitFn(t, src)
-		c := jitCompile(fn)
+		c := jitCompile(fn, nil)
 		if c == nil {
 			t.Errorf("%s: refused to compile", src)
 			return
@@ -127,7 +127,7 @@ func TestJITAgreesWithTheInterpreter(t *testing.T) {
 func TestJITLoopOutlivesItsFuel(t *testing.T) {
 	const src = "function f(n,m){ var s=0, i=0; while (i<n) { s=s+i; i=i+1; } return s; }"
 	fn := jitFn(t, src)
-	c := jitCompile(fn)
+	c := jitCompile(fn, nil)
 	if c == nil {
 		t.Fatal("refused to compile")
 	}
@@ -153,7 +153,7 @@ func TestJITLoopOutlivesItsFuel(t *testing.T) {
 // number as an object.
 func TestJITCanonicalizesNaN(t *testing.T) {
 	fn := jitFn(t, "function f(a,b){ return a/b; }")
-	c := jitCompile(fn)
+	c := jitCompile(fn, nil)
 	if c == nil {
 		t.Fatal("refused to compile")
 	}
@@ -193,7 +193,7 @@ func TestJITCanonicalizesNaN(t *testing.T) {
 // a side effect, re-running from the top is always correct.
 func TestJITBailsOnNonNumbers(t *testing.T) {
 	fn := jitFn(t, "function f(a,b){ return a+b; }")
-	c := jitCompile(fn)
+	c := jitCompile(fn, nil)
 	if c == nil {
 		t.Fatal("refused to compile")
 	}
@@ -230,7 +230,7 @@ func TestJITRefusesWhatItCannotModel(t *testing.T) {
 		"function f(n,m){ var s=0, i=0; while (i<n) { var t=i*m; s=s+t; i=i+1; } return s; }",
 		"function f(a,b){ return -a; }", // negation is not in this tier
 	} {
-		if c := jitCompile(jitFn(t, src)); c != nil {
+		if c := jitCompile(jitFn(t, src), nil); c != nil {
 			c.free()
 			t.Errorf("compiled %q, which it should have refused", src)
 		}
@@ -242,7 +242,7 @@ func TestJITRefusesWhatItCannotModel(t *testing.T) {
 func TestJITMatchesRunningTheSource(t *testing.T) {
 	const src = "function f(a,b){ return (a+b)*(a-b)/b; }"
 	fn := jitFn(t, src)
-	c := jitCompile(fn)
+	c := jitCompile(fn, nil)
 	if c == nil {
 		t.Fatal("refused to compile")
 	}
@@ -275,7 +275,7 @@ func ftoa(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
 func BenchmarkJITvsInterpreter(b *testing.B) {
 	const src = "function f(a,b){ return (a+b)*(a-b)/b+a*b; }"
 	fn := jitFn(b, src)
-	c := jitCompile(fn)
+	c := jitCompile(fn, nil)
 	if c == nil {
 		b.Fatal("refused to compile")
 	}
@@ -312,7 +312,7 @@ func BenchmarkJITvsInterpreter(b *testing.B) {
 func BenchmarkJITLoop(b *testing.B) {
 	const src = "function f(n,m){ var s=0, i=0; while (i<n) { s=s+i*m; i=i+1; } return s; }"
 	fn := jitFn(b, src)
-	c := jitCompile(fn)
+	c := jitCompile(fn, nil)
 	if c == nil {
 		b.Fatal("refused to compile")
 	}

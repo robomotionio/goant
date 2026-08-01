@@ -119,6 +119,20 @@ func (a *Asm) Code() []byte {
 	return a.buf
 }
 
+// Unresolved reports whether anything branches to a label that was never bound.
+//
+// Code panics on that, because a wild branch is worse than a crash. A compiler
+// that may legitimately stop emitting part way — because it decided not to
+// compile the function after all — asks here first and declines quietly.
+func (a *Asm) Unresolved() bool {
+	for _, l := range a.labels {
+		if !l.bound && len(l.uses) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // NewLabel allocates an unbound label.
 func (a *Asm) NewLabel() *Label {
 	l := &Label{}

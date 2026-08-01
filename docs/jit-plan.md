@@ -263,13 +263,58 @@ The two differ exactly where it matters — the first NaN test written against
 `math.NaN()` failed, because Go's NaN is 0x7FF8000000000001 and neither the
 interpreter nor the compiler produces that one.
 
+## How much of a real corpus this compiles
+
+0.4% of it. 26 functions out of 6,976 across Octane.
+
+`TestJITCoverage` reports that, and what stopped the rest:
+
+| refused because | functions |
+| --- | --- |
+| a local it could not prove assigned | 1555 |
+| `SHR` | 873 |
+| `SPECIAL_OBJ` | 832 |
+| `GET_FIELD` and `GET_FIELD2` | 979 |
+| `GET_GLOBAL` | 786 |
+| `GET_UPVAL` | 541 |
+| `CLOSURE` | 235 |
+| `RETURN_UNDEF` | 181 |
+| `UNDEF` / `TRUE` / `NULL` / `FALSE` | 460 |
+
+The number is small enough that wiring this tier into the interpreter would
+change nothing measurable, which settles the order of the remaining work: the
+tier has to cover far more before tiering is worth building.
+
+It also corrects a prediction. Property access looked like the obvious next
+lever — it is where Richards and DeltaBlue spend their time, and it is what
+`lucasdss/v8go` named as the fix they never made. It is not the top of this list.
+The straight-line prefix rule for definite assignment refuses more functions than
+any opcode does, and it is the cheapest of these to lift, because nothing about
+it needs new code generation.
+
 ## Still to do
 
-Nothing calls `jitCompile`. Tiering, and the counters that decide when a function
-is worth compiling, belong with the type feedback of phase 1; wiring an untiered
-compiler into the interpreter would be the wrong order. After that, in rough
-order of what the profiles say is worth having: definite assignment over the CFG,
-so a local declared inside a loop stops being a refusal; property access with the
-inline-cache guard chain emitted inline, which is where the remaining Octane gap
-lives; calls, which is the 70 ns above; and an arm64 emitter, for which jitmem is
-already in place.
+In the order the table argues for:
+
+1. **Definite assignment over the control-flow graph**, replacing the
+   straight-line prefix rule. A local declared inside a loop or a branch stops
+   being a refusal. No new instructions, and it is worth more than any of them.
+2. **The rest of the numeric operators** — `SHR` and the other shifts and bitwise
+   operations are ordinary integer instructions over the NaN box.
+3. **Values that are not Numbers** — `undefined`, `null`, the Booleans, and the
+   comparisons that produce them. Mostly a matter of letting tagged values live
+   on the operand stack unexamined.
+4. **Property access**, with the inline-cache guard chain emitted as machine
+   code rather than delegated. This is the one that matters for Octane's score
+   rather than its function count, and it is where the helper round trip
+   measured in phase 2 starts to be load-bearing.
+5. **Globals, upvalues and calls.** Calls are also the 70 ns of frame setup that
+   the phase 3 measurement could not touch.
+6. **Tiering** — counters, a compile threshold, and the lifecycle rules that keep
+   a code block alive exactly as long as something can enter it. Worth building
+   once the coverage justifies it, and not before.
+7. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
+   emitter is mechanical once the amd64 shape has stopped moving.
+
+Phase 1's type feedback is not on this list because this tier guards rather than
+speculates. It moves back up when there is a second tier to feed.
