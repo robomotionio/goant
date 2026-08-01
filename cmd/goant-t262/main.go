@@ -48,6 +48,7 @@ func main() {
 		showSkip = flag.Bool("show-skip", false, "also list skipped tests")
 		failFile = flag.String("failures", "", "write the sorted list of failing test paths here")
 		core     = flag.Bool("core", false, "score only the ECMA-262 core: skip ECMA-402 (intl402), the\n\tnon-normative staging/ imports, staged proposals, and the tests that\n\tneed threads, a second realm, or web-legacy document.all")
+		all      = flag.Bool("all", false, "score every test file, skipping nothing: no profile, no feature\n\texclusions, not even the host-capability ones. This is the number with\n\tno judgement calls in it — use it to audit what -core leaves out.\n\tOverrides -core.")
 	)
 	flag.Parse()
 
@@ -80,7 +81,7 @@ func main() {
 		*jobs = min(16, max(1, runtime.NumCPU()))
 	}
 
-	coreOnly = *core
+	coreOnly, skipNothing = *core, *all
 	results := runAll(*runner, *root, tests, harness, *timeout, *jobs)
 
 	report(results, *verbose, *showSkip, *failFile)
@@ -305,9 +306,23 @@ var skipFeatures = map[string]bool{
 // coreOnly restricts scoring to the ECMA-262 core (the -core flag).
 var coreOnly bool
 
+// skipNothing disables every exclusion below (the -all flag), so the score has
+// no judgement calls in it: tests for features goant does not implement, and
+// tests needing a host it does not provide, are run and counted as failures.
+// The point is that -core's number stays auditable against this one.
+var skipNothing bool
+
 // coreSkipFeatures are the features outside a pure single-threaded ECMA-262
 // engine: staged proposals that are not yet the language, tests needing a second
 // realm the host must supply, and web-legacy document.all emulation.
+//
+// The proposal entries are the flags test262 lists above its "## Standard
+// language features" header in features.txt. That header is the line to watch:
+// when a proposal graduates it moves below it, and the tests stop being
+// skippable and start being work. (iterator-chunking and iterator-includes
+// crossed it in July 2026 and cost 109 failures until they were implemented.)
+// Temporal and the Atomics/SharedArrayBuffer group sit below the header and are
+// excluded on scope, not on staging — they are deliberately not in goant.
 var coreSkipFeatures = map[string]bool{
 	"Temporal":                   true,
 	"decorators":                 true,
@@ -316,6 +331,7 @@ var coreSkipFeatures = map[string]bool{
 	"import-defer":               true,
 	"import-bytes":               true,
 	"import-text":                true,
+	"Iterator.prototype.join":    true,
 	"import-attributes":          false, // implemented; scored
 	"cross-realm":                true,
 	"IsHTMLDDA":                  true,
@@ -330,6 +346,9 @@ var coreSkipFeatures = map[string]bool{
 var coreSkipDirs = []string{"intl402/", "staging/"}
 
 func (m meta) skipReason() string {
+	if skipNothing {
+		return ""
+	}
 	for _, f := range m.features {
 		if skipFeatures[f] {
 			return "feature:" + f
@@ -411,7 +430,7 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 		return result{rel, outFail, "read: " + err.Error()}
 	}
 	m := parseMeta(string(src))
-	if coreOnly {
+	if coreOnly && !skipNothing {
 		for _, d := range coreSkipDirs {
 			if strings.HasPrefix(rel, "test/"+d) {
 				return result{rel, outSkip, "non-core:" + strings.TrimSuffix(d, "/")}
