@@ -182,6 +182,146 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 	return blocks, true
 }
 
+// jitNumberDemand reports which locals the body needs to be Numbers.
+//
+// This decides which parameters the prologue checks, and checking fewer of them
+// is not a saving but the point. A parameter that is checked cannot be an
+// object, because the check is "untagged or leave" — so for as long as every
+// parameter was checked, no object could reach compiled code at all, and the
+// property read below it could only ever see a primitive. Guarding a parameter
+// the body only reads fields from is what made an inline cache in compiled code
+// unreachable rather than merely unwritten.
+//
+// A local is in demand when a read of it reaches an operation defined on Numbers
+// — arithmetic, a bitwise operator, a comparison. Being a property's receiver,
+// being stored, being returned: none of those demand anything, because the
+// templates for them work on any value.
+//
+// The relation is transitive through the locals, which is what the outer loop is
+// for: `let t = o; t * 2` demands a Number of t, and therefore of o. The origin
+// of a stack slot is the local whose read produced it, or none for a computed
+// value, and a store propagates the destination's demand back to that origin.
+func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
+	code := fn.code
+	demand := make([]bool, fn.maxLocals)
+
+	const noOrigin = -1
+	for changed := true; changed; {
+		changed = false
+		want := func(i int) {
+			if i != noOrigin && !demand[i] {
+				demand[i] = true
+				changed = true
+			}
+		}
+		for _, b := range blocks {
+			if !b.reachable {
+				continue
+			}
+			// Every block is entered with an empty operand stack, so the origins
+			// of one block's slots never reach another's.
+			var org []int
+			push := func(o int) { org = append(org, o) }
+			pop := func() (int, bool) {
+				if len(org) == 0 {
+					return noOrigin, false
+				}
+				o := org[len(org)-1]
+				org = org[:len(org)-1]
+				return o, true
+			}
+			popWant := func() bool {
+				o, ok := pop()
+				if ok {
+					want(o)
+				}
+				return ok
+			}
+			for ip := b.start; ip < b.end; {
+				op := Opcode(code[ip])
+				size := int(opTable[op].Size)
+				if size <= 0 || ip+size > len(code) {
+					return nil, false
+				}
+				switch op {
+				case OpGetLocal:
+					i := int(readU16(code, ip+1))
+					if i >= fn.maxLocals {
+						return nil, false
+					}
+					push(i)
+				case OpPutLocal, OpSetLocal:
+					i := int(readU16(code, ip+1))
+					if i >= fn.maxLocals {
+						return nil, false
+					}
+					o, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					// What the destination needs, the source must supply.
+					if demand[i] {
+						want(o)
+					}
+					if op == OpSetLocal {
+						push(o)
+					}
+				case OpAdd, OpSub, OpMul, OpDiv,
+					OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr,
+					OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne:
+					if !popWant() || !popWant() {
+						return nil, false
+					}
+					push(noOrigin)
+				case OpNeg, OpBnot, OpInc, OpDec, OpNot:
+					if !popWant() {
+						return nil, false
+					}
+					push(noOrigin)
+				case OpDup:
+					o, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					push(o)
+					push(o)
+				case OpInsert2:
+					av, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					obj, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					push(av)
+					push(obj)
+					push(av)
+				case OpGetField:
+					// The receiver is demanded of nothing: the template reads a
+					// field of whatever it is handed, or asks the runtime to.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(noOrigin)
+				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpThis:
+					push(noOrigin)
+				case OpPop, OpJmpFalse, OpJmpTrue, OpReturn:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+				case OpJmp, OpReturnUndef:
+					// no stack effect
+				default:
+					return nil, false
+				}
+				ip += size
+			}
+		}
+	}
+	return demand, true
+}
+
 // jitNumericLocals reports which locals only ever receive Numbers.
 //
 // The tier used to be able to assume this of every local, because the only
@@ -195,15 +335,23 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 // worth a lattice per program point. It starts optimistic and shrinks, so it
 // terminates.
 //
+// Parameters are seeded from demand rather than optimistically, because what
+// makes a parameter a Number is the prologue checking it, and the prologue only
+// checks the ones in demand. An unchecked parameter holds whatever the caller
+// passed, so it is not numeric, and neither is anything copied from it.
+//
 // It walks the same stack discipline the emitter does. The two agreeing matters,
 // so anything unexpected refuses the function rather than guessing — and since
 // the emitter refuses the same opcodes, they cannot drift apart on a function
 // either of them accepts.
-func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
+func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bool, bool) {
 	code := fn.code
 	numeric := make([]bool, fn.maxLocals)
 	for i := range numeric {
 		numeric[i] = true
+	}
+	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
+		numeric[i] = demand[i]
 	}
 
 	for changed := true; changed; {

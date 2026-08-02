@@ -44,6 +44,15 @@ type ExecContext struct {
 	// holds a Value, and a stale one from an earlier call holds a handle to a
 	// cell that may since have been freed.
 	SpillN uint64
+	// Pool is the address of the runtime's object pool, which compiled code
+	// needs to turn a Value's handle into an object.
+	//
+	// Passed in rather than compiled in because two runtimes have two pools, and
+	// code compiled while running one must never resolve a handle against the
+	// other's — it would land on a live cell holding an unrelated object. One
+	// load per property access is what makes that impossible rather than
+	// unlikely.
+	Pool uintptr
 }
 
 // SpillSlots bounds the operand stack a compiled function may hold across a
@@ -59,7 +68,8 @@ const (
 	CtxOffResume = 56
 	CtxOffSpill  = 64
 	CtxOffSpillN = 64 + 8*SpillSlots
-	CtxSize      = 72 + 8*SpillSlots
+	CtxOffPool   = 72 + 8*SpillSlots
+	CtxSize      = 80 + 8*SpillSlots
 )
 
 // Which fields hold a Value, and so must be traced by the runtime's collector

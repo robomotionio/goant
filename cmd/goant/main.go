@@ -121,6 +121,11 @@ func dumpJITStats() {
 	}
 	fmt.Fprintf(os.Stderr, "jit: %d compiled (%.1f%% of frame entries), %d declined, %d interpreted\n",
 		c, 100*float64(c)/float64(total), d, in)
+	hit, miss := engine.JITPropertyStats()
+	if reads := hit + miss; reads > 0 {
+		fmt.Fprintf(os.Stderr, "jit: %d property reads, %d served by the compiled cache (%.1f%%)\n",
+			reads, hit, 100*float64(hit)/float64(reads))
+	}
 }
 
 func stopProfile() {

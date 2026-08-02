@@ -221,6 +221,56 @@ func (a *Asm) emitMem(w bool, opcode []byte, reg, base uint8, disp int32) {
 	}
 }
 
+// emitMemIndex encodes an operation on [base + index*scale + disp].
+//
+// Always a SIB byte, so the two awkward cases of emitMem shrink to one: rm=100
+// selects SIB, which is what is wanted, and base=101 with mod=00 means "no base,
+// disp32 follows", so RBP and R13 still need an explicit displacement. RSP
+// cannot be an index at all: 100 in the index field means "no index", and only
+// REX.X rescues it — which is why R12, whose low bits are also 100, is perfectly
+// usable as one. That asymmetry is worth a panic rather than a silent
+// misencoding, because dropping an index reads the base and gets a real value.
+func (a *Asm) emitMemIndex(w bool, opcode []byte, reg, base, index uint8, scale uint8, disp int32) {
+	if index == uint8(RSP) {
+		panic("jitasm: RSP cannot be a scaled index")
+	}
+	var ss uint8
+	switch scale {
+	case 1:
+		ss = 0
+	case 2:
+		ss = 1
+	case 4:
+		ss = 2
+	case 8:
+		ss = 3
+	default:
+		panic("jitasm: scale must be 1, 2, 4 or 8")
+	}
+	if p := rex(w, reg, index, base); w || p != 0x40 {
+		a.emit(p)
+	}
+	a.emit(opcode...)
+
+	var mod uint8
+	switch {
+	case disp == 0 && base&7 != 5:
+		mod = 0
+	case disp >= -128 && disp <= 127:
+		mod = 1
+	default:
+		mod = 2
+	}
+	a.emit(modrm(mod, reg, 4)) // rm=100: a SIB byte follows
+	a.emit(ss<<6 | (index&7)<<3 | base&7)
+	switch mod {
+	case 1:
+		a.emit(byte(int8(disp)))
+	case 2:
+		a.emit32(uint32(disp))
+	}
+}
+
 // ---- moves ----
 
 // MovRegImm64 loads a 64-bit immediate. Used for addresses — pool bases, helper
@@ -259,6 +309,26 @@ func (a *Asm) MovMemReg(base Reg, disp int32, src Reg) {
 func (a *Asm) MovMemImm32(base Reg, disp int32, v uint32) {
 	a.emitMem(true, []byte{0xC7}, 0, uint8(base), disp)
 	a.emit32(v)
+}
+
+// Mov32RegMem loads the low 32 bits of a memory operand, zero-extended.
+//
+// The engine stores a slot number and a cache epoch as uint32, and reading one
+// with a 64-bit load would pull in whatever field follows it.
+func (a *Asm) Mov32RegMem(dst, base Reg, disp int32) {
+	a.emitMem(false, []byte{0x8B}, uint8(dst), uint8(base), disp)
+}
+
+// MovRegMemIndex loads from base+index*scale+disp, which is what reading an
+// element of an array whose index is not known until run time takes.
+func (a *Asm) MovRegMemIndex(dst, base, index Reg, scale uint8, disp int32) {
+	a.emitMemIndex(true, []byte{0x8B}, uint8(dst), uint8(base), uint8(index), scale, disp)
+}
+
+// MovzxRegMem8 loads one byte and zero-extends it, for the uint8 fields of a
+// shape.
+func (a *Asm) MovzxRegMem8(dst, base Reg, disp int32) {
+	a.emitMem(false, []byte{0x0F, 0xB6}, uint8(dst), uint8(base), disp)
 }
 
 // ---- integer arithmetic ----
@@ -307,6 +377,37 @@ func (a *Asm) AndRegImm32(r Reg, v uint32) {
 // folded in without needing a register to hold it first.
 func (a *Asm) AddRegMem(dst, base Reg, disp int32) {
 	a.emitMem(true, []byte{0x03}, uint8(dst), uint8(base), disp)
+}
+
+// AddMemImm32 adds a sign-extended immediate to a 64-bit memory operand, which
+// is how compiled code bumps a counter without spending a second register.
+func (a *Asm) AddMemImm32(base Reg, disp int32, v uint32) {
+	a.emitMem(true, []byte{0x81}, 0, uint8(base), disp)
+	a.emit32(v)
+}
+
+// OrRegMem, CmpRegMem and Cmp32RegMem take their second operand from memory.
+//
+// A guard sequence is a run of compares against fields of structures that are
+// read once and never held, so folding the load into the compare is not a
+// peephole — it is the difference between needing a spare register and not.
+func (a *Asm) OrRegMem(dst, base Reg, disp int32) {
+	a.emitMem(true, []byte{0x0B}, uint8(dst), uint8(base), disp)
+}
+
+func (a *Asm) CmpRegMem(dst, base Reg, disp int32) {
+	a.emitMem(true, []byte{0x3B}, uint8(dst), uint8(base), disp)
+}
+
+func (a *Asm) Cmp32RegMem(dst, base Reg, disp int32) {
+	a.emitMem(false, []byte{0x3B}, uint8(dst), uint8(base), disp)
+}
+
+// LeaRegMemIndex computes base+index*scale+disp without dereferencing it, and
+// without touching the flags — which is what turns a three-instruction address
+// calculation into one.
+func (a *Asm) LeaRegMemIndex(dst, base, index Reg, scale uint8, disp int32) {
+	a.emitMemIndex(true, []byte{0x8D}, uint8(dst), uint8(base), uint8(index), scale, disp)
 }
 
 func (a *Asm) XchgRegReg(x, y Reg) { a.emitRM(true, []byte{0x87}, uint8(x), uint8(y)) }

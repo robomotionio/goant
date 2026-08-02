@@ -366,7 +366,7 @@ compiler covers, not by the value representation. `lucasdss/v8go` reached 1.7x
 with a whole optimising tier because 48-byte values capped it. Nothing caps this
 one in the same way.
 
-## Property access, and why it is not yet a win
+## Property access
 
 `GET_FIELD` compiles. It needed a mechanism rather than an instruction: compiled
 code keeps the operand stack in registers, and calling into the runtime loses
@@ -404,42 +404,98 @@ arithmetic wins. That is the design rule from the top of this document arriving
 with a number attached: **the fast paths have to be emitted, not delegated.**
 `lucasdss/v8go` stopped at 1.7x for the same reason, and named the same fix.
 
-Kept rather than reverted because the tier is off by default, the machinery it
-needed is correct and tested, and the next step is now precisely specified: emit
-the inline-cache hit — resolve the handle, compare the shape, load the slot —
-and call the helper only on a miss. Until then, turning the JIT on makes
-property-heavy code slower, which is the honest state of it.
+### The cache, emitted
+
+So it is emitted, and the runtime keeps only the miss. The probe is `icWay.hit`
+restricted to the case machine code can serve — one way, an own slot, in the
+object rather than its overflow, holding something other than an unparsed JSON
+span — and everything else falls through to exactly the helper above.
+
+```js
+function spin(o, n) { var i = 0; while (i < n) { o.a; o.b; o.c; o.d; i = i + 1; } return i; }
+```
+
+| 80,000,000 property reads | |
+| --- | --- |
+| interpreted | 2690 ms |
+| compiled | **184 ms** |
+
+**14.6x**, and 15.6x on `BenchmarkJITProperty`, which measures the same loop
+without the process around it. The counters say 79,992,000 of 80,000,000 reads
+were served by the emitted probe — the missing 8,000 are the 2,000 iterations
+that ran before the loop tiered up, which is what makes the accounting worth
+printing rather than merely believing.
+
+The values are discarded because this tier still cannot compute with a field's
+value, which is the next section's problem and not the cache's.
+
+### The thing that made it unreachable
+
+Writing the probe was not the hard part. Finding out that nothing could ever
+reach it was.
+
+The prologue used to check every parameter, and the check is "untagged, or hand
+the frame back to the interpreter". A checked parameter therefore cannot be an
+object — so for as long as every parameter was checked, no object could enter
+compiled code at all, and a compiled property read could only ever be handed a
+primitive. The cache would have been correct, tested, and dead.
+
+The fix is to check the parameters the body actually computes with, which needs a
+small analysis (`jitNumberDemand`): a local is in demand when a read of it
+reaches an operation defined on Numbers, and demand propagates backwards through
+stores, so `var t = o; t * 2` demands a Number of `o`. Everything else — being a
+receiver, being stored, being returned — demands nothing, because the templates
+for those work on any value. An unchecked parameter is not thereby trusted: the
+numeric analysis is seeded from the same set, so a template that needs a Number
+refuses the function rather than guarding it.
+
+That change also surfaced a latent miscompilation. `GET_FIELD` carries private
+names as well as properties, and they are not properties — `other.#x` in a class
+method resolves against the class environment the frame carries. Compiled code
+called `getField` with the mangled name, which finds nothing:
+
+| `static read(o) { return o.#x; }`, summed over 200 instances | |
+| --- | --- |
+| interpreted | 19900 |
+| compiled, before the guard | **NaN** |
+
+Unreachable while parameters were checked, because the object argument bailed
+before the read. The first thing letting objects in did was to make it reachable.
 
 ## What the tier is worth on Octane: nothing yet
 
-`GOANT_JIT_STATS=1` counts frame entries by where they ran. The static coverage
-figure above — 4.9% of functions — turns out to be a poor guide to anything:
+`GOANT_JIT_STATS=1` counts frame entries by where they ran. Static coverage —
+6.0% of functions — turns out to be a poor guide to anything. Scores are
+higher-is-better; the tier is on for the second column.
 
-| | entries served by compiled code |
-| --- | --- |
-| Richards | 0 of 5,870,643 |
-| DeltaBlue | 37,918 of 9,292,451 (0.4%) |
-| Crypto | 84 of 3,102,716 |
-| NavierStokes | 12 of 2,743 (0.4%) |
-| RayTrace | 0 of 8,382,213 |
-| EarleyBoyer | 0 of 29,596,449 |
-| Splay | 0 of 3,389,073 |
-| RegExp | 0 of 1,646,915 |
+| | off | on | entries served by compiled code |
+| --- | --- | --- | --- |
+| Richards | 220 | 217 | 0 of 5,020,416 |
+| DeltaBlue | 249 | 243 | 34,214 of 8,385,875 (0.4%) |
+| Crypto | 254 | 251 | 668 of 3,059,884 |
+| RayTrace | 397 | 395 | 0 of 9,026,997 |
+| EarleyBoyer | 623 | 618 | 252 of 29,358,351 |
+| Splay | 1967 | 1983 | 0 of 2,984,153 |
+| NavierStokes | 466 | 453 | 12 of 2,743 (0.4%) |
 
-Essentially zero, which is what the unchanged Octane scores were already saying.
+Unchanged, and the property counters say something sharper than the scores do:
+**across the whole suite, compiled code executes zero property reads.** Not a low
+hit rate — no reads at all. The 6% of functions that compile are numeric leaves
+that never touch a field, so the fastest inline cache in the world sits in code
+Octane does not run.
 
 The hope was that the split would favour the tier — that a numeric compiler would
 miss many functions but catch the ones that run in loops. It is the other way
 round. The functions Octane spends its time in are the ones that allocate,
 dispatch over a class hierarchy, close over variables and call each other, which
-is precisely the set this tier refuses. The 4.9% it does compile are leaves and
-helpers that barely execute.
+is precisely the set this tier refuses.
 
 So there is no shortcut here and no 80/20. Reaching a score that competes with
-node on this suite needs calls, property access through an emitted inline cache,
-closures, upvalues, globals, arrays and exceptions — most of the language, not a
-numeric core with a long tail. The measurement is worth having early: it is the
-difference between a plan and a hope.
+node on this suite needs calls, stores, closures, upvalues, globals, arrays and
+exceptions — most of the language, not a numeric core with a long tail. The
+measurement is worth having early: it is the difference between a plan and a
+hope, and it is what keeps a 15.6x microbenchmark from being mistaken for
+progress on the thing that was actually asked for.
 
 ## Can this reach ant's speed in Go?
 
@@ -476,10 +532,10 @@ opcodes against 135 — and not speed per opcode.
 
 ## Still to do
 
-Rewritten 2 August after measuring, which changed the order and removed two
-items that turned out not to be worth anything.
+Rewritten 2 August, twice: once after measuring the numeric operators, and again
+after the inline cache landed and moved the ordering under it.
 
-**What the histogram says now.** Item 2 below used to argue that the numeric
+**What the histogram says.** The list here used to argue that the numeric
 operators were not worth building. They were: `SHR` alone blocked 892 functions
 and the sole-blocker column was reading the marginal case, not the aggregate.
 They are all in, they cost one runtime call in a range real code never reaches,
@@ -487,34 +543,47 @@ and arithmetic has disappeared from the refusal histogram completely. What is
 left is **88% memory access** — GET_GLOBAL 1761, GET_FIELD2 962, PUT_FIELD 870,
 SPECIAL_OBJ 832, GET_UPVAL 824, GET_ELEM 323, CLOSURE 277.
 
-**What the histogram does not say.** None of that moved Octane, which is
-unchanged to within 2% with the tier on and marginally worse — the counters cost
-a little and nothing hot ever compiles. Integer kernels went 1.6x to 5.6x in the
-same build. A tier is worth what its *hot* coverage is worth, and static
-coverage is a poor proxy for it: 6.0% of functions compile and 0.0% to 0.4% of
-frame entries land in them.
+**What the histogram does not say.** None of it moved Octane, which is unchanged
+with the tier on. Integer kernels went 1.6x to 5.6x in the same build and
+property reads 14.6x. A tier is worth what its *hot* coverage is worth, and
+static coverage is a poor proxy for it: 6.0% of functions compile and 0.0% to
+0.4% of frame entries land in them.
 
-1. **The inline cache for property access, emitted as machine code.** Everything
-   else on this list is smaller than it. It needs the object header, pool and
-   cache-entry offsets exported as constants from one source of truth, because a
-   wrong offset here is memory corruption rather than a wrong answer. No
-   deoptimisation is required: an unknown-typed result cannot reach an
-   arithmetic instruction, because the compiler refuses it — the one piece of
-   luck in the whole design. Delegating instead of emitting is already measured
-   as a 10% regression, so this is the difference between the tier being correct
-   and the tier being worth turning on.
-2. **Globals and upvalues**, which are the same problem with a simpler shape:
-   the binding is found once and the guard is a version check rather than a
-   prototype walk.
-3. **Calls, compiled to compiled.** Measured at 1.15 ns against 4.69 ns for the
+1. **Generic operators with a runtime fallback**, which is what the cache is
+   waiting on. A field's value has no known type, so `sum += o.a` refuses to
+   compile and every cache hit feeds a value this tier can only store or pass
+   on. The fix is not deoptimisation and does not need it: test both operands
+   for the tag bits, take ADDSD when neither has them, and otherwise call the
+   helper that does what the interpreter's ADD does. A helper is a call, not an
+   exit from the frame, so nothing has to be reconstructed. Two compares and a
+   not-taken branch is the whole cost, and it is the difference between the
+   cache being fast and the cache being useful.
+2. **`PUT_FIELD`**, the store side of the same cache. `icFillPutTransition`
+   already records the case that matters most — a store that *creates* the
+   property, which is what initialising a fresh object is made of — and it was
+   measured at 8% of EarleyBoyer on the interpreter side alone.
+3. **`GET_FIELD2`**, which is the same probe with a different stack effect (962
+   functions), and is what `o.m()` compiles to. Worth little before calls and
+   nearly free after this one.
+4. **Globals and upvalues** — the largest single blocker at 1761 and 824 — and
+   the same problem with a simpler shape: the binding is found once and the
+   guard is a version check rather than a prototype walk.
+5. **Calls, compiled to compiled.** Measured at 1.15 ns against 4.69 ns for the
    detour through the runtime, so the convention has to be decided before the
    first one is emitted. This is also the 70 ns of frame setup that phase 3
    could not touch.
-4. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
+6. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
    emitter is mechanical once the amd64 shape has stopped moving.
 
-Tiering has come off this list. Counters and a compile threshold are in, and so
-is the case a threshold cannot see: a function called once whose loop is hot
+The inline cache has come off this list, and so has the thing that turned out to
+be underneath it: a prologue that checked every parameter meant no object could
+enter compiled code, so the cache would have been correct and unreachable. That
+is the lesson worth carrying forward — a guard that rejects a type is also a
+guard that prevents ever handling it, and the two are easy to confuse when the
+guard is the one making everything else sound.
+
+Tiering has come off this list too. Counters and a compile threshold are in, and
+so is the case a threshold cannot see: a function called once whose loop is hot
 never reaches a call count, and used to run to completion in the interpreter
 however long it took. Entering compiled code at a loop header costs nothing to
 support because a back edge already has an empty operand stack and every live

@@ -30,11 +30,21 @@ const jitThreshold = 8
 // a numeric tier can take are exactly the ones that run in loops. What decides
 // the speedup is the share of *entries* that land in compiled code, which is
 // what this counts.
+// icHit and icMiss count property reads by whether the compiled probe served
+// them. They are the number that says whether emitting the cache was worth it,
+// and they cannot be inferred from anything else: a site that misses looks
+// exactly like a site that was never compiled.
+//
+// icHit is incremented by compiled code, which is why the increment is only
+// emitted when this is on — a counter nobody reads is still a store to a shared
+// line on the hottest path there is.
 var jitStats struct {
 	enabled  bool
 	compiled uint64
 	declined uint64
 	interp   uint64
+	icHit    uint64
+	icMiss   uint64
 }
 
 func init() { jitStats.enabled = os.Getenv("GOANT_JIT_STATS") != "" }
@@ -44,6 +54,10 @@ func init() { jitStats.enabled = os.Getenv("GOANT_JIT_STATS") != "" }
 func JITStats() (compiled, declined, interpreted uint64) {
 	return jitStats.compiled, jitStats.declined, jitStats.interp
 }
+
+// JITPropertyStats reports compiled property reads served by the emitted
+// inline-cache probe, and those that fell through to the runtime.
+func JITPropertyStats() (hit, miss uint64) { return jitStats.icHit, jitStats.icMiss }
 
 // jitOSRThreshold is how many times a loop may go round in the interpreter
 // before the function it is in gets compiled.

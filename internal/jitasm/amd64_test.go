@@ -285,6 +285,192 @@ func TestShifts(t *testing.T) {
 	}
 }
 
+// TestScaledIndexEveryRegister is the SIB test.
+//
+// Every combination of base and index, because the encoding has three ways to go
+// wrong that a single pair would not show: R12 as a base collides with the
+// "SIB follows" escape in the rm field, R13 as a base collides with the
+// "no base" escape in the SIB byte, and either register as an index needs REX.X
+// rather than REX.B — an encoder that sets the wrong one addresses RAX instead
+// of R8 and reads whatever happens to be there.
+func TestScaledIndexEveryRegister(t *testing.T) {
+	scratch := make([]uint64, 64)
+	for i := range scratch {
+		scratch[i] = uint64(i)*0x1010101 + 1
+	}
+	addr := uint64(uintptr(unsafe.Pointer(&scratch[0])))
+
+	for _, base := range allocatable {
+		for _, index := range allocatable {
+			if index == base {
+				continue
+			}
+			for _, disp := range []int32{0, 8, 200} {
+				const idx = 5
+				a := NewAsm()
+				a.MovRegMem(base, RegCtx, jitmem.CtxOffArgs)
+				a.MovRegMem(index, RegCtx, jitmem.CtxOffArgs+8)
+				a.MovRegMemIndex(RAX, base, index, 8, disp)
+				a.Ret()
+
+				ctx := jitmem.ExecContext{Args: [4]uint64{addr, idx}}
+				want := scratch[idx+disp/8]
+				got := run(t, a.Code(), &ctx)
+				runtime.KeepAlive(scratch)
+				if got != want {
+					t.Errorf("base %d index %d disp %d: got %#x, want %#x",
+						base, index, disp, got, want)
+				}
+			}
+		}
+	}
+}
+
+// TestScaledIndexScales checks that each scale factor is what it says, since
+// getting one wrong reads a real value from the wrong element rather than
+// failing.
+func TestScaledIndexScales(t *testing.T) {
+	scratch := make([]byte, 64)
+	for i := range scratch {
+		scratch[i] = byte(i)
+	}
+	addr := uint64(uintptr(unsafe.Pointer(&scratch[0])))
+
+	for _, scale := range []uint8{1, 2, 4, 8} {
+		a := NewAsm()
+		a.MovRegMem(RSI, RegCtx, jitmem.CtxOffArgs)
+		a.MovRegMem(RDI, RegCtx, jitmem.CtxOffArgs+8)
+		a.MovRegMemIndex(RAX, RSI, RDI, scale, 0)
+		a.Ret()
+
+		ctx := jitmem.ExecContext{Args: [4]uint64{addr, 3}}
+		got := byte(run(t, a.Code(), &ctx))
+		runtime.KeepAlive(scratch)
+		if want := scratch[3*int(scale)]; got != want {
+			t.Errorf("scale %d: read element %d, want %d", scale, got, want)
+		}
+	}
+}
+
+// TestLeaScaledIndexKeepsFlags is why LEA is used for address arithmetic in a
+// guard sequence: the compare before it has already set the flags a branch after
+// it depends on.
+func TestLeaScaledIndexKeepsFlags(t *testing.T) {
+	a := NewAsm()
+	a.MovRegImm64(RAX, 1)
+	a.MovRegImm64(RCX, 1)
+	a.CmpRegReg(RAX, RCX) // equal
+	a.MovRegImm64(RSI, 0x1000)
+	a.MovRegImm64(RDI, 2)
+	a.LeaRegMemIndex(RDX, RSI, RDI, 8, 16)
+	a.MovRegImm64(RAX, 0)
+	equal := a.NewLabel()
+	a.Jcc(CondE, equal)
+	a.Ret() // RAX = 0: LEA destroyed the flags
+	a.Bind(equal)
+	a.MovRegReg(RAX, RDX)
+	a.Ret()
+
+	var ctx jitmem.ExecContext
+	if got := run(t, a.Code(), &ctx); got != 0x1000+2*8+16 {
+		t.Errorf("lea produced %#x (0 means the flags did not survive)", got)
+	}
+}
+
+// TestMemoryOperandForms covers the compares and the or that read their second
+// operand from memory, including the 32-bit forms that must not pull in the
+// field that follows.
+func TestMemoryOperandForms(t *testing.T) {
+	scratch := []uint64{7, 0xFFFFFFFF00000007, 0}
+	addr := uint64(uintptr(unsafe.Pointer(&scratch[0])))
+
+	cases := []struct {
+		name string
+		emit func(*Asm)
+		want uint64
+	}{
+		// cmp rax, [mem] over equal and unequal operands.
+		{"cmp-eq", func(a *Asm) {
+			a.MovRegImm64(RAX, 7)
+			a.CmpRegMem(RAX, RSI, 0)
+		}, 1},
+		{"cmp-ne", func(a *Asm) {
+			a.MovRegImm64(RAX, 8)
+			a.CmpRegMem(RAX, RSI, 0)
+		}, 0},
+		// The 32-bit compare must ignore the high half, which is what makes it
+		// the right instruction for a uint32 field with another beside it.
+		{"cmp32-eq", func(a *Asm) {
+			a.MovRegImm64(RAX, 7)
+			a.Cmp32RegMem(RAX, RSI, 8)
+		}, 1},
+		{"cmp64-differs", func(a *Asm) {
+			a.MovRegImm64(RAX, 7)
+			a.CmpRegMem(RAX, RSI, 8)
+		}, 0},
+		// or rax, [mem] sets ZF from the result, which is how several pointer
+		// fields are tested for nil at once.
+		{"or-zero", func(a *Asm) {
+			a.XorRegReg(RAX, RAX)
+			a.OrRegMem(RAX, RSI, 16)
+		}, 1},
+		{"or-nonzero", func(a *Asm) {
+			a.XorRegReg(RAX, RAX)
+			a.OrRegMem(RAX, RSI, 0)
+		}, 0},
+	}
+	for _, tc := range cases {
+		a := NewAsm()
+		a.MovRegMem(RSI, RegCtx, jitmem.CtxOffArgs)
+		tc.emit(a)
+		set := a.NewLabel()
+		a.Jcc(CondE, set)
+		a.MovRegImm64(RAX, 0)
+		a.Ret()
+		a.Bind(set)
+		a.MovRegImm64(RAX, 1)
+		a.Ret()
+
+		ctx := jitmem.ExecContext{Args: [4]uint64{addr}}
+		got := run(t, a.Code(), &ctx)
+		runtime.KeepAlive(scratch)
+		if got != tc.want {
+			t.Errorf("%s: zero flag %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestByteAndWordLoads checks the narrow loads zero-extend rather than merging
+// into what the register already held.
+func TestByteAndWordLoads(t *testing.T) {
+	scratch := []uint64{0xAABBCCDDEEFF0102}
+	addr := uint64(uintptr(unsafe.Pointer(&scratch[0])))
+
+	for _, tc := range []struct {
+		name string
+		emit func(*Asm)
+		want uint64
+	}{
+		{"movzx8", func(a *Asm) { a.MovzxRegMem8(RAX, RSI, 0) }, 0x02},
+		{"movzx8-disp", func(a *Asm) { a.MovzxRegMem8(RAX, RSI, 1) }, 0x01},
+		{"mov32", func(a *Asm) { a.Mov32RegMem(RAX, RSI, 0) }, 0xEEFF0102},
+		{"mov32-disp", func(a *Asm) { a.Mov32RegMem(RAX, RSI, 4) }, 0xAABBCCDD},
+	} {
+		a := NewAsm()
+		a.MovRegImm64(RAX, ^uint64(0)) // must be overwritten, not merged into
+		a.MovRegMem(RSI, RegCtx, jitmem.CtxOffArgs)
+		tc.emit(a)
+		a.Ret()
+
+		ctx := jitmem.ExecContext{Args: [4]uint64{addr}}
+		got := run(t, a.Code(), &ctx)
+		runtime.KeepAlive(scratch)
+		if got != tc.want {
+			t.Errorf("%s: got %#x, want %#x", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestEncodings pins a handful of sequences byte for byte. Execution catches
 // most mistakes, but not one that encodes a different instruction which happens
 // to produce the same answer for the values a test used.
@@ -306,6 +492,22 @@ func TestEncodings(t *testing.T) {
 			[]byte{0x49, 0x89, 0x04, 0x24}},
 		{"add rax, rcx", func(a *Asm) { a.AddRegReg(RAX, RCX) },
 			[]byte{0x48, 0x01, 0xC8}},
+		{"mov rax, [rsi+rdi*8]", func(a *Asm) { a.MovRegMemIndex(RAX, RSI, RDI, 8, 0) },
+			[]byte{0x48, 0x8B, 0x04, 0xFE}},
+		{"mov rax, [r13+r12*8+16]", func(a *Asm) { a.MovRegMemIndex(RAX, R13, R12, 8, 16) },
+			[]byte{0x4B, 0x8B, 0x44, 0xE5, 0x10}},
+		{"lea rdx, [rsi+rdi*1+8]", func(a *Asm) { a.LeaRegMemIndex(RDX, RSI, RDI, 1, 8) },
+			[]byte{0x48, 0x8D, 0x54, 0x3E, 0x08}},
+		{"cmp rax, [rsi+8]", func(a *Asm) { a.CmpRegMem(RAX, RSI, 8) },
+			[]byte{0x48, 0x3B, 0x46, 0x08}},
+		{"cmp eax, [rsi+8]", func(a *Asm) { a.Cmp32RegMem(RAX, RSI, 8) },
+			[]byte{0x3B, 0x46, 0x08}},
+		{"or rax, [rsi+8]", func(a *Asm) { a.OrRegMem(RAX, RSI, 8) },
+			[]byte{0x48, 0x0B, 0x46, 0x08}},
+		{"movzx eax, byte [rsi+8]", func(a *Asm) { a.MovzxRegMem8(RAX, RSI, 8) },
+			[]byte{0x0F, 0xB6, 0x46, 0x08}},
+		{"mov eax, [rsi+8]", func(a *Asm) { a.Mov32RegMem(RAX, RSI, 8) },
+			[]byte{0x8B, 0x46, 0x08}},
 		{"ret", (*Asm).Ret, []byte{0xC3}},
 	} {
 		a := NewAsm()

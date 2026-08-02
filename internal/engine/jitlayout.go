@@ -47,6 +47,11 @@ const (
 	jitOffObjProto = unsafe.Offsetof(object{}.proto)
 	jitOffObjShape = unsafe.Offsetof(object{}.shape)
 	jitOffObjInobj = unsafe.Offsetof(object{}.inobj)
+	jitOffObjProxy = unsafe.Offsetof(object{}.proxy)
+
+	// A shape's inobj limit, which decides whether a slot is in the object or
+	// in its overflow slice.
+	jitOffShapeInobjLimit = unsafe.Offsetof(shape{}.inobjLimit)
 
 	// One cache site, and one way within it.
 	jitSizeofICWay  = unsafe.Sizeof(icWay{})
@@ -73,4 +78,31 @@ const jitInobjSlots = inobjMaxSlots
 // other's.
 func jitObjectPoolAddr(rt *Runtime) uintptr {
 	return uintptr(unsafe.Pointer(rt.objects))
+}
+
+// jitEpochAddr is the address of the inline-cache generation counter.
+//
+// Baked into compiled code as an immediate rather than passed in, because
+// unlike the pool it is one counter for the whole process — a cache retired by
+// one Runtime is retired for all of them, which the comment on icEpochCounter
+// explains is a cost rather than a wrong answer.
+//
+// Compiled code reads it with an ordinary 32-bit load. That is what
+// atomic.LoadUint32 compiles to on amd64, and the value is only ever compared
+// for equality against one recorded earlier: reading a stale epoch makes a live
+// cache look retired, which costs a slow-path lookup and nothing else.
+func jitEpochAddr() uintptr { return uintptr(unsafe.Pointer(&icEpochCounter)) }
+
+// jitICHitAddr is the address of the compiled-hit counter, for the increment
+// compiled code emits when GOANT_JIT_STATS is set.
+func jitICHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.icHit)) }
+
+// jitICWayAddr is the address of a cache site's first way.
+//
+// Constant for the life of the function: frameICs allocates the array once and
+// nothing grows it, and Go does not move what it has allocated. The array is
+// reachable from the svFunc that owns the compiled code, so it cannot be
+// collected while any of that code can run.
+func jitICWayAddr(ics []propIC, i int) uintptr {
+	return uintptr(unsafe.Pointer(&ics[i].ways[0]))
 }

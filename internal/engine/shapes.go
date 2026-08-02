@@ -34,15 +34,17 @@ const inobjMaxSlots = 4
 // goroutines bump it independently. Sharing it is harmless — a bump from an
 // unrelated Runtime only makes another's caches refill, which is a cost, not a
 // wrong answer — whereas a torn read or a lost update would be neither.
-var icEpochCounter atomic.Uint32
+// It is a plain uint32 behind the atomic functions rather than an atomic.Uint32
+// so that its address is the address of the counter. Compiled code compares
+// against it directly (see jitEpochAddr), and where a named field sits inside a
+// wrapper struct is not something this package gets to decide.
+var icEpochCounter uint32 = 1
 
-func init() { icEpochCounter.Store(1) }
-
-func icEpoch() uint32 { return icEpochCounter.Load() }
+func icEpoch() uint32 { return atomic.LoadUint32(&icEpochCounter) }
 
 func icEpochBump() {
-	if icEpochCounter.Add(1) == 0 {
-		icEpochCounter.Store(1)
+	if atomic.AddUint32(&icEpochCounter, 1) == 0 {
+		atomic.StoreUint32(&icEpochCounter, 1)
 	}
 }
 

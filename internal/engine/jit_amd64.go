@@ -16,13 +16,16 @@ import (
 // else.
 //
 // What makes it tractable is an invariant rather than a restriction on shape.
-// Parameters are checked once, on entry, before anything has been written; every
-// value the compiled code then produces is the result of double arithmetic, and
-// so is a Number by construction; and every local it reads is either one of
-// those checked parameters or a local it assigned itself. Nothing inside the
-// body can therefore fail a type check, which means no guard is needed after
-// entry, and the only way out is the one at the top — before a single store has
-// happened.
+// Every value an arithmetic instruction is handed is known to be a Number before
+// the instruction is emitted: either it was produced by other arithmetic, or it
+// came from a local the prologue checked. Nothing inside the body can therefore
+// fail a type check, which means no guard is needed after entry, and the only
+// way out is the one at the top — before a single store has happened.
+//
+// The prologue checks the parameters the body needs to be Numbers and no others,
+// which is what lets an object be a parameter at all: the check is "untagged or
+// leave". An unchecked parameter is not trusted, it is simply never handed to an
+// instruction that would care — see jitNumberDemand.
 //
 // That is what makes deoptimisation trivial here. Bailing means the interpreter
 // runs the function from the beginning, and there is no state to reconstruct
@@ -131,32 +134,30 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if !ok {
 		return refuse(why, "undecodable")
 	}
-	numeric, ok := jitNumericLocals(fn, blocks)
+	demand, ok := jitNumberDemand(fn, blocks)
 	if !ok {
 		return refuse(why, "undecodable")
 	}
+	numeric, ok := jitNumericLocals(fn, blocks, demand)
+	if !ok {
+		return refuse(why, "undecodable")
+	}
+	// The cache array has to exist before anything is emitted, because a
+	// compiled property read addresses its site by absolute address. It is
+	// allocated once per function and never grown, which is what makes that
+	// address a constant.
+	ics := frameICs(fn)
 
 	a := jitasm.NewAsm()
 	bail := a.NewLabel()
+	prologue := a.NewLabel()
+	body := a.NewLabel()
 	labels := make(map[int]*jitasm.Label, len(targets))
 	for t := range targets {
 		labels[t] = a.NewLabel()
 	}
 	var fixups []jitResumeFixup
-
-	// Entry. The locals base arrives in Args[0] and the fuel in Args[1]; the
-	// threshold is worth a register because every parameter check and every NaN
-	// canonicalisation compares against it.
-	a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
-	a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
-	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
-		// Anything above the threshold is tagged — a String, an object, a
-		// binding still in its temporal dead zone — and all of them mean the
-		// interpreter. Checking here, once, is what buys an unguarded body.
-		a.MovRegMem(jitasm.RAX, jitRegLocals, int32(i)*8)
-		a.CmpRegReg(jitasm.RAX, jitRegGuard)
-		a.Jcc(jitasm.CondA, bail)
-	}
+	a.Bind(body)
 
 	sp := 0
 	returned := false
@@ -499,11 +500,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			ip++
 
 		case OpGetField:
-			// The lookup itself is the runtime's: a shape probe, a prototype
-			// walk, possibly a getter that is more JavaScript. What compiled
-			// code contributes is everything around it. Emitting the
-			// inline-cache hit here instead would be the next real gain, and it
-			// is what stops this tier being merely correct.
+			// The cache probe is emitted; everything it declines is the
+			// runtime's — a prototype walk, an accessor, a Proxy trap, an
+			// unparsed JSON span, or simply a shape this site has not seen.
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
@@ -511,12 +510,33 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if int(idx) >= len(fn.constNames) || idx > 0x7FFFFFFF {
 				return refuse(why, "shape")
 			}
-			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+16, jitStackRegs[sp-1])
-			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffArgs+24, idx)
+			if isPrivateKey(fn.constNames[idx]) {
+				// GET_FIELD also carries private names, which are not
+				// properties: they resolve against the class environment the
+				// frame carries, which compiled code does not have. Refusing is
+				// what keeps `other.#x` in a method out of getField, where the
+				// mangled name would find nothing.
+				return refuse(why, "private-name")
+			}
+			icx := int(readU16(code, ip+5))
+			recv := jitStackRegs[sp-1]
+			slow := a.NewLabel()
+			done := a.NewLabel()
+			if icx != icNoSlot && icx < len(ics) && sp+jitICGetSpareRegs <= len(jitStackRegs) {
+				jitEmitICGet(a, recv, jitStackRegs[sp], jitStackRegs[sp+1],
+					jitICWayAddr(ics, icx), jitEpochAddr(), slow, done)
+			}
+			a.Bind(slow)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+16, recv)
+			// The name and the cache site, both constants for this site, packed
+			// into the one argument slot the helper protocol leaves untraced.
+			a.MovRegImm64(jitRegScratch, uint64(idx)|uint64(uint32(icx))<<32)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
 			if !jitCallHelper(a, sp, jitHelperGetField, &fixups) {
 				return refuse(why, "stack-too-deep")
 			}
-			a.MovRegMem(jitStackRegs[sp-1], jitasm.RegCtx, jitmem.CtxOffRet)
+			a.MovRegMem(recv, jitasm.RegCtx, jitmem.CtxOffRet)
+			a.Bind(done)
 			// A field holds anything, so the result is not a Number as far as
 			// this tier knows. Arithmetic on it is refused rather than guarded.
 			kind[sp-1] = false
@@ -563,6 +583,33 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitDeopt))
 	a.MovRegImm64(jitasm.RAX, jitmem.ExitDeopt)
 	a.Ret()
+
+	// The prologue, emitted after the body because which parameters it has to
+	// check is not known until the body has been walked.
+	//
+	// Only the parameters the body does arithmetic on. That is not a saving; it
+	// is what lets an object be a parameter at all. The check is "untagged or
+	// leave", so a checked parameter can never be an object, a String, or a
+	// binding still in its temporal dead zone — and for as long as every
+	// parameter was checked, the property read below could only ever be handed a
+	// primitive, which made a cache for it unreachable rather than merely
+	// unwritten.
+	//
+	// An unchecked parameter is not thereby trusted: jitNumberDemand and
+	// jitNumericLocals agree that it is not a Number, so the templates that need
+	// one refuse the function instead.
+	a.Bind(prologue)
+	a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
+	a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
+	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
+		if !readsNumeric[i] {
+			continue
+		}
+		a.MovRegMem(jitasm.RAX, jitRegLocals, int32(i)*8)
+		a.CmpRegReg(jitasm.RAX, jitRegGuard)
+		a.Jcc(jitasm.CondA, bail)
+	}
+	a.Jmp(body)
 
 	// One entry stub per loop header, so that a loop already spinning in the
 	// interpreter can move into compiled code without being called again.
@@ -631,7 +678,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if why != nil {
 		*why = ""
 	}
-	c := &jitCode{block: block, entry: block.Addr()}
+	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset())}
 	if len(osrLabels) > 0 {
 		c.osr = make(map[int]uintptr, len(osrLabels))
 		for h, l := range osrLabels {
@@ -861,10 +908,13 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, entry uintpt
 	if len(locals) == 0 {
 		return mkundef(), nil, false
 	}
-	ctx := &jitmem.ExecContext{Args: [4]uint64{
-		uint64(uintptr(unsafe.Pointer(&locals[0]))),
-		jitFuel,
-	}}
+	ctx := &jitmem.ExecContext{
+		Args: [4]uint64{
+			uint64(uintptr(unsafe.Pointer(&locals[0]))),
+			jitFuel,
+		},
+		Pool: jitObjectPoolAddr(rt),
+	}
 	// Rooted for as long as compiled code can be suspended in a helper holding
 	// values nothing else refers to. See markRoots.
 	rt.jitFrames = append(rt.jitFrames, ctx)
@@ -899,9 +949,24 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, entry uintpt
 func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 	switch ctx.Helper {
 	case jitHelperGetField:
-		v, e := rt.getField(Value(ctx.Args[2]), fn.constNames[ctx.Args[3]])
+		recv := Value(ctx.Args[2])
+		name := fn.constNames[uint32(ctx.Args[3])]
+		v, e := rt.getField(recv, name)
 		if e != nil {
 			return e
+		}
+		// Filling the cache from here is what lets compiled code warm its own
+		// sites. A function tiered up on its call count has been interpreted
+		// often enough that its caches are already full, but one entered at a
+		// loop header may never have run this site at all — and a site nothing
+		// ever fills is a probe that misses forever.
+		if icx := uint32(ctx.Args[3] >> 32); icx != icNoSlot {
+			if ics := frameICs(fn); int(icx) < len(ics) && !ics[icx].dead() {
+				rt.icFillGet(&ics[icx], rt.icReceiver(recv), name)
+			}
+		}
+		if jitStats.enabled {
+			jitStats.icMiss++
 		}
 		ctx.Ret = uint64(v)
 		return nil

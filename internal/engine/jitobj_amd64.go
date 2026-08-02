@@ -42,30 +42,29 @@ func jitEmitTagCheck(a *jitasm.Asm, r jitasm.Reg, want Type, notObject *jitasm.L
 // rather than baked into the code: two Runtimes have two pools, and code
 // compiled against one must never read the other's.
 //
-// dst, src and pool must be distinct, and jitRegScratch is clobbered. No bounds
-// check is emitted, which is safe only downstream of jitEmitTagCheck — a Value
-// that passed it carries a handle the engine issued, and every issued handle has
-// a chunk.
+// dst, src and pool must be distinct; pool and jitRegScratch are both clobbered.
+// No bounds check is emitted, which is safe only downstream of jitEmitTagCheck —
+// a Value that passed it carries a handle the engine issued, and every issued
+// handle has a chunk.
 func jitEmitResolve(a *jitasm.Asm, dst, src, pool jitasm.Reg) {
+	// The chunk vector, read through the slice header rather than baked in,
+	// because appending a chunk reallocates it while the header's own address
+	// never moves.
+	a.MovRegMem(pool, pool, int32(jitOffPoolChunks))
+
 	// The handle is the low 32 bits of the payload. Taking them with a 32-bit
 	// move drops the tag as a side effect, so no payload mask is needed.
 	a.Mov32RegReg(dst, src)
 
-	// The chunk: chunks[h >> shift], reached through the slice header rather
-	// than a baked-in vector, because appending a chunk reallocates the vector
-	// while the header's own address never moves.
+	// The chunk: chunks[h >> shift].
 	a.MovRegReg(jitRegScratch, dst)
 	a.ShrRegImm(jitRegScratch, jitPoolChunkShift)
-	a.ShlRegImm(jitRegScratch, 3) // the vector holds pointers
-	a.AddRegMem(jitRegScratch, pool, int32(jitOffPoolChunks))
-	a.MovRegMem(jitRegScratch, jitRegScratch, 0)
+	a.MovRegMemIndex(jitRegScratch, pool, jitRegScratch, 8, 0)
 
 	// The cell within it: (h & mask) * sizeof(cell). A cell is not a power of
-	// two in size, so the scale is a multiply rather than a shift.
+	// two in size, so the scale is a multiply rather than an addressing mode,
+	// and only the last addition folds into an LEA.
 	a.AndRegImm32(dst, jitPoolChunkMask)
 	a.ImulRegImm32(dst, dst, uint32(jitSizeofPoolCell))
-	a.AddRegReg(dst, jitRegScratch)
-	if jitOffCellElem != 0 {
-		a.AddRegImm32(dst, uint32(jitOffCellElem))
-	}
+	a.LeaRegMemIndex(dst, jitRegScratch, dst, 1, int32(jitOffCellElem))
 }
