@@ -268,8 +268,13 @@ interpreter nor the compiler produces that one.
 
 ## How much of a real corpus this compiles
 
-4.3% of it — 303 functions out of 6,976 across Octane. It was 0.4% before the two
-analyses below.
+7.5% of it — 521 functions out of 6,976 across Octane. It was 0.4% before the two
+analyses below, and 4.3% when this section was written.
+
+That number is here because it is easy to produce, and the rest of this document
+is the argument for not trusting it: see "What the tier is refusing, weighted by
+how often it runs", which counts frame entries instead and has disagreed with
+this table every time the two have been compared.
 
 `TestJITCoverage` measures it two ways, because the obvious way misleads. A
 histogram of the *first* thing that stopped each function flatters whatever the
@@ -280,13 +285,14 @@ only the bodies with exactly one:
 
 | implementing this alone would compile | functions |
 | --- | --- |
-| `GET_FIELD` | 239 |
-| `CLOSURE` | 27 |
-| `GET_GLOBAL` | 10 |
-| `THROW` | 10 |
-| `SPECIAL_OBJ` | 9 |
+| `CALL` | 108 |
+| `CLOSURE` | 104 |
+| `GET_ELEM` | 102 |
+| `GET_UPVAL` | 98 |
+| `PUT_GLOBAL` | 95 |
 
-Against 6,314 that need several and would move for none of them.
+Against 4,934 that need several and would move for none of them, plus 835 blocked
+by something that is not an opcode at all.
 
 That last number is the important one. A baseline JIT is close to all-or-nothing:
 most functions are blocked by a handful of features at once, so coverage does not
@@ -333,9 +339,10 @@ a 99.998% score: the suite is a floor, not a proof.
 
 ## Running it
 
-`GOANT_JIT=1` turns the tier on. It is off by default: at 4.3% coverage it cannot
-pay for itself on a mixed workload, and an execution path that is not the default
-is one to justify rather than assume.
+`GOANT_JIT=1` turns the tier on. It is off by default: it is measured at level
+with the interpreter on Octane, so it cannot yet pay for itself on a mixed
+workload, and an execution path that is not the default is one to justify rather
+than assume.
 
 A function is compiled after eight entries. The threshold is low because
 compiling is cheap here — two dataflow passes and straight-line templates, no
@@ -596,6 +603,118 @@ to 998 ms against the interpreter's 1138 to 1167 — the first time on this
 benchmark that compiling a function has been worth doing at all, and it took the
 cache, the operators and the frame together to get there.
 
+## The store, and the four-property ceiling underneath it
+
+`PUT_FIELD` was the largest single thing the tier was missing by static count:
+597 functions in the Octane corpus had it as their only unsupported opcode, seven
+times the next one. A function that reads a field almost always writes one, so
+refusing the write refused the read as well.
+
+The probe is the read's, piece for piece — tag check, handle resolve, a scan over
+every way, epoch, the three pointers that must be nil, the slot bounds — and then
+a store instead of a load. Building it out of the same parts is the point: two
+probes that disagreed about the same cache would be two ways to be wrong about
+it. This cut serves an own writable slot and declines the store that *creates*
+the property, which is what `toShape` marks and what the runtime keeps.
+
+Two things the read did not have to do. The store maintains the
+invocation-dirty flag itself, because the compiled path skips `[[Set]]` and that
+is where a write to state older than the run would otherwise be noticed — four
+instructions and a not-taken branch when no invocation is running. And it needs
+the runtime's address, so the context carries one alongside the pool, for the
+same reason: two Runtimes have two of them.
+
+Coverage went 460 → 497 functions and Octane did not move. The interesting part
+is what came next.
+
+### The probe served four properties
+
+Emitting the global read (below) produced a **0%** hit rate, and the reason was
+worth more than the feature. Both probes had a bound that reads like a corner
+case and is not one:
+
+```
+slot < 4          // ANT_INOBJ_MAX_SLOTS
+slot < shape.inobjLimit
+```
+
+Four is how many properties live in the object itself; everything past that is in
+a slice. So a class instance with five fields had a fifth field no compiled read
+could reach — and the global object, which carries every builtin before a
+script's own names get near it, has *none* of its properties in the object at
+all. The global read could never hit, and no test caught it because falling
+through to the runtime is how every test agreed with the runtime.
+
+`jitEmitSlotAddr` resolves a slot number to an address either way, for both
+probes, in four instructions on the inline path and seven on the other. The bound
+is the slice's length rather than its capacity, so a slot the shape declares but
+the slice has not been grown to still goes to the runtime — growing one is its
+job. `TestJITReadsAnOverflowSlot` and its store counterpart require a hit rather
+than an answer, which is the difference that would have caught this.
+
+## What the tier is refusing, weighted by how often it runs
+
+The static histogram has now pointed at the wrong work twice. It said the numeric
+operators were not worth building and they were; it said `PUT_FIELD` was the
+largest blocker by a factor of seven, and clearing it moved 37 functions and no
+score at all. Both times for the same reason: a program's time is not spread
+evenly over its functions, so counting functions counts the wrong thing.
+
+`GOANT_JIT_STATS=1` now charges every interpreted frame entry to the reason its
+function was refused for, with a second column for what that reason *alone* would
+unblock. The two are not the same question, and the difference is the whole
+point:
+
+| richards, 5.4M interpreted entries | entries | unblocks | functions |
+| --- | --- | --- | --- |
+| `stack-across-blocks` | 1.43M | 1.43M | 1 |
+| `local-not-assigned` | 1.04M | 1.04M | 11 |
+| `op:NEW` | 2.1k | 1.2k | 4 |
+| `op:GET_FIELD2` | 2.51M | **0** | 14 |
+| `op:GET_ELEM` | 0.45M | **0** | 2 |
+
+| deltablue, 8.7M interpreted entries | entries | unblocks | functions |
+| --- | --- | --- | --- |
+| `stack-across-blocks` | 1.98M | 1.98M | 2 |
+| `local-not-assigned` | 1.82M | 1.82M | 11 |
+| `op:GET_ELEM` | 1.16M | 1.16M | 2 |
+| `op:NEW` | 0.13M | 0.09M | 9 |
+| `op:GET_FIELD2` | 3.56M | **0** | 35 |
+
+`GET_FIELD2` is what `o.m()` compiles to and `CALL` is the instruction after it,
+so a template for it alone moves the refusal one opcode along and unblocks
+nothing — 3.56M entries and a zero. It was the second-largest blocker in the
+static corpus at 1,071 functions. A reason with a large entry count and a small
+unblock count is a queue, not a blocker, and the static histogram cannot tell the
+two apart.
+
+What is left at the top of the list is not missing opcodes. `stack-across-blocks`
+is a block reached with operands still on the stack, which the two analyses model
+as empty; `local-not-assigned` is a local the emitter cannot prove was written on
+every path, which is a `var` read before its assignment or a lexical binding that
+would have to throw. Both are limits in how the emitter models a frame, and
+between them they are 45% of richards and 44% of deltablue.
+
+The caveat the column carries: `unblocks` counts functions whose *one* missing
+opcode is this one, so it is an upper bound rather than a prediction. `GET_GLOBAL`
+was measured at 1.95M and 1.96M and delivered nothing, because the same functions
+met `local-not-assigned` the moment the template existed. The way to read it is
+"no more than this", and the way to check it is to build the thing and measure
+again.
+
+## The global read
+
+Emitted, and it is the same cache once more: the probe over a receiver compiled
+code fetches from the runtime rather than one it was handed. `rt.global` is
+loaded on every probe rather than baked in, because `BeginInvocation` swaps a
+fresh global in and `End` puts the old one back, and a compiled site outlives
+several of them.
+
+The guard that is not a shape: a Script-level `let` shadows a global property of
+the same name and lives in a declarative record that no shape describes. It does
+not need checking here — registering one bumps the cache epoch, which the probe
+already tests.
+
 ## What the tier is worth on Octane: nothing yet
 
 `GOANT_JIT_STATS=1` counts frame entries by where they ran. Static coverage —
@@ -603,20 +722,22 @@ cache, the operators and the frame together to get there.
 higher-is-better; the tier is on for the second column, and the two arms are
 interleaved per benchmark so drift cannot favour either.
 
-| | off | on |
-| --- | --- | --- |
-| Richards | 224 | 221 |
-| DeltaBlue | 253 | 250 |
-| Crypto | 253 | 248 |
-| RayTrace | 399 | 396 |
-| EarleyBoyer | 624 | 617 |
-| Splay | 2009 | 1966 |
-| NavierStokes | 455 | 446 |
-| RegExp | 147 | 146 |
+Two runs of each arm, alternating, on the benchmark VM:
 
-Unchanged, and slightly down in every column, which was still true after the
-probe and the frame entry were fixed — `dist` goes from 10% behind the
-interpreter to 17% ahead in the same build and Octane does not move at all.
+| | off | on | off | on |
+| --- | --- | --- | --- | --- |
+| Richards | 219 | 215 | 219 | 218 |
+| DeltaBlue | 250 | 249 | 249 | 250 |
+| Crypto | 251 | 251 | 252 | 251 |
+| RayTrace | 400 | 400 | 401 | 400 |
+| EarleyBoyer | 623 | 622 | 623 | 621 |
+| Splay | 2016 | 2010 | 2010 | 2007 |
+| NavierStokes | 456 | 456 | 455 | 455 |
+| RegExp | 147 | 147 | — | — |
+
+Unchanged. It used to be 1–2% *down* in every column; the frame-entry allocation
+and the one-way probe accounted for that, and with both fixed the tier now costs
+nothing and gains nothing. Richards is the only one that moves at all, by 1.6%.
 
 The residual cost is the tiering check rather than compiled code: every frame
 entry reads two fields of `fn.jit` and most of them are entries into a function
@@ -683,41 +804,36 @@ Rewritten 2 August, three times: after measuring the numeric operators, after
 the inline cache landed, and after the generic operators made the cache's hit
 rate measurable on real code.
 
-**What the histogram says.** The list here used to argue that the numeric
-operators were not worth building. They were: `SHR` alone blocked 892 functions
-and the sole-blocker column was reading the marginal case, not the aggregate.
-They are all in, they cost one runtime call in a range real code never reaches,
-and arithmetic has disappeared from the refusal histogram completely. What is
-left is **88% memory access** — GET_GLOBAL 1761, GET_FIELD2 962, PUT_FIELD 870,
-SPECIAL_OBJ 832, GET_UPVAL 824, GET_ELEM 323, CLOSURE 277.
+**This list is now ordered by measurement rather than by corpus count.** The
+static histogram is still worth reading — 521 of 6,976 functions compile, and
+`GET_ELEM` 1321, `GET_FIELD2` 1268, `GET_UPVAL` 918, `SPECIAL_OBJ` 832 lead the
+refusals — but the entry-weighted table above is what decides what to build. It
+has disagreed with the corpus count every time they have been compared.
 
-**What the histogram does not say.** None of it moved Octane, which is unchanged
-with the tier on. Integer kernels went 1.6x to 5.6x in the same build and a
-property read in isolation 14.6x. A tier is worth what its *hot* coverage is
-worth, and static coverage is a poor proxy for it: 6.6% of functions compile and
-0.0% to 0.4% of frame entries land in them. Nor is a microbenchmark a proxy for
-a hit rate — the same cache that is 14.6x on one receiver serves 1.0% of the
-reads on a hundred.
-
-1. **`PUT_FIELD`**, the store side of the same cache. `icFillPutTransition`
-   already records the case that matters most — a store that *creates* the
-   property, which is what initialising a fresh object is made of — and it was
-   measured at 8% of EarleyBoyer on the interpreter side alone. It is now the
-   largest sole blocker in the corpus by a factor of seven: 597 functions have
-   no other unsupported opcode in them, and it reuses the read's guard chain
-   whole.
-2. **`GET_FIELD2`**, which is the same probe with a different stack effect (962
-   functions), and is what `o.m()` compiles to. Worth little before calls and
-   nearly free after this one.
-3. **Globals and upvalues** — the largest single blocker at 1761 and 824 — and
-   the same problem with a simpler shape: the binding is found once and the
-   guard is a version check rather than a prototype walk.
+1. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
+   the emitter's stack discipline model every block as starting empty, so a
+   block reached with an operand still live refuses the whole function. One
+   function in richards and two in deltablue, and between them 1.43M and 1.98M
+   frame entries — the largest single item in both.
+2. **`local-not-assigned`**, also not an opcode: a local the emitter cannot prove
+   was written on every path that reaches the read. The interpreter's rule is one
+   compare — an empty slot is a lexical binding in its dead zone and throws,
+   anything else is the value — so the template is a compare and a helper that
+   throws. The care is in `jitNumericLocals`, which must stop calling such a
+   local numeric or an ADDSD gets `undefined`. 1.04M and 1.82M entries.
+3. **`GET_ELEM`**, worth 1.16M entries in deltablue on its own and nothing in
+   richards.
 4. **Calls, compiled to compiled.** Measured at 1.15 ns against 4.69 ns for the
    detour through the runtime, so the convention has to be decided before the
    first one is emitted. This is also the 70 ns of frame setup that phase 3
-   could not touch.
+   could not touch — and it is what makes `GET_FIELD2`, `NEW` and `CLOSURE` worth
+   anything, since all three are refused in functions that call.
 5. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
    emitter is mechanical once the amd64 shape has stopped moving.
+
+`GET_FIELD2` has come *off* this list, having been item 2 on it. It is the
+second-largest blocker in the static corpus and worth exactly zero entries on its
+own, because `CALL` is always the next instruction.
 
 The inline cache has come off this list, and so has the thing that turned out to
 be underneath it: a prologue that checked every parameter meant no object could
@@ -737,6 +853,15 @@ they were: `dist(p)` above could not compile at all while `dx*dx` needed a known
 Number. But by function count they were worth 43 of 6,976, because the wall in
 front of this tier is not what it can do with a value — it is that it cannot
 store one, read a global, or call anything.
+
+The store and the global read have come off it as the third turn of the same
+lesson, and the sharpest one: both were emitted, both were correct, both served
+100% of what reached them on a microbenchmark, and neither moved a score. The
+store's probe could reach four properties of an object and the global read's
+could reach none, and every test passed throughout because a probe that declines
+gives the same answer as one that hits. The fix — an address computation shared
+by both — is smaller than either feature, and finding it took building the
+weighted diagnostic rather than reading the corpus count again.
 
 Tiering has come off this list too. Counters and a compile threshold are in, and
 so is the case a threshold cannot see: a function called once whose loop is hot
