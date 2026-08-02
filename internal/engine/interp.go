@@ -148,7 +148,75 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	// between them.
 	rt.maybeCollect()
 
+	// A compiled frame needs almost none of what the interpreter's frame entry
+	// builds, so it gets its own way in. See runCompiledFrame.
+	if jitEnabled && fn.jit.code != nil {
+		if v, e, ok := rt.runCompiledFrame(fn, thisVal, args); ok {
+			return v, e
+		}
+	}
+
 	return rt.runFrameBody(fn, cl, fnVal, thisVal, args)
+}
+
+// runCompiledFrame enters compiled code without building an interpreted frame
+// around it, reporting false if the compiled code declined its arguments.
+//
+// This is the other half of the Octane result. DeltaBlue runs 22.4% of its frame
+// entries as machine code and scores exactly what the interpreter scores,
+// because entering a frame costs about a hundred nanoseconds and the bodies
+// being compiled are smaller than that: BenchmarkCallIntoALoop is 16x, and
+// BenchmarkCallIntoATinyFunction, whose body is one addition, is flat. A tier
+// that makes bodies faster cannot help a program made of small methods until
+// the entry stops dominating them.
+//
+// Half of that entry is storage a compiled frame never touches. It has no
+// operand stack — its stack is nine registers and the spill area — so
+// frameStack builds and clears a buffer nobody reads. And runFrameBody declares
+// eight closures over its frame state; they capture, so they escape, and every
+// entry pays for them whether or not a single bytecode runs.
+//
+// What is left is what compiled code genuinely needs, and it is short: the
+// receiver bound, the locals filled, and new.target consumed so a nested
+// ordinary call does not inherit it.
+//
+// Everything else runFrameBody does is excluded by jitEligible before a function
+// is ever compiled — no upvalues, no try handlers, no with-chain, no module
+// environment, no dynamic variable object. The one exception is pendingModule,
+// which is keyed on the *hoisting* function rather than on the body, so it is
+// checked here rather than assumed away.
+func (rt *Runtime) runCompiledFrame(fn *svFunc, thisVal Value, args []Value) (Value, *ThrowError, bool) {
+	if rt.pendingModule != nil {
+		return mkundef(), nil, false
+	}
+	rt.frameStrict = fn.isStrict
+	if !fn.isStrict {
+		if thisVal.IsNullish() {
+			thisVal = rt.global
+		} else if !thisVal.IsObjectType() && thisVal.Type() != TTypedArray {
+			thisVal, _ = rt.toObjectValue(thisVal) // non-nullish: cannot error
+		}
+	}
+	// Consumed rather than read, so a call the compiled body makes does not see
+	// the `new` that reached this one. Put back if the compiled code declines,
+	// because the interpreted path below is going to consume it itself.
+	pendingNT := rt.pendingNewTarget
+	rt.pendingNewTarget = mkundef()
+
+	locals := rt.frameLocals(rt.frameDepth, fn.maxLocals)
+	for i := 0; i < fn.paramCount && i < fn.maxLocals && i < len(args); i++ {
+		locals[i] = args[i]
+	}
+	// Published because frameLocals hands back a plain slice rather than a slab
+	// one past the cached depth or size, and only a slab is traced by walking
+	// the slabs.
+	rt.frames[rt.frameDepth].locals = locals
+
+	v, e, ok := jitTry(rt, fn, locals, thisVal)
+	if !ok {
+		rt.pendingNewTarget = pendingNT
+	}
+	return v, e, ok
 }
 
 // publishFrame returns the slot this depth publishes its live values in,
