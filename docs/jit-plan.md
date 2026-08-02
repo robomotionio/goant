@@ -1032,12 +1032,20 @@ with the corpus count every time the two have been compared.
 No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
-1. **`GET_UPVAL` and `CLOSURE`**, which is what the two remaining negatives are.
-   NavierStokes compiles 0.4% of its frame entries and Crypto little more, so
-   both pay the tiering check and receive nothing; `GET_UPVAL` refuses 15 of
-   NavierStokes' functions on its own. A closed-over variable is a slot in a
-   cell, and reading one is a load behind a pointer — much less work than the
-   property cache already emitted.
+1. **`GET_ELEM`**, which is what the two remaining negatives turned out to be.
+   `GET_UPVAL` was built first on the theory that it was NavierStokes' blocker —
+   it refused fifteen of its functions — and it moved neither benchmark, because
+   what is left underneath is array indexing: 2.81M frame entries in Crypto and
+   every one of NavierStokes' remaining refusals. Both are array mathematics, and
+   `a[i]` is the one property access this tier still cannot do. It is also a
+   different data structure from everything above — elements storage rather than
+   shape slots — so it is a new guard chain rather than another use of the one
+   that exists.
+
+   NavierStokes is worth a caveat: it makes **2,826 frame entries in the whole
+   benchmark**, so its share of entries in compiled code says nothing at all. Its
+   time is inside a handful of enormous loops, which is what the OSR entry stubs
+   are for, and measuring it needs a counter of *iterations* rather than entries.
 2. **The store that creates a property, emitted rather than helped.** The helper
    now reaches it, which recovered EarleyBoyer's 18% and Splay's 3.4%, but each
    one still costs an exit and a re-entry where the interpreter pays neither.
