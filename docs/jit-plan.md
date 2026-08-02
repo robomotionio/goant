@@ -861,52 +861,61 @@ verified to compile nothing:
 
 | | off | on | off | on | |
 | --- | --- | --- | --- | --- | --- |
-| **DeltaBlue** | 255 | **298** | 255 | **298** | **+16.9%** |
-| **Richards** | 226 | **246** | 226 | **244** | **+8.4%** |
-| RayTrace | 401 | 406 | 400 | 405 | +1.2% |
-| RegExp | 147 | 147 | 147 | 146 | −0.3% |
-| Crypto | 255 | 251 | 255 | 251 | −1.6% |
-| NavierStokes | 460 | 450 | 459 | 450 | −2.1% |
-| Splay | 2019 | 1963 | 2039 | 1955 | −3.4% |
-| **EarleyBoyer** | 629 | **515** | 630 | **515** | **−18.2%** |
-| | | | | | **geomean −0.3%** |
+| **DeltaBlue** | 250 | **298** | 250 | **298** | **+19.2%** |
+| **Richards** | 222 | **240** | 222 | **240** | **+8.1%** |
+| Splay | 1953 | 2005 | 1926 | 1925 | +1.3% |
+| EarleyBoyer | 631 | 637 | 627 | 628 | +0.6% |
+| RayTrace | 399 | 403 | 400 | 401 | +0.6% |
+| RegExp | 146 | 145 | 147 | 146 | −0.7% |
+| Crypto | 256 | 253 | 255 | 252 | −1.2% |
+| NavierStokes | 465 | 456 | 466 | 457 | −2.0% |
+| | | | | | **geomean +3.1%** |
 
 Both arms are steady to the point, so none of these are drift. DeltaBlue runs
 59.1% of its frame entries as machine code and Richards 32.7%.
 
-Flat overall, and the flatness is two large wins against one large loss rather
-than eight small nothings. The loss is worth more than the wins right now,
-because it is one number and it has one cause.
+The two that are still negative are the two the tier barely touches. NavierStokes
+compiles **0.4%** of its frame entries — `GET_UPVAL` refuses almost all of it —
+so what it measures is the price of having a tier at all: two `fn.jit` field
+reads on every frame entry, and nothing in return. That is the honest reading of
+−2%, and the fix for it is coverage of exactly those functions rather than
+anything to do with the tier's overhead.
 
-### EarleyBoyer, −18.2%: the store that creates a property
+### EarleyBoyer: 18.75 million stores at a 0.8% hit rate
 
-`GOANT_JIT_STATS=1` says it in a line:
+Before the last commit this table read −18.2% for EarleyBoyer and −3.4% for
+Splay, and `GOANT_JIT_STATS=1` said why in a line:
 
 ```
 jit: 18754393 property stores, 152621 served by the compiled cache (0.8%)
 ```
 
-Eighteen million stores and the probe serves eight in a thousand. Splay's figure
-is 0.0% of 349,364. The reason is the restriction the first cut of `PUT_FIELD`
-took deliberately: it serves a store to a slot that already exists and declines
-the one that *creates* the property, which is what `toShape` marks — and building
-an object is nothing but stores that create properties. So compiling those
-functions moved eighteen million stores out of the interpreter, which handled
-them with a cached transition, and into an exit-and-re-enter helper.
+Eighteen million stores and the emitted probe served eight in a thousand;
+Splay's figure was 0.0% of 349,364. `PUT_FIELD`'s first cut serves a store to a
+slot that already exists and declines the one that *creates* the property —
+which is what `toShape` marks, and what building an object is entirely made of.
+Compiling those functions moved eighteen million stores out of the interpreter,
+which handled each with a shape install and a slot write, and into a full
+`OrdinarySet` behind an exit-and-re-enter.
 
-It is the same shape as the inherited slot two sections up, and the second time
-in one session that compiling more code made a benchmark slower by taking work
-away from a cache that was serving it. **Coverage moves work; it does not make
-work cheaper. Whatever the new coverage exposes has to be served before the
-coverage is a gain.**
+It is the same shape as the inherited slot above, and the second time in one
+session that compiling more code made a benchmark slower by taking work away
+from a cache that was already serving it. **Coverage moves work out of the
+interpreter; it does not make the work cheaper.** Whatever the new coverage
+exposes has to be served before the coverage is a gain.
 
-The fix is `icFillPutTransition`, which already records exactly this: the
-pre-store shape as the key, the post-store shape in `toShape`, and the prototype
-walk's conclusion in `protoVal`. The hit path is that guard chain plus an
-extensibility test — a property of the object, not of its shape — then installing
-`toShape` and writing the slot. The one thing needing care is that installing a
-shape is a *Go pointer* store from machine code, where every other store this tier
-emits is a NaN-boxed integer.
+The fix here is the cheap half: the interpreter's cached-store path is now a
+method both callers share, and the JIT's helper tries it before `setFieldR`. The
+same for the read, because what compiled code emits is narrower than what the
+cache can answer — a receiver that is not a plain object, a slot past the end of
+the overflow slice, a site with no spare registers. EarleyBoyer and Splay go back
+to level.
+
+The expensive half is still open: emitting the transition in machine code rather
+than reaching it through a helper. That means *installing a shape*, which would
+be the first Go pointer this tier stores from generated code, and the first that
+needs an argument about write barriers rather than the standing one that a Value
+is an integer.
 
 **How much of a difference this table can see.** DeltaBlue's score has read
 249–250 in one session, 260–266 in the next and 255 in this one, all from builds
@@ -1020,22 +1029,25 @@ histogram is still worth reading — 1,485 of 6,976 functions now compile — bu
 entry-weighted table above is what decides what to build, and it has disagreed
 with the corpus count every time the two have been compared.
 
-The first three items are all EarleyBoyer's, because EarleyBoyer is the one
-benchmark the tier makes worse and it is worth 18% on its own.
+No benchmark is now made materially worse by the tier, so the list is ordered by
+what would gain rather than by what is bleeding.
 
-1. **The store that creates a property**, which is EarleyBoyer's 18.75 million
-   stores at a 0.8% hit rate and Splay's 349,364 at 0.0%. Everything it needs is
-   already recorded by `icFillPutTransition`; the hit path is the read's guard
-   chain plus an extensibility test, then installing `toShape` and writing the
-   slot. Installing a shape is the first *Go pointer* this tier would store from
-   machine code, so it is the first that needs an argument about write barriers
-   rather than the standing one that a Value is an integer.
-2. **`op:NEW`** — 2.39M frame entries in EarleyBoyer with 2.39M unblocks, and
-   174,689 in Splay. Both benchmarks are constructor-heavy, and `NEW` is now the
-   largest single-opcode blocker anywhere in the weighted table.
-3. **`op:INSTANCEOF` and `op:TYPEOF`** — 8.28M and 1.24M entries in EarleyBoyer.
-   INSTANCEOF unblocks only 619k of its own, so it needs the others first, but
-   TYPEOF unblocks all 1.24M of its.
+1. **`GET_UPVAL` and `CLOSURE`**, which is what the two remaining negatives are.
+   NavierStokes compiles 0.4% of its frame entries and Crypto little more, so
+   both pay the tiering check and receive nothing; `GET_UPVAL` refuses 15 of
+   NavierStokes' functions on its own. A closed-over variable is a slot in a
+   cell, and reading one is a load behind a pointer — much less work than the
+   property cache already emitted.
+2. **The store that creates a property, emitted rather than helped.** The helper
+   now reaches it, which recovered EarleyBoyer's 18% and Splay's 3.4%, but each
+   one still costs an exit and a re-entry where the interpreter pays neither.
+   Everything needed is recorded by `icFillPutTransition`; the hit path is the
+   read's guard chain plus an extensibility test, then installing `toShape` and
+   writing the slot. Installing a shape is the first *Go pointer* this tier
+   would store from machine code, so it is the first that needs an argument
+   about write barriers rather than the standing one that a Value is an integer.
+3. **`op:NEW`** (2.39M frame entries in EarleyBoyer, 175k in Splay, both fully
+   unblocking) and **`op:TYPEOF`** (1.24M, fully unblocking).
 4. **Calls, compiled to compiled**, with a constraint attached. Measured at 1.15
    ns against 4.69 ns for the detour through the runtime, plus the ~100 ns of
    interpreted frame entry that disappears with it. Every compiled function is
