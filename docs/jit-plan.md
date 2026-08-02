@@ -814,6 +814,46 @@ floor rather than above it. Every "unchanged" here means "not distinguishable
 from unchanged". DeltaBlue's four identical columns are the exception and are
 worth the most, because they are four measurements of the same thing that agree.
 
+### Why: entering a frame costs more than a small method does
+
+`BenchmarkCallIntoATinyFunction` and `BenchmarkCallIntoALoop` are the two numbers
+that explain the table. Same call, same machine, the arms differing in nothing
+but `jitEnabled`:
+
+| | interpreted | compiled |
+| --- | --- | --- |
+| a body worth compiling (a 50-iteration loop) | 5,400 ns | 250 ns — **16x** |
+| a body of one addition | ~100 ns | ~100 ns — **flat** |
+
+Entering a frame costs about a hundred nanoseconds, and DeltaBlue is made of
+methods smaller than that. A tier that makes bodies faster cannot help until the
+entry stops dominating them, which is the whole of the 263/263.
+
+### The fix that was not one
+
+So: enter a compiled frame without building an interpreted one around it. A
+compiled frame has no operand stack — its stack is nine registers and the spill
+area — so `frameStack` builds and clears a buffer nobody reads; and
+`runFrameBody` declares eight closures over its frame state, which capture, so
+they escape, and every entry pays for them whether or not a bytecode runs. What
+is actually needed is the receiver bound, the locals filled, and new.target
+consumed. It took the tiny call from ~100 ns to **~48**.
+
+On Octane it lost 2–4%, and the measurement that settles where is this one: with
+`GOANT_JIT=0`, so the new path is never entered at all, the build carrying it
+still scored 256–257 on DeltaBlue and 211–213 on Richards against 262 and 221
+without it. **One branch at the top of `runFrameBody` costs the interpreter
+several percent.** It was tried in `runFrame` first and measured −1.3% there. That
+function is the hottest in the engine and its register allocation does not
+survive being perturbed.
+
+The gain applied to 22.4% of DeltaBlue's frame entries and was invisible in the
+score; the cost applied to all of them and was not. `interp.go` went back byte
+for byte, and what is left is the benchmark that says why the work is worth
+doing — and the constraint on doing it: **whatever attacks the frame entry must
+not perturb `runFrameBody`'s codegen**, which most likely means doing the work at
+the call site rather than at the frame.
+
 ### What that changes about the plan
 
 Coverage was the bottleneck and is no longer the only one. The list above still
@@ -880,12 +920,18 @@ refusals — but the entry-weighted table above is what decides what to build. I
 has disagreed with the corpus count every time they have been compared.
 
 1. **Calls, compiled to compiled** — promoted to the top by DeltaBlue's four
-   identical columns. Measured at 1.15 ns against 4.69 ns for the detour through
-   the runtime, plus the 70 ns of interpreted frame setup that disappears with
-   it. Every compiled function today is an island: entered from the interpreter,
-   and every call it makes goes back out. This is also what makes `GET_FIELD2`,
-   `NEW` and `CLOSURE` worth anything, since all three are refused in functions
-   that call. The convention has to be decided before the first one is emitted.
+   identical columns, and now with a constraint attached. Measured at 1.15 ns
+   against 4.69 ns for the detour through the runtime, plus the ~100 ns of
+   interpreted frame entry that disappears with it. Every compiled function
+   today is an island: entered from the interpreter, and every call it makes
+   goes back out. This is also what makes `GET_FIELD2`, `NEW` and `CLOSURE` worth
+   anything, since all three are refused in functions that call.
+
+   The constraint, from the attempt above: the saving has to be taken **without
+   adding a branch to `runFrameBody` or `runFrame`**, because doing so costs the
+   interpreter more than the saving is worth. Which points at the call site — a
+   compiled caller reaching a compiled callee directly — rather than at a
+   cheaper frame entry bolted onto the shared path.
 2. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
    the emitter's stack discipline model every block as starting empty, so a
    block reached with an operand still live refuses the whole function. The
