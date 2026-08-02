@@ -1032,21 +1032,24 @@ with the corpus count every time the two have been compared.
 No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
-1. **`GET_ELEM`**, which is what the two remaining negatives turned out to be.
-   `GET_UPVAL` was built first on the theory that it was NavierStokes' blocker —
-   it refused fifteen of its functions — and it moved neither benchmark, because
-   what is left underneath is array indexing: 2.81M frame entries in Crypto and
-   every one of NavierStokes' remaining refusals. Both are array mathematics, and
-   `a[i]` is the one property access this tier still cannot do. It is also a
-   different data structure from everything above — elements storage rather than
-   shape slots — so it is a new guard chain rather than another use of the one
-   that exists.
+1. **`stack-across-blocks`**, now Crypto's largest blocker at 313,372 frame
+   entries across eleven functions, all of them fully unblocking. The two
+   analyses that walk the emitter's stack discipline model every block as
+   starting empty, so a block reached with an operand still live refuses the
+   whole function — and the shape that produces it is ordinary: `a && b`,
+   `a || b` and `a ? b : c` all jump with a value on the stack. The work is a
+   per-block entry depth in place of the "must be zero" rule, which the
+   positional register assignment then follows for free provided every
+   predecessor agrees. Richards has 1.08M entries in a single function.
+2. **Element *writes*** — `INSERT3` and `PUT_ELEM`. `a[i] = v` is what
+   NavierStokes has left, and it is the store counterpart of the read below.
 
-   NavierStokes is worth a caveat: it makes **2,826 frame entries in the whole
-   benchmark**, so its share of entries in compiled code says nothing at all. Its
-   time is inside a handful of enormous loops, which is what the OSR entry stubs
-   are for, and measuring it needs a counter of *iterations* rather than entries.
-2. **The store that creates a property, emitted rather than helped.** The helper
+   NavierStokes is worth a caveat whichever way it goes: it makes **2,826 frame
+   entries in the whole benchmark**, so its share of entries in compiled code
+   says nothing at all. Its time is inside a handful of enormous loops, which is
+   what the OSR entry stubs are for, and measuring it needs a counter of
+   *iterations* rather than of entries.
+3. **The store that creates a property, emitted rather than helped.** The helper
    now reaches it, which recovered EarleyBoyer's 18% and Splay's 3.4%, but each
    one still costs an exit and a re-entry where the interpreter pays neither.
    Everything needed is recorded by `icFillPutTransition`; the hit path is the
@@ -1054,9 +1057,9 @@ what would gain rather than by what is bleeding.
    writing the slot. Installing a shape is the first *Go pointer* this tier
    would store from machine code, so it is the first that needs an argument
    about write barriers rather than the standing one that a Value is an integer.
-3. **`op:NEW`** (2.39M frame entries in EarleyBoyer, 175k in Splay, both fully
+4. **`op:NEW`** (2.39M frame entries in EarleyBoyer, 175k in Splay, both fully
    unblocking) and **`op:TYPEOF`** (1.24M, fully unblocking).
-4. **Calls, compiled to compiled**, with a constraint attached. Measured at 1.15
+5. **Calls, compiled to compiled**, with a constraint attached. Measured at 1.15
    ns against 4.69 ns for the detour through the runtime, plus the ~100 ns of
    interpreted frame entry that disappears with it. Every compiled function is
    still an island: entered from the interpreter, and every call it makes goes
@@ -1065,15 +1068,6 @@ what would gain rather than by what is bleeding.
    doing so costs the interpreter more than the saving is worth. Which points at
    the call site rather than at a cheaper frame entry bolted onto the shared
    path.
-5. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
-   the emitter's stack discipline model every block as starting empty, so a
-   block reached with an operand still live refuses the whole function. The
-   largest coverage item left — 1.08M entries in richards in *one* function,
-   1.60M in deltablue in two — and the shape that produces it is ordinary:
-   `a && b`, `a || b` and `a ? b : c` all jump with a value on the stack. The
-   work is a per-block entry depth in place of the "must be zero" rule, which the
-   positional register assignment then follows for free provided every
-   predecessor agrees.
 6. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
    emitter is mechanical once the amd64 shape has stopped moving.
 
