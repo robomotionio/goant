@@ -102,3 +102,31 @@ func TestTieringCompilesSomething(t *testing.T) {
 			fn.jit.tried, fn.jit.count)
 	}
 }
+
+// TestJITFrameEntryDoesNotAllocate guards the cost of entering compiled code.
+//
+// The context compiled code shares with the runtime is 160 bytes, and building
+// one per call is most of what compiling a small function saved: `dist` in
+// docs/jit-plan.md pays it two million times and comes out behind the
+// interpreter with a cache serving every one of its reads. The root stack it
+// lives on is LIFO, so it is its own free list — and an allocation reappearing
+// here is that regression, which nothing else would show.
+func TestJITFrameEntryDoesNotAllocate(t *testing.T) {
+	rt, fn, c := jitField(t, "x")
+	o := rt.newObject(rt.objectProto)
+	rt.objPtr(o).defineOwn("x", tov(7), attrDefault)
+	locals := make([]Value, fn.maxLocals)
+	locals[0] = o
+
+	// Once first, so the cache is warm and the first-call fill is not measured.
+	if _, e := jitGet(t, rt, fn, c, o); e != nil {
+		t.Fatal("threw")
+	}
+	if n := testing.AllocsPerRun(200, func() {
+		if _, _, ok := c.jitRun(rt, fn, locals); !ok {
+			t.Fatal("declined")
+		}
+	}); n != 0 {
+		t.Errorf("entering compiled code allocates %v times per call", n)
+	}
+}

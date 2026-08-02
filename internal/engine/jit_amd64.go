@@ -978,17 +978,40 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, entry uintpt
 	if len(locals) == 0 {
 		return mkundef(), nil, false
 	}
-	ctx := &jitmem.ExecContext{
+	// The context is rooted for as long as compiled code can be suspended in a
+	// helper holding values nothing else refers to — see markRoots — and that
+	// root stack is also where it comes from.
+	//
+	// Building one per entry cost an allocation of 160 bytes per call, which for
+	// a callee small enough to be worth compiling is most of what compiling it
+	// saved. The stack is LIFO and a context is dead the moment it is popped, so
+	// the slice past its length is a free list that needs no bookkeeping: the
+	// only care required is that a reused context starts clear, because the
+	// collector reads Ret and the spill slots and the previous call's are stale.
+	n := len(rt.jitFrames)
+	var ctx *jitmem.ExecContext
+	if n < cap(rt.jitFrames) {
+		ctx = rt.jitFrames[:n+1][n] // popped by an earlier call, still allocated
+	}
+	if ctx == nil {
+		ctx = new(jitmem.ExecContext)
+	}
+	// Cleared before it is published rather than after, so the stack never holds
+	// an entry the collector would read a stale Ret or spill slot out of.
+	*ctx = jitmem.ExecContext{
 		Args: [4]uint64{
 			uint64(uintptr(unsafe.Pointer(&locals[0]))),
 			jitFuel,
 		},
 		Pool: jitObjectPoolAddr(rt),
 	}
-	// Rooted for as long as compiled code can be suspended in a helper holding
-	// values nothing else refers to. See markRoots.
-	rt.jitFrames = append(rt.jitFrames, ctx)
-	defer func() { rt.jitFrames = rt.jitFrames[:len(rt.jitFrames)-1] }()
+	if n < cap(rt.jitFrames) {
+		rt.jitFrames = rt.jitFrames[:n+1]
+		rt.jitFrames[n] = ctx
+	} else {
+		rt.jitFrames = append(rt.jitFrames, ctx)
+	}
+	defer func() { rt.jitFrames = rt.jitFrames[:n] }()
 
 	pc := entry
 	for {

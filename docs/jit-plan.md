@@ -579,10 +579,23 @@ looking at it, and the two readers have to mean the same thing by empty.
 
 The 198 ms is exactly the four million helper round trips that are no longer
 made. What is left is a 2% loss against the interpreter on a benchmark whose
-caller is interpreted: 2M entries into compiled code, each of which allocates a
-160-byte ExecContext and pushes it on the collector's root stack, for a callee
-that does three arithmetic operations. That is the frame-entry cost, and it is
-the next thing.
+caller is interpreted.
+
+### Entering a frame allocated
+
+Every entry into compiled code built the context it shares with the runtime on
+the heap: 160 bytes and one allocation per call, which `-benchmem` reports and
+nothing else would have shown. `dist` pays it two million times for a callee that
+does three arithmetic operations, which is most of what compiling it saved.
+
+The root stack it lives on is LIFO and a context is dead the moment it is popped,
+so the slice past its length is a free list that needs no bookkeeping of its own.
+The one thing that needs care is clearing a reused context *before* it is
+published rather than after, because the collector reads `Ret` and the spill
+slots and the previous call's are stale.
+
+Entering compiled code now allocates nothing, and
+`TestJITFrameEntryDoesNotAllocate` is what keeps it that way.
 
 ## What the tier is worth on Octane: nothing yet
 
@@ -680,30 +693,24 @@ worth, and static coverage is a poor proxy for it: 6.6% of functions compile and
 a hit rate — the same cache that is 14.6x on one receiver serves 1.0% of the
 reads on a hundred.
 
-1. **Frame entry allocates.** Every entry into compiled code builds an
-   ExecContext on the heap — 160 bytes and one allocation per call, measured —
-   and pushes it on the collector's root stack. `dist` pays that 2M times for a
-   callee that does three arithmetic operations, and comes out 2% behind the
-   interpreter with a cache that serves 100% of its reads. The root stack is
-   already LIFO, so it can be its own free list.
-2. **`PUT_FIELD`**, the store side of the same cache. `icFillPutTransition`
+1. **`PUT_FIELD`**, the store side of the same cache. `icFillPutTransition`
    already records the case that matters most — a store that *creates* the
    property, which is what initialising a fresh object is made of — and it was
    measured at 8% of EarleyBoyer on the interpreter side alone. It is now the
    largest sole blocker in the corpus by a factor of seven: 597 functions have
    no other unsupported opcode in them, and it reuses the read's guard chain
    whole.
-3. **`GET_FIELD2`**, which is the same probe with a different stack effect (962
+2. **`GET_FIELD2`**, which is the same probe with a different stack effect (962
    functions), and is what `o.m()` compiles to. Worth little before calls and
    nearly free after this one.
-4. **Globals and upvalues** — the largest single blocker at 1761 and 824 — and
+3. **Globals and upvalues** — the largest single blocker at 1761 and 824 — and
    the same problem with a simpler shape: the binding is found once and the
    guard is a version check rather than a prototype walk.
-5. **Calls, compiled to compiled.** Measured at 1.15 ns against 4.69 ns for the
+4. **Calls, compiled to compiled.** Measured at 1.15 ns against 4.69 ns for the
    detour through the runtime, so the convention has to be decided before the
    first one is emitted. This is also the 70 ns of frame setup that phase 3
    could not touch.
-6. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
+5. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
    emitter is mechanical once the amd64 shape has stopped moving.
 
 The inline cache has come off this list, and so has the thing that turned out to
@@ -712,6 +719,11 @@ enter compiled code, so the cache would have been correct and unreachable. That
 is the lesson worth carrying forward — a guard that rejects a type is also a
 guard that prevents ever handling it, and the two are easy to confuse when the
 guard is the one making everything else sound.
+
+The one-way probe has come off it as the same lesson a level down: it was
+verified against a site with one receiver, which is the only case where way 0 is
+the answer. So has the allocation on every frame entry, which no conformance
+suite and no score could have shown and `-benchmem` reported in one line.
 
 The generic operators have come off it too, and they are the smaller half of
 that lesson. They were listed first because the cache was waiting on them, and
