@@ -862,11 +862,51 @@ verified to compile nothing:
 | | off | on | off | on | |
 | --- | --- | --- | --- | --- | --- |
 | **DeltaBlue** | 255 | **298** | 255 | **298** | **+16.9%** |
-| **Richards** | 226 | **246** | 226 | **244** | **+8.6%** |
+| **Richards** | 226 | **246** | 226 | **244** | **+8.4%** |
+| RayTrace | 401 | 406 | 400 | 405 | +1.2% |
+| RegExp | 147 | 147 | 147 | 146 | −0.3% |
+| Crypto | 255 | 251 | 255 | 251 | −1.6% |
+| NavierStokes | 460 | 450 | 459 | 450 | −2.1% |
+| Splay | 2019 | 1963 | 2039 | 1955 | −3.4% |
+| **EarleyBoyer** | 629 | **515** | 630 | **515** | **−18.2%** |
+| | | | | | **geomean −0.3%** |
 
-Both arms are steady to the point — 255/255 and 226/226 against 298/298 and
-246/244 — so these are results rather than drift. DeltaBlue runs 59.1% of its
-frame entries as machine code and Richards 32.7%.
+Both arms are steady to the point, so none of these are drift. DeltaBlue runs
+59.1% of its frame entries as machine code and Richards 32.7%.
+
+Flat overall, and the flatness is two large wins against one large loss rather
+than eight small nothings. The loss is worth more than the wins right now,
+because it is one number and it has one cause.
+
+### EarleyBoyer, −18.2%: the store that creates a property
+
+`GOANT_JIT_STATS=1` says it in a line:
+
+```
+jit: 18754393 property stores, 152621 served by the compiled cache (0.8%)
+```
+
+Eighteen million stores and the probe serves eight in a thousand. Splay's figure
+is 0.0% of 349,364. The reason is the restriction the first cut of `PUT_FIELD`
+took deliberately: it serves a store to a slot that already exists and declines
+the one that *creates* the property, which is what `toShape` marks — and building
+an object is nothing but stores that create properties. So compiling those
+functions moved eighteen million stores out of the interpreter, which handled
+them with a cached transition, and into an exit-and-re-enter helper.
+
+It is the same shape as the inherited slot two sections up, and the second time
+in one session that compiling more code made a benchmark slower by taking work
+away from a cache that was serving it. **Coverage moves work; it does not make
+work cheaper. Whatever the new coverage exposes has to be served before the
+coverage is a gain.**
+
+The fix is `icFillPutTransition`, which already records exactly this: the
+pre-store shape as the key, the post-store shape in `toShape`, and the prototype
+walk's conclusion in `protoVal`. The hit path is that guard chain plus an
+extensibility test — a property of the object, not of its shape — then installing
+`toShape` and writing the slot. The one thing needing care is that installing a
+shape is a *Go pointer* store from machine code, where every other store this tier
+emits is a NaN-boxed integer.
 
 **How much of a difference this table can see.** DeltaBlue's score has read
 249–250 in one session, 260–266 in the next and 255 in this one, all from builds
@@ -975,26 +1015,37 @@ Rewritten 2 August, three times: after measuring the numeric operators, after
 the inline cache landed, and after the generic operators made the cache's hit
 rate measurable on real code.
 
-**This list is now ordered by measurement rather than by corpus count.** The
-static histogram is still worth reading — 521 of 6,976 functions compile, and
-`GET_ELEM` 1321, `GET_FIELD2` 1268, `GET_UPVAL` 918, `SPECIAL_OBJ` 832 lead the
-refusals — but the entry-weighted table above is what decides what to build. It
-has disagreed with the corpus count every time they have been compared.
+**This list is ordered by measurement rather than by corpus count.** The static
+histogram is still worth reading — 1,485 of 6,976 functions now compile — but the
+entry-weighted table above is what decides what to build, and it has disagreed
+with the corpus count every time the two have been compared.
 
-1. **Calls, compiled to compiled** — promoted to the top by DeltaBlue's four
-   identical columns, and now with a constraint attached. Measured at 1.15 ns
-   against 4.69 ns for the detour through the runtime, plus the ~100 ns of
-   interpreted frame entry that disappears with it. Every compiled function
-   today is an island: entered from the interpreter, and every call it makes
-   goes back out. This is also what makes `GET_FIELD2`, `NEW` and `CLOSURE` worth
-   anything, since all three are refused in functions that call.
+The first three items are all EarleyBoyer's, because EarleyBoyer is the one
+benchmark the tier makes worse and it is worth 18% on its own.
 
-   The constraint, from the attempt above: the saving has to be taken **without
-   adding a branch to `runFrameBody` or `runFrame`**, because doing so costs the
-   interpreter more than the saving is worth. Which points at the call site — a
-   compiled caller reaching a compiled callee directly — rather than at a
-   cheaper frame entry bolted onto the shared path.
-2. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
+1. **The store that creates a property**, which is EarleyBoyer's 18.75 million
+   stores at a 0.8% hit rate and Splay's 349,364 at 0.0%. Everything it needs is
+   already recorded by `icFillPutTransition`; the hit path is the read's guard
+   chain plus an extensibility test, then installing `toShape` and writing the
+   slot. Installing a shape is the first *Go pointer* this tier would store from
+   machine code, so it is the first that needs an argument about write barriers
+   rather than the standing one that a Value is an integer.
+2. **`op:NEW`** — 2.39M frame entries in EarleyBoyer with 2.39M unblocks, and
+   174,689 in Splay. Both benchmarks are constructor-heavy, and `NEW` is now the
+   largest single-opcode blocker anywhere in the weighted table.
+3. **`op:INSTANCEOF` and `op:TYPEOF`** — 8.28M and 1.24M entries in EarleyBoyer.
+   INSTANCEOF unblocks only 619k of its own, so it needs the others first, but
+   TYPEOF unblocks all 1.24M of its.
+4. **Calls, compiled to compiled**, with a constraint attached. Measured at 1.15
+   ns against 4.69 ns for the detour through the runtime, plus the ~100 ns of
+   interpreted frame entry that disappears with it. Every compiled function is
+   still an island: entered from the interpreter, and every call it makes goes
+   back out. The constraint, from the attempt recorded above: the saving has to
+   be taken **without adding a branch to `runFrameBody` or `runFrame`**, because
+   doing so costs the interpreter more than the saving is worth. Which points at
+   the call site rather than at a cheaper frame entry bolted onto the shared
+   path.
+5. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
    the emitter's stack discipline model every block as starting empty, so a
    block reached with an operand still live refuses the whole function. The
    largest coverage item left — 1.08M entries in richards in *one* function,
@@ -1003,18 +1054,20 @@ has disagreed with the corpus count every time they have been compared.
    work is a per-block entry depth in place of the "must be zero" rule, which the
    positional register assignment then follows for free provided every
    predecessor agrees.
-3. **`non-numeric-operand`** (579k in richards, 4 functions) and **`GET_ELEM`**
-   (940k in deltablue, 2 functions).
-4. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
+6. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
    emitter is mechanical once the amd64 shape has stopped moving.
 
-Coverage led this list for three sessions and has been demoted on evidence:
-DeltaBlue reached 22.4% of frame entries in compiled code and scored 263 against
-the interpreter's 263. More of the same buys more of the same.
+Coverage led this list for three sessions and is no longer at the top of it.
+Twice in one session, compiling more code made a benchmark *slower* — the method
+call cost DeltaBlue 9% until inherited slots were served, and the store cost
+EarleyBoyer 18% and still does. Coverage moves work out of the interpreter; it
+does not make the work cheaper, and the interpreter's caches were already serving
+some of it.
 
-`GET_FIELD2` has come *off* this list, having been item 2 on it. It is the
-second-largest blocker in the static corpus and worth exactly zero entries on its
-own, because `CALL` is always the next instruction.
+`GET_FIELD2` has come off this list by being built, and it proved the weighted
+table right twice over: worth exactly zero entries on its own — `CALL_METHOD` is
+always the instruction after it — and worth 37 points of DeltaBlue once that was
+in too.
 
 `local-not-assigned` has come off it too, and it is the one that taught the most:
 it was worth 1.04M and 1.82M entries on the table, it was implemented, and the
