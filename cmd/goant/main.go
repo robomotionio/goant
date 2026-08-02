@@ -136,6 +136,19 @@ func dumpJITStats() {
 		fmt.Fprintf(os.Stderr, "jit: %d untyped operators, %d took the machine instruction (%.1f%%)\n",
 			ops, fast, 100*float64(fast)/float64(ops))
 	}
+	// What the tier lost, weighted by how often the function ran rather than by
+	// how many functions there were. Only the top few: the tail is long and
+	// every entry in it is, by construction, cold.
+	if w := engine.JITRefusalWeights(); len(w) > 0 {
+		fmt.Fprintln(os.Stderr, "jit: interpreted frame entries by what refused the function:")
+		for i, r := range w {
+			if i == 8 || r.Entries == 0 {
+				break
+			}
+			fmt.Fprintf(os.Stderr, "jit:   %-24s %12d entries in %d functions\n",
+				r.Reason, r.Entries, r.Funcs)
+		}
+	}
 }
 
 func stopProfile() {

@@ -96,6 +96,13 @@ type jitAttempt struct {
 	loops int32
 	code  *jitCode
 	tried bool
+	// why and entries are the diagnostic in jitrefusal.go and are only ever
+	// written when GOANT_JIT_STATS is set. They live here rather than in a map
+	// because the increment is on the interpreter's frame entry, which is the
+	// hottest path in the engine and must not grow a hash lookup even in a
+	// diagnostic build.
+	why     uint32
+	entries uint32
 }
 
 // jitTryLoop moves a loop that is already running into compiled code.
@@ -118,10 +125,13 @@ func jitTryLoop(rt *Runtime, fn *svFunc, locals []Value, header int) (Value, *Th
 	}
 	fn.jit.tried = true
 	if !jitEligible(fn) {
+		jitNoteRefusal(fn, "ineligible-frame")
 		return mkundef(), nil, false
 	}
-	fn.jit.code = jitCompile(fn, nil)
+	var why string
+	fn.jit.code = jitCompile(fn, jitWhy(&why))
 	if fn.jit.code == nil {
+		jitNoteRefusal(fn, why)
 		return mkundef(), nil, false
 	}
 	return fn.jit.code.jitRunOSR(rt, fn, locals, header)
@@ -164,6 +174,7 @@ func jitTry(rt *Runtime, fn *svFunc, locals []Value) (Value, *ThrowError, bool) 
 	}
 	if jitStats.enabled {
 		jitStats.interp++
+		jitNoteEntry(fn)
 	}
 	if fn.jit.tried {
 		return mkundef(), nil, false
@@ -174,10 +185,13 @@ func jitTry(rt *Runtime, fn *svFunc, locals []Value) (Value, *ThrowError, bool) 
 	}
 	fn.jit.tried = true // compiling is attempted once; a refusal is remembered
 	if !jitEligible(fn) {
+		jitNoteRefusal(fn, "ineligible-frame")
 		return mkundef(), nil, false
 	}
-	fn.jit.code = jitCompile(fn, nil)
+	var why string
+	fn.jit.code = jitCompile(fn, jitWhy(&why))
 	if fn.jit.code == nil {
+		jitNoteRefusal(fn, why)
 		return mkundef(), nil, false
 	}
 	return fn.jit.code.jitRun(rt, fn, locals)
