@@ -23,6 +23,28 @@ var jitEnabled = os.Getenv("GOANT_JIT") != ""
 // failing is lower still, and it is paid once — a refusal is remembered.
 const jitThreshold = 8
 
+// jitStats counts frame entries by where they ran, for GOANT_JIT_STATS=1.
+//
+// The static count of compilable functions is a poor guide to what a tier is
+// worth: a program's time is not spread evenly over its functions, and the ones
+// a numeric tier can take are exactly the ones that run in loops. What decides
+// the speedup is the share of *entries* that land in compiled code, which is
+// what this counts.
+var jitStats struct {
+	enabled  bool
+	compiled uint64
+	declined uint64
+	interp   uint64
+}
+
+func init() { jitStats.enabled = os.Getenv("GOANT_JIT_STATS") != "" }
+
+// JITStats reports frame entries served by compiled code, by compiled code that
+// declined its arguments, and by the interpreter for want of any compiled form.
+func JITStats() (compiled, declined, interpreted uint64) {
+	return jitStats.compiled, jitStats.declined, jitStats.interp
+}
+
 // jitAttempt is svFunc's tiering state, in one place so the interpreter's hot
 // path touches one field.
 type jitAttempt struct {
@@ -56,7 +78,18 @@ func jitEligible(fn *svFunc) bool {
 // is the entry check — which happens before compiled code has written anything.
 func jitTry(rt *Runtime, fn *svFunc, locals []Value) (Value, *ThrowError, bool) {
 	if fn.jit.code != nil {
-		return fn.jit.code.jitRun(rt, fn, locals)
+		v, e, ok := fn.jit.code.jitRun(rt, fn, locals)
+		if jitStats.enabled {
+			if ok {
+				jitStats.compiled++
+			} else {
+				jitStats.declined++
+			}
+		}
+		return v, e, ok
+	}
+	if jitStats.enabled {
+		jitStats.interp++
 	}
 	if fn.jit.tried {
 		return mkundef(), nil, false

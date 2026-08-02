@@ -29,6 +29,13 @@ func main() {
 	)
 	flag.Parse()
 
+	// Where the compiled tier actually ran, for GOANT_JIT_STATS=1. Deferred
+	// rather than printed at the end of main because the interesting exits —
+	// a thrown error, an explicit process.exit — do not reach it.
+	if os.Getenv("GOANT_JIT_STATS") != "" {
+		defer dumpJITStats()
+	}
+
 	if *cpuProf != "" {
 		f, err := os.Create(*cpuProf)
 		if err != nil {
@@ -105,6 +112,16 @@ func main() {
 // profiling records whether a CPU profile is running, so the exit paths know
 // they have to flush it before os.Exit discards the deferred stop.
 var profiling bool
+
+func dumpJITStats() {
+	c, d, in := engine.JITStats()
+	total := c + d + in
+	if total == 0 {
+		total = 1
+	}
+	fmt.Fprintf(os.Stderr, "jit: %d compiled (%.1f%% of frame entries), %d declined, %d interpreted\n",
+		c, 100*float64(c)/float64(total), d, in)
+}
 
 func stopProfile() {
 	if profiling {

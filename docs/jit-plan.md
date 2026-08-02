@@ -410,6 +410,37 @@ the inline-cache hit — resolve the handle, compare the shape, load the slot �
 and call the helper only on a miss. Until then, turning the JIT on makes
 property-heavy code slower, which is the honest state of it.
 
+## What the tier is worth on Octane: nothing yet
+
+`GOANT_JIT_STATS=1` counts frame entries by where they ran. The static coverage
+figure above — 4.9% of functions — turns out to be a poor guide to anything:
+
+| | entries served by compiled code |
+| --- | --- |
+| Richards | 0 of 5,870,643 |
+| DeltaBlue | 37,918 of 9,292,451 (0.4%) |
+| Crypto | 84 of 3,102,716 |
+| NavierStokes | 12 of 2,743 (0.4%) |
+| RayTrace | 0 of 8,382,213 |
+| EarleyBoyer | 0 of 29,596,449 |
+| Splay | 0 of 3,389,073 |
+| RegExp | 0 of 1,646,915 |
+
+Essentially zero, which is what the unchanged Octane scores were already saying.
+
+The hope was that the split would favour the tier — that a numeric compiler would
+miss many functions but catch the ones that run in loops. It is the other way
+round. The functions Octane spends its time in are the ones that allocate,
+dispatch over a class hierarchy, close over variables and call each other, which
+is precisely the set this tier refuses. The 4.9% it does compile are leaves and
+helpers that barely execute.
+
+So there is no shortcut here and no 80/20. Reaching a score that competes with
+node on this suite needs calls, property access through an emitted inline cache,
+closures, upvalues, globals, arrays and exceptions — most of the language, not a
+numeric core with a long tail. The measurement is worth having early: it is the
+difference between a plan and a hope.
+
 ## Still to do
 
 In the order the table argues for:
