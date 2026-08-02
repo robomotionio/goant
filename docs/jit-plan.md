@@ -38,8 +38,11 @@ document:
 | object creation | 209 ns | 111 ns (2.0x) | — |
 
 An entire optimising tier for no gain over the baseline. Their own analysis
-(`docs/PERFORMANCE-DEEP-DIVE.md`) explains it, and marks the first two causes
-"Irreducible: Yes — root cause: Go GC architecture":
+explains it, and marks the first two causes "Irreducible: Yes — root cause: Go GC
+architecture". The quotations in this section are from that project's README and
+`docs/PERFORMANCE-DEEP-DIVE.md` at commit `c5bba68`
+(github.com/lucasdss/v8go, BSD 3-Clause, © 2026 Lucas de Souza Santos). None of
+its code is used here; what is borrowed is the conclusion, which is worth more:
 
 - No tagged integers, because "Go's garbage collector scans every 8-byte aligned
   value for valid heap pointers. If we used tagged integers, Go's GC would
