@@ -400,8 +400,8 @@ restart:
 	// it produced the answer; anything else falls through to the interpreter
 	// below, which is what makes declining free.
 	if jitEnabled {
-		if v, ok := jitTry(fn, locals); ok {
-			return v, nil
+		if v, e, ok := jitTry(rt, fn, locals); ok {
+			return v, e
 		}
 	}
 

@@ -8,9 +8,27 @@ import (
 	"testing"
 )
 
+// jitRunT enters compiled code from a test, discarding the throw channel that
+// only the opcodes calling into the runtime can use.
+func jitRunT(t testing.TB, rt *Runtime, c *jitCode, fn *svFunc, locals []Value) (Value, bool) {
+	t.Helper()
+	v, e, ok := c.jitRun(rt, fn, locals)
+	if e != nil {
+		t.Fatalf("compiled code threw")
+	}
+	return v, ok
+}
+
 // jitFn compiles src, which must declare exactly one function, and returns that
 // function's bytecode.
 func jitFn(t testing.TB, src string) *svFunc {
+	_, fn := jitFnRT(t, src)
+	return fn
+}
+
+// jitFnRT is jitFn plus the Runtime the function was compiled in, which
+// compiled code needs once it can call back into the engine.
+func jitFnRT(t testing.TB, src string) (*Runtime, *svFunc) {
 	t.Helper()
 	rt := New()
 	prog, err := Parse("jit_test.js", src)
@@ -24,7 +42,7 @@ func jitFn(t testing.TB, src string) *svFunc {
 	if len(top.childFuncs) != 1 {
 		t.Fatalf("want exactly one function, got %d", len(top.childFuncs))
 	}
-	return top.childFuncs[0]
+	return rt, top.childFuncs[0]
 }
 
 // interpret runs src's function f through the whole engine with exactly these
@@ -102,7 +120,7 @@ var jitLoopInputs = []struct{ a, b float64 }{
 // strays into the tag space.
 func TestJITAgreesWithTheInterpreter(t *testing.T) {
 	check := func(src string, inputs []struct{ a, b float64 }) {
-		fn := jitFn(t, src)
+		rt, fn := jitFnRT(t, src)
 		c := jitCompile(fn, nil)
 		if c == nil {
 			t.Errorf("%s: refused to compile", src)
@@ -113,7 +131,7 @@ func TestJITAgreesWithTheInterpreter(t *testing.T) {
 			av, bv := tov(in.a), tov(in.b)
 			locals := make([]Value, fn.maxLocals)
 			locals[0], locals[1] = av, bv
-			got, ok := c.jitRun(locals)
+			got, ok := jitRunT(t, rt, c, fn, locals)
 			if !ok {
 				t.Errorf("%s(%v,%v): bailed on two Numbers", src, in.a, in.b)
 				continue
@@ -139,7 +157,7 @@ func TestJITAgreesWithTheInterpreter(t *testing.T) {
 // re-establish the pinned registers and pick up where it left off.
 func TestJITLoopOutlivesItsFuel(t *testing.T) {
 	const src = "function f(n,m){ var s=0, i=0; while (i<n) { s=s+i; i=i+1; } return s; }"
-	fn := jitFn(t, src)
+	rt, fn := jitFnRT(t, src)
 	c := jitCompile(fn, nil)
 	if c == nil {
 		t.Fatal("refused to compile")
@@ -149,7 +167,7 @@ func TestJITLoopOutlivesItsFuel(t *testing.T) {
 	for _, n := range []float64{0, 1, 10, jitFuel - 1, jitFuel, jitFuel + 1, 3*jitFuel + 7} {
 		locals := make([]Value, fn.maxLocals)
 		locals[0], locals[1] = tov(n), tov(0)
-		got, ok := c.jitRun(locals)
+		got, ok := jitRunT(t, rt, c, fn, locals)
 		if !ok {
 			t.Fatalf("n=%v bailed", n)
 		}
@@ -165,7 +183,7 @@ func TestJITLoopOutlivesItsFuel(t *testing.T) {
 // raw it would read as a tagged value and the rest of the engine would treat a
 // number as an object.
 func TestJITCanonicalizesNaN(t *testing.T) {
-	fn := jitFn(t, "function f(a,b){ return a/b; }")
+	rt, fn := jitFnRT(t, "function f(a,b){ return a/b; }")
 	c := jitCompile(fn, nil)
 	if c == nil {
 		t.Fatal("refused to compile")
@@ -174,7 +192,7 @@ func TestJITCanonicalizesNaN(t *testing.T) {
 
 	locals := make([]Value, fn.maxLocals)
 	locals[0], locals[1] = tov(0), tov(0)
-	got, ok := c.jitRun(locals)
+	got, ok := jitRunT(t, rt, c, fn, locals)
 	if !ok {
 		t.Fatal("bailed")
 	}
@@ -191,8 +209,8 @@ func TestJITCanonicalizesNaN(t *testing.T) {
 	// The interpreter is the reference, not any particular NaN constant: Go's
 	// math.NaN() is 0x7FF8000000000001, which is a different pattern again and
 	// would make this test agree with nothing.
-	rt := New()
-	want, err := rt.RunString("nan.js", "function f(a,b){ return a/b; } f(0,0);")
+	ref := New()
+	want, err := ref.RunString("nan.js", "function f(a,b){ return a/b; } f(0,0);")
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -205,7 +223,7 @@ func TestJITCanonicalizesNaN(t *testing.T) {
 // hands everything else back to the interpreter; because it emits nothing with
 // a side effect, re-running from the top is always correct.
 func TestJITBailsOnNonNumbers(t *testing.T) {
-	fn := jitFn(t, "function f(a,b){ return a+b; }")
+	rt, fn := jitFnRT(t, "function f(a,b){ return a+b; }")
 	c := jitCompile(fn, nil)
 	if c == nil {
 		t.Fatal("refused to compile")
@@ -215,11 +233,11 @@ func TestJITBailsOnNonNumbers(t *testing.T) {
 	for _, bad := range []Value{mkundef(), mknull(), mkbool(true), tEmpty} {
 		locals := make([]Value, fn.maxLocals)
 		locals[0], locals[1] = bad, tov(1)
-		if _, ok := c.jitRun(locals); ok {
+		if _, ok := jitRunT(t, rt, c, fn, locals); ok {
 			t.Errorf("did not bail on a %v operand", bad.Type())
 		}
 		locals[0], locals[1] = tov(1), bad
-		if _, ok := c.jitRun(locals); ok {
+		if _, ok := jitRunT(t, rt, c, fn, locals); ok {
 			t.Errorf("did not bail on a %v operand in the second position", bad.Type())
 		}
 	}
@@ -232,7 +250,6 @@ func TestJITRefusesWhatItCannotModel(t *testing.T) {
 	for _, src := range []string{
 		"function f(a,b){ return g(a); }",               // a call
 		"function f(a,b){ if (a) return 1; return 2; }", // a branch
-		"function f(a,b){ return a.x; }",                // a property
 		"function f(a,b){ return 'x'; }",                // a String constant
 		"function f(a,b){ return a%b; }",                // modulo is not in this tier
 		"function f(a,b){ return -a; }",                 // negation is not in this tier
@@ -248,25 +265,25 @@ func TestJITRefusesWhatItCannotModel(t *testing.T) {
 // through the whole engine, and through compiled code, agreeing.
 func TestJITMatchesRunningTheSource(t *testing.T) {
 	const src = "function f(a,b){ return (a+b)*(a-b)/b; }"
-	fn := jitFn(t, src)
+	rt, fn := jitFnRT(t, src)
 	c := jitCompile(fn, nil)
 	if c == nil {
 		t.Fatal("refused to compile")
 	}
 	defer c.free()
 
-	rt := New()
-	if _, err := rt.RunString("jit_test.js", src); err != nil {
+	ref := New()
+	if _, err := ref.RunString("jit_test.js", src); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	for _, in := range []struct{ a, b float64 }{{7, 3}, {1.5, 0.25}, {-4, 9}} {
-		v, err := rt.RunString("call.js", src+"; f("+ftoa(in.a)+","+ftoa(in.b)+");")
+		v, err := ref.RunString("call.js", src+"; f("+ftoa(in.a)+","+ftoa(in.b)+");")
 		if err != nil {
 			t.Fatalf("call: %v", err)
 		}
 		locals := make([]Value, fn.maxLocals)
 		locals[0], locals[1] = tov(in.a), tov(in.b)
-		got, ok := c.jitRun(locals)
+		got, ok := jitRunT(t, rt, c, fn, locals)
 		if !ok {
 			t.Fatalf("f(%v,%v) bailed", in.a, in.b)
 		}
@@ -281,7 +298,7 @@ func ftoa(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
 // BenchmarkJITvsInterpreter is what all of this is for.
 func BenchmarkJITvsInterpreter(b *testing.B) {
 	const src = "function f(a,b){ return (a+b)*(a-b)/b+a*b; }"
-	fn := jitFn(b, src)
+	rt, fn := jitFnRT(b, src)
 	c := jitCompile(fn, nil)
 	if c == nil {
 		b.Fatal("refused to compile")
@@ -293,7 +310,7 @@ func BenchmarkJITvsInterpreter(b *testing.B) {
 
 	b.Run("compiled", func(b *testing.B) {
 		for b.Loop() {
-			if _, ok := c.jitRun(locals); !ok {
+			if _, ok := jitRunT(b, rt, c, fn, locals); !ok {
 				b.Fatal("bailed")
 			}
 		}
@@ -318,7 +335,7 @@ func BenchmarkJITvsInterpreter(b *testing.B) {
 // that spends its time going round rather than being called.
 func BenchmarkJITLoop(b *testing.B) {
 	const src = "function f(n,m){ var s=0, i=0; while (i<n) { s=s+i*m; i=i+1; } return s; }"
-	fn := jitFn(b, src)
+	rt, fn := jitFnRT(b, src)
 	c := jitCompile(fn, nil)
 	if c == nil {
 		b.Fatal("refused to compile")
@@ -330,7 +347,7 @@ func BenchmarkJITLoop(b *testing.B) {
 
 	b.Run("compiled", func(b *testing.B) {
 		for b.Loop() {
-			if _, ok := c.jitRun(locals); !ok {
+			if _, ok := jitRunT(b, rt, c, fn, locals); !ok {
 				b.Fatal("bailed")
 			}
 		}

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"errors"
+	"github.com/robomotionio/goant/internal/jitmem"
 	"math"
 	"path/filepath"
 
@@ -31,6 +32,16 @@ type Runtime struct {
 
 	// String interning table (Phase 2): interned text -> flat-string handle.
 	interned map[string]Handle
+
+	// jitFrames are the compiled frames currently suspended in a helper, in
+	// entry order, and they are roots — see markRoots. A compiled frame keeps
+	// its operand stack in registers, so once it has left for a helper the only
+	// copy is in its ExecContext, which nothing else refers to.
+	//
+	// A slice rather than one pointer because a helper can re-enter the engine:
+	// a getter is JavaScript, and the frame that called it is still holding an
+	// operand stack the collector would otherwise never look at.
+	jitFrames []*jitmem.ExecContext
 
 	// rootShapes holds this runtime's empty root shape per inobj limit. Every
 	// shape descends from one of them through the transition tree, and adding a
@@ -622,7 +633,7 @@ func (rt *Runtime) initPrototypes() {
 	// Array.isArray(Array.prototype) is true and it carries array [[DefineOwn]].
 	{
 		h, obj := rt.objects.alloc()
-	obj.self = h
+		obj.self = h
 		obj.proto = rt.objectProto
 		obj.shape = rt.newShape()
 		obj.typeTag = TArr

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"github.com/robomotionio/goant/internal/jitmem"
 	"os"
 	"reflect"
 	"strconv"
@@ -638,6 +639,21 @@ func (rt *Runtime) markRoots() {
 			rt.gc.strMarks.set(h)
 		}
 
+		// A compiled frame suspended in a helper holds its operand stack in the
+		// ExecContext, and nothing else refers to those values: the registers
+		// they came from are gone, and the frame's locals slice does not contain
+		// them. Only the slots compiled code declared live are traced — a stale
+		// one from an earlier call holds a handle to a cell that may since have
+		// been freed. Args[0] and Args[1] are a pointer and a counter, and
+		// Args[3] is an immediate, so none of the three is a Value.
+		for _, ctx := range r.jitFrames {
+			rt.markValue(Value(ctx.Args[2]))
+			rt.markValue(Value(ctx.Ret))
+			for i := uint64(0); i < ctx.SpillN && i < jitmem.SpillSlots; i++ {
+				rt.markValue(Value(ctx.Spill[i]))
+			}
+		}
+
 		// A suspended async function has no object to hang its coroutine off, so
 		// asyncFrames is what keeps it alive; the reflective walk below finds it
 		// by descending into the map's keys. This pass is still needed on top of
@@ -777,7 +793,6 @@ func isPoolType(t reflect.Type) bool {
 // because the answer depends only on the type, so Runtimes on different
 // goroutines may fill it concurrently.
 var valueBearing sync.Map
-
 
 // sweepWeakTables settles the object-keyed side tables.
 //

@@ -363,17 +363,61 @@ compiler covers, not by the value representation. `lucasdss/v8go` reached 1.7x
 with a whole optimising tier because 48-byte values capped it. Nothing caps this
 one in the same way.
 
+## Property access, and why it is not yet a win
+
+`GET_FIELD` compiles. It needed a mechanism rather than an instruction: compiled
+code keeps the operand stack in registers, and calling into the runtime loses
+every one of them, so the live slots go to the ExecContext and come back on the
+way in. A template compiler knows its depth at each point, so that is a fixed
+sequence rather than a scan.
+
+It also needed the collector to be told. A spilled slot holds a Value that
+nothing else refers to — the registers it came from are gone, and the frame's
+locals do not contain it — so a compiled frame suspended in a helper is a root,
+and `SpillN` is how it says which slots are live. A stale slot from an earlier
+call holds a handle to a cell that may since have been freed, which is why the
+count is written before the exit rather than inferred afterwards. `Args[0]` is a
+pointer and `Args[3]` an immediate, so tracing either would be worse than missing
+one. The getter tests in `TestTieringAgreesWithTheInterpreter` exist for this:
+a getter is JavaScript re-entering the engine underneath a compiled frame that is
+holding values only its context refers to, and one of them allocates hard enough
+to collect while that is true.
+
+And it is slower:
+
+```js
+function dist(p) { var dx = p.x, dy = p.y; return dx*dx + dy*dy; }
+```
+
+| | |
+| --- | --- |
+| goant, interpreted | 1133 ms |
+| goant, compiled | **1244 ms** |
+| node | 10 ms |
+
+A helper round trip is 7.6ns and the interpreter's inline-cache hit is less than
+that, so every field read compiled this way loses more than the surrounding
+arithmetic wins. That is the design rule from the top of this document arriving
+with a number attached: **the fast paths have to be emitted, not delegated.**
+`lucasdss/v8go` stopped at 1.7x for the same reason, and named the same fix.
+
+Kept rather than reverted because the tier is off by default, the machinery it
+needed is correct and tested, and the next step is now precisely specified: emit
+the inline-cache hit — resolve the handle, compare the shape, load the slot —
+and call the helper only on a miss. Until then, turning the JIT on makes
+property-heavy code slower, which is the honest state of it.
+
 ## Still to do
 
 In the order the table argues for:
 
-1. **Property access**, with the inline-cache guard chain emitted as machine code
-   rather than delegated. The largest single lever by a wide margin, and the one
-   that matters for Octane's score rather than its function count. It is also
-   where the tier's cheap deoptimisation story runs out: a field's value is not
-   known to be a Number, so using one in arithmetic needs a guard that can fail
-   after stores have happened, which is real deoptimisation rather than a bail
-   before anything was written.
+1. **The inline cache for property access, emitted as machine code.** The lookup
+   works and loses to the interpreter; this is what turns it into a gain. It
+   needs the object header, pool and cache-entry offsets exported as constants
+   from one source of truth, because a wrong offset here is memory corruption
+   rather than a wrong answer. No deoptimisation is required: an unknown-typed
+   result cannot reach an arithmetic instruction, because the compiler refuses
+   it — which is the one piece of luck in the whole design.
 2. **The remaining numeric operators** — `MOD`, the shifts and the bitwise
    operations. Tempting because `SHR` is the second most common *first* refusal,
    but the sole-blocker column is the one that matters and it puts them at two or

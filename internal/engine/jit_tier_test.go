@@ -28,6 +28,26 @@ func TestTieringAgreesWithTheInterpreter(t *testing.T) {
 		// A local assigned only inside a branch, which the tier refuses.
 		`function p(a){ if (a>0) { var t=a*2; return t; } return 0; }
 		 var r=0; for (var k=0;k<40;k++) r+=p(k-10); r;`,
+		// Property reads, which leave the tier's Number world: the result is
+		// whatever the object held, so it may be stored and returned but never
+		// arithmetic'd without the compiler refusing.
+		`function r(o){ return o.x; }
+		 var o={x:7}, s=0; for (var k=0;k<40;k++) s+=r(o); s;`,
+		`function r(o){ var a=o.x; var b=o.y; return a; }
+		 var o={x:1,y:2}, s=0; for (var k=0;k<40;k++) s+=r(o); s;`,
+		// A read that throws, every time, once the function is compiled.
+		`function r(o){ return o.x; }
+		 var n=0; for (var k=0;k<40;k++) { try { r(k<20?{x:1}:null); } catch (e) { n++; } } n;`,
+		// A getter, which is JavaScript re-entering the engine underneath
+		// compiled code that is suspended holding its operand stack.
+		`var o = { get x() { return 3; } };
+		 function r(p){ return p.x; }
+		 var s=0; for (var k=0;k<40;k++) s+=r(o); s;`,
+		// A getter that allocates hard enough to collect while the compiled
+		// frame above it is suspended holding values only its context refers to.
+		`var o = { get x() { var a=[]; for (var i=0;i<200;i++) a.push({i:i}); return a.length; } };
+		 function r(p){ return p.x; }
+		 var s=0; for (var k=0;k<60;k++) s+=r(o); s;`,
 		// Mixes Numbers and values that are not, across a branch.
 		`function q(a,b){ var x=null; if (a<b) { return x; } return a-b; }
 		 var r=0; for (var k=0;k<40;k++) { var v=q(k,20); r += (v===null) ? 1 : v; } r;`,

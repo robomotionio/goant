@@ -347,6 +347,30 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			ip += 5
 
+		case OpGetField:
+			// The lookup itself is the runtime's: a shape probe, a prototype
+			// walk, possibly a getter that is more JavaScript. What compiled
+			// code contributes is everything around it. Emitting the
+			// inline-cache hit here instead would be the next real gain, and it
+			// is what stops this tier being merely correct.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			idx := readU32(code, ip+1)
+			if int(idx) >= len(fn.constNames) || idx > 0x7FFFFFFF {
+				return refuse(why, "shape")
+			}
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+16, jitStackRegs[sp-1])
+			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffArgs+24, idx)
+			if !jitCallHelper(a, sp, jitHelperGetField, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-1], jitasm.RegCtx, jitmem.CtxOffRet)
+			// A field holds anything, so the result is not a Number as far as
+			// this tier knows. Arithmetic on it is refused rather than guarded.
+			kind[sp-1] = false
+			ip += 7
+
 		case OpReturnUndef:
 			if sp != 0 {
 				return refuse(why, "return-stack")
@@ -438,7 +462,7 @@ func jitUnsupported(fn *svFunc, start int) (string, bool) {
 			OpGetLocal, OpPutLocal, OpSetLocal, OpPop,
 			OpAdd, OpSub, OpMul, OpDiv,
 			OpLt, OpLe, OpGt, OpGe,
-			OpJmp, OpJmpFalse, OpJmpTrue,
+			OpJmp, OpJmpFalse, OpJmpTrue, OpGetField,
 			OpReturn, OpReturnUndef, OpThis:
 		default:
 			return opTable[op].Name, false
@@ -545,6 +569,53 @@ func jitBackEdge(a *jitasm.Asm, top *jitasm.Label, fixups *[]jitResumeFixup) {
 	a.Jmp(top)
 }
 
+// Helper identifiers. Compiled code cannot call a Go function, so it records
+// which one it wants and returns; jitHelper runs it and execution resumes.
+const (
+	jitHelperGetField = 1
+)
+
+// jitCallHelper emits a call out to the runtime.
+//
+// The operand stack lives in registers, and returning to Go loses every one of
+// them, so the live slots go to the context first and come back on the way in.
+// A template compiler knows its depth at every point, which is what makes this
+// a fixed sequence rather than a scan.
+//
+// Reports false when the stack is deeper than the context can hold, which is a
+// refusal rather than an error.
+func jitCallHelper(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFixup) bool {
+	if sp > jitmem.SpillSlots {
+		return false
+	}
+	resume := a.NewLabel()
+
+	for i := 0; i < sp; i++ {
+		a.MovMemReg(jitasm.RegCtx, int32(jitmem.CtxOffSpill+8*i), jitStackRegs[i])
+	}
+	// SpillN is what tells the collector how much of Spill to trace. Writing it
+	// before the exit rather than after is the whole point: between the RET
+	// below and the helper returning, this context is the only reference to
+	// those values.
+	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffSpillN, uint32(sp))
+	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffHelper, helper)
+	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitHelper))
+	immOff := a.MovRegImm64At(jitasm.RAX, 0)
+	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume})
+	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitasm.RAX)
+	a.MovRegImm64(jitasm.RAX, jitmem.ExitHelper)
+	a.Ret()
+
+	a.Bind(resume)
+	a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
+	a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
+	for i := 0; i < sp; i++ {
+		a.MovRegMem(jitStackRegs[i], jitasm.RegCtx, int32(jitmem.CtxOffSpill+8*i))
+	}
+	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffSpillN, 0)
+	return true
+}
+
 // jitCanonicalizeNaN folds a NaN result into the one bit pattern the NaN box can
 // hold.
 //
@@ -563,38 +634,65 @@ func jitCanonicalizeNaN(a *jitasm.Asm, r jitasm.Reg) {
 }
 
 // jitRun enters compiled code with the frame's locals and reports whether it
-// produced an answer.
+// produced the answer.
 //
 // A false return means the code declined the arguments it was given and the
 // caller must interpret instead. That is always safe: the only exit that reports
-// it is the entry check, which runs before the compiled code has written
-// anything.
-func (c *jitCode) jitRun(locals []Value) (Value, bool) {
+// it is the entry check, which runs before compiled code has written anything.
+//
+// A throw is not a decline. It comes from a helper, by which point the frame has
+// run, and this tier has no exception handlers of its own — TRY_PUSH is refused
+// — so the only thing left to do is what the interpreter would: leave.
+func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value) (Value, *ThrowError, bool) {
 	if len(locals) == 0 {
-		return mkundef(), false
+		return mkundef(), nil, false
 	}
-	ctx := jitmem.ExecContext{Args: [4]uint64{
+	ctx := &jitmem.ExecContext{Args: [4]uint64{
 		uint64(uintptr(unsafe.Pointer(&locals[0]))),
 		jitFuel,
 	}}
+	// Rooted for as long as compiled code can be suspended in a helper holding
+	// values nothing else refers to. See markRoots.
+	rt.jitFrames = append(rt.jitFrames, ctx)
+	defer func() { rt.jitFrames = rt.jitFrames[:len(rt.jitFrames)-1] }()
+
 	pc := c.entry
 	for {
-		jitmem.Enter(pc, &ctx)
+		jitmem.Enter(pc, ctx)
 		// The locals slice reaches compiled code as an integer, so nothing in
 		// the call graph keeps it reachable for the collector.
 		runtime.KeepAlive(locals)
 		switch ctx.Exit {
 		case jitmem.ExitReturn:
-			return Value(ctx.Ret), true
+			return Value(ctx.Ret), nil, true
 		case jitmem.ExitPreempt:
 			// Being here is the safepoint: this is ordinary Go, so the runtime
 			// can collect and preempt before the loop is re-entered.
 			ctx.Args[1] = jitFuel
 			pc = ctx.Resume
+		case jitmem.ExitHelper:
+			if e := jitHelper(rt, fn, ctx); e != nil {
+				return mkundef(), e, true
+			}
+			pc = ctx.Resume
 		default:
-			return mkundef(), false
+			return mkundef(), nil, false
 		}
 	}
+}
+
+// jitHelper runs what compiled code asked for.
+func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
+	switch ctx.Helper {
+	case jitHelperGetField:
+		v, e := rt.getField(Value(ctx.Args[2]), fn.constNames[ctx.Args[3]])
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(v)
+		return nil
+	}
+	return rt.typeError("unknown JIT helper")
 }
 
 // free releases the code block. A jitCode must outlive every entry into it.

@@ -273,6 +273,13 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 						return nil, false
 					}
 					push(true) // double arithmetic yields a Number
+				case OpGetField:
+					// The object goes in and whatever it held comes out, which
+					// is not a Number as far as this tier can tell.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(false)
 				case OpLt, OpLe, OpGt, OpGe:
 					if _, ok := pop(); !ok {
 						return nil, false

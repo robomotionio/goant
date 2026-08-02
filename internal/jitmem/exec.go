@@ -29,7 +29,26 @@ type ExecContext struct {
 	Args   [4]uint64
 	Ret    uint64
 	Resume uintptr
+	// Spill is where compiled code leaves its operand stack when it has to
+	// return to the runtime part way through a function.
+	//
+	// Generated code keeps the operand stack in registers, and returning to Go
+	// loses every one of them. A compiler that knows its stack depth at each
+	// point — which a template compiler does, because it assigns the stack
+	// positionally — can write exactly the live slots here and read them back on
+	// the way in. That, rather than anything about deoptimisation, is what a
+	// compiled function needs before it can call out mid-expression.
+	Spill [SpillSlots]uint64
+	// SpillN is how many of Spill are live, written by compiled code before it
+	// leaves. The runtime's collector has no other way to know: a spilled slot
+	// holds a Value, and a stale one from an earlier call holds a handle to a
+	// cell that may since have been freed.
+	SpillN uint64
 }
+
+// SpillSlots bounds the operand stack a compiled function may hold across a
+// call out. It matches the number of registers the emitter has to give it.
+const SpillSlots = 10
 
 // Field offsets generated code compiles against.
 const (
@@ -38,8 +57,20 @@ const (
 	CtxOffArgs   = 16
 	CtxOffRet    = 48
 	CtxOffResume = 56
-	CtxSize      = 64
+	CtxOffSpill  = 64
+	CtxOffSpillN = 64 + 8*SpillSlots
+	CtxSize      = 72 + 8*SpillSlots
 )
+
+// Which fields hold a Value, and so must be traced by the runtime's collector
+// while compiled code is suspended in a helper:
+//
+//	Args[2]  the operand a helper was handed
+//	Ret      the operand it produced
+//	Spill[0:SpillN]
+//
+// Args[0] and Args[1] are a pointer and a counter, and Args[3] is an immediate.
+// Tracing either as a Value would be worse than missing one.
 
 // Enter calls generated code at pc with ctx in the ABI's context register and
 // returns whatever the code left in the return register.

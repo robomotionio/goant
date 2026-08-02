@@ -17,4 +17,6 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	return nil
 }
 
-func (c *jitCode) jitRun(locals []Value) (Value, bool) { return mkundef(), false }
+func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value) (Value, *ThrowError, bool) {
+	return mkundef(), nil, false
+}

@@ -54,24 +54,24 @@ func jitEligible(fn *svFunc) bool {
 // nothing was compiled, or the compiled code declined the arguments it was
 // given. Declining is safe at any point, because the only exit that reports it
 // is the entry check — which happens before compiled code has written anything.
-func jitTry(fn *svFunc, locals []Value) (Value, bool) {
+func jitTry(rt *Runtime, fn *svFunc, locals []Value) (Value, *ThrowError, bool) {
 	if fn.jit.code != nil {
-		return fn.jit.code.jitRun(locals)
+		return fn.jit.code.jitRun(rt, fn, locals)
 	}
 	if fn.jit.tried {
-		return mkundef(), false
+		return mkundef(), nil, false
 	}
 	fn.jit.count++
 	if fn.jit.count < jitThreshold {
-		return mkundef(), false
+		return mkundef(), nil, false
 	}
 	fn.jit.tried = true // compiling is attempted once; a refusal is remembered
 	if !jitEligible(fn) {
-		return mkundef(), false
+		return mkundef(), nil, false
 	}
 	fn.jit.code = jitCompile(fn, nil)
 	if fn.jit.code == nil {
-		return mkundef(), false
+		return mkundef(), nil, false
 	}
-	return fn.jit.code.jitRun(locals)
+	return fn.jit.code.jitRun(rt, fn, locals)
 }
