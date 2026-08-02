@@ -1,6 +1,9 @@
 package engine
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 // TestJITRefusalWeightsChargeTheHotFunction is the diagnostic's own gate.
 //
@@ -58,5 +61,34 @@ func TestJITRefusalWeightsChargeTheHotFunction(t *testing.T) {
 	}
 	if w[0].Entries < w[len(w)-1].Entries {
 		t.Error("the weights are not ordered heaviest first")
+	}
+}
+
+// TestEnvOnHonoursItsValue is the regression test for a measurement bug rather
+// than a code one.
+//
+// `GOANT_JIT=0` used to mean the tier was ON, because the check was for the
+// variable's presence and not its value. Every A/B run of the tier against the
+// interpreter therefore compared the tier against itself, and the conclusion
+// drawn from all of them — "Octane is unchanged with the tier on" — was drawn
+// from two identical arms.
+func TestEnvOnHonoursItsValue(t *testing.T) {
+	for _, tc := range []struct {
+		v  string
+		on bool
+	}{
+		{"", false}, {"0", false}, {"false", false}, {"FALSE", false},
+		{"no", false}, {"off", false}, {" 0 ", false},
+		{"1", true}, {"true", true}, {"yes", true}, {"on", true}, {"x", true},
+	} {
+		t.Setenv("GOANT_TEST_ENV_ON", tc.v)
+		if got := envOn("GOANT_TEST_ENV_ON"); got != tc.on {
+			t.Errorf("envOn(%q) = %v, want %v", tc.v, got, tc.on)
+		}
+	}
+	t.Setenv("GOANT_TEST_ENV_ON", "")
+	os.Unsetenv("GOANT_TEST_ENV_ON")
+	if envOn("GOANT_TEST_ENV_ON") {
+		t.Error("an absent variable read as on")
 	}
 }

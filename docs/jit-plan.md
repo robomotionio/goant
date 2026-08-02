@@ -771,6 +771,65 @@ in richards and 1.99M in deltablue, in exactly the eleven functions per benchmar
 that had been charged to definite assignment. Those functions were never blocked
 by definite assignment at all.
 
+## Calls, and the first thing that moved a score
+
+Three opcodes, in the order the weighted diagnostic named them, and the third one
+is where it turns.
+
+**`CALL`** had refused every function containing it, which is why `GET_FIELD2`
+was worth 2.83M frame entries and *zero* unblocks: `CALL_METHOD` was always the
+instruction after it. The operands are already where the helper wants them — a
+call site holds `[callee, arg0..argN-1]`, spilling roots all of it, and `SpillN`
+says how much is live — so nothing is passed but the count. The arguments are
+copied into a slice of their own, because a sloppy callee's mapped `arguments`
+writes through to the array it is given and that array must not be the caller's
+operand stack.
+
+**`GET_FIELD2` and `CALL_METHOD`**, the pair `o.m()` compiles to. GET_FIELD2 is
+GET_FIELD's probe with the receiver kept for the call that follows; the probe
+writes over the register it is given, so the receiver is copied up first and the
+copy is what gets probed — which also leaves the slow path holding the receiver
+where the helper wants it, so GET_FIELD's helper is reused unchanged.
+
+| frame entries in compiled code | before | after |
+| --- | --- | --- |
+| Richards | 5.0% | **32.7%** |
+| DeltaBlue | 22.4% | **59.1%** |
+| static coverage | 999 | **1485** of 6,976 |
+
+And DeltaBlue got **9% slower**.
+
+### The inherited slot
+
+A class's methods live on its prototype, so `o.m` is an inherited read every
+time — and the probe declined every one of them. Compiling the method call
+therefore moved 55% of DeltaBlue's property reads *out* of the interpreter's
+cache, which was serving them, and into a helper round trip. Richards, less
+prototype-heavy, gained 3% from the same change; DeltaBlue lost 9%.
+
+What the cache holds for an inherited property is the conclusion of a prototype
+walk, so the guard is the receiver's `[[Prototype]]` still being the one the
+entry was filled from — two objects can share a shape and not a prototype.
+Everything else that could change the answer already bumps the epoch, because
+every object the walk passed through is flagged `usedAsProto`.
+
+| property reads served by the compiled cache | before | after |
+| --- | --- | --- |
+| Richards | 74.0% | **98.9%** |
+| DeltaBlue | 44.6% | **82.0%** |
+
+Same build, same machine, tier on in both arms, three interleaved pairs:
+
+| | before these three commits | after |
+| --- | --- | --- |
+| DeltaBlue | 263, 261, 262 | **295, 295, 294** |
+| Richards | 221, 219, 220 | **246, 247, 246** |
+
+**+12.6% and +11.8%.** After four sessions in which every coverage gain produced
+exactly nothing, this is the first change to move an Octane score past the noise
+floor — and it is not the coverage that did it. The coverage came first and cost
+9%; what turned it into a gain was serving the reads that coverage exposed.
+
 ## What the tier is worth on Octane: nothing yet
 
 `GOANT_JIT_STATS=1` counts frame entries by where they ran. Scores are

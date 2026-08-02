@@ -1,6 +1,9 @@
 package engine
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 // Tiering: when a compiled function is worth having, and when to try.
 //
@@ -9,12 +12,27 @@ import "os"
 // worth nothing, and the count is a single increment on a path that already
 // touches the same cache line.
 //
-// jitEnabled is off by default. This tier compiles a small fraction of real code
-// — see TestJITCoverage — so it cannot yet pay for itself on a mixed workload,
-// and an execution path that is not the default is one that has to be justified
-// rather than assumed. GOANT_JIT=1 turns it on, which is how the differential
-// over Octane is run.
-var jitEnabled = os.Getenv("GOANT_JIT") != ""
+// jitEnabled is off by default. An execution path that is not the default is
+// one that has to be justified rather than assumed, and GOANT_JIT=1 turns it on
+// — which is how the differential over Octane is run.
+//
+// It reads the value rather than merely the presence of the variable, and that
+// is not tidiness. `GOANT_JIT=0` used to mean *on*, because any non-empty string
+// was, so every A/B run of the tier against the interpreter compared the tier
+// against itself. Weeks of "Octane is unchanged with the tier on" were measured
+// that way. A flag whose name carries a value has to honour it.
+var jitEnabled = envOn("GOANT_JIT")
+
+// envOn reads a boolean environment variable, treating the spellings of "no" as
+// no. Absent is off, and anything not recognised as off is on, so a typo turns a
+// diagnostic on rather than silently off.
+func envOn(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "", "0", "false", "no", "off":
+		return false
+	}
+	return true
+}
 
 // jitThreshold is how many entries a function needs before it is compiled.
 //
@@ -57,7 +75,7 @@ var jitStats struct {
 	genSlow  uint64
 }
 
-func init() { jitStats.enabled = os.Getenv("GOANT_JIT_STATS") != "" }
+func init() { jitStats.enabled = envOn("GOANT_JIT_STATS") }
 
 // JITStats reports frame entries served by compiled code, by compiled code that
 // declined its arguments, and by the interpreter for want of any compiled form.

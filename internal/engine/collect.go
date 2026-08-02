@@ -164,7 +164,7 @@ func (rt *Runtime) chargeBytes(n uint64) {
 	}
 }
 
-func osGetenvGCPoison() bool { return os.Getenv("GOANT_GC_POISON") != "" }
+func osGetenvGCPoison() bool { return envOn("GOANT_GC_POISON") }
 
 func init() {
 	if v := os.Getenv("GOANT_GC_FLOOR"); v != "" {
