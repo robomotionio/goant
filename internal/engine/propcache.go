@@ -144,6 +144,65 @@ func (ic *propIC) recordProto(o, holder *object, slot uint32) {
 	}
 }
 
+// icCachedRead answers a read from the site if it describes this receiver.
+//
+// Shared between the interpreter's GET_FIELD and the JIT's helper rather than
+// written twice. The helper reaches it because compiled code emits a probe that
+// serves less than this does — a receiver that is not a plain object, a slot the
+// overflow slice has not been grown to, a site emitted at a stack depth with no
+// registers to spare — and every one of those is a read the cache can still
+// answer without the full lookup.
+func (rt *Runtime) icCachedRead(ic *propIC, o *object) (Value, bool) {
+	if ic.n == 0 {
+		return mkundef(), false
+	}
+	if w := ic.lookup(o); w != nil {
+		return w.read(o), true
+	}
+	return mkundef(), false
+}
+
+// icCachedStore performs a store from the site if it describes this receiver,
+// reporting whether it did.
+//
+// The transition case — a store that creates the property — is the one that
+// matters and the one compiled code does not emit: EarleyBoyer makes 18.75
+// million property stores and the emitted probe served 0.8% of them, because
+// building an object is nothing but stores that create properties. Reaching this
+// from the helper turns those from a full OrdinarySet into a shape install and a
+// slot write.
+//
+// obj is the receiver as a Value and o the same object resolved; both are needed
+// because shared-state detection is keyed on the handle. That detection has to
+// happen here for the same reason it does in compiled code: a cached store skips
+// [[Set]], which is where a write to a builtin would otherwise be noticed.
+func (rt *Runtime) icCachedStore(ic *propIC, obj Value, o *object, val Value) bool {
+	if ic.n == 0 {
+		return false
+	}
+	w := ic.lookup(o)
+	if w == nil {
+		return false
+	}
+	// Extensibility is a property of the object rather than of its shape —
+	// preventExtensions leaves the shape alone — so it cannot be cached and is
+	// tested on every hit that would add a property.
+	if w.toShape != nil && !o.flags.extensible {
+		return false
+	}
+	rt.noteSharedMutation(obj)
+	if w.toShape != nil {
+		// The store creates the property: take the layout the site recorded,
+		// then write the new slot. The receiver may have become someone's
+		// prototype since this entry was filled, in which case adding to it
+		// retires the caches that walked through it.
+		o.shape = w.toShape
+		o.noteLayoutChange()
+	}
+	o.slotSet(w.slot, val)
+	return true
+}
+
 // icReceiver returns the object to consult for an inline-cached read, or nil if
 // this receiver can never use one.
 func (rt *Runtime) icReceiver(v Value) *object {

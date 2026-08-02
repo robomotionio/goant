@@ -1316,6 +1316,24 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 	switch ctx.Helper {
 	case jitHelperGetField:
 		recv := Value(ctx.Args[2])
+		// The cache first, for the same reason as the store: what compiled code
+		// emits is narrower than what the cache can answer. A receiver that is
+		// not a plain object, a slot past the end of the overflow slice, a site
+		// with no spare registers — all of them arrive here, and all of them are
+		// reads the cache can serve without a lookup.
+		if icx := uint32(ctx.Args[3] >> 32); icx != icNoSlot {
+			if ics := frameICs(fn); int(icx) < len(ics) {
+				if o := rt.icReceiver(recv); o != nil {
+					if v, ok := rt.icCachedRead(&ics[icx], o); ok {
+						if jitStats.enabled {
+							jitStats.icMiss++
+						}
+						ctx.Ret = uint64(v)
+						return nil
+					}
+				}
+			}
+		}
 		name := fn.constNames[uint32(ctx.Args[3])]
 		v, e := rt.getField(recv, name)
 		if e != nil {
@@ -1424,6 +1442,22 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 			return rt.typeError("JIT operand stack")
 		}
 		obj, val := Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1])
+		// The cache first, because the emitted probe serves strictly less than
+		// the cache does. It declines the store that *creates* a property, and
+		// that is what building an object is made of: EarleyBoyer makes 18.75
+		// million stores and the probe served 0.8% of them, so the rest arrived
+		// here and paid a full OrdinarySet for what the interpreter was doing
+		// with a shape install and a slot write.
+		if icx := uint32(ctx.Args[3] >> 32); icx != icNoSlot {
+			if ics := frameICs(fn); int(icx) < len(ics) {
+				if o := rt.icReceiver(obj); o != nil && rt.icCachedStore(&ics[icx], obj, o, val) {
+					if jitStats.enabled {
+						jitStats.putMiss++
+					}
+					return nil
+				}
+			}
+		}
 		name := fn.constNames[uint32(ctx.Args[3])]
 		// The shape before the store, which is what tells the fill below whether
 		// the store created the property. Read before, because after it is gone.

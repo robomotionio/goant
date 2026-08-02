@@ -1122,10 +1122,10 @@ restart:
 
 		case OpGetField:
 			obj := pop()
-			if icx := readU16(code, ip+5); icx != icNoSlot && ics[icx].n != 0 {
+			if icx := readU16(code, ip+5); icx != icNoSlot {
 				if o := rt.icReceiver(obj); o != nil {
-					if w := ics[icx].lookup(o); w != nil {
-						push(w.read(o))
+					if v, ok := rt.icCachedRead(&ics[icx], o); ok {
+						push(v)
 						ip += 7
 						break
 					}
@@ -1183,26 +1183,9 @@ restart:
 			var preShape *shape
 			if icx := readU16(code, ip+5); icx != icNoSlot {
 				if o := rt.icReceiver(obj); o != nil {
-					if ics[icx].n != 0 {
-						if w := ics[icx].lookup(o); w != nil &&
-							(w.toShape == nil || o.flags.extensible) {
-							// The cached store skips [[Set]] entirely, so shared-state
-							// detection has to happen here too or a warmed site would
-							// write through to a builtin unnoticed.
-							rt.noteSharedMutation(obj)
-							if w.toShape != nil {
-								// The store creates the property: take the layout
-								// the site recorded, then write the new slot.
-								o.shape = w.toShape
-								// The receiver may have become someone's prototype
-								// since this entry was filled, in which case adding
-								// to it retires the caches that walked through it.
-								o.noteLayoutChange()
-							}
-							o.slotSet(w.slot, val)
-							ip += 7
-							break
-						}
+					if rt.icCachedStore(&ics[icx], obj, o, val) {
+						ip += 7
+						break
 					}
 					preShape = o.shape
 				}
