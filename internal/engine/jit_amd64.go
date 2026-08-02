@@ -144,7 +144,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	// stack, which they model as empty. Named apart from "undecodable" because
 	// that is a bytecode the tier could not read, and this is a bytecode it read
 	// perfectly and cannot follow — a different piece of work.
-	demand, ok := jitNumberDemand(fn, blocks)
+	depths, ok := jitBlockDepths(fn, start, blocks)
+	if !ok {
+		return refuse(why, "stack-across-blocks")
+	}
+	demand, ok := jitNumberDemand(fn, blocks, depths)
 	if !ok {
 		return refuse(why, "stack-across-blocks")
 	}
@@ -157,7 +161,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			demand[i] = false
 		}
 	}
-	numeric, ok := jitNumericLocals(fn, blocks, demand)
+	numeric, ok := jitNumericLocals(fn, blocks, depths, demand)
 	if !ok {
 		return refuse(why, "stack-across-blocks")
 	}
@@ -202,12 +206,25 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			copy(cur, b.in)
 		}
 		if l, isTarget := labels[ip]; isTarget {
-			// Every branch target is reached with an empty operand stack in the
-			// code goant's compiler emits. Requiring it rather than tracking a
-			// per-block depth keeps the register assignment positional, and a
-			// function that violates it is refused rather than mis-compiled.
-			if sp != 0 {
+			// A branch target may be reached with operands still live — `a && b`
+			// jumps with one — and jitBlockDepths says how many, having required
+			// every predecessor to agree. The register assignment is positional,
+			// so operands that arrive at the same depth are already in the
+			// registers the code after the label expects and nothing has to move.
+			//
+			// This is also the check on that prediction: falling through with a
+			// depth the analysis did not predict refuses the function rather than
+			// emitting code that reads the wrong register.
+			want := depths[ip]
+			if !returned && sp != want {
 				return refuse(why, "stack-at-target")
+			}
+			sp = want
+			// Whatever those operands are, this block cannot know: they came from
+			// somewhere else. Not a Number is the only sound answer, and it is
+			// what both analyses seed as well.
+			for i := 0; i < sp; i++ {
+				kind[i] = false
 			}
 			a.Bind(l)
 			returned = false
@@ -408,7 +425,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			if fused {
 				sp -= 2
-				if sp != 0 {
+				if sp != depths[after] {
 					return refuse(why, "stack-at-target")
 				}
 				ip = after
@@ -588,7 +605,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			if fused {
 				sp -= 2
-				if sp != 0 {
+				if sp != depths[after] {
 					return refuse(why, "stack-at-target")
 				}
 				ip = after

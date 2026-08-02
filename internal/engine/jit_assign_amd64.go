@@ -207,7 +207,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 // for: `let t = o; t * 2` demands a Number of t, and therefore of o. The origin
 // of a stack slot is the local whose read produced it, or none for a computed
 // value, and a store propagates the destination's demand back to that origin.
-func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
+func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) ([]bool, bool) {
 	code := fn.code
 	demand := make([]bool, fn.maxLocals)
 
@@ -224,9 +224,14 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 			if !b.reachable {
 				continue
 			}
-			// Every block is entered with an empty operand stack, so the origins
-			// of one block's slots never reach another's.
-			var org []int
+			// A block may be entered with operands already live — `a && b` jumps
+			// with one — and their origins are not knowable from here, so they
+			// are seeded as having none. Conservative in the right direction: an
+			// origin nobody claims demands nothing of any local.
+			org := make([]int, depths[b.start])
+			for i := range org {
+				org[i] = noOrigin
+			}
 			push := func(o int) { org = append(org, o) }
 			pop := func() (int, bool) {
 				if len(org) == 0 {
@@ -373,6 +378,94 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 	return demand, true
 }
 
+// jitStackEffect reports how many operands the instruction at ip consumes and
+// produces.
+//
+// Only the opcodes this tier has a template for; anything else reports false and
+// the function is refused before this matters. The counts come from opTable,
+// which the compiler and the interpreter already agree on, plus the argument
+// count for the call forms — a call's operand is how many arguments follow the
+// callee, and opTable records only the callee and the receiver.
+func jitStackEffect(fn *svFunc, ip int) (pop, push int, ok bool) {
+	code := fn.code
+	op := Opcode(code[ip])
+	if !jitHasTemplate(op) {
+		return 0, 0, false
+	}
+	info := opTable[op]
+	pop, push = int(info.NPop), int(info.NPush)
+	switch op {
+	case OpCall, OpCallMethod:
+		pop += int(readU16(code, ip+1))
+	}
+	return pop, push, true
+}
+
+// jitBlockDepths reports the operand-stack depth each block is entered with.
+//
+// Every branch target used to have to be reached with an empty stack, which is
+// most of what goant's compiler emits and not all of it: `a && b`, `a || b` and
+// `a ? b : c` all jump with a value live. That rule refused 313,372 frame
+// entries across eleven Crypto functions and 1.08M in a single Richards one, all
+// of them fully unblocking — the largest item left on the list once the property
+// accesses were in.
+//
+// The register assignment is positional, so a target reached at the same depth
+// from every predecessor needs no fixing up at all: the operands are already in
+// the registers the code after the label expects. What this computes is exactly
+// that agreement, and reports false when the predecessors disagree.
+//
+// It is a prediction of what the emitter will do rather than a description of
+// it, and the emitter checks it: at every label the depth it actually has must
+// equal the one predicted here, or the function is refused. So a wrong
+// prediction costs a refusal and can never cost a miscompilation.
+func jitBlockDepths(fn *svFunc, start int, blocks map[int]*jitBlock) (map[int]int, bool) {
+	depth := map[int]int{start: 0}
+	// Reverse post-order is not needed: the graph is small and this iterates to
+	// a fixpoint, refusing the moment two predecessors disagree.
+	for changed := true; changed; {
+		changed = false
+		for ip, b := range blocks {
+			if !b.reachable {
+				continue
+			}
+			d, seen := depth[ip]
+			if !seen {
+				continue
+			}
+			for at := b.start; at < b.end; {
+				pop, push, ok := jitStackEffect(fn, at)
+				if !ok {
+					return nil, false
+				}
+				if d -= pop; d < 0 {
+					return nil, false
+				}
+				d += push
+				at += int(opTable[Opcode(fn.code[at])].Size)
+			}
+			for _, s := range b.succ {
+				if was, ok := depth[s]; ok {
+					if was != d {
+						return nil, false // predecessors disagree
+					}
+					continue
+				}
+				depth[s] = d
+				changed = true
+			}
+		}
+	}
+	for ip, b := range blocks {
+		if b.reachable {
+			if _, ok := depth[ip]; !ok {
+				return nil, false
+			}
+		}
+	}
+	return depth, true
+}
+
 // jitUnprovenLocals reports which locals the emitter will read without being
 // able to prove they were written first.
 //
@@ -434,7 +527,7 @@ func jitUnprovenLocals(fn *svFunc, blocks map[int]*jitBlock) []bool {
 // so anything unexpected refuses the function rather than guessing — and since
 // the emitter refuses the same opcodes, they cannot drift apart on a function
 // either of them accepts.
-func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bool, bool) {
+func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, demand []bool) ([]bool, bool) {
 	code := fn.code
 	numeric := make([]bool, fn.maxLocals)
 	for i := range numeric {
@@ -461,9 +554,11 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bo
 			if !b.reachable {
 				continue
 			}
-			// Every block is entered with an empty operand stack — the emitter
-			// requires it — so each can be walked on its own.
-			var kinds []bool
+			// Operands already live at the block's entry are seeded non-numeric,
+			// which is what the emitter does with them too: a slot arriving from
+			// another block has no kind this walk can know, and calling it a
+			// Number is the one answer that would be unsound.
+			kinds := make([]bool, depths[b.start])
 			push := func(k bool) { kinds = append(kinds, k) }
 			pop := func() (bool, bool) {
 				if len(kinds) == 0 {

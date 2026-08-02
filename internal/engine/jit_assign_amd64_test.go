@@ -232,11 +232,15 @@ func TestJITDeadZoneLocalIsNotNumeric(t *testing.T) {
 	if !any {
 		t.Fatal("no local was found unproven; this function no longer exercises the analysis")
 	}
-	demand, ok := jitNumberDemand(fn, blocks)
+	depths, ok := jitBlockDepths(fn, fn.startIP, blocks)
+	if !ok {
+		t.Fatal("depth analysis failed")
+	}
+	demand, ok := jitNumberDemand(fn, blocks, depths)
 	if !ok {
 		t.Fatal("demand analysis failed")
 	}
-	numeric, ok := jitNumericLocals(fn, blocks, demand)
+	numeric, ok := jitNumericLocals(fn, blocks, depths, demand)
 	if !ok {
 		t.Fatal("numeric analysis failed")
 	}
@@ -318,5 +322,76 @@ func TestJITCompilesAnUpvalueRead(t *testing.T) {
 	}
 	if o.clPtr.fn.jit.code == nil {
 		t.Error("a function whose only unusual opcode is GET_UPVAL was not compiled")
+	}
+}
+
+// TestJITOperandsLiveAcrossABranchAreNoLongerTheBlocker records where the rule
+// that used to refuse them has got to.
+//
+// A branch target had to be reached with an empty operand stack, which is most
+// of what goant's compiler emits and not all of it: `a && b`, `a || b` and
+// `a ? b : c` all jump with a value live. That rule refused 313,372 frame
+// entries across eleven Crypto functions and 1.08M in a single Richards one, and
+// jitBlockDepths replaces it — a target reached at the same depth from every
+// predecessor needs nothing moved, because the register assignment is
+// positional.
+//
+// These shapes are still refused, and the reason they are refused is now the
+// *other* thing they need: branching on a bare value rather than on a comparison
+// this tier fused. That is a truthiness template, and it is a separate piece of
+// work. The test pins which of the two is in the way so the next change can tell
+// whether it moved.
+func TestJITOperandsLiveAcrossABranchAreNoLongerTheBlocker(t *testing.T) {
+	for _, src := range []string{
+		"function f(a,b){ return a && b; }",
+		"function f(a,b){ return a || b; }",
+		"function f(a,b){ return a ? b : a; }",
+		"function f(a,b){ return (a && b) + 1; }",
+	} {
+		_, fn := jitFnRT(t, src)
+		var why string
+		if c := jitCompile(fn, &why); c != nil {
+			c.free()
+			continue // compiled outright, which is better still
+		}
+		if why == "stack-across-blocks" || why == "stack-at-target" {
+			t.Errorf("%q is still refused for the operand stack (%s)", src, why)
+		}
+	}
+}
+
+// TestJITBranchWithOperandsLiveAgreesWithTheInterpreter is the same shapes run
+// rather than compiled. An operand carried across a label lives in a register
+// the code on the other side has to agree about, and disagreeing produces a
+// wrong value rather than a crash.
+func TestJITBranchWithOperandsLiveAgreesWithTheInterpreter(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"and-or-ternary", `
+			function f(a, b) { return (a && b) + (a || b) + (a ? b : a); }
+			var s = 0;
+			for (var k = 0; k < 200; k++) s += f(k % 3, (k + 1) % 4);
+			s;`},
+		{"short-circuit-skips-a-call", `
+			var calls = 0;
+			function side() { calls++; return 1; }
+			function f(a) { return a && side(); }
+			var s = 0;
+			for (var k = 0; k < 200; k++) s += f(k % 2);
+			s * 1000 + calls;`},
+		{"nested-in-a-loop", `
+			function f(n) { var s = 0; for (var i = 0; i < n; i++) { s += (i && i % 3) || 1; } return s; }
+			var t = 0; for (var k = 0; k < 60; k++) t += f(k % 9); t;`},
+		{"a-ternary-of-fields", `
+			function f(o) { return (o.a ? o.b : o.c) + (o.a && o.b); }
+			var o = {a: 1, b: 2, c: 3}, s = 0;
+			for (var k = 0; k < 200; k++) s += f(o);
+			s;`},
+		{"an-object-carried-across", `
+			function f(o, p) { return (o || p).x; }
+			var s = 0;
+			for (var k = 0; k < 200; k++) s += f(k % 2 ? {x: 1} : null, {x: 10});
+			s;`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
 	}
 }
