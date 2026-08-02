@@ -476,30 +476,50 @@ opcodes against 135 — and not speed per opcode.
 
 ## Still to do
 
-In the order the table argues for:
+Rewritten 2 August after measuring, which changed the order and removed two
+items that turned out not to be worth anything.
 
-1. **The inline cache for property access, emitted as machine code.** The lookup
-   works and loses to the interpreter; this is what turns it into a gain. It
-   needs the object header, pool and cache-entry offsets exported as constants
-   from one source of truth, because a wrong offset here is memory corruption
-   rather than a wrong answer. No deoptimisation is required: an unknown-typed
-   result cannot reach an arithmetic instruction, because the compiler refuses
-   it — which is the one piece of luck in the whole design.
-2. **The remaining numeric operators** — `MOD`, the shifts and the bitwise
-   operations. Tempting because `SHR` is the second most common *first* refusal,
-   but the sole-blocker column is the one that matters and it puts them at two or
-   three functions each. They also need ToInt32 emitted inline, which is a
-   twenty-instruction sequence needing three scratch registers once the range
-   above 2**63 is handled correctly — so they are neither as cheap nor as
-   valuable as they first look.
-3. **Globals, upvalues, closures and calls.** Calls are also the 70 ns of frame
-   setup the phase 3 measurement could not touch.
-4. **Tiering** — counters, a compile threshold, and the lifecycle rules that keep
-   a code block alive exactly as long as something can enter it. At 4.3% this
-   would still change nothing measurable; it is worth building when the coverage
-   earns it.
-5. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
+**What the histogram says now.** Item 2 below used to argue that the numeric
+operators were not worth building. They were: `SHR` alone blocked 892 functions
+and the sole-blocker column was reading the marginal case, not the aggregate.
+They are all in, they cost one runtime call in a range real code never reaches,
+and arithmetic has disappeared from the refusal histogram completely. What is
+left is **88% memory access** — GET_GLOBAL 1761, GET_FIELD2 962, PUT_FIELD 870,
+SPECIAL_OBJ 832, GET_UPVAL 824, GET_ELEM 323, CLOSURE 277.
+
+**What the histogram does not say.** None of that moved Octane, which is
+unchanged to within 2% with the tier on and marginally worse — the counters cost
+a little and nothing hot ever compiles. Integer kernels went 1.6x to 5.6x in the
+same build. A tier is worth what its *hot* coverage is worth, and static
+coverage is a poor proxy for it: 6.0% of functions compile and 0.0% to 0.4% of
+frame entries land in them.
+
+1. **The inline cache for property access, emitted as machine code.** Everything
+   else on this list is smaller than it. It needs the object header, pool and
+   cache-entry offsets exported as constants from one source of truth, because a
+   wrong offset here is memory corruption rather than a wrong answer. No
+   deoptimisation is required: an unknown-typed result cannot reach an
+   arithmetic instruction, because the compiler refuses it — the one piece of
+   luck in the whole design. Delegating instead of emitting is already measured
+   as a 10% regression, so this is the difference between the tier being correct
+   and the tier being worth turning on.
+2. **Globals and upvalues**, which are the same problem with a simpler shape:
+   the binding is found once and the guard is a version check rather than a
+   prototype walk.
+3. **Calls, compiled to compiled.** Measured at 1.15 ns against 4.69 ns for the
+   detour through the runtime, so the convention has to be decided before the
+   first one is emitted. This is also the 70 ns of frame setup that phase 3
+   could not touch.
+4. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
    emitter is mechanical once the amd64 shape has stopped moving.
+
+Tiering has come off this list. Counters and a compile threshold are in, and so
+is the case a threshold cannot see: a function called once whose loop is hot
+never reaches a call count, and used to run to completion in the interpreter
+however long it took. Entering compiled code at a loop header costs nothing to
+support because a back edge already has an empty operand stack and every live
+value in the locals array — the same state the fuel exit resumes from. That case
+is 5.6x.
 
 Phase 1's type feedback is not on this list because this tier guards rather than
 speculates. It moves back up when there is a second tier to feed.
