@@ -69,6 +69,14 @@ const (
 	jitOffRTWatermark = unsafe.Offsetof(Runtime{}.invWatermark)
 	jitOffRTDirty     = unsafe.Offsetof(Runtime{}.invDirty)
 
+	// A fast array's element storage. arr is a Go slice, so its length is one
+	// word past its data pointer — the same written-down fact as the overflow
+	// slice's, and checked the same way. arrLen is the array's `length`, which is
+	// not the slice's: an array can have a length past what its storage holds.
+	jitOffObjArr    = unsafe.Offsetof(object{}.arr)
+	jitOffObjArrCap = jitOffObjArr + 8
+	jitOffObjArrLen = unsafe.Offsetof(object{}.arrLen)
+
 	// An upvalue: a pointer to wherever the captured binding lives, which is a
 	// frame's locals slot while the frame is open and the cell itself once it has
 	// been closed. Reading one is the same load either way.
@@ -130,6 +138,9 @@ func jitICPutHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.putHit)
 
 // jitICGlobalHitAddr is the same for a global read.
 func jitICGlobalHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.glbHit)) }
+
+// jitElemHitAddr is the same for an element read.
+func jitElemHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.elemHit)) }
 
 // jitGenericFastAddr is the address of the counter for generic operators whose
 // operands turned out to be Numbers after all.

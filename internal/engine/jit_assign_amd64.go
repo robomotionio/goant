@@ -310,6 +310,16 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 						return nil, false
 					}
 					push(noOrigin)
+				case OpGetElem:
+					// Nor is the index: the template guards it rather than
+					// requiring the prologue to have checked it.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(noOrigin)
 				case OpPutField:
 					// Neither the receiver nor the value is demanded, for the
 					// same reason, and the store leaves nothing behind — an
@@ -566,6 +576,16 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bo
 					push(false)
 				case OpGetGlobal, OpGetUpval:
 					// A global or a captured binding holds anything at all.
+					push(false)
+				case OpGetElem:
+					// Array and index in, an element out, which is not a Number
+					// as far as this tier can tell.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
 					push(false)
 				case OpGetField2:
 					// obj -> obj val: the receiver stays as it was, and a field

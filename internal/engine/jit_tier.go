@@ -71,6 +71,8 @@ var jitStats struct {
 	putMiss  uint64
 	glbHit   uint64
 	glbMiss  uint64
+	elemHit  uint64
+	elemMiss uint64
 	genFast  uint64
 	genSlow  uint64
 }
@@ -95,6 +97,10 @@ func JITStoreStats() (hit, miss uint64) { return jitStats.putHit, jitStats.putMi
 // JITGlobalStats is the same for a global read, which is the same cache over a
 // receiver compiled code fetches rather than one it was handed.
 func JITGlobalStats() (hit, miss uint64) { return jitStats.glbHit, jitStats.glbMiss }
+
+// JITElementStats is the same for `a[i]`, which has no cache site and a guard
+// chain of its own.
+func JITElementStats() (hit, miss uint64) { return jitStats.elemHit, jitStats.elemMiss }
 
 // JITOperatorStats reports operators compiled without a known operand type, by
 // whether the guard let them take the machine instruction or sent them to the

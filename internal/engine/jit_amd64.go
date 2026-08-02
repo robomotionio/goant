@@ -732,6 +732,29 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp -= argc
 			ip += 3
 
+		case OpGetElem:
+			// `a[i]`, with no cache site: an array's elements are a slice of
+			// their own, so what is emitted is a guard chain rather than a probe.
+			// See jit_getelem_amd64.go.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			recv, key := jitStackRegs[sp-2], jitStackRegs[sp-1]
+			slow := a.NewLabel()
+			done := a.NewLabel()
+			if sp+jitICElemSpareRegs <= len(jitStackRegs) {
+				jitEmitGetElem(a, recv, key, jitStackRegs[sp], jitStackRegs[sp+1], slow, done)
+			}
+			a.Bind(slow)
+			if !jitCallHelper(a, sp, jitHelperGetElem, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(recv, jitasm.RegCtx, jitmem.CtxOffRet)
+			a.Bind(done)
+			kind[sp-2] = false
+			sp--
+			ip++
+
 		case OpGetUpval:
 			// A closed-over variable: the closure's upvalue array, the upvalue,
 			// the location it points at, and the value there. Four dependent
@@ -1018,7 +1041,7 @@ func jitHasTemplate(op Opcode) bool {
 		OpNeg, OpInc, OpDec, OpNot,
 		OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
 		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpGetField2, OpPutField,
-		OpGetGlobal, OpGetUpval, OpCall, OpCallMethod,
+		OpGetGlobal, OpGetUpval, OpGetElem, OpCall, OpCallMethod,
 		OpReturn, OpReturnUndef, OpThis:
 		return true
 	}
@@ -1177,6 +1200,7 @@ const (
 	jitHelperDeadZone   = 8
 	jitHelperCall       = 9
 	jitHelperCallMethod = 10
+	jitHelperGetElem    = 11
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1433,6 +1457,22 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		v, e := rt.callValue(callee, thisArg, args)
 		if e != nil {
 			return e
+		}
+		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperGetElem:
+		// The interpreter's GET_ELEM. Its operands are the top two of the spill
+		// area, like every other multi-operand helper here.
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		v, e := rt.getElement(Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1]))
+		if e != nil {
+			return e
+		}
+		if jitStats.enabled {
+			jitStats.elemMiss++
 		}
 		ctx.Ret = uint64(v)
 		return nil
