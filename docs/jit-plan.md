@@ -773,61 +773,66 @@ by definite assignment at all.
 
 ## What the tier is worth on Octane: nothing yet
 
-`GOANT_JIT_STATS=1` counts frame entries by where they ran. Static coverage —
-6.6% of functions — turns out to be a poor guide to anything. Scores are
-higher-is-better; the tier is on for the second column, and the two arms are
-interleaved per benchmark so drift cannot favour either.
+`GOANT_JIT_STATS=1` counts frame entries by where they ran. Scores are
+higher-is-better; the two arms are interleaved per benchmark so drift cannot
+favour either. Two runs of each arm, alternating, on the benchmark VM, with
+everything in this document in:
 
-Two runs of each arm, alternating, on the benchmark VM:
-
-| | off | on | off | on |
+| | on | off | on | off |
 | --- | --- | --- | --- | --- |
-| Richards | 219 | 215 | 219 | 218 |
-| DeltaBlue | 250 | 249 | 249 | 250 |
-| Crypto | 251 | 251 | 252 | 251 |
-| RayTrace | 400 | 400 | 401 | 400 |
-| EarleyBoyer | 623 | 622 | 623 | 621 |
-| Splay | 2016 | 2010 | 2010 | 2007 |
-| NavierStokes | 456 | 456 | 455 | 455 |
-| RegExp | 147 | 147 | — | — |
+| Richards | 227 | 227 | 227 | 214 |
+| **DeltaBlue** | **263** | **263** | **263** | **263** |
+| Crypto | 252 | 253 | 253 | 252 |
+| RayTrace | 404 | 400 | 403 | 403 |
+| NavierStokes | 453 | 454 | 452 | 453 |
+| Splay | 1927 | 1907 | 2079 | 1933 |
+| RegExp | 147 | 147 | 147 | 147 |
+| EarleyBoyer | 511 | 512 | 511 | 511 |
 
-Unchanged. It used to be 1–2% *down* in every column; the frame-entry allocation
-and the one-way probe accounted for that, and with both fixed the tier now costs
-nothing and gains nothing. Richards is the only one that moves at all, by 1.6%.
+**DeltaBlue is the whole result.** 263 in all four columns — and 22.4% of its
+frame entries are executing as machine code. A quarter of the frames in that
+benchmark went from the interpreter to compiled code and the score did not move
+by one point in either direction.
+
+That is a much sharper statement than "the tier does not help yet", and it says
+something the coverage numbers cannot: **compiled code is running at almost
+exactly interpreter speed on the work DeltaBlue does.** Not slower, which the
+frame-entry allocation and the one-way probe used to make it. Not faster either.
+The property probe is about thirty instructions and the interpreter's path to the
+same answer is a Go call chain that costs about the same, so moving a frame
+between them buys nothing.
+
+Richards agrees at 5.0% of frame entries, RegExp is identical because none of it
+compiles, and the rest are within the drift below.
 
 **How much of a difference this table can see.** DeltaBlue's *interpreter* arm —
-the one nothing in this document touches — read 249–250 in one session and
-260–266 in the next on the same machine. That is 4–6% of run-to-run drift, so
-only the two arms of a single interleaved run are comparable to each other, and a
-1–2% difference between them is at the noise floor rather than above it. Every
-"unchanged" here means "not distinguishable from unchanged", and any claim
-smaller than about 5% needs more runs than these.
+the one nothing in this document touches — read 249–250 in one session, 260–266
+in the next and 263 in this one; EarleyBoyer's read 623 and then 511. That is 4%
+to 18% of run-to-run drift, so only the two arms of a single interleaved run are
+comparable to each other, and a 1–2% difference between them is at the noise
+floor rather than above it. Every "unchanged" here means "not distinguishable
+from unchanged". DeltaBlue's four identical columns are the exception and are
+worth the most, because they are four measurements of the same thing that agree.
 
-The residual cost is the tiering check rather than compiled code: every frame
-entry reads two fields of `fn.jit` and most of them are entries into a function
-that will never compile. EarleyBoyer makes 29.4 million of them. That is the
-price of having a tier at all, and it only turns into a gain when the tier
-covers something the program spends its time in.
+### What that changes about the plan
 
-The generic operators did change one thing the scores cannot show. Compiled code
-used to execute **zero** property reads across the whole suite, because the 6% of
-functions that compiled were numeric leaves that never touched a field. Now
-DeltaBlue executes 283,096 of them and EarleyBoyer 225,432. Against 8.4M and
-29.4M frame entries that is still a rounding error, which is why the scores do
-not move — but the cache is no longer sitting in code nothing runs.
+Coverage was the bottleneck and is no longer the only one. The list above still
+matters — `stack-across-blocks` is 1.6M frame entries in two DeltaBlue functions
+— but reaching 40% or 60% of frame entries by the same route would, on this
+evidence, produce the same 263.
 
-The hope was that the split would favour the tier — that a numeric compiler would
-miss many functions but catch the ones that run in loops. It is the other way
-round. The functions Octane spends its time in are the ones that allocate,
-dispatch over a class hierarchy, close over variables and call each other, which
-is precisely the set this tier refuses.
+What has to come down is the cost *per operation*, and the measurement for that
+already exists: a call between two compiled functions is **1.15 ns against 4.69
+ns** for the exit-and-re-enter detour, and 70 ns of interpreted frame setup
+disappears with it. Every compiled function today is an island — it is entered
+from the interpreter, and every call it makes goes back out. DeltaBlue's 22.4%
+is 1.55 million frames that each pay full entry and exit for work that is
+otherwise interpreter-speed.
 
-So there is no shortcut here and no 80/20. Reaching a score that competes with
-node on this suite needs calls, stores, closures, upvalues, globals, arrays and
-exceptions — most of the language, not a numeric core with a long tail. The
-measurement is worth having early: it is the difference between a plan and a
-hope, and it is what keeps a 15.6x microbenchmark from being mistaken for
-progress on the thing that was actually asked for.
+The hope early on was that a numeric compiler would miss many functions but catch
+the ones that run in loops. It was the other way round, and the fix for that —
+methods, stores, globals, fields past the fourth — is now in. The next thing is
+not another opcode. It is making a compiled function cheap to *call*.
 
 ## Can this reach ant's speed in Go?
 
@@ -874,24 +879,30 @@ static histogram is still worth reading — 521 of 6,976 functions compile, and
 refusals — but the entry-weighted table above is what decides what to build. It
 has disagreed with the corpus count every time they have been compared.
 
-1. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
+1. **Calls, compiled to compiled** — promoted to the top by DeltaBlue's four
+   identical columns. Measured at 1.15 ns against 4.69 ns for the detour through
+   the runtime, plus the 70 ns of interpreted frame setup that disappears with
+   it. Every compiled function today is an island: entered from the interpreter,
+   and every call it makes goes back out. This is also what makes `GET_FIELD2`,
+   `NEW` and `CLOSURE` worth anything, since all three are refused in functions
+   that call. The convention has to be decided before the first one is emitted.
+2. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
    the emitter's stack discipline model every block as starting empty, so a
-   block reached with an operand still live refuses the whole function. It is now
-   the largest item in both benchmarks — 1.08M entries in richards in *one*
-   function, 1.60M in deltablue in two — and the shape that produces it is
-   ordinary: `a && b`, `a || b` and `a ? b : c` all jump with a value on the
-   stack. The work is a per-block entry depth in place of the "must be zero"
-   rule, which the positional register assignment then follows for free provided
-   every predecessor agrees.
-2. **`non-numeric-operand`** (579k in richards, 4 functions) and **`GET_ELEM`**
+   block reached with an operand still live refuses the whole function. The
+   largest coverage item left — 1.08M entries in richards in *one* function,
+   1.60M in deltablue in two — and the shape that produces it is ordinary:
+   `a && b`, `a || b` and `a ? b : c` all jump with a value on the stack. The
+   work is a per-block entry depth in place of the "must be zero" rule, which the
+   positional register assignment then follows for free provided every
+   predecessor agrees.
+3. **`non-numeric-operand`** (579k in richards, 4 functions) and **`GET_ELEM`**
    (940k in deltablue, 2 functions).
-3. **Calls, compiled to compiled.** Measured at 1.15 ns against 4.69 ns for the
-   detour through the runtime, so the convention has to be decided before the
-   first one is emitted. This is also the 70 ns of frame setup that phase 3
-   could not touch — and it is what makes `GET_FIELD2`, `NEW` and `CLOSURE` worth
-   anything, since all three are refused in functions that call.
 4. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
    emitter is mechanical once the amd64 shape has stopped moving.
+
+Coverage led this list for three sessions and has been demoted on evidence:
+DeltaBlue reached 22.4% of frame entries in compiled code and scored 263 against
+the interpreter's 263. More of the same buys more of the same.
 
 `GET_FIELD2` has come *off* this list, having been item 2 on it. It is the
 second-largest blocker in the static corpus and worth exactly zero entries on its
