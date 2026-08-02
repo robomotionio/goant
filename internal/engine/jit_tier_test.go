@@ -1,3 +1,10 @@
+//go:build amd64
+
+// Every test here needs a backend: it asserts that something was compiled, or
+// measures what compiling it cost. Without the tag the package does not build
+// for arm64 at all, which `go build` does not notice because it does not type
+// check tests — `GOOS=darwin GOARCH=arm64 go vet ./internal/engine` does.
+
 package engine
 
 import "testing"
