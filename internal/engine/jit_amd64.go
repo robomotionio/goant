@@ -141,13 +141,19 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if !ok {
 		return refuse(why, "undecodable")
 	}
+	// The two analyses below walk the same stack discipline the emitter does,
+	// and the only way either fails once every opcode has a template is that the
+	// walk itself does not hold: a block reached with operands still on the
+	// stack, which they model as empty. Named apart from "undecodable" because
+	// that is a bytecode the tier could not read, and this is a bytecode it read
+	// perfectly and cannot follow — a different piece of work.
 	demand, ok := jitNumberDemand(fn, blocks)
 	if !ok {
-		return refuse(why, "undecodable")
+		return refuse(why, "stack-across-blocks")
 	}
 	numeric, ok := jitNumericLocals(fn, blocks, demand)
 	if !ok {
-		return refuse(why, "undecodable")
+		return refuse(why, "stack-across-blocks")
 	}
 	// The cache array has to exist before anything is emitted, because a
 	// compiled property read addresses its site by absolute address. It is
@@ -591,7 +597,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			done := a.NewLabel()
 			if icx != icNoSlot && icx < len(ics) && sp+jitICGetSpareRegs <= len(jitStackRegs) {
 				jitEmitICGet(a, recv, jitStackRegs[sp], jitStackRegs[sp+1],
-					jitICWayAddr(ics, icx), jitEpochAddr(), slow, done)
+					jitICWayAddr(ics, icx), jitEpochAddr(), jitICHitAddr(), slow, done)
 			}
 			a.Bind(slow)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+16, recv)
@@ -607,6 +613,46 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			// A field holds anything, so the result is not a Number as far as
 			// this tier knows. Arithmetic on it is refused rather than guarded.
 			kind[sp-1] = false
+			ip += 7
+
+		case OpGetGlobal:
+			// The same cache again, over a receiver compiled code fetches
+			// instead of one it was handed. A top-level function or constant is
+			// read this way in every loop that uses it, and the measurement in
+			// jitrefusal.go says this one opcode is the only thing standing
+			// between the tier and 41% of richards and 27% of deltablue.
+			//
+			// The lexical record — a Script-level let/const shadowing a global
+			// property — is not part of the object's shape, so it cannot be
+			// checked here. It does not have to be: registering one bumps the
+			// cache epoch, which is the guard already emitted.
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			idx := readU32(code, ip+1)
+			if int(idx) >= len(fn.constNames) || idx > 0x7FFFFFFF {
+				return refuse(why, "shape")
+			}
+			icx := int(readU16(code, ip+5))
+			dst := jitStackRegs[sp]
+			slow := a.NewLabel()
+			done := a.NewLabel()
+			if icx != icNoSlot && icx < len(ics) && sp+jitICGlobalSpareRegs <= len(jitStackRegs) {
+				a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffHost)
+				a.MovRegMem(dst, jitRegScratch, int32(jitOffRTGlobal))
+				jitEmitICGet(a, dst, jitStackRegs[sp+1], jitStackRegs[sp+2],
+					jitICWayAddr(ics, icx), jitEpochAddr(), jitICGlobalHitAddr(), slow, done)
+			}
+			a.Bind(slow)
+			a.MovRegImm64(jitRegScratch, uint64(idx)|uint64(uint32(icx))<<32)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperGetGlobal, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
+			a.Bind(done)
+			kind[sp] = false
+			sp++
 			ip += 7
 
 		case OpPutField:
@@ -803,7 +849,7 @@ func jitHasTemplate(op Opcode) bool {
 		OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr, OpBnot,
 		OpNeg, OpInc, OpDec, OpNot,
 		OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
-		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpPutField,
+		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpPutField, OpGetGlobal,
 		OpReturn, OpReturnUndef, OpThis:
 		return true
 	}
@@ -958,7 +1004,13 @@ const (
 	jitHelperRelational = 4
 	jitHelperEquals     = 5
 	jitHelperPutField   = 6
+	jitHelperGetGlobal  = 7
 )
+
+// jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
+// one for the value it produces, which starts out holding the global object,
+// and two for the probe.
+const jitICGlobalSpareRegs = 3
 
 // jitCallHelper emits a call out to the runtime.
 //
@@ -1132,6 +1184,40 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		}
 		if jitStats.enabled {
 			jitStats.icMiss++
+		}
+		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperGetGlobal:
+		// The interpreter's GET_GLOBAL with its cache fast path already tried
+		// and declined: the declarative record first, then HasProperty, then
+		// [[Get]]. The order is the specified one and not an optimisation — a
+		// Script-level let shadows a global property of the same name, and a
+		// bare undeclared name is a ReferenceError rather than undefined.
+		name := fn.constNames[uint32(ctx.Args[3])]
+		if b := rt.lookupGlobalLex(name); b != nil {
+			v, e := rt.globalLexRead(b, name)
+			if e != nil {
+				return e
+			}
+			ctx.Ret = uint64(v)
+			return nil
+		}
+		if !rt.hasProp(rt.global, name) {
+			return rt.referenceError(name + " is not defined")
+		}
+		// Through [[Get]] rather than the slot, because a global bound as an
+		// accessor has to run its getter.
+		v, e := rt.getField(rt.global, name)
+		if e != nil {
+			return e
+		}
+		if icx := uint32(ctx.Args[3] >> 32); icx != icNoSlot {
+			if ics := frameICs(fn); int(icx) < len(ics) && !ics[icx].dead() {
+				rt.icFillGet(&ics[icx], rt.objPtr(rt.global), name)
+			}
+		}
+		if jitStats.enabled {
+			jitStats.glbMiss++
 		}
 		ctx.Ret = uint64(v)
 		return nil

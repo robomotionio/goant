@@ -51,6 +51,8 @@ var jitStats struct {
 	icMiss   uint64
 	putHit   uint64
 	putMiss  uint64
+	glbHit   uint64
+	glbMiss  uint64
 	genFast  uint64
 	genSlow  uint64
 }
@@ -71,6 +73,10 @@ func JITPropertyStats() (hit, miss uint64) { return jitStats.icHit, jitStats.icM
 // because the two probes decline for different reasons and a combined figure
 // would hide whichever of them is doing worse.
 func JITStoreStats() (hit, miss uint64) { return jitStats.putHit, jitStats.putMiss }
+
+// JITGlobalStats is the same for a global read, which is the same cache over a
+// receiver compiled code fetches rather than one it was handed.
+func JITGlobalStats() (hit, miss uint64) { return jitStats.glbHit, jitStats.glbMiss }
 
 // JITOperatorStats reports operators compiled without a known operand type, by
 // whether the guard let them take the machine instruction or sent them to the

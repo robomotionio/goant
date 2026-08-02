@@ -21,10 +21,9 @@ import (
 // the hit has to be emitted, and what the runtime keeps is the miss.
 //
 // What is emitted is exactly icWay.hit restricted to the case it can serve, and
-// no more: an own slot, in the object rather than its overflow, holding
-// something other than an unparsed JSON span. Every other shape the cache can
-// describe — an inherited method, a store transition, a slot past the inline
-// limit — falls to the runtime, which handles it as it always did.
+// no more: an own slot holding something other than an unparsed JSON span.
+// Every other shape the cache can describe — an inherited method, a store
+// transition — falls to the runtime, which handles it as it always did.
 //
 // It scans every way, because probing only the first one was measured at a 1.0%
 // hit rate on a loop the interpreter caches perfectly. Ways fill in order, so
@@ -51,7 +50,10 @@ const jitICGetSpareRegs = 2
 //
 // wayBase is the address of the site's first cache way and epoch the address of
 // the generation counter, both constants — see jitICWayAddr and jitEpochAddr.
-func jitEmitICGet(a *jitasm.Asm, recv, obj, way jitasm.Reg, wayBase, epoch uintptr, slow, done *jitasm.Label) {
+// hits is the counter to increment when the probe serves the read, which is a
+// different counter for a field and for a global: the two decline for different
+// reasons and one figure would hide whichever is doing worse.
+func jitEmitICGet(a *jitasm.Asm, recv, obj, way jitasm.Reg, wayBase, epoch, hits uintptr, slow, done *jitasm.Label) {
 	scratch := jitRegScratch
 
 	// A plain object. Restricting to one tag rather than testing the whole
@@ -111,31 +113,21 @@ func jitEmitICGet(a *jitasm.Asm, recv, obj, way jitasm.Reg, wayBase, epoch uintp
 	a.OrRegMem(scratch, obj, int32(jitOffObjProxy))
 	a.Jcc(jitasm.CondNE, slow)
 
-	// The slot is in the object rather than its overflow slice. Both bounds are
-	// needed and neither implies the other: the inline area is a fixed size, and
-	// a shape may declare a smaller limit than that. Together they are the
-	// clamped limit slotGet computes, and they also reject the sentinel a site
-	// records for a shape it has decided it cannot cache — it is the largest
-	// uint32, so it fails the first compare.
+	// Where the slot lives, in the object or in its overflow slice.
 	a.Mov32RegMem(way, way, int32(jitOffWaySlot))
-	a.CmpRegImm32(way, uint32(jitInobjSlots))
-	a.Jcc(jitasm.CondAE, slow)
-	a.MovRegMem(scratch, obj, int32(jitOffObjShape))
-	a.MovzxRegMem8(scratch, scratch, int32(jitOffShapeInobjLimit))
-	a.CmpRegReg(way, scratch)
-	a.Jcc(jitasm.CondAE, slow)
+	jitEmitSlotAddr(a, obj, way, slow)
 
 	// The value, unless it is a span of a JSON document that has not been parsed
 	// yet. slotGet carries that check for the same reason this does: the slot
 	// holds a sentinel until something reads it, and materialising one is the
 	// runtime's job.
-	a.MovRegMemIndex(way, obj, way, 8, int32(jitOffObjInobj))
+	a.MovRegMem(way, way, 0)
 	a.MovRegImm64(scratch, uint64(lazyBase))
 	a.CmpRegReg(way, scratch)
 	a.Jcc(jitasm.CondAE, slow)
 
 	if jitStats.enabled {
-		a.MovRegImm64(scratch, uint64(jitICHitAddr()))
+		a.MovRegImm64(scratch, uint64(hits))
 		a.AddMemImm32(scratch, 0, 1)
 	}
 	a.MovRegReg(recv, way)

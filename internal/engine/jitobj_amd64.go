@@ -68,3 +68,48 @@ func jitEmitResolve(a *jitasm.Asm, dst, src, pool jitasm.Reg) {
 	a.ImulRegImm32(dst, dst, uint32(jitSizeofPoolCell))
 	a.LeaRegMemIndex(dst, jitRegScratch, dst, 1, int32(jitOffCellElem))
 }
+
+// jitEmitSlotAddr replaces the shape slot number in slot with the address of
+// that slot's Value.
+//
+// An object keeps its first four properties in itself and the rest in a slice,
+// and until this existed the compiled probes served only the first four. That
+// is a narrower rule than it sounds: four is ANT_INOBJ_MAX_SLOTS, so a class
+// instance with five fields has a fifth property no compiled read could reach,
+// and the global object — which carries every builtin before a script's own
+// names — has none of them in the object at all. A global read that only served
+// inline slots was measured at a 0% hit rate, which is what sent this here
+// rather than leaving it as an optimisation.
+//
+// obj and slot must be distinct, and jitRegScratch is clobbered. Control reaches
+// slow when the slot is past what the object actually holds — which is where the
+// sentinel a site records for an uncacheable shape ends up, since it is the
+// largest uint32 and no overflow slice is that long.
+func jitEmitSlotAddr(a *jitasm.Asm, obj, slot jitasm.Reg, slow *jitasm.Label) {
+	scratch := jitRegScratch
+	overflow := a.NewLabel()
+	have := a.NewLabel()
+
+	// The shape's limit, which is what decides where a slot lives. It is a
+	// property of the shape rather than a constant: a shape may declare fewer
+	// inline slots than the object has room for.
+	a.MovRegMem(scratch, obj, int32(jitOffObjShape))
+	a.MovzxRegMem8(scratch, scratch, int32(jitOffShapeInobjLimit))
+	a.CmpRegReg(slot, scratch)
+	a.Jcc(jitasm.CondAE, overflow)
+
+	a.LeaRegMemIndex(slot, obj, slot, 8, int32(jitOffObjInobj))
+	a.Jmp(have)
+
+	a.Bind(overflow)
+	// The index within the slice, bounds-checked against its length rather than
+	// its capacity. A slot the shape declares can still be past the end of the
+	// slice — slotSet grows it on demand — and growing one is the runtime's job.
+	a.SubRegReg(slot, scratch)
+	a.CmpRegMem(slot, obj, int32(jitOffObjOverflowLen))
+	a.Jcc(jitasm.CondAE, slow)
+	a.MovRegMem(scratch, obj, int32(jitOffObjOverflow))
+	a.LeaRegMemIndex(slot, scratch, slot, 8, 0)
+
+	a.Bind(have)
+}

@@ -49,6 +49,13 @@ const (
 	jitOffObjInobj = unsafe.Offsetof(object{}.inobj)
 	jitOffObjProxy = unsafe.Offsetof(object{}.proxy)
 
+	// The slice holding the properties that did not fit in the object. Go lays a
+	// slice header out as {data, len, cap}, so the length is one word in — the
+	// one fact here that Offsetof cannot state and TestJITReadsAnOverflowSlot
+	// therefore checks by reading a real object both ways.
+	jitOffObjOverflow    = unsafe.Offsetof(object{}.overflow)
+	jitOffObjOverflowLen = jitOffObjOverflow + 8
+
 	// A shape's inobj limit, which decides whether a slot is in the object or
 	// in its overflow slice.
 	jitOffShapeInobjLimit = unsafe.Offsetof(shape{}.inobjLimit)
@@ -61,6 +68,11 @@ const (
 	// it is a byte store rather than the word store everything else here uses.
 	jitOffRTWatermark = unsafe.Offsetof(Runtime{}.invWatermark)
 	jitOffRTDirty     = unsafe.Offsetof(Runtime{}.invDirty)
+
+	// The global object, which a compiled global read starts from. Loaded every
+	// time rather than baked in: BeginInvocation swaps a fresh one in and End
+	// puts the old one back, so a compiled site outlives several of them.
+	jitOffRTGlobal = unsafe.Offsetof(Runtime{}.global)
 
 	// One cache site, and one way within it.
 	jitSizeofICWay  = unsafe.Sizeof(icWay{})
@@ -76,8 +88,10 @@ const (
 	jitOffWayProtoVal = unsafe.Offsetof(icWay{}.protoVal)
 )
 
-// jitInobjSlots is how many properties live in the object itself, which is the
-// only case a compiled read serves without a second indirection.
+// jitInobjSlots is how many properties live in the object itself. Everything
+// past it is one more indirection, which jitEmitSlotAddr emits; the number is
+// kept here because the tests that build receivers on both sides of the
+// boundary need to know where it is.
 const jitInobjSlots = inobjMaxSlots
 
 // jitObjectPoolAddr is the address of the object pool's slice header.
@@ -108,6 +122,9 @@ func jitICHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.icHit)) }
 
 // jitICPutHitAddr is the same for the store probe.
 func jitICPutHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.putHit)) }
+
+// jitICGlobalHitAddr is the same for a global read.
+func jitICGlobalHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.glbHit)) }
 
 // jitGenericFastAddr is the address of the counter for generic operators whose
 // operands turned out to be Numbers after all.

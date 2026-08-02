@@ -88,16 +88,11 @@ func jitEmitICPut(a *jitasm.Asm, recv, val, obj, way jitasm.Reg, wayBase, epoch 
 	a.OrRegMem(scratch, obj, int32(jitOffObjProxy))
 	a.Jcc(jitasm.CondNE, slow)
 
-	// The slot is in the object rather than its overflow slice, and is a real
-	// slot rather than the sentinel a site records for a shape it has decided it
-	// cannot cache.
+	// Where the slot lives, which also rejects the sentinel a site records for a
+	// shape it has decided it cannot cache, and a slot the shape declares that
+	// the overflow slice has not been grown to yet.
 	a.Mov32RegMem(way, way, int32(jitOffWaySlot))
-	a.CmpRegImm32(way, uint32(jitInobjSlots))
-	a.Jcc(jitasm.CondAE, slow)
-	a.MovRegMem(scratch, obj, int32(jitOffObjShape))
-	a.MovzxRegMem8(scratch, scratch, int32(jitOffShapeInobjLimit))
-	a.CmpRegReg(way, scratch)
-	a.Jcc(jitasm.CondAE, slow)
+	jitEmitSlotAddr(a, obj, way, slow)
 
 	// The store. No Go write barrier is needed and none is emitted: a Value is a
 	// NaN-boxed integer over non-moving pools, so as far as Go's collector is
@@ -109,7 +104,7 @@ func jitEmitICPut(a *jitasm.Asm, recv, val, obj, way jitasm.Reg, wayBase, epoch 
 	// a read has to materialise — but a store overwrites it, and the value it
 	// would have produced is exactly what is being thrown away. slotSet ignores
 	// it for the same reason.
-	a.MovMemIndexReg(obj, way, 8, int32(jitOffObjInobj), val)
+	a.MovMemReg(way, 0, val)
 
 	// obj and way are dead from here, which is what the dirty check borrows.
 	jitEmitNoteSharedMutation(a, recv, obj, way)

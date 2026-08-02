@@ -332,6 +332,51 @@ func TestJITStoreProbeActuallyRuns(t *testing.T) {
 	}
 }
 
+// TestJITStoresToAnOverflowSlot is the store's half of TestJITReadsAnOverflowSlot:
+// the same slice-header offset, and the same four-property ceiling if it is
+// wrong. It checks every other property as well, because a store that computes
+// the wrong address does not fail — it overwrites a neighbour.
+func TestJITStoresToAnOverflowSlot(t *testing.T) {
+	was := jitStats.enabled
+	jitStats.enabled = true
+	t.Cleanup(func() { jitStats.enabled = was })
+
+	names := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+	if len(names) <= jitInobjSlots {
+		t.Fatal("this receiver no longer has any properties past the inline area")
+	}
+	for i, field := range names {
+		t.Run(field, func(t *testing.T) {
+			rt, fn, c, _ := jitStore(t, field)
+			o := rt.newObject(rt.objectProto)
+			for j, n := range names {
+				rt.objPtr(o).defineOwn(n, tov(float64(j*10)), attrDefault)
+			}
+			hit0, miss0 := jitStats.putHit, jitStats.putMiss
+			const runs = 8
+			for k := 0; k < runs; k++ {
+				if e := jitPut(t, rt, fn, c, o, tov(float64(1000+k))); e != nil {
+					t.Fatalf("store %d threw", k)
+				}
+			}
+			hits, misses := jitStats.putHit-hit0, jitStats.putMiss-miss0
+			if misses != 1 || hits != runs-1 {
+				t.Errorf("slot %d: %d hits and %d misses over %d stores; the probe declined a slot it should serve",
+					i, hits, misses, runs)
+			}
+			for j, n := range names {
+				want := tov(float64(j * 10))
+				if j == i {
+					want = tov(float64(1000 + runs - 1))
+				}
+				if got, _ := rt.getField(o, n); got != want {
+					t.Errorf("after storing to %q, %q is %v (want %v)", field, n, got, want)
+				}
+			}
+		})
+	}
+}
+
 // TestJITStoreServesEveryShapeASiteHolds is the read probe's lesson applied
 // before it can be learned twice: a site holds up to eight shapes and the scan
 // has to consult all of them, because way 0 holds the first shape the site ever

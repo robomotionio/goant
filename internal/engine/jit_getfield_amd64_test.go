@@ -282,6 +282,50 @@ func TestJITPropertyProbeActuallyRuns(t *testing.T) {
 	}
 }
 
+// TestJITReadsAnOverflowSlot is the one layout fact jitlayout.go cannot derive.
+//
+// Everything else there comes from unsafe.Offsetof, which the compiler
+// recomputes when a struct moves. Where the length sits inside a Go slice header
+// does not: it is written down as "one word after the data pointer", and the way
+// to check a number that is written down is to read a real object through the
+// emitted code and through Go and require the same answer.
+//
+// It is also what stops the compiled read from silently serving four properties
+// and declining the rest, which is what it did until jitEmitSlotAddr existed —
+// four is ANT_INOBJ_MAX_SLOTS, so a fifth field was out of reach.
+func TestJITReadsAnOverflowSlot(t *testing.T) {
+	was := jitStats.enabled
+	jitStats.enabled = true
+	t.Cleanup(func() { jitStats.enabled = was })
+
+	names := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+	if len(names) <= jitInobjSlots {
+		t.Fatal("this receiver no longer has any properties past the inline area")
+	}
+	for i, field := range names {
+		t.Run(field, func(t *testing.T) {
+			rt, fn, c := jitField(t, field)
+			o := rt.newObject(rt.objectProto)
+			for j, n := range names {
+				rt.objPtr(o).defineOwn(n, tov(float64(j*10)), attrDefault)
+			}
+			hit0, miss0 := jitStats.icHit, jitStats.icMiss
+			const runs = 8
+			for k := 0; k < runs; k++ {
+				got, e := jitGet(t, rt, fn, c, o)
+				if e != nil || got != tov(float64(i*10)) {
+					t.Fatalf("read %d of slot %d returned %v", k, i, got)
+				}
+			}
+			hits, misses := jitStats.icHit-hit0, jitStats.icMiss-miss0
+			if misses != 1 || hits != runs-1 {
+				t.Errorf("slot %d: %d hits and %d misses over %d reads; the probe declined a slot it should serve",
+					i, hits, misses, runs)
+			}
+		})
+	}
+}
+
 // TestJITChecksOnlyTheParametersItComputesWith is the other half of letting an
 // object into compiled code.
 //

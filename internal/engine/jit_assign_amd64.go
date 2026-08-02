@@ -321,7 +321,8 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
-				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpThis:
+				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpThis,
+					OpGetGlobal:
 					push(noOrigin)
 				case OpPop, OpJmpFalse, OpJmpTrue, OpReturn:
 					if _, ok := pop(); !ok {
@@ -489,6 +490,9 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bo
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
+					push(false)
+				case OpGetGlobal:
+					// A global holds anything at all.
 					push(false)
 				case OpPutField:
 					// Receiver and value in, nothing out.
