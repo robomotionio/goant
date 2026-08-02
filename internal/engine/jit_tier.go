@@ -139,6 +139,7 @@ type jitAttempt struct {
 	why     uint32
 	sole    uint32
 	entries uint32
+	insns   uint64
 }
 
 // jitDeclineLimit is how many times a compiled function may turn its arguments

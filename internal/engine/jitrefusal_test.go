@@ -8,11 +8,15 @@ import (
 // TestJITRefusalWeightsChargeTheHotFunction is the diagnostic's own gate.
 //
 // The number it exists to produce is "how much of the running program would
-// this template reach", and the way to get that wrong is to charge a refusal to
-// the function that declared it rather than the one that ran. So this runs two
-// refused functions a hundredfold apart and requires the weights to say so —
-// which a per-function count would, and a per-reason count taken at compile time
-// would not.
+// this template reach", and there are two ways to get it wrong. Charging a
+// refusal to the function that declared it rather than the one that ran is the
+// first. Counting frame entries rather than work is the second, and it is the
+// one that took longest to see: DeltaBlue runs 72% of its frame entries as
+// machine code and that code is 11% of its CPU time, because a function called
+// once and looping for a second costs an entry count nothing.
+//
+// So this runs two refused functions a hundredfold apart and requires the
+// weights to say so.
 func TestJITRefusalWeightsChargeTheHotFunction(t *testing.T) {
 	savedJIT, savedStats, savedTable := jitEnabled, jitStats.enabled, jitRefusals
 	jitEnabled, jitStats.enabled = true, true
@@ -42,9 +46,9 @@ func TestJITRefusalWeightsChargeTheHotFunction(t *testing.T) {
 	for _, r := range w {
 		switch r.Reason {
 		case "op:TYPEOF":
-			warm = r.Entries
+			warm = r.Insns
 		case "op:INSTANCEOF":
-			chilly = r.Entries
+			chilly = r.Insns
 		}
 	}
 	if warm == 0 {
@@ -53,13 +57,13 @@ func TestJITRefusalWeightsChargeTheHotFunction(t *testing.T) {
 	// Not an equality: the loop bodies are functions too, the tier only starts
 	// counting once a function has been entered, and a refusal is recorded on
 	// the entry that attempts compilation rather than the first.
-	if warm < hot/2 {
-		t.Errorf("the hot function was charged %d entries out of %d calls", warm, hot)
+	if warm < hot {
+		t.Errorf("the hot function was charged %d instructions over %d calls", warm, hot)
 	}
 	if chilly >= warm {
 		t.Errorf("the cold function (%d entries) outweighed the hot one (%d)", chilly, warm)
 	}
-	if w[0].Entries < w[len(w)-1].Entries {
+	if w[0].Insns < w[len(w)-1].Insns {
 		t.Error("the weights are not ordered heaviest first")
 	}
 }

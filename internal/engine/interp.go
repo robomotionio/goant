@@ -408,6 +408,12 @@ restart:
 	ip = fn.startIP
 
 	for {
+		if jitStats.enabled {
+			// One bytecode instruction, charged to this function. See
+			// jitNoteInstruction: a frame entry is the wrong denominator for
+			// deciding what the tier is missing, and this is the right one.
+			jitNoteInstruction(fn)
+		}
 		op := Opcode(code[ip])
 		switch op {
 		case OpUndef:

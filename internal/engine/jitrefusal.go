@@ -95,16 +95,32 @@ func jitNoteEntry(fn *svFunc) {
 	}
 }
 
+// jitNoteInstruction charges one interpreted bytecode instruction to fn.
+//
+// Frame entries were the wrong denominator, and it took a profile of compiled
+// code to see it: DeltaBlue runs 72% of its frame *entries* as machine code and
+// that code is 11% of its CPU time, because the functions the tier still refuses
+// are the ones with the long bodies. A count of entries says a function that is
+// called once and runs for a second costs nothing.
+//
+// One branch and one increment on the interpreter's instruction dispatch, and
+// only when GOANT_JIT_STATS is set. It slows a diagnostic run and leaves the
+// proportions it is measuring intact, which is the whole job.
+func jitNoteInstruction(fn *svFunc) {
+	fn.jit.insns++
+}
+
 // JITRefusalWeight is one refusal reason and what it costs.
 //
-// Entries is how many interpreted frame entries hit this reason first. Unblocks
-// is how many of those would compile if this reason alone were dealt with, and
-// is the one to build from: a reason with a large Entries and a small Unblocks
-// is a queue, not a blocker.
+// Insns is the one to read: how many bytecode instructions the interpreter
+// executed inside functions refused for this reason. Entries counts frame
+// entries, which flatters a function called often over one that runs long, and
+// Unblocks is how much of Entries this reason alone would release.
 type JITRefusalWeight struct {
 	Reason   string
 	Entries  uint64
 	Unblocks uint64
+	Insns    uint64
 	Funcs    int
 }
 
@@ -124,6 +140,7 @@ func JITRefusalWeights() []JITRefusalWeight {
 	for _, fn := range jitRefusals.funcs {
 		r := at(fn.jit.why)
 		r.Entries += uint64(fn.jit.entries)
+		r.Insns += fn.jit.insns
 		r.Funcs++
 		if fn.jit.sole != 0 {
 			at(fn.jit.sole).Unblocks += uint64(fn.jit.entries)
@@ -134,11 +151,11 @@ func JITRefusalWeights() []JITRefusalWeight {
 		out = append(out, *r)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].Insns != out[j].Insns {
+			return out[i].Insns > out[j].Insns
+		}
 		if out[i].Unblocks != out[j].Unblocks {
 			return out[i].Unblocks > out[j].Unblocks
-		}
-		if out[i].Entries != out[j].Entries {
-			return out[i].Entries > out[j].Entries
 		}
 		return out[i].Reason < out[j].Reason
 	})
