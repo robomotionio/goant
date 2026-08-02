@@ -88,11 +88,25 @@ func (ic *propIC) way(o *object) *icWay {
 	}
 	ic.misses++
 	if ic.dead() {
-		ic.n = 0 // no live object matches an empty set of ways
+		ic.retire()
 		return nil
 	}
 	// Full and still useful: replace the oldest.
 	return &ic.ways[0]
+}
+
+// retire empties a site that has seen too many shapes to be worth caching.
+//
+// Setting n to zero is what stops lookup consulting it. Clearing the ways as
+// well is what lets a reader that does not carry n — compiled code, which has
+// four registers and no room for a bound — decide a way is empty by looking at
+// it. A retired way describes a shape that is still real, so consulting one
+// would not give a wrong answer; it would give an answer this site has decided
+// not to spend probe time on, and the two readers disagreeing about that is
+// worth more to avoid than the fills it costs.
+func (ic *propIC) retire() {
+	ic.ways = [icWays]icWay{}
+	ic.n = 0
 }
 
 // wayIndex is way() for an entry keyed on a shape the receiver no longer has —
@@ -109,7 +123,7 @@ func (ic *propIC) wayIndex(o *object, key *shape) int {
 	}
 	ic.misses++
 	if ic.dead() {
-		ic.n = 0
+		ic.retire()
 		return -1
 	}
 	return 0

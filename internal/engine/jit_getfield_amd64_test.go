@@ -423,3 +423,62 @@ func TestJITPropertyRefusesAPrivateName(t *testing.T) {
 		t.Fatal("did not find the method under test")
 	}
 }
+
+// TestJITPropertyServesEveryShapeASiteHolds is the test the probe needed and
+// did not have.
+//
+// The original probe checked one cache way, and every test for it used one
+// receiver — which is exactly the case where way 0 is the answer. On real code
+// it is not: ways fill in order, so way 0 holds the first shape a site ever
+// saw, and a hundred objects from one `{x, y}` literal occupy three shapes, one
+// and one and ninety-eight, because the transition memo produces a shape of its
+// own for each of the first two. Way 0 was therefore filled by the shape that
+// never comes back, and the measured hit rate was 1.0% against an interpreter
+// that hits every time.
+func TestJITPropertyServesEveryShapeASiteHolds(t *testing.T) {
+	was := jitStats.enabled
+	jitStats.enabled = true
+	t.Cleanup(func() { jitStats.enabled = was })
+
+	rt, fn, c := jitField(t, "x")
+
+	// Built the way bench/prop.js builds them, so the shape spread is the one
+	// real code produces rather than one arranged here.
+	pts, err := rt.RunString("pts.js", "var pts=[]; for (var i=0;i<100;i++) pts.push({x:i,y:i*2}); pts;")
+	if err != nil {
+		t.Fatalf("building the receivers: %v", err)
+	}
+	var objs []Value
+	shapes := map[*shape]int{}
+	for i := 0; i < 100; i++ {
+		o, e := rt.getField(pts, itoa(i))
+		if e != nil {
+			t.Fatalf("pts[%d]: threw", i)
+		}
+		objs = append(objs, o)
+		shapes[rt.objPtr(o).shape]++
+	}
+	if len(shapes) < 2 {
+		t.Skip("this corpus no longer produces more than one shape; the probe's multi-way scan is untested by it")
+	}
+	t.Logf("100 objects from one literal occupy %d shapes", len(shapes))
+
+	hit0, miss0 := jitStats.icHit, jitStats.icMiss
+	for k := 0; k < 50; k++ {
+		for i, o := range objs {
+			got, e := jitGet(t, rt, fn, c, o)
+			if e != nil {
+				t.Fatalf("pts[%d]: threw", i)
+			}
+			if got != tov(float64(i)) {
+				t.Fatalf("pts[%d].x: compiled code read %v", i, got)
+			}
+		}
+	}
+	hit, miss := jitStats.icHit-hit0, jitStats.icMiss-miss0
+	t.Logf("%d reads over %d receivers: %d hit, %d missed", hit+miss, len(objs), hit, miss)
+	if hit < (hit+miss)*9/10 {
+		t.Errorf("the probe served %d of %d reads; a site holding every shape these receivers have should serve nearly all of them",
+			hit, hit+miss)
+	}
+}

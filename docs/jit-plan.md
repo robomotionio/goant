@@ -555,7 +555,34 @@ by construction.
 
 That is the same mistake as the prologue guard, one level down: the probe was
 verified against a site with one receiver, and one receiver is the case where way
-0 is the answer. Probing more than one way is the fix and it is the next thing.
+0 is the answer.
+
+### Scanning the ways
+
+The probe now walks all eight. Three instructions per way that does not match,
+none at all for a site that matches at way 0, and no extra register: the object's
+shape sits in the scratch while the way pointer walks forward, and the tail
+re-reads what it needs. At most one way can hold a given shape — a fill reuses
+the way already holding it — so the first match is the only candidate.
+
+The one thing that had to change underneath it is that a site which gives up
+caching now clears its ways rather than only setting its count to zero. Compiled
+code has no register to spare for that count, so it decides a way is empty by
+looking at it, and the two readers have to mean the same thing by empty.
+
+| `dist` over 100 points, 2M calls | |
+| --- | --- |
+| interpreted | 1122–1149 ms |
+| compiled, one way | 1361 ms, **1.0%** of reads served |
+| compiled, eight ways | **1163 ms**, **100.0%** of reads served |
+| node | 8 ms |
+
+The 198 ms is exactly the four million helper round trips that are no longer
+made. What is left is a 2% loss against the interpreter on a benchmark whose
+caller is interpreted: 2M entries into compiled code, each of which allocates a
+160-byte ExecContext and pushes it on the collector's root stack, for a callee
+that does three arithmetic operations. That is the frame-entry cost, and it is
+the next thing.
 
 ## What the tier is worth on Octane: nothing yet
 
@@ -653,12 +680,12 @@ worth, and static coverage is a poor proxy for it: 6.6% of functions compile and
 a hit rate — the same cache that is 14.6x on one receiver serves 1.0% of the
 reads on a hundred.
 
-1. **Probe more than one way.** Compiled code checks way 0 and the interpreter
-   checks all of them, and way 0 is whichever shape the site saw first — which
-   for an object literal is the one the transition memo produced while it was
-   warming up and never produces again. Measured at a **1.0% hit rate** on
-   `dist`, against an interpreter that hits, and worth 200 ms of a 1361 ms run.
-   Nothing else on this list matters until a compiled read is actually served.
+1. **Frame entry allocates.** Every entry into compiled code builds an
+   ExecContext on the heap — 160 bytes and one allocation per call, measured —
+   and pushes it on the collector's root stack. `dist` pays that 2M times for a
+   callee that does three arithmetic operations, and comes out 2% behind the
+   interpreter with a cache that serves 100% of its reads. The root stack is
+   already LIFO, so it can be its own free list.
 2. **`PUT_FIELD`**, the store side of the same cache. `icFillPutTransition`
    already records the case that matters most — a store that *creates* the
    property, which is what initialising a fresh object is made of — and it was

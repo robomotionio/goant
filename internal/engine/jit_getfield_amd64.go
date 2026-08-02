@@ -21,12 +21,20 @@ import (
 // the hit has to be emitted, and what the runtime keeps is the miss.
 //
 // What is emitted is exactly icWay.hit restricted to the case it can serve, and
-// no more: one way, an own slot, in the object rather than its overflow, holding
+// no more: an own slot, in the object rather than its overflow, holding
 // something other than an unparsed JSON span. Every other shape the cache can
 // describe — an inherited method, a store transition, a slot past the inline
-// limit — falls to the runtime, which handles it as it always did. Widening the
-// probe to scan all eight ways is a later question, and one to answer with a
-// measurement rather than by reasoning about how many shapes a site sees.
+// limit — falls to the runtime, which handles it as it always did.
+//
+// It scans every way, because probing only the first one was measured at a 1.0%
+// hit rate on a loop the interpreter caches perfectly. Ways fill in order, so
+// way 0 holds the first shape a site ever saw — and a hundred objects from one
+// `{x, y}` literal occupy three shapes, 1 and 1 and 98, because the transition
+// memo produces a shape of its own for each of the first two and never again.
+// Way 0 was therefore filled by the object whose shape does not recur. Scanning
+// is what makes the compiled probe answer the question the interpreter answers
+// rather than a narrower one; the cost is three instructions per way that does
+// not match, and none at all for a site that matches at way 0.
 
 // jitICGetSpareRegs is how many operand-stack registers beyond the receiver's
 // the probe needs. A site emitted at a depth that cannot spare them keeps the
@@ -36,14 +44,14 @@ const jitICGetSpareRegs = 2
 // jitEmitICGet emits the probe.
 //
 // recv holds the receiver on entry, and the property's value on the fall-through
-// to done. obj and tmp are scratch, as is jitRegScratch; all three are clobbered
+// to done. obj and way are scratch, as is jitRegScratch; all three are clobbered
 // on both paths. Control reaches slow with recv still holding the receiver,
 // which is what the runtime path needs and the reason the loaded value is
 // checked before it is moved there.
 //
-// way is the address of the site's first cache way and epoch the address of the
-// generation counter, both constants — see jitICWayAddr and jitEpochAddr.
-func jitEmitICGet(a *jitasm.Asm, recv, obj, tmp jitasm.Reg, way, epoch uintptr, slow, done *jitasm.Label) {
+// wayBase is the address of the site's first cache way and epoch the address of
+// the generation counter, both constants — see jitICWayAddr and jitEpochAddr.
+func jitEmitICGet(a *jitasm.Asm, recv, obj, way jitasm.Reg, wayBase, epoch uintptr, slow, done *jitasm.Label) {
 	scratch := jitRegScratch
 
 	// A plain object. Restricting to one tag rather than testing the whole
@@ -58,16 +66,31 @@ func jitEmitICGet(a *jitasm.Asm, recv, obj, tmp jitasm.Reg, way, epoch uintptr, 
 
 	// The receiver as an object. The pool comes from the context because two
 	// Runtimes have two of them.
-	a.MovRegMem(tmp, jitasm.RegCtx, jitmem.CtxOffPool)
-	jitEmitResolve(a, obj, recv, tmp)
+	a.MovRegMem(way, jitasm.RegCtx, jitmem.CtxOffPool)
+	jitEmitResolve(a, obj, recv, way)
 
-	// The cached shape is still this object's. Shape identity is most of what
-	// makes a cache sound: it says the object has the same properties in the
-	// same slots as the one the entry was recorded from.
-	a.MovRegImm64(tmp, uint64(way))
+	// The way recording this object's shape, if the site has one. Shape identity
+	// is most of what makes a cache sound: it says the object has the same
+	// properties in the same slots as the one the entry was recorded from.
+	//
+	// At most one way can hold a given shape — a fill reuses the way already
+	// holding it — so the first match is the only candidate and there is nothing
+	// to keep scanning for. A way that was never filled holds a nil shape, which
+	// no live object's shape equals, and a way retired with its site holds a nil
+	// shape too because that is what killing a site now writes. So the ways with
+	// something in them are exactly the ways the interpreter would consult.
+	found := a.NewLabel()
+	a.MovRegImm64(way, uint64(wayBase))
 	a.MovRegMem(scratch, obj, int32(jitOffObjShape))
-	a.CmpRegMem(scratch, tmp, int32(jitOffWayShape))
-	a.Jcc(jitasm.CondNE, slow)
+	for i := 0; i < icWays; i++ {
+		if i > 0 {
+			a.AddRegImm32(way, uint32(jitSizeofICWay))
+		}
+		a.CmpRegMem(scratch, way, int32(jitOffWayShape))
+		a.Jcc(jitasm.CondE, found)
+	}
+	a.Jmp(slow)
+	a.Bind(found)
 
 	// The way has not been retired. Identity is not sufficient on its own: a
 	// shape that is not yet shared is mutated in place, so a delete can move
@@ -75,7 +98,7 @@ func jitEmitICGet(a *jitasm.Asm, recv, obj, tmp jitasm.Reg, way, epoch uintptr, 
 	// that can do that bumps this counter.
 	a.MovRegImm64(scratch, uint64(epoch))
 	a.Mov32RegMem(scratch, scratch, 0)
-	a.Cmp32RegMem(scratch, tmp, int32(jitOffWayEpoch))
+	a.Cmp32RegMem(scratch, way, int32(jitOffWayEpoch))
 	a.Jcc(jitasm.CondNE, slow)
 
 	// An own data slot, on a receiver whose [[Get]] is a slot read. Three
@@ -83,8 +106,8 @@ func jitEmitICGet(a *jitasm.Asm, recv, obj, tmp jitasm.Reg, way, epoch uintptr, 
 	// was found up the prototype chain and the chain would have to be guarded, a
 	// toShape means this is a store site's transition entry, and a proxy means
 	// the receiver's [[Get]] is a trap rather than a read.
-	a.MovRegMem(scratch, tmp, int32(jitOffWayHolder))
-	a.OrRegMem(scratch, tmp, int32(jitOffWayToShape))
+	a.MovRegMem(scratch, way, int32(jitOffWayHolder))
+	a.OrRegMem(scratch, way, int32(jitOffWayToShape))
 	a.OrRegMem(scratch, obj, int32(jitOffObjProxy))
 	a.Jcc(jitasm.CondNE, slow)
 
@@ -94,27 +117,27 @@ func jitEmitICGet(a *jitasm.Asm, recv, obj, tmp jitasm.Reg, way, epoch uintptr, 
 	// clamped limit slotGet computes, and they also reject the sentinel a site
 	// records for a shape it has decided it cannot cache — it is the largest
 	// uint32, so it fails the first compare.
-	a.Mov32RegMem(tmp, tmp, int32(jitOffWaySlot))
-	a.CmpRegImm32(tmp, uint32(jitInobjSlots))
+	a.Mov32RegMem(way, way, int32(jitOffWaySlot))
+	a.CmpRegImm32(way, uint32(jitInobjSlots))
 	a.Jcc(jitasm.CondAE, slow)
 	a.MovRegMem(scratch, obj, int32(jitOffObjShape))
 	a.MovzxRegMem8(scratch, scratch, int32(jitOffShapeInobjLimit))
-	a.CmpRegReg(tmp, scratch)
+	a.CmpRegReg(way, scratch)
 	a.Jcc(jitasm.CondAE, slow)
 
 	// The value, unless it is a span of a JSON document that has not been parsed
 	// yet. slotGet carries that check for the same reason this does: the slot
 	// holds a sentinel until something reads it, and materialising one is the
 	// runtime's job.
-	a.MovRegMemIndex(tmp, obj, tmp, 8, int32(jitOffObjInobj))
+	a.MovRegMemIndex(way, obj, way, 8, int32(jitOffObjInobj))
 	a.MovRegImm64(scratch, uint64(lazyBase))
-	a.CmpRegReg(tmp, scratch)
+	a.CmpRegReg(way, scratch)
 	a.Jcc(jitasm.CondAE, slow)
 
 	if jitStats.enabled {
 		a.MovRegImm64(scratch, uint64(jitICHitAddr()))
 		a.AddMemImm32(scratch, 0, 1)
 	}
-	a.MovRegReg(recv, tmp)
+	a.MovRegReg(recv, way)
 	a.Jmp(done)
 }
