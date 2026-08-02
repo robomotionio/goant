@@ -326,6 +326,119 @@ func TestJITReadsAnOverflowSlot(t *testing.T) {
 	}
 }
 
+// TestJITPropertyServesAnInheritedSlot is the case that made compiling a method
+// call a regression before it was handled.
+//
+// A class's methods live on its prototype, so `o.m` is an inherited read every
+// time. While the probe declined those, DeltaBlue's score fell 9% when method
+// calls started compiling — the compiled site paid a helper round trip for reads
+// the interpreter's cache was already serving.
+func TestJITPropertyServesAnInheritedSlot(t *testing.T) {
+	was := jitStats.enabled
+	jitStats.enabled = true
+	t.Cleanup(func() { jitStats.enabled = was })
+
+	rt, fn, c := jitField(t, "m")
+	recv, err := rt.RunString("proto.js", `
+		function P(v) { this.v = v; }
+		P.prototype.m = 42;
+		new P(1);`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	hit0, miss0 := jitStats.icHit, jitStats.icMiss
+	const runs = 32
+	for i := 0; i < runs; i++ {
+		got, e := jitGet(t, rt, fn, c, recv)
+		if e != nil || got != tov(42) {
+			t.Fatalf("run %d read %v", i, got)
+		}
+	}
+	hits, misses := jitStats.icHit-hit0, jitStats.icMiss-miss0
+	if misses != 1 || hits != runs-1 {
+		t.Errorf("%d hits and %d misses over %d inherited reads; the probe is still declining them",
+			hits, misses, runs)
+	}
+}
+
+// TestJITInheritedSlotWatchesThePrototype is the guard that comes with serving
+// one. What the cache holds is the conclusion of a prototype walk, so everything
+// that could change the answer has to stop it: a different chain under the same
+// shape, a value replaced on the holder, the holder losing the property, and the
+// receiver being re-pointed at something else.
+func TestJITInheritedSlotWatchesThePrototype(t *testing.T) {
+	rt, fn, c := jitField(t, "m")
+	setup, err := rt.RunString("chain.js", `
+		var protoA = { m: "A" };
+		var protoB = { m: "B" };
+		function make(p) { var o = Object.create(p); o.own = 1; return o; }
+		var a = make(protoA), b = make(protoB);
+		[a, b, protoA, protoB];`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	at := func(i int) Value {
+		v, e := rt.getField(setup, itoa(i))
+		if e != nil {
+			t.Fatalf("setup[%d]: threw", i)
+		}
+		return v
+	}
+	a, b, protoA := at(0), at(1), at(2)
+
+	read := func(recv Value, step string) string {
+		t.Helper()
+		var last string
+		for i := 0; i < 8; i++ {
+			got, e := jitGet(t, rt, fn, c, recv)
+			if e != nil {
+				t.Fatalf("%s: threw", step)
+			}
+			want, _ := rt.getField(recv, "m")
+			if uint64(got) != uint64(want) {
+				t.Fatalf("%s: compiled %#x, runtime %#x", step, uint64(got), uint64(want))
+			}
+			if got.Type() == TStr {
+				last = string(rt.strBytes(got))
+			} else {
+				last = "not-a-string"
+			}
+		}
+		return last
+	}
+
+	// Two receivers with the same shape and different prototypes, alternating, so
+	// a site that ignored the chain would answer one of them with the other's.
+	for i := 0; i < 8; i++ {
+		if s := read(a, "a"); s != "A" {
+			t.Fatalf("a.m read %q", s)
+		}
+		if s := read(b, "b"); s != "B" {
+			t.Fatalf("b.m read %q", s)
+		}
+	}
+
+	// The holder's value replaced: the cache holds the holder and reads the slot
+	// live, so this must be seen without any invalidation at all.
+	rt.setField(protoA, "m", rt.newString("A2"))
+	if s := read(a, "after the holder's value changed"); s != "A2" {
+		t.Errorf("a.m read %q after the prototype's value changed", s)
+	}
+
+	// The property removed from the holder, which changes what the walk finds.
+	rt.objPtr(protoA).deleteOwn("m")
+	read(a, "after the property left the prototype")
+
+	// The receiver re-pointed at the other prototype.
+	if _, err := rt.RunString("repoint.js", "Object.setPrototypeOf(a, protoB);"); err != nil {
+		t.Fatalf("setPrototypeOf: %v", err)
+	}
+	if s := read(a, "after the prototype was replaced"); s != "B" {
+		t.Errorf("a.m read %q after its prototype was replaced", s)
+	}
+}
+
 // TestJITChecksOnlyTheParametersItComputesWith is the other half of letting an
 // object into compiled code.
 //

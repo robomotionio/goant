@@ -622,7 +622,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			slow := a.NewLabel()
 			done := a.NewLabel()
 			if icx != icNoSlot && icx < len(ics) && sp+jitICGetSpareRegs <= len(jitStackRegs) {
-				jitEmitICGet(a, recv, jitStackRegs[sp], jitStackRegs[sp+1],
+				jitEmitICGet(a, recv, jitStackRegs[sp], jitStackRegs[sp+1], jitStackRegs[sp+2],
 					jitICWayAddr(ics, icx), jitEpochAddr(), jitICHitAddr(), slow, done)
 			}
 			a.Bind(slow)
@@ -670,7 +670,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			slow := a.NewLabel()
 			done := a.NewLabel()
 			if icx != icNoSlot && icx < len(ics) && sp+jitICGlobalSpareRegs <= len(jitStackRegs) {
-				jitEmitICGet(a, dst, jitStackRegs[sp+1], jitStackRegs[sp+2],
+				jitEmitICGet(a, dst, jitStackRegs[sp+1], jitStackRegs[sp+2], jitStackRegs[sp+3],
 					jitICWayAddr(ics, icx), jitEpochAddr(), jitICHitAddr(), slow, done)
 			}
 			a.Bind(slow)
@@ -771,7 +771,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if icx != icNoSlot && icx < len(ics) && sp+jitICGlobalSpareRegs <= len(jitStackRegs) {
 				a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffHost)
 				a.MovRegMem(dst, jitRegScratch, int32(jitOffRTGlobal))
-				jitEmitICGet(a, dst, jitStackRegs[sp+1], jitStackRegs[sp+2],
+				jitEmitICGet(a, dst, jitStackRegs[sp+1], jitStackRegs[sp+2], jitStackRegs[sp+3],
 					jitICWayAddr(ics, icx), jitEpochAddr(), jitICGlobalHitAddr(), slow, done)
 			}
 			a.Bind(slow)
@@ -1144,7 +1144,7 @@ const (
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
 // one for the value it produces, which starts out holding the global object,
 // and two for the probe.
-const jitICGlobalSpareRegs = 3
+const jitICGlobalSpareRegs = 4
 
 // jitCallHelper emits a call out to the runtime.
 //

@@ -38,13 +38,13 @@ import (
 // jitICGetSpareRegs is how many operand-stack registers beyond the receiver's
 // the probe needs. A site emitted at a depth that cannot spare them keeps the
 // runtime path, which costs nothing but the speed it would have gained.
-const jitICGetSpareRegs = 2
+const jitICGetSpareRegs = 3
 
 // jitEmitICGet emits the probe.
 //
 // recv holds the receiver on entry, and the property's value on the fall-through
-// to done. obj and way are scratch, as is jitRegScratch; all three are clobbered
-// on both paths. Control reaches slow with recv still holding the receiver,
+// to done. obj, way and hold are scratch, as is jitRegScratch; all four are
+// clobbered on both paths. Control reaches slow with recv still holding the receiver,
 // which is what the runtime path needs and the reason the loaded value is
 // checked before it is moved there.
 //
@@ -53,7 +53,7 @@ const jitICGetSpareRegs = 2
 // hits is the counter to increment when the probe serves the read, which is a
 // different counter for a field and for a global: the two decline for different
 // reasons and one figure would hide whichever is doing worse.
-func jitEmitICGet(a *jitasm.Asm, recv, obj, way jitasm.Reg, wayBase, epoch, hits uintptr, slow, done *jitasm.Label) {
+func jitEmitICGet(a *jitasm.Asm, recv, obj, way, hold jitasm.Reg, wayBase, epoch, hits uintptr, slow, done *jitasm.Label) {
 	scratch := jitRegScratch
 
 	// A plain object. Restricting to one tag rather than testing the whole
@@ -103,15 +103,38 @@ func jitEmitICGet(a *jitasm.Asm, recv, obj, way jitasm.Reg, wayBase, epoch, hits
 	a.Cmp32RegMem(scratch, way, int32(jitOffWayEpoch))
 	a.Jcc(jitasm.CondNE, slow)
 
-	// An own data slot, on a receiver whose [[Get]] is a slot read. Three
-	// pointers that must all be nil, tested as one: a holder means the property
-	// was found up the prototype chain and the chain would have to be guarded, a
-	// toShape means this is a store site's transition entry, and a proxy means
-	// the receiver's [[Get]] is a trap rather than a read.
-	a.MovRegMem(scratch, way, int32(jitOffWayHolder))
-	a.OrRegMem(scratch, way, int32(jitOffWayToShape))
+	// Two pointers that must be nil, tested as one: a toShape means this is a
+	// store site's transition entry, and a proxy means the receiver's [[Get]] is
+	// a trap rather than a read.
+	a.MovRegMem(scratch, way, int32(jitOffWayToShape))
 	a.OrRegMem(scratch, obj, int32(jitOffObjProxy))
 	a.Jcc(jitasm.CondNE, slow)
+
+	// A holder means the property was found up the prototype chain, and the slot
+	// to read is on it rather than on the receiver.
+	//
+	// This is not a refinement. A class's methods live on its prototype, so
+	// `o.m()` is an inherited read every time — and while this case fell to the
+	// runtime, compiling the method call made DeltaBlue 9% *slower*, because the
+	// probe declined 55% of the reads that the interpreter's cache was serving
+	// and paid a helper round trip for each one.
+	//
+	// What is cached is the conclusion of a prototype walk, so the guard is the
+	// receiver's [[Prototype]] still being the one the entry was filled from. Two
+	// objects can share a shape and not a prototype; every object the walk passed
+	// through is flagged usedAsProto, so a layout change to any of them bumps the
+	// epoch checked above.
+	own := a.NewLabel()
+	a.MovRegMem(hold, way, int32(jitOffWayHolder))
+	a.TestRegReg(hold, hold)
+	a.Jcc(jitasm.CondE, own)
+	a.MovRegMem(scratch, way, int32(jitOffWayProtoVal))
+	a.CmpRegMem(scratch, obj, int32(jitOffObjProto))
+	a.Jcc(jitasm.CondNE, slow)
+	// Read from the holder from here on — including its inobj limit, which is
+	// the holder's shape's and not the receiver's.
+	a.MovRegReg(obj, hold)
+	a.Bind(own)
 
 	// Where the slot lives, in the object or in its overflow slice.
 	a.Mov32RegMem(way, way, int32(jitOffWaySlot))
