@@ -117,11 +117,22 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	code := fn.code
 	ip := fn.startIP
 
-	// A non-arrow body opens by binding `this` to a local. Skipping it is sound
-	// rather than convenient: the slot is left out of the assigned set below, so
-	// any read of it refuses to compile, and on the interpreted path the
-	// prologue runs as usual.
+	// A non-arrow body opens by binding `this` to a local. Compiled code is
+	// handed a frame's locals and nothing else — the receiver is not among them —
+	// so it steps over the prologue and refuses any read of the slot it writes.
+	//
+	// Recorded explicitly rather than left to the assigned-set analysis. It used
+	// to be implicit: the slot was outside the analysed region, so it was never
+	// proven assigned, and an unproven read refused the whole function. When
+	// unproven reads stopped refusing, this slot silently started reading the
+	// undefined the frame was filled with — and `this.x = 1` in a compiled
+	// constructor threw "cannot set properties of undefined". Two rules sharing
+	// one mechanism, where only one of them was written down.
+	unbound := make([]bool, fn.maxLocals)
 	if ip+3 < len(code) && Opcode(code[ip]) == OpThis && Opcode(code[ip+1]) == OpPutLocal {
+		if i := int(readU16(code, ip+2)); i < fn.maxLocals {
+			unbound[i] = true
+		}
 		ip += 4
 	}
 	start := ip
@@ -265,16 +276,41 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if i >= fn.maxLocals || sp >= len(jitStackRegs) {
 				return refuse(why, "stack-too-deep")
 			}
-			if !cur[i] {
-				// Not assigned on every path that reaches here, so the slot may
-				// hold undefined, or a binding still in its dead zone. Either
-				// way the interpreter is the one that knows what to do.
-				return refuse(why, "local-not-assigned")
+			if unbound[i] {
+				// The `this` binding, which the skipped prologue would have
+				// written and compiled code has no way to produce.
+				return refuse(why, "this-local")
 			}
 			a.MovRegMem(jitStackRegs[sp], jitRegLocals, int32(i)*8)
-			kind[sp] = numeric[i]
-			if numeric[i] {
-				readsNumeric[i] = true
+			if !cur[i] {
+				// Not assigned on every path that reaches here, which is the
+				// ordinary shape of a `var` read before its assignment and also
+				// the shape of a lexical binding read inside its dead zone. The
+				// interpreter tells the two apart with one compare: an empty
+				// slot is the dead zone and throws, and anything else is the
+				// value, undefined included. So does this.
+				//
+				// The throw sequence sits in the instruction stream rather than
+				// out of line, because a template compiler emits in bytecode
+				// order and has nowhere else to put it. It is never executed.
+				ok := a.NewLabel()
+				a.MovRegImm64(jitRegScratch, uint64(tEmpty))
+				a.CmpRegReg(jitStackRegs[sp], jitRegScratch)
+				a.Jcc(jitasm.CondNE, ok)
+				if !jitCallHelper(a, sp, jitHelperDeadZone, &fixups) {
+					return refuse(why, "stack-too-deep")
+				}
+				a.Bind(ok)
+				// Whatever the slot holds, it is not something this tier knows
+				// to be a Number — jitNumericLocals seeds such a local
+				// non-numeric so that the two agree about everything copied out
+				// of it.
+				kind[sp] = false
+			} else {
+				kind[sp] = numeric[i]
+				if numeric[i] {
+					readsNumeric[i] = true
+				}
 			}
 			sp++
 			ip += 3
@@ -1005,6 +1041,7 @@ const (
 	jitHelperEquals     = 5
 	jitHelperPutField   = 6
 	jitHelperGetGlobal  = 7
+	jitHelperDeadZone   = 8
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1187,6 +1224,11 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		}
 		ctx.Ret = uint64(v)
 		return nil
+	case jitHelperDeadZone:
+		// Reached only when a local held the empty sentinel, which is a lexical
+		// binding read before its initialiser ran. The interpreter's message,
+		// because the two paths must be indistinguishable from a script.
+		return rt.referenceError("Cannot access a lexical binding before initialization")
 	case jitHelperGetGlobal:
 		// The interpreter's GET_GLOBAL with its cache fast path already tried
 		// and declined: the declarative record first, then HasProperty, then

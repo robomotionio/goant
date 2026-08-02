@@ -340,6 +340,45 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 	return demand, true
 }
 
+// jitUnprovenLocals reports which locals the emitter will read without being
+// able to prove they were written first.
+//
+// It walks the blocks exactly the way the emitter does — seed from the block's
+// entry set, and a store makes the slot assigned for the rest of the block — so
+// the two cannot disagree about which reads are unproven. What the emitter does
+// about such a read is emit a dead-zone check; what this is for is the
+// consequence, which is that the value is not a Number.
+func jitUnprovenLocals(fn *svFunc, blocks map[int]*jitBlock) []bool {
+	code := fn.code
+	unproven := make([]bool, fn.maxLocals)
+	cur := make([]bool, fn.maxLocals)
+	for _, b := range blocks {
+		if !b.reachable {
+			continue
+		}
+		copy(cur, b.in)
+		for ip := b.start; ip < b.end; {
+			op := Opcode(code[ip])
+			size := int(opTable[op].Size)
+			if size <= 0 || ip+size > len(code) {
+				return unproven
+			}
+			switch op {
+			case OpGetLocal:
+				if i := int(readU16(code, ip+1)); i < fn.maxLocals && !cur[i] {
+					unproven[i] = true
+				}
+			case OpPutLocal, OpSetLocal:
+				if i := int(readU16(code, ip+1)); i < fn.maxLocals {
+					cur[i] = true
+				}
+			}
+			ip += size
+		}
+	}
+	return unproven
+}
+
 // jitNumericLocals reports which locals only ever receive Numbers.
 //
 // The tier used to be able to assume this of every local, because the only
@@ -370,6 +409,17 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bo
 	}
 	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
 		numeric[i] = demand[i]
+	}
+	// A local read where the emitter cannot prove it was written holds whatever
+	// the frame left there — undefined for a `var`, the dead-zone sentinel for a
+	// lexical binding — and neither is a Number. Seeded here rather than handled
+	// at the read, because the fixpoint below has to carry it: without this a
+	// local copied out of one would stay marked numeric and reach an ADDSD
+	// holding undefined.
+	for i, unproven := range jitUnprovenLocals(fn, blocks) {
+		if unproven {
+			numeric[i] = false
+		}
 	}
 
 	for changed := true; changed; {
