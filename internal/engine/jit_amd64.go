@@ -1160,17 +1160,31 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, this Value, 
 	if ctx == nil {
 		ctx = new(jitmem.ExecContext)
 	}
-	// Cleared before it is published rather than after, so the stack never holds
-	// an entry the collector would read a stale Ret or spill slot out of.
-	*ctx = jitmem.ExecContext{
-		Args: [4]uint64{
-			uint64(uintptr(unsafe.Pointer(&locals[0]))),
-			jitFuel,
-		},
-		Pool: jitObjectPoolAddr(rt),
-		Host: jitRuntimeAddr(rt),
-		This: uint64(this),
-	}
+	// Written field by field rather than as a struct literal, and this is worth
+	// the ugliness: a literal clears the whole context, and eighty of its bytes
+	// are the spill area. That memset was the largest single item in the profile
+	// of entering a compiled function once the interpreted frame around it was
+	// gone.
+	//
+	// Leaving the spill slots stale is sound for the same reason SpillN exists at
+	// all. The collector reads Spill[0:SpillN] and nothing more, SpillN is zero
+	// here, and the only thing that raises it is compiled code writing the slots
+	// immediately before it exits. A stale slot is therefore never read, and the
+	// alternative — clearing ten words on every call so that nobody looks at them
+	// — is the cost this pays to avoid.
+	//
+	// Everything the collector *does* read unconditionally is written: Args[2],
+	// Ret and This. Cleared before the context is published rather than after, so
+	// the root stack never holds an entry with a previous call's values in it.
+	ctx.Exit, ctx.Helper = 0, 0
+	ctx.Args[0] = uint64(uintptr(unsafe.Pointer(&locals[0])))
+	ctx.Args[1] = jitFuel
+	ctx.Args[2], ctx.Args[3] = 0, 0
+	ctx.Ret, ctx.Resume = 0, 0
+	ctx.SpillN = 0
+	ctx.Pool = jitObjectPoolAddr(rt)
+	ctx.Host = jitRuntimeAddr(rt)
+	ctx.This = uint64(this)
 	if n < cap(rt.jitFrames) {
 		rt.jitFrames = rt.jitFrames[:n+1]
 		rt.jitFrames[n] = ctx
