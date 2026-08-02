@@ -1836,6 +1836,17 @@ restart:
 					syncFrame()
 					rt.collect()
 				}
+				// A loop can be hot without its function being entered again,
+				// and a call count cannot see that. Only the unconditional
+				// backward jump is offered: it is the one the compiler emits
+				// with an empty operand stack, so there is nothing here that
+				// would have to be carried across.
+				if jitEnabled && sp == 0 {
+					syncFrame()
+					if v, e, ok := jitTryLoop(rt, fn, locals, t); ok {
+						return v, e
+					}
+				}
 			}
 			ip = t
 		case OpJmpFalse:

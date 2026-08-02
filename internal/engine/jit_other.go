@@ -20,3 +20,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value) (Value, *ThrowError, bool) {
 	return mkundef(), nil, false
 }
+
+func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, locals []Value, header int) (Value, *ThrowError, bool) {
+	return mkundef(), nil, false
+}

@@ -45,12 +45,54 @@ func JITStats() (compiled, declined, interpreted uint64) {
 	return jitStats.compiled, jitStats.declined, jitStats.interp
 }
 
+// jitOSRThreshold is how many times a loop may go round in the interpreter
+// before the function it is in gets compiled.
+//
+// A separate trigger is needed because entering a frame is not the only way to
+// spend time in one. A function called once that then loops for a second would
+// never reach jitThreshold, however hot the loop is — measured at 1070ms
+// interpreted against 262ms for exactly the same work, split into enough calls
+// to tier. The count is higher than the call threshold because a back edge is a
+// far cheaper event than a frame entry, so the same absolute work takes more of
+// them to be worth compiling for.
+const jitOSRThreshold = 2000
+
 // jitAttempt is svFunc's tiering state, in one place so the interpreter's hot
 // path touches one field.
 type jitAttempt struct {
 	count int32
+	loops int32
 	code  *jitCode
 	tried bool
+}
+
+// jitTryLoop moves a loop that is already running into compiled code.
+//
+// Called from the interpreter's backward jumps, which is the one place a
+// function can be spending its time without entering a frame. A false return
+// means nothing happened and interpretation continues from the same place;
+// there is no half-transferred state, because the stub either takes the whole
+// frame or declines before touching it.
+func jitTryLoop(rt *Runtime, fn *svFunc, locals []Value, header int) (Value, *ThrowError, bool) {
+	if fn.jit.code != nil {
+		return fn.jit.code.jitRunOSR(rt, fn, locals, header)
+	}
+	if fn.jit.tried {
+		return mkundef(), nil, false
+	}
+	fn.jit.loops++
+	if fn.jit.loops < jitOSRThreshold {
+		return mkundef(), nil, false
+	}
+	fn.jit.tried = true
+	if !jitEligible(fn) {
+		return mkundef(), nil, false
+	}
+	fn.jit.code = jitCompile(fn, nil)
+	if fn.jit.code == nil {
+		return mkundef(), nil, false
+	}
+	return fn.jit.code.jitRunOSR(rt, fn, locals, header)
 }
 
 // jitEligible rejects the frame shapes the compiler does not model, before it

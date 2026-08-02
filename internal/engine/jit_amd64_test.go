@@ -440,3 +440,99 @@ func benchInterpretedCall(b *testing.B, src string, args ...Value) {
 		}
 	}
 }
+
+// TestJITEntersARunningLoop covers the trigger rather than the code: a function
+// called once, whose loop is hot, has to end up compiled anyway.
+//
+// Without an on-stack entry this is the case a call-count tier cannot see at
+// all, and the loop runs to completion in the interpreter however long it takes.
+func TestJITEntersARunningLoop(t *testing.T) {
+	const src = "function f(n){ var s=0, i=0; while (i<n) { s=(s+i*3)|0; i=i+1; } return s; }"
+	fn := jitFn(t, src)
+	c := jitCompile(fn, nil)
+	if c == nil {
+		t.Fatal("refused to compile")
+	}
+	defer c.free()
+	if len(c.osr) == 0 {
+		t.Fatal("no loop-header entry stub was emitted")
+	}
+
+	// Enter at the header with the locals an interpreter would have left
+	// part-way through, and check the whole loop still finishes correctly.
+	for _, start := range []float64{0, 1, 7, 1000} {
+		const n = 5000
+		var header int
+		for h := range c.osr {
+			header = h
+		}
+		locals := make([]Value, fn.maxLocals)
+		locals[0] = tov(n)
+		// s and i as of `start` iterations, computed the way the body would.
+		var s float64
+		for k := float64(0); k < start; k++ {
+			s = float64(int32(s + k*3))
+		}
+		sSlot, iSlot := jitVarSlots(fn)
+		locals[sSlot], locals[iSlot] = tov(s), tov(start)
+		got, _, ok := c.jitRunOSR(New(), fn, locals, header)
+		if !ok {
+			t.Fatalf("start=%v: the entry stub declined Numbers", start)
+		}
+		want := s
+		for k := start; k < n; k++ {
+			want = float64(int32(want + k*3))
+		}
+		if got.Number() != want {
+			t.Errorf("start=%v: resumed loop gave %v, want %v", start, got.Number(), want)
+		}
+	}
+}
+
+// TestJITLoopEntryDeclinesNonNumbers checks the other half: entering part-way
+// through inherits whatever the interpreter put in the locals, so the guards
+// that the ordinary entry applies to parameters have to apply here to every
+// local the body does arithmetic on.
+func TestJITLoopEntryDeclinesNonNumbers(t *testing.T) {
+	const src = "function f(n){ var s=0, i=0; while (i<n) { s=(s+i*3)|0; i=i+1; } return s; }"
+	fn := jitFn(t, src)
+	c := jitCompile(fn, nil)
+	if c == nil {
+		t.Fatal("refused to compile")
+	}
+	defer c.free()
+	var header int
+	for h := range c.osr {
+		header = h
+	}
+	for _, bad := range []Value{mkundef(), mknull(), mkbool(true)} {
+		locals := make([]Value, fn.maxLocals)
+		locals[0] = tov(10)
+		sSlot, iSlot := jitVarSlots(fn)
+		locals[sSlot], locals[iSlot] = bad, tov(0)
+		if _, _, ok := c.jitRunOSR(New(), fn, locals, header); ok {
+			t.Errorf("entered a running loop with a %v accumulator", bad.Type())
+		}
+	}
+}
+
+// jitVarSlots finds the two var slots of the loop functions above, by reading
+// the stores the prologue makes rather than assuming they follow the
+// parameters — a non-arrow body binds `this` to a local of its own first.
+func jitVarSlots(fn *svFunc) (int, int) {
+	var seen []int
+	for ip := fn.startIP; ip < len(fn.code); {
+		op := Opcode(fn.code[ip])
+		if op == OpPutLocal {
+			s := int(readU16(fn.code, ip+1))
+			if s != fn.thisSlot {
+				seen = append(seen, s)
+			}
+		}
+		ip += int(opTable[op].Size)
+	}
+	if len(seen) < 2 {
+		return fn.paramCount, fn.paramCount + 1
+	}
+	return seen[0], seen[1]
+}

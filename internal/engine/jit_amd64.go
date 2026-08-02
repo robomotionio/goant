@@ -74,9 +74,14 @@ func refuse(why *string, reason string) *jitCode {
 }
 
 // jitCode is a compiled function and the block its code lives in.
+//
+// osr maps a loop header's bytecode offset to the address of an entry stub for
+// it, which is what lets a loop already running in the interpreter move into
+// compiled code without waiting to be called again.
 type jitCode struct {
 	block *jitmem.Block
 	entry uintptr
+	osr   map[int]uintptr
 }
 
 // jitResumeFixup records a resume address that could not be written until the
@@ -166,6 +171,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	// what lets undefined, null and the Booleans travel through compiled code
 	// without any of it having to guard.
 	kind := make([]bool, len(jitStackRegs)+1)
+	// The locals whose Number-ness the body relies on, and the loop headers it
+	// could be entered at. Both are only known once the body has been walked,
+	// which is why the entry stubs are emitted after it.
+	readsNumeric := make([]bool, fn.maxLocals)
+	loopHeaders := map[int]bool{}
 
 	for ip < len(code) {
 		if b, isLeader := blocks[ip]; isLeader {
@@ -249,6 +259,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegMem(jitStackRegs[sp], jitRegLocals, int32(i)*8)
 			kind[sp] = numeric[i]
+			if numeric[i] {
+				readsNumeric[i] = true
+			}
 			sp++
 			ip += 3
 
@@ -334,6 +347,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				return nil
 			}
 			if target <= ip {
+				loopHeaders[target] = true
 				jitBackEdge(a, l, &fixups)
 			} else {
 				a.Jmp(l)
@@ -550,6 +564,42 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	a.MovRegImm64(jitasm.RAX, jitmem.ExitDeopt)
 	a.Ret()
 
+	// One entry stub per loop header, so that a loop already spinning in the
+	// interpreter can move into compiled code without being called again.
+	//
+	// The ordinary entry checks the parameters because everything else is a
+	// value the body itself produced. Entering at a header inherits locals the
+	// interpreter wrote instead, so the stub checks every local the body relies
+	// on being a Number. A local it only stores to needs no check, and one it
+	// reads without doing arithmetic on has none to fail.
+	//
+	// Jumping straight to the header is sound for the same reason the fuel exit
+	// is: a back edge is reached with the operand stack empty and every live
+	// value in the locals array, so there is nothing else to restore. The
+	// definite-assignment set at the header holds too, because the interpreter
+	// got there through the same control-flow graph.
+	osrLabels := make(map[int]*jitasm.Label, len(loopHeaders))
+	for h := range loopHeaders {
+		l, ok := labels[h]
+		if !ok {
+			continue
+		}
+		stub := a.NewLabel()
+		a.Bind(stub)
+		a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
+		a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
+		for i := 0; i < fn.maxLocals; i++ {
+			if !readsNumeric[i] || !blocks[h].in[i] {
+				continue
+			}
+			a.MovRegMem(jitasm.RAX, jitRegLocals, int32(i)*8)
+			a.CmpRegReg(jitasm.RAX, jitRegGuard)
+			a.Jcc(jitasm.CondA, bail)
+		}
+		a.Jmp(l)
+		osrLabels[h] = stub
+	}
+
 	// Emission stops at the first unreachable trailer, so a branch target beyond
 	// it never got bound. That is a function this tier does not understand the
 	// shape of rather than an error, and declining is the answer — jitasm would
@@ -581,7 +631,14 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if why != nil {
 		*why = ""
 	}
-	return &jitCode{block: block, entry: block.Addr()}
+	c := &jitCode{block: block, entry: block.Addr()}
+	if len(osrLabels) > 0 {
+		c.osr = make(map[int]uintptr, len(osrLabels))
+		for h, l := range osrLabels {
+			c.osr[h] = block.AddrAt(l.Offset())
+		}
+	}
+	return c
 }
 
 // jitUnsupported reports the first opcode in the body that this tier has no
@@ -784,6 +841,23 @@ func jitCanonicalizeNaN(a *jitasm.Asm, r jitasm.Reg) {
 // run, and this tier has no exception handlers of its own — TRY_PUSH is refused
 // — so the only thing left to do is what the interpreter would: leave.
 func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value) (Value, *ThrowError, bool) {
+	return c.jitRunAt(rt, fn, locals, c.entry)
+}
+
+// jitRunOSR enters at the stub for a loop header, if there is one.
+//
+// Reports false when there is not, or when the stub's guards decline the locals
+// the interpreter has produced — in which case nothing has happened and the
+// interpreter carries on from where it was.
+func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, locals []Value, header int) (Value, *ThrowError, bool) {
+	pc, ok := c.osr[header]
+	if !ok {
+		return mkundef(), nil, false
+	}
+	return c.jitRunAt(rt, fn, locals, pc)
+}
+
+func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, entry uintptr) (Value, *ThrowError, bool) {
 	if len(locals) == 0 {
 		return mkundef(), nil, false
 	}
@@ -796,7 +870,7 @@ func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value) (Value, *Throw
 	rt.jitFrames = append(rt.jitFrames, ctx)
 	defer func() { rt.jitFrames = rt.jitFrames[:len(rt.jitFrames)-1] }()
 
-	pc := c.entry
+	pc := entry
 	for {
 		jitmem.Enter(pc, ctx)
 		// The locals slice reaches compiled code as an integer, so nothing in
