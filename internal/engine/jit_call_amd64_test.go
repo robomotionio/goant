@@ -54,14 +54,84 @@ func BenchmarkCallIntoATinyFunction(b *testing.B) {
 	b.Run("compiled", func(b *testing.B) { run(b, true) })
 }
 
-// TestCompiledFrameEntryKeepsTheFrameContract is what runCompiledFrame has to
-// earn by skipping most of the interpreter's frame entry.
+// TestJITCallAgreesWithTheInterpreter covers the opcode that had refused every
+// function containing it.
 //
-// Each case is one thing the full path does that the short one either has to do
-// as well or is allowed to leave out because jitEligible already refused the
-// function. Run both ways and compare, because the failures here are quiet: a
-// receiver bound wrong reads undefined, and a new.target left in place is
-// visible only to whatever the compiled body calls next.
+// A call is where compiled code hands control to something it knows nothing
+// about, so the cases are the ways that can go wrong: a callee that is not a
+// function, one that throws, one that runs a collection while this frame's
+// operands are sitting in the spill area, and one that writes to its own
+// `arguments` — which must not reach back into the caller's operand stack.
+func TestJITCallAgreesWithTheInterpreter(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"no-arguments", `
+			function g() { return 7; }
+			function f() { return g() + 1; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(); s;`},
+		{"several-arguments", `
+			function g(a, b, c) { return a + b * c; }
+			function f(x) { return g(x, x + 1, x + 2); }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
+		{"fewer-arguments-than-parameters", `
+			function g(a, b) { return "" + a + "," + b; }
+			function f(x) { return g(x); }
+			var s = ""; for (var k = 0; k < 200; k++) s = f(k); s;`},
+		{"nested-calls", `
+			function h(a) { return a * 2; }
+			function g(a) { return h(a) + 1; }
+			function f(a) { return g(a) + g(a + 1); }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
+		{"the-callee-throws", `
+			function g(a) { if (a > 100) { throw new Error("no"); } return a; }
+			function f(a) { return g(a) + 1; }
+			var s = 0, c = 0;
+			for (var k = 0; k < 200; k++) { try { s += f(k); } catch (e) { c++; } }
+			s * 1000 + c;`},
+		{"the-callee-is-not-a-function", `
+			var g = 5;
+			function f(a) { return g(a); }
+			var c = 0; for (var k = 0; k < 200; k++) { try { f(k); } catch (e) { c++; } } c;`},
+		{"a-native-callee", `
+			function f(a) { return Math.max(a, 3); }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k % 6); s;`},
+		// The callee writes to its own mapped arguments object. If the helper
+		// handed it a window onto the caller's spill area rather than a slice of
+		// its own, this would write into the caller's operand stack.
+		{"the-callee-writes-its-arguments", `
+			function g(a, b) { arguments[0] = 99; return a + b; }
+			function f(x, y) { var t = g(x, y); return t + x + y; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k, k + 1); s;`},
+		// A call is a place a collection can happen with this frame's operands
+		// live only in the spill area.
+		{"a-collection-inside-the-callee", `
+			function g(a) { var junk = []; for (var i = 0; i < 200; i++) junk.push({i: i}); return a; }
+			function f(a, b) { return g(a) + b; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k, k + 1); s;`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
+	}
+}
+
+// TestJITCompilesAFunctionThatCalls stops the agreement above from being
+// agreement between the interpreter and itself.
+func TestJITCompilesAFunctionThatCalls(t *testing.T) {
+	const src = "function f(a){ return g(a) + 1; }"
+	_, fn := jitFnRT(t, src)
+	var why string
+	c := jitCompile(fn, &why)
+	if c == nil {
+		t.Fatalf("refused %q: %s", src, why)
+	}
+	c.free()
+}
+
+// TestCompiledFrameEntryKeepsTheFrameContract is the frame contract a compiled
+// entry has to keep, whichever way it is reached.
+//
+// Each case is one thing the interpreter's frame entry does that a compiled
+// frame depends on. Run both ways and compare, because the failures here are
+// quiet: a receiver bound wrong reads undefined, and a new.target left in place
+// is visible only to whatever the compiled body calls next.
 func TestCompiledFrameEntryKeepsTheFrameContract(t *testing.T) {
 	for _, tc := range []struct{ name, src string }{
 		// new.target is consumed by the frame that was constructed, so an

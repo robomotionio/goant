@@ -311,7 +311,7 @@ func TestJITBailsOnNonNumbers(t *testing.T) {
 // to be refused rather than mis-compiled.
 func TestJITRefusesWhatItCannotModel(t *testing.T) {
 	for _, src := range []string{
-		"function f(a,b){ return g(a); }",                 // a call
+		"function f(a,b){ return new g(a); }",             // a construct
 		"function f(a,b){ if (a) return 1; return 2; }",   // a bare value as a condition
 		"function f(a,b){ return a%b; }",                  // modulo is not in this tier
 		"function f(a,b){ return typeof a; }",             // TYPEOF is not in this tier

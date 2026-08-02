@@ -641,6 +641,35 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			kind[sp-1] = false
 			ip += 7
 
+		case OpCall:
+			// The operands are already where the helper wants them. A call site
+			// holds [callee, arg0 .. argN-1] on the operand stack, spilling
+			// roots the whole stack anyway, and SpillN says how much of it is
+			// live — so nothing has to be passed but the count.
+			//
+			// This is the exit-and-re-enter detour rather than a compiled
+			// function calling a compiled function, which is measured at 4.69 ns
+			// against 1.15. It is here first because it is what lets a function
+			// that calls anything compile at all: until now the whole body was
+			// refused, which is why GET_FIELD2 was worth zero frame entries in
+			// the weighted table — CALL was always the instruction after it.
+			argc := int(readU16(code, ip+1))
+			if argc < 0 || sp < argc+1 {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(uint32(argc)))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperCall, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			// The result replaces the callee, which is the deepest of the slots
+			// this consumed.
+			dst := jitStackRegs[sp-argc-1]
+			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-argc-1] = false
+			sp -= argc
+			ip += 3
+
 		case OpThis:
 			// The receiver, from the context rather than the locals, because it
 			// is the one thing a frame carries that is neither a local nor an
@@ -890,7 +919,7 @@ func jitHasTemplate(op Opcode) bool {
 		OpNeg, OpInc, OpDec, OpNot,
 		OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
 		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpPutField, OpGetGlobal,
-		OpReturn, OpReturnUndef, OpThis:
+		OpCall, OpReturn, OpReturnUndef, OpThis:
 		return true
 	}
 	return false
@@ -1046,6 +1075,7 @@ const (
 	jitHelperPutField   = 6
 	jitHelperGetGlobal  = 7
 	jitHelperDeadZone   = 8
+	jitHelperCall       = 9
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1240,6 +1270,31 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		}
 		if jitStats.enabled {
 			jitStats.icMiss++
+		}
+		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperCall:
+		// The interpreter's CALL, reading its operands out of the spill area.
+		//
+		// The arguments are copied into a slice of their own rather than handed
+		// over as a window onto Spill. A sloppy callee's mapped `arguments`
+		// object writes through to the array it was given, and that array must
+		// not be this frame's operand stack. The interpreter allocates the same
+		// slice for the same reason, so this is parity rather than a cost.
+		argc := int(uint32(ctx.Args[3]))
+		n := int(ctx.SpillN)
+		if argc < 0 || n < argc+1 {
+			return rt.typeError("JIT operand stack")
+		}
+		base := n - argc - 1
+		callee := Value(ctx.Spill[base])
+		args := make([]Value, argc)
+		for i := 0; i < argc; i++ {
+			args[i] = Value(ctx.Spill[base+1+i])
+		}
+		v, e := rt.callValue(callee, mkundef(), args)
+		if e != nil {
+			return e
 		}
 		ctx.Ret = uint64(v)
 		return nil

@@ -23,7 +23,7 @@ var jitSupported = map[Opcode]bool{
 	OpLt: true, OpLe: true, OpGt: true, OpGe: true,
 	OpEq: true, OpNe: true, OpSeq: true, OpSne: true,
 	OpJmp: true, OpJmpFalse: true, OpJmpTrue: true,
-	OpGetField: true, OpPutField: true, OpGetGlobal: true,
+	OpGetField: true, OpPutField: true, OpGetGlobal: true, OpCall: true,
 	OpReturn: true, OpReturnUndef: true,
 }
 

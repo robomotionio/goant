@@ -321,6 +321,15 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
+				case OpCall:
+					// The callee and its arguments, none of them demanded: what
+					// a call does with a value is the callee's business.
+					for i := int(readU16(code, ip+1)); i >= 0; i-- {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+					}
+					push(noOrigin)
 				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpThis,
 					OpGetGlobal:
 					push(noOrigin)
@@ -543,6 +552,15 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bo
 					push(false)
 				case OpGetGlobal:
 					// A global holds anything at all.
+					push(false)
+				case OpCall:
+					// Callee and arguments in, one result out, and a call can
+					// return anything.
+					for i := int(readU16(code, ip+1)); i >= 0; i-- {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+					}
 					push(false)
 				case OpPutField:
 					// Receiver and value in, nothing out.
