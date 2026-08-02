@@ -1,0 +1,56 @@
+============
+goant is a port of ant to Go.
+
+The engine — lexer, parser, bytecode compiler, interpreter, garbage collector,
+the WTF-8 string representation, the NaN-boxed value layout and the 213-opcode
+instruction set — is a transliteration of the "Silver" engine in ant
+(github.com/theMackabu/ant), a JavaScript runtime written in C. Structures,
+opcode semantics and in many places the shape of individual functions follow it
+directly; the file comments say where a port diverges and why.
+
+Not a port: the regular-expression engine (see internal/regexp2 below), the
+JIT (internal/jitasm, internal/jitmem and internal/engine/jit_*.go — ant's JIT
+is built on MIR, and docs/jit-plan.md records why this one is not), and the
+embedding API in goant.go and v8go/.
+---
+ant was released under this license:
+
+The MIT License (MIT)
+
+Copyright (c) 2026 theMackabu (me@themackabu.dev)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+============
+internal/regexp2 is a fork of dlclark/regexp2, itself a port of the .NET regular
+expression engine. It carries its own LICENSE and ATTRIB, which cover its
+upstreams in turn (dotnet/corefx, the Go standard library, and test data from
+the Mono project). The fork exists because ECMAScript and .NET disagree about
+nullable loops; internal/regexp2/ATTRIB records what changed.
+
+============
+bench/suites/octane holds the Octane 2.0 benchmark suite, fetched rather than
+vendored (bench/suites/fetch.sh pins the commit). It carries its own LICENSE and
+is not part of the shipped library.
+
+============
+Not used, and named only because the comparison is discussed in
+docs/jit-plan.md: github.com/lucasdss/v8go, BSD 3-Clause, (c) 2026 Lucas de
+Souza Santos. That document quotes its README and performance write-up for
+comparison. No code from it appears here.

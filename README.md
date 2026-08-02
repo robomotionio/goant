@@ -857,3 +857,5 @@ goant is a port of the Silver engine from
 opcode set and the conformance bar are all its. The regex engine is a fork of
 [`dlclark/regexp2`](https://github.com/dlclark/regexp2). The `v8go` package
 mirrors the API of [`rogchap/v8go`](https://github.com/rogchap/v8go).
+
+MIT, like ant. `ATTRIB` says which parts came from where.
