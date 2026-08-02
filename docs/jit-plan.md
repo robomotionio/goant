@@ -861,24 +861,28 @@ verified to compile nothing:
 
 | | off | on | off | on | |
 | --- | --- | --- | --- | --- | --- |
-| **DeltaBlue** | 246 | **305** | 245 | **304** | **+24.0%** |
-| **Richards** | 212 | **259** | 212 | **256** | **+21.5%** |
-| EarleyBoyer | 605 | 620 | 604 | 616 | +2.2% |
-| RayTrace | 388 | 394 | 388 | 395 | +1.7% |
-| RegExp | 146 | 145 | 145 | 145 | −0.3% |
-| Splay | 1983 | 1954 | 1966 | 1954 | −1.0% |
-| Crypto | 237 | 233 | 237 | 233 | −1.7% |
-| NavierStokes | 435 | 425 | 435 | 425 | −2.3% |
-| | | | | | **geomean +5.1%** |
+| **Richards** | 214 | **372** | 214 | **375** | **+74.5%** |
+| **DeltaBlue** | 244 | **370** | 244 | **370** | **+51.6%** |
+| RegExp | 145 | 155 | 146 | 156 | +6.9% |
+| RayTrace | 394 | 417 | 393 | 413 | +5.5% |
+| EarleyBoyer | 609 | 622 | 610 | 612 | +1.2% |
+| Splay | 1964 | 1976 | 1990 | 1978 | +0.0% |
+| Crypto | 236 | 233 | 237 | 233 | −1.5% |
+| NavierStokes | 436 | 424 | 436 | 424 | −2.8% |
+| | | | | | **geomean +14.2%** |
 
 Both arms are steady to the point, so none of these are drift.
 
-Compiled code holds 72.2% of DeltaBlue's frame entries and 52.6% of Richards'.
+Compiled code holds **97.7%** of DeltaBlue's frame entries and **88.3%** of
+Richards'. Richards' distance from node halves with the tier on, 155x to 88x.
 
-**Coverage measured by count kept not paying.** Carrying operands across a branch
-was the clearest case: DeltaBlue 59.1% → 72.2% of frame entries, the largest
-single coverage gain here, and the geomean moved from +4.5% to +3.9% — nothing
-outside the drift. That happened four times before the denominator was fixed.
+**Coverage measured by count kept not paying, and then it did.** Four changes in
+a row moved the share of frame entries substantially and the score not at all —
+carrying operands across a branch was the clearest, DeltaBlue 59.1% → 72.2% and
+the geomean from +4.5% to +3.9%. What changed is not the tier but the
+measurement: once refusals were weighted by *interpreted instructions* rather
+than by entries, the next three changes it named were worth +5.1% → +14.2%
+between them. The count was never the problem; counting the wrong thing was.
 
 NavierStokes makes **2,826 frame entries in the whole benchmark** — its time is
 inside a handful of enormous loops rather than spread over calls — so its share
