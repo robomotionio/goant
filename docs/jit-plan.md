@@ -738,7 +738,23 @@ in compiled code by more than a rounding error:
 
 DeltaBlue's compiled code now executes 3.96M property reads at a 72% hit rate,
 173k stores at 89%, and 258k global reads at 100% — against 283,096 reads and
-nothing else two changes ago.
+nothing else two changes ago. Its score reads 265/266 with the tier on against
+260/266 without, which is inside the drift described above rather than a result.
+
+### The declines it uncovered
+
+Richards did not follow, and the counter said why in one line: 195,342 *declines*
+against 639 entries that ran. Compiled code was entered, the prologue's parameter
+check turned the arguments away, and the frame went back to the interpreter — for
+every call, for the life of the program. The bet that a caller passes Numbers is
+worth making, and it was invisible when it lost, because the functions it loses
+on are methods and methods did not compile at all.
+
+After 32 declines the function is rebuilt with the demand set suppressed: the
+prologue accepts every frame and the arithmetic emits its own guard, which is
+what the generic operators are for. Richards goes to 5.0% of frame entries, 64
+declines, 100% of its property reads and 98.4% of its stores served — and all
+309,057 of its untyped operators take the runtime path, which is the trade.
 
 ### How it was found, which is the part worth keeping
 
@@ -778,6 +794,14 @@ Two runs of each arm, alternating, on the benchmark VM:
 Unchanged. It used to be 1–2% *down* in every column; the frame-entry allocation
 and the one-way probe accounted for that, and with both fixed the tier now costs
 nothing and gains nothing. Richards is the only one that moves at all, by 1.6%.
+
+**How much of a difference this table can see.** DeltaBlue's *interpreter* arm —
+the one nothing in this document touches — read 249–250 in one session and
+260–266 in the next on the same machine. That is 4–6% of run-to-run drift, so
+only the two arms of a single interleaved run are comparable to each other, and a
+1–2% difference between them is at the noise floor rather than above it. Every
+"unchanged" here means "not distinguishable from unchanged", and any claim
+smaller than about 5% needs more runs than these.
 
 The residual cost is the tiering check rather than compiled code: every frame
 entry reads two fields of `fn.jit` and most of them are entries into a function
