@@ -112,7 +112,11 @@ type jitResumeFixup struct {
 // reported as such.
 func jitCompile(fn *svFunc, why *string) *jitCode {
 	if why != nil {
-		*why = "shape"
+		// Overwritten by every path that declines for a stated reason. Anything
+		// still carrying this got out of here without saying why, which is a
+		// gap in the diagnostic rather than a shape of function — the last one
+		// hid 31.9 million interpreted instructions in two DeltaBlue functions.
+		*why = "unstated-refusal"
 	}
 	code := fn.code
 	ip := fn.startIP
@@ -132,7 +136,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 
 	targets, ok := jitScanTargets(fn, start)
 	if !ok {
-		return nil
+		return refuse(why, "branch-into-instruction")
 	}
 	blocks, ok := jitAnalyze(fn, start, targets)
 	if !ok {
@@ -338,7 +342,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 
 		case OpPop:
 			if sp < 1 {
-				return nil
+				return refuse(why, "stack-underflow")
 			}
 			sp--
 			ip++
@@ -436,10 +440,19 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			ip++
 
 		case OpJmp:
+			// The depth at the target rather than zero. This was the other half
+			// of carrying operands across a branch and it was missed: the label
+			// binding learned the depth and the jump to it did not, so
+			// `a ? b : c` still refused — and silently, as the catch-all reason,
+			// which is why it took splitting that reason to find. Two DeltaBlue
+			// functions and 31.9 million interpreted instructions.
 			target := int(readU32(code, ip+1))
 			l, known := labels[target]
-			if !known || sp != 0 {
-				return nil
+			if !known {
+				return refuse(why, "branch-into-instruction")
+			}
+			if sp != depths[target] {
+				return refuse(why, "stack-at-target")
 			}
 			if target <= ip {
 				loopHeaders[target] = true
@@ -935,10 +948,14 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			ip++
 
 		case OpReturn:
-			if sp != 1 {
-				return nil
+			// Only the top of the stack matters: a return leaves the frame, so
+			// whatever is under the value being returned goes with it. Requiring
+			// a depth of exactly one refused `return a ? b : c`, where the
+			// ternary's operand is still live below the result.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
 			}
-			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffRet, jitStackRegs[0])
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffRet, jitStackRegs[sp-1])
 			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitReturn))
 			a.MovRegImm64(jitasm.RAX, jitmem.ExitReturn)
 			a.Ret()
@@ -1038,7 +1055,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	buf := a.Code()
 	block, err := jitmem.Alloc(len(buf))
 	if err != nil {
-		return nil
+		return refuse(why, "no-executable-memory")
 	}
 	// Resume addresses are absolute and the code had no address until now.
 	// Patching rather than regenerating is safe because MovRegImm64 always emits
