@@ -1466,17 +1466,12 @@ restart:
 			push(v)
 			ip++
 		case OpNeg:
-			a, e := rt.toNumeric(pop())
+			v, e := rt.jsUnary(OpNeg, pop())
 			if e != nil {
 				thrown = e
 				goto unwind
 			}
-			if a.Type() == TBigInt {
-				push(rt.newBigInt(new(big.Int).Neg(rt.bigIntVal(a))))
-				ip++
-				break
-			}
-			push(mknum(-a.Number()))
+			push(v)
 			ip++
 		case OpUplus:
 			a := pop()
@@ -1633,36 +1628,17 @@ restart:
 			}
 			push(pk)
 			ip++
-		case OpInc:
-			a := pop()
-			if a.Type() == TBigInt {
-				push(rt.newBigInt(new(big.Int).Add(rt.bigIntVal(a), big.NewInt(1))))
-				ip++
-			} else {
-				n, e := rt.toNumber(a)
-				if e != nil {
-					thrown = e
-					goto unwind
-				}
-				push(mknum(n + 1))
-				ip++
+		case OpInc, OpDec:
+			v, e := rt.jsUnary(op, pop())
+			if e != nil {
+				thrown = e
+				goto unwind
 			}
-		case OpDec:
-			a := pop()
-			if a.Type() == TBigInt {
-				push(rt.newBigInt(new(big.Int).Sub(rt.bigIntVal(a), big.NewInt(1))))
-				ip++
-			} else {
-				n, e := rt.toNumber(a)
-				if e != nil {
-					thrown = e
-					goto unwind
-				}
-				push(mknum(n - 1))
-				ip++
-			}
+			push(v)
+			ip++
 		case OpNot:
-			push(mkbool(!rt.toBoolean(pop())))
+			v, _ := rt.jsUnary(OpNot, pop())
+			push(v)
 			ip++
 		case OpTypeof:
 			push(rt.internString(rt.typeofString(pop())))
@@ -1747,24 +1723,13 @@ restart:
 			push(mkbool(res))
 			ip += 3
 		case OpBnot:
-			a, e := rt.toNumeric(pop())
+			v, e := rt.jsUnary(OpBnot, pop())
 			if e != nil {
 				thrown = e
 				goto unwind
 			}
-			if a.Type() == TBigInt {
-				// BigInt::bitwiseNOT: ~x = -(x + 1).
-				push(rt.newBigInt(new(big.Int).Not(rt.bigIntVal(a))))
-				ip++
-			} else {
-				n, e := rt.toInt32(a)
-				if e != nil {
-					thrown = e
-					goto unwind
-				}
-				push(mknum(float64(^n)))
-				ip++
-			}
+			push(v)
+			ip++
 		case OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr:
 			b, a := pop(), pop()
 			v, e := rt.jsBitwise(op, a, b)
@@ -2754,6 +2719,61 @@ func (rt *Runtime) toNumeric(v Value) (Value, *ThrowError) {
 		return mkundef(), e
 	}
 	return mknum(n), nil
+}
+
+// jsUnary is the operators that take one operand, in one place so the
+// interpreter and compiled code cannot drift apart about them.
+//
+// Compiled code reaches it for the operand it could not prove was a Number,
+// which is the same reason it reaches jsArith and jsBitwise. The BigInt arms are
+// most of what is here and none of it can be emitted: `-1n` is arbitrary
+// precision.
+func (rt *Runtime) jsUnary(op Opcode, a Value) (Value, *ThrowError) {
+	switch op {
+	case OpNot:
+		return mkbool(!rt.toBoolean(a)), nil
+	case OpInc, OpDec:
+		if a.Type() == TBigInt {
+			one := big.NewInt(1)
+			x := rt.bigIntVal(a)
+			if op == OpInc {
+				return rt.newBigInt(new(big.Int).Add(x, one)), nil
+			}
+			return rt.newBigInt(new(big.Int).Sub(x, one)), nil
+		}
+		n, e := rt.toNumber(a)
+		if e != nil {
+			return mkundef(), e
+		}
+		if op == OpInc {
+			return mknum(n + 1), nil
+		}
+		return mknum(n - 1), nil
+	}
+	// NEG and BNOT coerce with ToNumeric, which keeps a BigInt a BigInt.
+	v, e := rt.toNumeric(a)
+	if e != nil {
+		return mkundef(), e
+	}
+	isBig := v.Type() == TBigInt
+	switch op {
+	case OpNeg:
+		if isBig {
+			return rt.newBigInt(new(big.Int).Neg(rt.bigIntVal(v))), nil
+		}
+		return mknum(-v.Number()), nil
+	case OpBnot:
+		if isBig {
+			// BigInt::bitwiseNOT: ~x = -(x + 1).
+			return rt.newBigInt(new(big.Int).Not(rt.bigIntVal(v))), nil
+		}
+		n, e := rt.toInt32(v)
+		if e != nil {
+			return mkundef(), e
+		}
+		return mknum(float64(^n)), nil
+	}
+	return mkundef(), rt.typeError("unary operator")
 }
 
 func (rt *Runtime) jsBitwise(op Opcode, a, b Value) (Value, *ThrowError) {

@@ -150,6 +150,54 @@ func jitOperands(t testing.TB, rt *Runtime) []struct {
 // file: every operator, over every pair of operand kinds, has to produce what
 // running the same function through the engine produces — or throw where it
 // throws.
+// TestJITGenericUnaryOperatorsAgreeWithTheInterpreter is the same gate for the
+// operators that take one operand. They kept their "must be a Number" rule long
+// after the binary ones lost it, and weighted by interpreted instructions that
+// was 41.3 million in Richards.
+func TestJITGenericUnaryOperatorsAgreeWithTheInterpreter(t *testing.T) {
+	jitInterpretOnly(t)
+	for _, expr := range []string{"-", "~", "!"} {
+		t.Run(expr, func(t *testing.T) {
+			src := "function f(o){ return " + expr + "o.a; }; f;"
+			rt := New()
+			fnVal, err := rt.RunString("unary.js", src)
+			if err != nil {
+				t.Fatalf("run %q: %v", src, err)
+			}
+			cl := rt.closureOf(fnVal)
+			if cl == nil {
+				t.Fatalf("%q did not produce a function", src)
+			}
+			c := jitCompile(cl.fn, nil)
+			if c == nil {
+				t.Fatalf("refused to compile %q", src)
+			}
+			defer c.free()
+			fn := cl.fn
+
+			for _, x := range jitOperands(t, rt) {
+				recv := rt.newObject(rt.objectProto)
+				rt.objPtr(recv).defineOwn("a", x.v, attrDefault)
+				want, wantErr := rt.callValue(fnVal, mkundef(), []Value{recv})
+				locals := make([]Value, fn.maxLocals)
+				locals[0] = recv
+				got, gotErr, ok := c.jitRun(rt, fn, nil, locals, mkundef())
+				if !ok {
+					t.Fatalf("%s%s: declined", expr, jitShow(rt, x.v))
+				}
+				if (wantErr == nil) != (gotErr == nil) {
+					t.Fatalf("%s%s: compiled threw %v, interpreter threw %v",
+						expr, jitShow(rt, x.v), gotErr != nil, wantErr != nil)
+				}
+				if wantErr == nil && !jitSame(rt, got, want) {
+					t.Errorf("%s%s: compiled %s, interpreter %s",
+						expr, jitShow(rt, x.v), jitShow(rt, got), jitShow(rt, want))
+				}
+			}
+		})
+	}
+}
+
 func TestJITGenericOperatorsAgreeWithTheInterpreter(t *testing.T) {
 	jitInterpretOnly(t)
 	for _, expr := range []string{"+", "-", "*", "/", "&", "|", "^", "<<", ">>", ">>>",

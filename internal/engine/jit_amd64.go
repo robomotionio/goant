@@ -573,15 +573,26 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
-			if !kind[sp-1] {
-				return refuse(why, "non-numeric-operand")
-			}
 			r := jitStackRegs[sp-1]
+			var slow, done *jitasm.Label
+			if !kind[sp-1] {
+				slow, done = a.NewLabel(), a.NewLabel()
+				jitEmitNumber(a, r, slow)
+			}
 			if !jitToInt32(a, r, r, sp, &fixups) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.Not32Reg(r)
 			jitFromInt32(a, r, true)
+			if !kind[sp-1] {
+				a.Jmp(done)
+				a.Bind(slow)
+				if !jitCallUnary(a, sp, op, &fixups) {
+					return refuse(why, "stack-too-deep")
+				}
+				a.MovRegMem(r, jitasm.RegCtx, jitmem.CtxOffRet)
+				a.Bind(done)
+			}
 			kind[sp-1] = true
 			ip++
 
@@ -589,27 +600,45 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
-			if !kind[sp-1] {
-				return refuse(why, "non-numeric-operand")
+			r := jitStackRegs[sp-1]
+			generic := !kind[sp-1]
+			var slow, done *jitasm.Label
+			if generic {
+				slow, done = a.NewLabel(), a.NewLabel()
+				jitEmitNumber(a, r, slow)
 			}
 			// Negation is the sign bit and nothing else, which is also why it
 			// needs canonicalising: flipping the sign of the canonical NaN puts
 			// it above the tag threshold.
 			a.MovRegImm64(jitRegScratch, 1<<63)
-			a.XorRegReg(jitStackRegs[sp-1], jitRegScratch)
-			jitCanonicalizeNaN(a, jitStackRegs[sp-1])
+			a.XorRegReg(r, jitRegScratch)
+			jitCanonicalizeNaN(a, r)
+			if generic {
+				a.Jmp(done)
+				a.Bind(slow)
+				if !jitCallUnary(a, sp, op, &fixups) {
+					return refuse(why, "stack-too-deep")
+				}
+				a.MovRegMem(r, jitasm.RegCtx, jitmem.CtxOffRet)
+				a.Bind(done)
+			}
+			// A BigInt negates to a BigInt, so the runtime arm may return one.
+			kind[sp-1] = !generic
 			ip++
 
 		case OpInc, OpDec:
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
-			if !kind[sp-1] {
-				// ToNumeric on anything else, and a BigInt would increment as
-				// one rather than coercing.
-				return refuse(why, "non-numeric-operand")
-			}
 			r := jitStackRegs[sp-1]
+			generic := !kind[sp-1]
+			var slow, done *jitasm.Label
+			if generic {
+				// ToNumeric on anything else, and a BigInt increments as one
+				// rather than coercing.
+				slow, done = a.NewLabel(), a.NewLabel()
+				jitEmitNumber(a, r, slow)
+			}
 			a.MovRegImm64(jitRegScratch, uint64(tov(1)))
 			a.MovqXReg(jitasm.X1, jitRegScratch)
 			a.MovqXReg(jitasm.X0, r)
@@ -620,25 +649,42 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovqRegX(r, jitasm.X0)
 			jitCanonicalizeNaN(a, r)
+			if generic {
+				a.Jmp(done)
+				a.Bind(slow)
+				if !jitCallUnary(a, sp, op, &fixups) {
+					return refuse(why, "stack-too-deep")
+				}
+				a.MovRegMem(r, jitasm.RegCtx, jitmem.CtxOffRet)
+				a.Bind(done)
+			}
+			kind[sp-1] = !generic
 			ip++
 
 		case OpNot:
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
-			if !kind[sp-1] {
-				// ToBoolean of anything else is a different question: the empty
-				// string is false, and every object is true.
-				return refuse(why, "non-numeric-operand")
+			r := jitStackRegs[sp-1]
+			if kind[sp-1] {
+				// A Number is falsy when it is zero or a NaN, and UCOMISD sets
+				// the zero flag for both — equal, or unordered. So the flag is
+				// `!x` already, for either signed zero.
+				a.XorRegReg(jitRegScratch, jitRegScratch)
+				a.MovqXReg(jitasm.X1, jitRegScratch)
+				a.MovqXReg(jitasm.X0, r)
+				a.UcomisdXX(jitasm.X0, jitasm.X1)
+				jitBoolean(a, jitasm.CondE, r)
+			} else {
+				// ToBoolean of anything else is a different question — the empty
+				// string is false and every object is true — and the same one the
+				// truthy branch answers, so it answers this too and materialises
+				// the Boolean rather than branching on it.
+				if !jitCallUnary(a, sp, op, &fixups) {
+					return refuse(why, "stack-too-deep")
+				}
+				a.MovRegMem(r, jitasm.RegCtx, jitmem.CtxOffRet)
 			}
-			// A Number is falsy when it is zero or a NaN, and UCOMISD sets the
-			// zero flag for both — equal, or unordered. So the flag is `!x`
-			// already, for either signed zero.
-			a.XorRegReg(jitRegScratch, jitRegScratch)
-			a.MovqXReg(jitasm.X1, jitRegScratch)
-			a.MovqXReg(jitasm.X0, jitStackRegs[sp-1])
-			a.UcomisdXX(jitasm.X0, jitasm.X1)
-			jitBoolean(a, jitasm.CondE, jitStackRegs[sp-1])
 			kind[sp-1] = false
 			ip++
 
@@ -1303,6 +1349,7 @@ const (
 	jitHelperGetElem    = 11
 	jitHelperBitwise    = 12
 	jitHelperToBoolean  = 13
+	jitHelperUnary      = 14
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1707,6 +1754,23 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		}
 		if e != nil {
 			return e
+		}
+		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperUnary:
+		// The operand this tier could not prove was a Number. jsUnary is what the
+		// interpreter runs for the same opcode, so a BigInt increments as one and
+		// an object coerces through valueOf exactly as it would there.
+		n := int(ctx.SpillN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		v, e := rt.jsUnary(Opcode(uint32(ctx.Args[3])), Value(ctx.Spill[n-1]))
+		if e != nil {
+			return e
+		}
+		if jitStats.enabled {
+			jitStats.genSlow++
 		}
 		ctx.Ret = uint64(v)
 		return nil

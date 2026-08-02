@@ -63,6 +63,27 @@ func jitEmitNumberPair(a *jitasm.Asm, x, y jitasm.Reg, slow *jitasm.Label) {
 // roots them for as long as the helper runs — so the depth and the opcode are
 // all the helper needs, and they go in the one argument slot the protocol leaves
 // untraced.
+// jitEmitNumber is jitEmitNumberPair for the operators that take one operand.
+func jitEmitNumber(a *jitasm.Asm, x jitasm.Reg, slow *jitasm.Label) {
+	a.CmpRegReg(x, jitRegGuard)
+	a.Jcc(jitasm.CondA, slow)
+	if jitStats.enabled {
+		a.MovRegImm64(jitRegScratch, uint64(jitGenericFastAddr()))
+		a.AddMemImm32(jitRegScratch, 0, 1)
+	}
+}
+
+// jitCallUnary is jitCallBinary for one operand: the opcode goes in the
+// untraced argument slot and the operand comes off the top of the spill area.
+func jitCallUnary(a *jitasm.Asm, sp int, op Opcode, fixups *[]jitResumeFixup) bool {
+	if sp < 1 || sp > jitmem.SpillSlots {
+		return false
+	}
+	a.MovRegImm64(jitRegScratch, uint64(op))
+	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+	return jitCallHelper(a, sp, jitHelperUnary, fixups)
+}
+
 func jitCallBinary(a *jitasm.Asm, sp int, op Opcode, helper uint32, fixups *[]jitResumeFixup) bool {
 	if sp < 2 || sp > jitmem.SpillSlots {
 		return false
