@@ -861,25 +861,34 @@ verified to compile nothing:
 
 | | off | on | off | on | |
 | --- | --- | --- | --- | --- | --- |
-| **DeltaBlue** | 250 | **298** | 250 | **298** | **+19.2%** |
-| **Richards** | 222 | **240** | 222 | **240** | **+8.1%** |
-| Splay | 1953 | 2005 | 1926 | 1925 | +1.3% |
-| EarleyBoyer | 631 | 637 | 627 | 628 | +0.6% |
-| RayTrace | 399 | 403 | 400 | 401 | +0.6% |
-| RegExp | 146 | 145 | 147 | 146 | −0.7% |
-| Crypto | 256 | 253 | 255 | 252 | −1.2% |
-| NavierStokes | 465 | 456 | 466 | 457 | −2.0% |
-| | | | | | **geomean +3.1%** |
+| **DeltaBlue** | 244 | **303** | 245 | **305** | **+24.3%** |
+| **Richards** | 214 | **247** | 215 | **247** | **+15.2%** |
+| RayTrace | 397 | 403 | 397 | 405 | +1.8% |
+| Splay | 1969 | 1987 | 1962 | 1995 | +1.3% |
+| EarleyBoyer | 615 | 622 | 615 | 622 | +1.1% |
+| RegExp | 146 | 144 | 146 | 145 | −1.0% |
+| Crypto | 238 | 234 | 238 | 234 | −1.7% |
+| NavierStokes | 444 | 433 | 442 | 432 | −2.4% |
+| | | | | | **geomean +4.5%** |
 
-Both arms are steady to the point, so none of these are drift. DeltaBlue runs
-59.1% of its frame entries as machine code and Richards 32.7%.
+Both arms are steady to the point, so none of these are drift. Six of the eight
+are positive, and the two that are not are the two the tier still barely
+compiles.
 
-The two that are still negative are the two the tier barely touches. NavierStokes
-compiles **0.4%** of its frame entries — `GET_UPVAL` refuses almost all of it —
-so what it measures is the price of having a tier at all: two `fn.jit` field
-reads on every frame entry, and nothing in return. That is the honest reading of
-−2%, and the fix for it is coverage of exactly those functions rather than
-anything to do with the tier's overhead.
+NavierStokes makes **2,826 frame entries in the whole benchmark** — its time is
+inside a handful of enormous loops rather than spread over calls — so its share
+of entries in compiled code says nothing, and −2.4% is close to what the tiering
+check costs on a benchmark it cannot help. What it has left is element *writes*.
+Crypto's remaining blocker is `stack-across-blocks` at 313,372 entries across
+eleven functions, all of them fully unblocking.
+
+Getting here took, in this order: `CALL`; `GET_FIELD2` and `CALL_METHOD`
+together, because `o.m()` is that pair; inherited slots in the property probe,
+without which the previous item was a 9% loss; the cached store reaching the
+helper, without which EarleyBoyer was an 18% loss; and `GET_ELEM`, which took
+DeltaBlue from +19% to +24% and Richards from +8% to +15%. Static coverage went
+from 919 functions to 2,006 of 6,976 along the way, but the two changes that
+mattered most — inherited slots and the cached store — added no coverage at all.
 
 ### EarleyBoyer: 18.75 million stores at a 0.8% hit rate
 
