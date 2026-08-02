@@ -339,10 +339,10 @@ a 99.998% score: the suite is a floor, not a proof.
 
 ## Running it
 
-`GOANT_JIT=1` turns the tier on. It is off by default: it is measured at level
-with the interpreter on Octane, so it cannot yet pay for itself on a mixed
-workload, and an execution path that is not the default is one to justify rather
-than assume.
+`GOANT_JIT=1` turns the tier on, and `GOANT_JIT=0` turns it off — which it did
+not always do, see the correction below. It is off by default while its coverage
+of a mixed workload is still narrow; on Octane it is now measured at +16.9% on
+DeltaBlue and +8.6% on Richards.
 
 A function is compiled after eight entries. The threshold is low because
 compiling is cheap here — two dataflow passes and straight-line templates, no
@@ -830,48 +830,51 @@ exactly nothing, this is the first change to move an Octane score past the noise
 floor — and it is not the coverage that did it. The coverage came first and cost
 9%; what turned it into a gain was serving the reads that coverage exposed.
 
-## What the tier is worth on Octane: nothing yet
+## What the tier is worth on Octane
+
+### First, a correction: every table below this line used to be wrong
+
+`jitEnabled` was `os.Getenv("GOANT_JIT") != ""`, so `GOANT_JIT=0` — which is what
+every control arm in every differential set — turned the tier **on**. For several
+sessions this document reported "Octane is unchanged with the tier on" from two
+identical arms. It was not measuring the tier against the interpreter; it was
+measuring the tier against itself, and the differences it recorded were noise,
+correctly reported as noise, from a comparison that could not have shown anything
+else.
+
+What survives that is every comparison of two *builds*, because those differ in
+the binary rather than in the flag and both arms were on throughout. The
+attribution runs are all of that kind, including the one that credits the call
+work below.
+
+`envOn` now reads the value. The lesson is the same one this document keeps
+finding: **a control arm has to be checked, not assumed.** The check that would
+have caught it is one line — run the control and confirm it compiled nothing —
+and `GOANT_JIT_STATS=1` had been printing exactly that all along.
+
+### What the tier is actually worth
 
 `GOANT_JIT_STATS=1` counts frame entries by where they ran. Scores are
 higher-is-better; the two arms are interleaved per benchmark so drift cannot
-favour either. Two runs of each arm, alternating, on the benchmark VM, with
-everything in this document in:
+favour either. Two runs of each arm on the benchmark VM, with the control arm
+verified to compile nothing:
 
-| | on | off | on | off |
-| --- | --- | --- | --- | --- |
-| Richards | 227 | 227 | 227 | 214 |
-| **DeltaBlue** | **263** | **263** | **263** | **263** |
-| Crypto | 252 | 253 | 253 | 252 |
-| RayTrace | 404 | 400 | 403 | 403 |
-| NavierStokes | 453 | 454 | 452 | 453 |
-| Splay | 1927 | 1907 | 2079 | 1933 |
-| RegExp | 147 | 147 | 147 | 147 |
-| EarleyBoyer | 511 | 512 | 511 | 511 |
+| | off | on | off | on | |
+| --- | --- | --- | --- | --- | --- |
+| **DeltaBlue** | 255 | **298** | 255 | **298** | **+16.9%** |
+| **Richards** | 226 | **246** | 226 | **244** | **+8.6%** |
 
-**DeltaBlue is the whole result.** 263 in all four columns — and 22.4% of its
-frame entries are executing as machine code. A quarter of the frames in that
-benchmark went from the interpreter to compiled code and the score did not move
-by one point in either direction.
+Both arms are steady to the point — 255/255 and 226/226 against 298/298 and
+246/244 — so these are results rather than drift. DeltaBlue runs 59.1% of its
+frame entries as machine code and Richards 32.7%.
 
-That is a much sharper statement than "the tier does not help yet", and it says
-something the coverage numbers cannot: **compiled code is running at almost
-exactly interpreter speed on the work DeltaBlue does.** Not slower, which the
-frame-entry allocation and the one-way probe used to make it. Not faster either.
-The property probe is about thirty instructions and the interpreter's path to the
-same answer is a Go call chain that costs about the same, so moving a frame
-between them buys nothing.
-
-Richards agrees at 5.0% of frame entries, RegExp is identical because none of it
-compiles, and the rest are within the drift below.
-
-**How much of a difference this table can see.** DeltaBlue's *interpreter* arm —
-the one nothing in this document touches — read 249–250 in one session, 260–266
-in the next and 263 in this one; EarleyBoyer's read 623 and then 511. That is 4%
-to 18% of run-to-run drift, so only the two arms of a single interleaved run are
-comparable to each other, and a 1–2% difference between them is at the noise
-floor rather than above it. Every "unchanged" here means "not distinguishable
-from unchanged". DeltaBlue's four identical columns are the exception and are
-worth the most, because they are four measurements of the same thing that agree.
+**How much of a difference this table can see.** DeltaBlue's score has read
+249–250 in one session, 260–266 in the next and 255 in this one, all from builds
+that should have measured the same; EarleyBoyer's read 623 and then 511. That is
+4% to 18% of run-to-run drift, so only the two arms of a single interleaved run
+are comparable to each other, and a 1–2% difference between them is at the noise
+floor rather than above it. The +16.9% above is well clear of it, and its two
+pairs agree to the point.
 
 ### Why: entering a frame costs more than a small method does
 
@@ -915,23 +918,23 @@ the call site rather than at the frame.
 
 ### What that changes about the plan
 
-Coverage was the bottleneck and is no longer the only one. The list above still
-matters — `stack-across-blocks` is 1.6M frame entries in two DeltaBlue functions
-— but reaching 40% or 60% of frame entries by the same route would, on this
-evidence, produce the same 263.
-
-What has to come down is the cost *per operation*, and the measurement for that
-already exists: a call between two compiled functions is **1.15 ns against 4.69
-ns** for the exit-and-re-enter detour, and 70 ns of interpreted frame setup
-disappears with it. Every compiled function today is an island — it is entered
-from the interpreter, and every call it makes goes back out. DeltaBlue's 22.4%
-is 1.55 million frames that each pay full entry and exit for work that is
-otherwise interpreter-speed.
-
 The hope early on was that a numeric compiler would miss many functions but catch
-the ones that run in loops. It was the other way round, and the fix for that —
-methods, stores, globals, fields past the fourth — is now in. The next thing is
-not another opcode. It is making a compiled function cheap to *call*.
+the ones that run in loops. It was the other way round: the functions Octane
+spends its time in allocate, dispatch over a class hierarchy and call each other,
+and the tier refused all of them. The fix for that — methods, stores, globals,
+fields past the fourth, calls, and the inherited slot a method lives in — is what
+this session put in, and it is what the +16.9% is.
+
+It also shows what "coverage" is worth on its own, which is nothing and sometimes
+less. Compiling the method call took DeltaBlue from 22.4% of frame entries to
+59.1% and made it **9% slower**, because the newly compiled sites paid a helper
+round trip for reads the interpreter's cache had been serving. Coverage is only a
+gain once the thing it exposes is served.
+
+Still true, and still the next thing: a call between two compiled functions is
+**1.15 ns against 4.69 ns** for the exit-and-re-enter detour, and ~100 ns of
+interpreted frame entry disappears with it. Every compiled function is still an
+island — entered from the interpreter, and every call it makes goes back out.
 
 ## Can this reach ant's speed in Go?
 
