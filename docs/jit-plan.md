@@ -328,6 +328,41 @@ inlinable. Crypto measures 255 against 256, which is to say no cost at all.
 test262 does not cover the range that was wrong, which is worth remembering about
 a 99.998% score: the suite is a floor, not a proof.
 
+## Running it
+
+`GOANT_JIT=1` turns the tier on. It is off by default: at 4.3% coverage it cannot
+pay for itself on a mixed workload, and an execution path that is not the default
+is one to justify rather than assume.
+
+A function is compiled after eight entries. The threshold is low because
+compiling is cheap here — two dataflow passes and straight-line templates, no
+register allocation to speak of — and a refusal is remembered, so the cost of
+trying and failing is paid once. Compiled code is never released: it has to
+outlive every entry into it, and nothing at this level can prove those have
+ended.
+
+On the workload the tier exists for, a script through the CLI rather than a
+microbenchmark:
+
+```js
+function work(n, m) { var s = 0, i = 0; while (i < n) { s = s + i*m; i = i + 1; } return s; }
+for (var k = 0; k < 3000; k++) r += work(1000, 1.5);
+```
+
+| | |
+| --- | --- |
+| goant, interpreted | 231 ms |
+| goant, compiled | **9 ms** |
+| node | 4 ms |
+
+All three agree on the checksum. Roughly 25x over the interpreter, and about 2x
+off node — on the friendliest possible shape, with no property access or calls in
+the hot loop, which is exactly the shape this tier is for. It is still the number
+that matters: it says the ceiling here is set by how much of the language the
+compiler covers, not by the value representation. `lucasdss/v8go` reached 1.7x
+with a whole optimising tier because 48-byte values capped it. Nothing caps this
+one in the same way.
+
 ## Still to do
 
 In the order the table argues for:

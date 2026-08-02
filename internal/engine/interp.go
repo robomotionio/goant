@@ -396,6 +396,15 @@ restart:
 		varObj = rt.newObject(mknull())
 		withStack = append(withStack, varObj)
 	}
+	// The compiled tier, if this function has earned one. It returns only when
+	// it produced the answer; anything else falls through to the interpreter
+	// below, which is what makes declining free.
+	if jitEnabled {
+		if v, ok := jitTry(fn, locals); ok {
+			return v, nil
+		}
+	}
+
 	ip = fn.startIP
 
 	for {

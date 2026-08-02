@@ -35,6 +35,12 @@ type svFunc struct {
 	filename string
 	source   string
 
+	// jit is this function's tiering state: how often it has been entered, and
+	// the compiled form once there is one. Compiled code is never released — a
+	// function that got hot stays hot, and the block has to outlive every entry
+	// into it, which nothing here can prove has ended.
+	jit jitAttempt
+
 	maxLocals  int
 	maxStack   int
 	paramCount int // positional parameter slots (used by frame init)
