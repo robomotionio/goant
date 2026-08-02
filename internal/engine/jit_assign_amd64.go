@@ -321,10 +321,24 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
-				case OpCall:
-					// The callee and its arguments, none of them demanded: what
-					// a call does with a value is the callee's business.
-					for i := int(readU16(code, ip+1)); i >= 0; i-- {
+				case OpGetField2:
+					// obj -> obj val: the receiver stays, keeping whatever
+					// origin it had.
+					o, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					push(o)
+					push(noOrigin)
+				case OpCall, OpCallMethod:
+					// The callee, its arguments and — for a method call — the
+					// receiver, none of them demanded: what a call does with a
+					// value is the callee's business.
+					n := int(readU16(code, ip+1)) + 1
+					if op == OpCallMethod {
+						n++
+					}
+					for i := 0; i < n; i++ {
 						if _, ok := pop(); !ok {
 							return nil, false
 						}
@@ -553,10 +567,23 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bo
 				case OpGetGlobal:
 					// A global holds anything at all.
 					push(false)
-				case OpCall:
-					// Callee and arguments in, one result out, and a call can
-					// return anything.
-					for i := int(readU16(code, ip+1)); i >= 0; i-- {
+				case OpGetField2:
+					// obj -> obj val: the receiver stays as it was, and a field
+					// is not a Number as far as this tier can tell.
+					k, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					push(k)
+					push(false)
+				case OpCall, OpCallMethod:
+					// Callee, arguments and receiver in, one result out, and a
+					// call can return anything.
+					n := int(readU16(code, ip+1)) + 1
+					if op == OpCallMethod {
+						n++
+					}
+					for i := 0; i < n; i++ {
 						if _, ok := pop(); !ok {
 							return nil, false
 						}

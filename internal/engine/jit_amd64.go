@@ -641,6 +641,68 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			kind[sp-1] = false
 			ip += 7
 
+		case OpGetField2:
+			// `obj -> obj val`: the same probe as GET_FIELD, but the receiver
+			// stays for the CALL_METHOD that follows. This is what `o.m()`
+			// compiles to, and between them the pair is 2.83M interpreted frame
+			// entries in DeltaBlue and 1.87M in Richards.
+			//
+			// The probe writes its answer over the register it was given, so the
+			// receiver is copied up first and the copy is what gets probed. That
+			// also leaves the slow path holding the receiver where the helper
+			// wants it, which is why this can reuse GET_FIELD's helper unchanged.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			idx := readU32(code, ip+1)
+			if int(idx) >= len(fn.constNames) || idx > 0x7FFFFFFF {
+				return refuse(why, "shape")
+			}
+			if isPrivateKey(fn.constNames[idx]) {
+				return refuse(why, "private-name")
+			}
+			icx := int(readU16(code, ip+5))
+			dst := jitStackRegs[sp]
+			a.MovRegReg(dst, jitStackRegs[sp-1])
+			slow := a.NewLabel()
+			done := a.NewLabel()
+			if icx != icNoSlot && icx < len(ics) && sp+jitICGlobalSpareRegs <= len(jitStackRegs) {
+				jitEmitICGet(a, dst, jitStackRegs[sp+1], jitStackRegs[sp+2],
+					jitICWayAddr(ics, icx), jitEpochAddr(), jitICHitAddr(), slow, done)
+			}
+			a.Bind(slow)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+16, dst)
+			a.MovRegImm64(jitRegScratch, uint64(idx)|uint64(uint32(icx))<<32)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperGetField, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
+			a.Bind(done)
+			kind[sp] = false
+			sp++
+			ip += 7
+
+		case OpCallMethod:
+			// CALL with a receiver: [this, callee, arg0 .. argN-1].
+			argc := int(readU16(code, ip+1))
+			if argc < 0 || sp < argc+2 {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(uint32(argc)))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperCallMethod, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			dst := jitStackRegs[sp-argc-2]
+			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-argc-2] = false
+			sp -= argc + 1
+			ip += 3
+
 		case OpCall:
 			// The operands are already where the helper wants them. A call site
 			// holds [callee, arg0 .. argN-1] on the operand stack, spilling
@@ -918,8 +980,8 @@ func jitHasTemplate(op Opcode) bool {
 		OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr, OpBnot,
 		OpNeg, OpInc, OpDec, OpNot,
 		OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
-		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpPutField, OpGetGlobal,
-		OpCall, OpReturn, OpReturnUndef, OpThis:
+		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpGetField2, OpPutField,
+		OpGetGlobal, OpCall, OpCallMethod, OpReturn, OpReturnUndef, OpThis:
 		return true
 	}
 	return false
@@ -1076,6 +1138,7 @@ const (
 	jitHelperGetGlobal  = 7
 	jitHelperDeadZone   = 8
 	jitHelperCall       = 9
+	jitHelperCallMethod = 10
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1273,8 +1336,10 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		}
 		ctx.Ret = uint64(v)
 		return nil
-	case jitHelperCall:
-		// The interpreter's CALL, reading its operands out of the spill area.
+	case jitHelperCall, jitHelperCallMethod:
+		// The interpreter's CALL and CALL_METHOD, reading their operands out of
+		// the spill area. The two differ only in whether a receiver sits below
+		// the callee.
 		//
 		// The arguments are copied into a slice of their own rather than handed
 		// over as a window onto Spill. A sloppy callee's mapped `arguments`
@@ -1282,17 +1347,26 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		// not be this frame's operand stack. The interpreter allocates the same
 		// slice for the same reason, so this is parity rather than a cost.
 		argc := int(uint32(ctx.Args[3]))
+		depth := argc + 1
+		if ctx.Helper == jitHelperCallMethod {
+			depth++
+		}
 		n := int(ctx.SpillN)
-		if argc < 0 || n < argc+1 {
+		if argc < 0 || n < depth {
 			return rt.typeError("JIT operand stack")
 		}
-		base := n - argc - 1
+		base := n - depth
+		thisArg := mkundef()
+		if ctx.Helper == jitHelperCallMethod {
+			thisArg = Value(ctx.Spill[base])
+			base++
+		}
 		callee := Value(ctx.Spill[base])
 		args := make([]Value, argc)
 		for i := 0; i < argc; i++ {
 			args[i] = Value(ctx.Spill[base+1+i])
 		}
-		v, e := rt.callValue(callee, mkundef(), args)
+		v, e := rt.callValue(callee, thisArg, args)
 		if e != nil {
 			return e
 		}

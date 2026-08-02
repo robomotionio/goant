@@ -112,17 +112,66 @@ func TestJITCallAgreesWithTheInterpreter(t *testing.T) {
 	}
 }
 
+// TestJITMethodCallAgreesWithTheInterpreter is the pair that `o.m()` compiles
+// to: GET_FIELD2, which leaves the receiver behind for CALL_METHOD to bind as
+// `this`. Neither is worth anything without the other, which is why the weighted
+// diagnostic scored GET_FIELD2 at zero for as long as CALL_METHOD was refused.
+func TestJITMethodCallAgreesWithTheInterpreter(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"a-method-on-the-prototype", `
+			function P(v) { this.v = v; }
+			P.prototype.get = function () { return this.v; };
+			P.prototype.twice = function () { return this.get() + this.get(); };
+			var p = new P(21), s = 0;
+			for (var k = 0; k < 200; k++) s += p.twice();
+			s;`},
+		{"an-own-method-with-arguments", `
+			var o = { n: 3, scale: function (a, b) { return this.n * a + b; } };
+			function f(x) { return o.scale(x, x + 1); }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
+		{"the-receiver-is-bound", `
+			var o = { n: 5, who: function () { return this === o ? this.n : -1; } };
+			function f() { return o.who(); }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(); s;`},
+		{"a-builtin-method", `
+			function f(a) { return a.toFixed(2); }
+			var s = ""; for (var k = 0; k < 200; k++) s = f(k + 0.5); s;`},
+		{"the-method-is-missing", `
+			var o = { n: 1 };
+			function f() { return o.nope(); }
+			var c = 0; for (var k = 0; k < 200; k++) { try { f(); } catch (e) { c++; } } c;`},
+		{"a-getter-returning-the-method", `
+			var calls = 0;
+			var o = { n: 4, get m() { calls++; return function () { return this.n; }; } };
+			function f() { return o.m(); }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(); s * 1000 + calls;`},
+		{"chained-through-a-field", `
+			var inner = { n: 2, get2: function () { return this.n; } };
+			var outer = { inner: inner };
+			function f() { return outer.inner.get2(); }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(); s;`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
+	}
+}
+
 // TestJITCompilesAFunctionThatCalls stops the agreement above from being
 // agreement between the interpreter and itself.
 func TestJITCompilesAFunctionThatCalls(t *testing.T) {
-	const src = "function f(a){ return g(a) + 1; }"
-	_, fn := jitFnRT(t, src)
-	var why string
-	c := jitCompile(fn, &why)
-	if c == nil {
-		t.Fatalf("refused %q: %s", src, why)
+	for _, src := range []string{
+		"function f(a){ return g(a) + 1; }",
+		"function f(o,a){ return o.m(a) + 1; }",
+		"function f(o){ return o.m(); }",
+	} {
+		_, fn := jitFnRT(t, src)
+		var why string
+		c := jitCompile(fn, &why)
+		if c == nil {
+			t.Errorf("refused %q: %s", src, why)
+			continue
+		}
+		c.free()
 	}
-	c.free()
 }
 
 // TestCompiledFrameEntryKeepsTheFrameContract is the frame contract a compiled
