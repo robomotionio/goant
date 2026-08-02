@@ -57,6 +57,15 @@ var jitStraightLine = []string{
 	"function f(a,b){ return a/b/b; }",
 	"function f(a,b){ a = a*2; return a+b; }",
 	"function f(a,b){ var t = a*b; return t+t; }",
+	// Values that are not Numbers. They never reach an arithmetic instruction,
+	// so they need no guard — only somewhere to sit while they travel.
+	"function f(a,b){ }",
+	"function f(a,b){ return undefined; }",
+	"function f(a,b){ return null; }",
+	"function f(a,b){ return true; }",
+	"function f(a,b){ return false; }",
+	"function f(a,b){ var x = true; return x; }",
+	"function f(a,b){ var x = null; if (a<b) { return x; } return a+b; }",
 }
 
 // jitLoops are counted loops, so their inputs have to be values they terminate
@@ -68,6 +77,10 @@ var jitLoops = []string{
 	"function f(n,m){ var s=0, i=n; while (i>0) { s=s+m; i=i-1; } return s; }",
 	"function f(n,m){ var s=0; for (var i=0; i<n; i=i+1) { s=s+i*m; } return s; }",
 	"function f(n,m){ var s=0, i=0; while (i<=n) { s=s+m; i=i+1; } return s; }",
+	// Declared inside the loop: only the control-flow analysis can prove it
+	// assigned before it is read, which the straight-line prefix rule could not.
+	"function f(n,m){ var s=0, i=0; while (i<n) { var t=i*m; s=s+t; i=i+1; } return s; }",
+	"function f(n,m){ var s=0, i=0; while (i<n) { var t=i+1; var u=t*m; s=s+u; i=t; } return s; }",
 }
 
 var jitWildInputs = []struct{ a, b float64 }{
@@ -221,14 +234,8 @@ func TestJITRefusesWhatItCannotModel(t *testing.T) {
 		"function f(a,b){ if (a) return 1; return 2; }", // a branch
 		"function f(a,b){ return a.x; }",                // a property
 		"function f(a,b){ return 'x'; }",                // a String constant
-		"function f(a,b){ }",                            // falls off the end
 		"function f(a,b){ return a%b; }",                // modulo is not in this tier
-		// Assigned inside the loop rather than before it, so the prefix rule
-		// cannot prove it is initialised on every path that reads it. Lifting
-		// this needs a definite-assignment pass over the whole control-flow
-		// graph, not the straight-line prefix.
-		"function f(n,m){ var s=0, i=0; while (i<n) { var t=i*m; s=s+t; i=i+1; } return s; }",
-		"function f(a,b){ return -a; }", // negation is not in this tier
+		"function f(a,b){ return -a; }",                 // negation is not in this tier
 	} {
 		if c := jitCompile(jitFn(t, src), nil); c != nil {
 			c.free()

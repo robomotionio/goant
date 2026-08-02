@@ -265,55 +265,65 @@ interpreter nor the compiler produces that one.
 
 ## How much of a real corpus this compiles
 
-0.4% of it. 26 functions out of 6,976 across Octane.
+4.3% of it — 303 functions out of 6,976 across Octane. It was 0.4% before the two
+analyses below.
 
-`TestJITCoverage` reports that, and what stopped the rest:
+`TestJITCoverage` measures it two ways, because the obvious way misleads. A
+histogram of the *first* thing that stopped each function flatters whatever the
+emitter checks earliest: a body blocked by five different opcodes is charged
+entirely to one of them. The useful question is which functions are one feature
+away, so the test also collects every unsupported opcode in a body and counts
+only the bodies with exactly one:
 
-| refused because | functions |
+| implementing this alone would compile | functions |
 | --- | --- |
-| a local it could not prove assigned | 1555 |
-| `SHR` | 873 |
-| `SPECIAL_OBJ` | 832 |
-| `GET_FIELD` and `GET_FIELD2` | 979 |
-| `GET_GLOBAL` | 786 |
-| `GET_UPVAL` | 541 |
-| `CLOSURE` | 235 |
-| `RETURN_UNDEF` | 181 |
-| `UNDEF` / `TRUE` / `NULL` / `FALSE` | 460 |
+| `GET_FIELD` | 239 |
+| `CLOSURE` | 27 |
+| `GET_GLOBAL` | 10 |
+| `THROW` | 10 |
+| `SPECIAL_OBJ` | 9 |
 
-The number is small enough that wiring this tier into the interpreter would
-change nothing measurable, which settles the order of the remaining work: the
-tier has to cover far more before tiering is worth building.
+Against 6,314 that need several and would move for none of them.
 
-It also corrects a prediction. Property access looked like the obvious next
-lever — it is where Richards and DeltaBlue spend their time, and it is what
-`lucasdss/v8go` named as the fix they never made. It is not the top of this list.
-The straight-line prefix rule for definite assignment refuses more functions than
-any opcode does, and it is the cheapest of these to lift, because nothing about
-it needs new code generation.
+That last number is the important one. A baseline JIT is close to all-or-nothing:
+most functions are blocked by a handful of features at once, so coverage does not
+climb smoothly with each opcode added. It jumped from 0.4% to 4.3% only because
+the two changes below lifted whole categories rather than single instructions.
+
+**Definite assignment over the control-flow graph.** The straight-line prefix
+rule refused 1,555 functions — more than any missing opcode — because a variable
+declared inside a loop or a branch is the ordinary way to write JavaScript. The
+usual forward analysis with intersection at the meet replaces it, and needs no
+new code generation.
+
+**Values that are not Numbers.** `undefined`, `null` and the Booleans can now sit
+on the operand stack and in locals. They need no guard because they never reach
+an arithmetic instruction: a compile-time kind on each stack slot, and a
+flow-insensitive pass marking any local that ever receives a non-Number, is
+enough to refuse the arithmetic instead. This is the change everything else
+depends on — no further opcode could have been added while the tier could only
+represent Numbers.
 
 ## Still to do
 
 In the order the table argues for:
 
-1. **Definite assignment over the control-flow graph**, replacing the
-   straight-line prefix rule. A local declared inside a loop or a branch stops
-   being a refusal. No new instructions, and it is worth more than any of them.
-2. **The rest of the numeric operators** — `SHR` and the other shifts and bitwise
-   operations are ordinary integer instructions over the NaN box.
-3. **Values that are not Numbers** — `undefined`, `null`, the Booleans, and the
-   comparisons that produce them. Mostly a matter of letting tagged values live
-   on the operand stack unexamined.
-4. **Property access**, with the inline-cache guard chain emitted as machine
-   code rather than delegated. This is the one that matters for Octane's score
-   rather than its function count, and it is where the helper round trip
-   measured in phase 2 starts to be load-bearing.
-5. **Globals, upvalues and calls.** Calls are also the 70 ns of frame setup that
-   the phase 3 measurement could not touch.
-6. **Tiering** — counters, a compile threshold, and the lifecycle rules that keep
-   a code block alive exactly as long as something can enter it. Worth building
-   once the coverage justifies it, and not before.
-7. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
+1. **Property access**, with the inline-cache guard chain emitted as machine code
+   rather than delegated. The largest single lever by a wide margin, and the one
+   that matters for Octane's score rather than its function count. It is also
+   where the tier's cheap deoptimisation story runs out: a field's value is not
+   known to be a Number, so using one in arithmetic needs a guard that can fail
+   after stores have happened, which is real deoptimisation rather than a bail
+   before anything was written.
+2. **The remaining numeric operators** — `MOD`, the shifts and the bitwise
+   operations, all ordinary integer instructions over the NaN box.
+3. **Globals, upvalues, closures and calls.** Calls are also the 70 ns of frame
+   setup the phase 3 measurement could not touch.
+4. **Tiering** — counters, a compile threshold, and the lifecycle rules that keep
+   a code block alive exactly as long as something can enter it. At 4.3% this
+   would still change nothing measurable; it is worth building when the coverage
+   earns it.
+5. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
    emitter is mechanical once the amd64 shape has stopped moving.
 
 Phase 1's type feedback is not on this list because this tier guards rather than

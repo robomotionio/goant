@@ -1,0 +1,298 @@
+//go:build amd64
+
+package engine
+
+// Definite assignment.
+//
+// The tier's invariant is that every local it reads holds a Number: either a
+// parameter, checked once on entry, or a slot it assigned itself, which can only
+// have received the result of double arithmetic. What the invariant needs is a
+// way to know that a read is genuinely preceded by an assignment on *every* path
+// that reaches it, not merely on the one that reads best.
+//
+// The first version of this asked whether the assignment appeared in the
+// straight-line run before any branch. That is sound but it refused 1555 of
+// Octane's functions — more than any unimplemented opcode — because a variable
+// declared inside a loop or an if is the ordinary way to write JavaScript. This
+// replaces it with the usual forward analysis over the control-flow graph, whose
+// meet is intersection: a local is assigned at a block's entry when it is
+// assigned at the exit of every block that can precede it.
+
+// jitBlock is a basic block: a run of instructions with one entry and one exit.
+type jitBlock struct {
+	start, end int    // [start, end)
+	succ       []int  // start ip of each successor
+	gen        []bool // locals this block assigns
+	in         []bool // locals assigned on entry, on every path
+	reachable  bool
+}
+
+// jitAnalyze splits the body into basic blocks and solves definite assignment
+// over them. It returns the entry set for each block, keyed by its start ip.
+//
+// Parameters are seeded as assigned because the compiled prologue checks them,
+// and a function is refused outright if the bytecode does not decode cleanly —
+// which cannot happen with goant's compiler, but an analysis that guessed would
+// be worse than one that declined.
+func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock, bool) {
+	code := fn.code
+	nloc := fn.maxLocals
+
+	// Leaders begin a block: the entry, every branch target, and whatever
+	// follows a branch or a return.
+	leaders := map[int]bool{start: true}
+	for t := range targets {
+		if t >= start {
+			leaders[t] = true
+		}
+	}
+	for ip := start; ip < len(code); {
+		op := Opcode(code[ip])
+		size := int(opTable[op].Size)
+		if size <= 0 || ip+size > len(code) {
+			return nil, false
+		}
+		switch op {
+		case OpJmp, OpJmpFalse, OpJmpTrue, OpReturn, OpReturnUndef:
+			if ip+size < len(code) {
+				leaders[ip+size] = true
+			}
+		}
+		ip += size
+	}
+
+	// Walk once more, cutting at leaders and recording what each block assigns
+	// and where it can go.
+	blocks := map[int]*jitBlock{}
+	var cur *jitBlock
+	for ip := start; ip < len(code); {
+		if leaders[ip] {
+			if cur != nil {
+				cur.end = ip
+				if len(cur.succ) == 0 {
+					cur.succ = []int{ip} // falls through
+				}
+			}
+			cur = &jitBlock{start: ip, gen: make([]bool, nloc), in: make([]bool, nloc)}
+			blocks[ip] = cur
+		}
+		op := Opcode(code[ip])
+		size := int(opTable[op].Size)
+		switch op {
+		case OpPutLocal, OpSetLocal:
+			i := int(readU16(code, ip+1))
+			if i >= nloc {
+				return nil, false
+			}
+			cur.gen[i] = true
+		case OpJmp:
+			cur.succ = []int{int(readU32(code, ip+1))}
+		case OpJmpFalse, OpJmpTrue:
+			cur.succ = []int{int(readU32(code, ip+1)), ip + size}
+		case OpReturn, OpReturnUndef:
+			cur.succ = []int{} // nothing follows
+		}
+		ip += size
+		if cur.end == 0 && ip >= len(code) {
+			cur.end = ip
+		}
+	}
+	if cur != nil && cur.end == 0 {
+		cur.end = len(code)
+	}
+	for _, b := range blocks {
+		for _, s := range b.succ {
+			if _, ok := blocks[s]; !ok {
+				return nil, false // a branch into the middle of an instruction
+			}
+		}
+	}
+
+	// Reachability, so that a block no path arrives at cannot drag the
+	// intersection down to nothing for the blocks that follow it.
+	var mark func(int)
+	mark = func(ip int) {
+		b, ok := blocks[ip]
+		if !ok || b.reachable {
+			return
+		}
+		b.reachable = true
+		for _, s := range b.succ {
+			mark(s)
+		}
+	}
+	mark(start)
+
+	// The entry block starts with the parameters assigned; every other reachable
+	// block starts optimistic and is cut down to the intersection of what its
+	// predecessors guarantee. Optimistic initialisation is what lets a loop body
+	// keep an assignment made before the loop rather than losing it to the back
+	// edge on the first pass.
+	entry := blocks[start]
+	for i := 0; i < fn.paramCount && i < nloc; i++ {
+		entry.in[i] = true
+	}
+	for ip, b := range blocks {
+		if ip == start || !b.reachable {
+			continue
+		}
+		for i := range b.in {
+			b.in[i] = true
+		}
+	}
+
+	preds := map[int][]int{}
+	for ip, b := range blocks {
+		if !b.reachable {
+			continue
+		}
+		for _, s := range b.succ {
+			preds[s] = append(preds[s], ip)
+		}
+	}
+
+	out := func(b *jitBlock) []bool {
+		o := make([]bool, nloc)
+		for i := range o {
+			o[i] = b.in[i] || b.gen[i]
+		}
+		return o
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for ip, b := range blocks {
+			if ip == start || !b.reachable {
+				continue
+			}
+			for i := range b.in {
+				if !b.in[i] {
+					continue
+				}
+				for _, p := range preds[ip] {
+					if o := out(blocks[p]); !o[i] {
+						b.in[i] = false
+						changed = true
+						break
+					}
+				}
+			}
+		}
+	}
+	return blocks, true
+}
+
+// jitNumericLocals reports which locals only ever receive Numbers.
+//
+// The tier used to be able to assume this of every local, because the only
+// values it could produce were results of double arithmetic. Once undefined,
+// null and the Booleans can be pushed, that stops being true, and a local that
+// has held one of them must not be handed to an ADDSD.
+//
+// The analysis is flow-insensitive on purpose: a local is numeric only if every
+// store to it anywhere in the body stores a Number. That refuses a slot reused
+// for a Number in one branch and a Boolean in another, which is rare and not
+// worth a lattice per program point. It starts optimistic and shrinks, so it
+// terminates.
+//
+// It walks the same stack discipline the emitter does. The two agreeing matters,
+// so anything unexpected refuses the function rather than guessing — and since
+// the emitter refuses the same opcodes, they cannot drift apart on a function
+// either of them accepts.
+func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
+	code := fn.code
+	numeric := make([]bool, fn.maxLocals)
+	for i := range numeric {
+		numeric[i] = true
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for _, b := range blocks {
+			if !b.reachable {
+				continue
+			}
+			// Every block is entered with an empty operand stack — the emitter
+			// requires it — so each can be walked on its own.
+			var kinds []bool
+			push := func(k bool) { kinds = append(kinds, k) }
+			pop := func() (bool, bool) {
+				if len(kinds) == 0 {
+					return false, false
+				}
+				k := kinds[len(kinds)-1]
+				kinds = kinds[:len(kinds)-1]
+				return k, true
+			}
+			for ip := b.start; ip < b.end; {
+				op := Opcode(code[ip])
+				size := int(opTable[op].Size)
+				if size <= 0 || ip+size > len(code) {
+					return nil, false
+				}
+				switch op {
+				case OpConstI8:
+					push(true)
+				case OpConst:
+					idx := readU32(code, ip+1)
+					if int(idx) >= len(fn.constants) {
+						return nil, false
+					}
+					push(fn.constants[idx].IsNumber())
+				case OpUndef, OpNull, OpTrue, OpFalse:
+					push(false)
+				case OpThis:
+					push(false)
+				case OpGetLocal:
+					i := int(readU16(code, ip+1))
+					if i >= fn.maxLocals {
+						return nil, false
+					}
+					push(numeric[i])
+				case OpPutLocal, OpSetLocal:
+					i := int(readU16(code, ip+1))
+					if i >= fn.maxLocals {
+						return nil, false
+					}
+					k, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					if !k && numeric[i] {
+						numeric[i] = false
+						changed = true
+					}
+					if op == OpSetLocal {
+						push(k) // SET_LOCAL leaves the value behind
+					}
+				case OpAdd, OpSub, OpMul, OpDiv:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(true) // double arithmetic yields a Number
+				case OpLt, OpLe, OpGt, OpGe:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(false) // a Boolean
+				case OpPop, OpJmpFalse, OpJmpTrue, OpReturn:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+				case OpJmp, OpReturnUndef:
+					// no stack effect
+				default:
+					return nil, false
+				}
+				ip += size
+			}
+		}
+	}
+	return numeric, true
+}

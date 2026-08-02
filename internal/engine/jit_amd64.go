@@ -105,13 +105,24 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	}
 	start := ip
 
+	// Check for an opcode with no template before anything else, so that the
+	// refusal names it. The analyses below decline the same functions, but they
+	// decline them as "undecodable", which says nothing about what to build next.
+	if bad, ok := jitUnsupported(fn, start); !ok {
+		return refuse(why, "op:"+bad)
+	}
+
 	targets, ok := jitScanTargets(fn, start)
 	if !ok {
 		return nil
 	}
-	assigned, ok := jitPrefixAssigned(fn, start, targets)
+	blocks, ok := jitAnalyze(fn, start, targets)
 	if !ok {
-		return nil
+		return refuse(why, "undecodable")
+	}
+	numeric, ok := jitNumericLocals(fn, blocks)
+	if !ok {
+		return refuse(why, "undecodable")
 	}
 
 	a := jitasm.NewAsm()
@@ -134,13 +145,26 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		a.MovRegMem(jitasm.RAX, jitRegLocals, int32(i)*8)
 		a.CmpRegReg(jitasm.RAX, jitRegGuard)
 		a.Jcc(jitasm.CondA, bail)
-		assigned[i] = true
 	}
 
 	sp := 0
 	returned := false
+	// cur tracks which locals are known assigned at this point. It is seeded
+	// from the block's entry set and advanced by the stores within the block, so
+	// a read is checked against what holds where it actually is rather than
+	// against a whole-function summary.
+	cur := make([]bool, fn.maxLocals)
+	copy(cur, blocks[start].in)
+	// kind[i] records whether operand-stack slot i is known to hold a Number.
+	// Arithmetic needs that guarantee; storing and returning do not, which is
+	// what lets undefined, null and the Booleans travel through compiled code
+	// without any of it having to guard.
+	kind := make([]bool, len(jitStackRegs)+1)
 
 	for ip < len(code) {
+		if b, isLeader := blocks[ip]; isLeader {
+			copy(cur, b.in)
+		}
 		if l, isTarget := labels[ip]; isTarget {
 			// Every branch target is reached with an empty operand stack in the
 			// code goant's compiler emits. Requiring it rather than tracking a
@@ -163,8 +187,32 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegImm64(jitStackRegs[sp], uint64(tov(float64(int8(code[ip+1])))))
+			kind[sp] = true
 			sp++
 			ip += 2
+
+		case OpUndef, OpNull, OpTrue, OpFalse:
+			// Immediates with no heap reference, so nothing has to stay alive
+			// for the code to remain valid. A String or object constant would,
+			// which is why OpConst still refuses one.
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			var v Value
+			switch op {
+			case OpUndef:
+				v = mkundef()
+			case OpNull:
+				v = mknull()
+			case OpTrue:
+				v = mkbool(true)
+			default:
+				v = mkbool(false)
+			}
+			a.MovRegImm64(jitStackRegs[sp], uint64(v))
+			kind[sp] = false
+			sp++
+			ip++
 
 		case OpConst:
 			idx := readU32(code, ip+1)
@@ -178,24 +226,35 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				return refuse(why, "non-numeric-constant")
 			}
 			a.MovRegImm64(jitStackRegs[sp], uint64(c))
+			kind[sp] = true
 			sp++
 			ip += 5
 
 		case OpGetLocal:
 			i := int(readU16(code, ip+1))
-			if i >= fn.maxLocals || sp >= len(jitStackRegs) || !assigned[i] {
+			if i >= fn.maxLocals || sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			if !cur[i] {
+				// Not assigned on every path that reaches here, so the slot may
+				// hold undefined, or a binding still in its dead zone. Either
+				// way the interpreter is the one that knows what to do.
 				return refuse(why, "local-not-assigned")
 			}
 			a.MovRegMem(jitStackRegs[sp], jitRegLocals, int32(i)*8)
+			kind[sp] = numeric[i]
 			sp++
 			ip += 3
 
 		case OpPutLocal, OpSetLocal:
 			i := int(readU16(code, ip+1))
-			if i >= fn.maxLocals || sp < 1 || !assigned[i] {
-				return refuse(why, "local-not-assigned")
+			if i >= fn.maxLocals || sp < 1 {
+				return refuse(why, "stack-underflow")
 			}
 			a.MovMemReg(jitRegLocals, int32(i)*8, jitStackRegs[sp-1])
+			// Everything this tier can put on the operand stack is a Number, so
+			// storing one is what makes the slot readable from here on.
+			cur[i] = true
 			if op == OpPutLocal {
 				sp-- // PUT_LOCAL consumes the value; SET_LOCAL leaves it
 			}
@@ -210,7 +269,13 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 
 		case OpAdd, OpSub, OpMul, OpDiv:
 			if sp < 2 {
-				return nil
+				return refuse(why, "stack-underflow")
+			}
+			if !kind[sp-1] || !kind[sp-2] {
+				// An operand may not be a Number, and the generic operators are
+				// the next tier's problem: `+` on a String concatenates, and on
+				// an object calls valueOf.
+				return refuse(why, "non-numeric-operand")
 			}
 			x, y := jitStackRegs[sp-2], jitStackRegs[sp-1]
 			a.MovqXReg(jitasm.X0, x)
@@ -227,6 +292,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovqRegX(x, jitasm.X0)
 			jitCanonicalizeNaN(a, x)
+			kind[sp-2] = true
 			sp--
 			ip++
 
@@ -236,7 +302,10 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			// consumes it as a branch, so the Boolean never exists.
 			next := ip + 1
 			if next >= len(code) || sp < 2 {
-				return nil
+				return refuse(why, "shape")
+			}
+			if !kind[sp-1] || !kind[sp-2] {
+				return refuse(why, "non-numeric-operand")
 			}
 			nop := Opcode(code[next])
 			if nop != OpJmpFalse && nop != OpJmpTrue {
@@ -277,6 +346,18 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				a.Jmp(l)
 			}
 			ip += 5
+
+		case OpReturnUndef:
+			if sp != 0 {
+				return refuse(why, "return-stack")
+			}
+			a.MovRegImm64(jitasm.RAX, uint64(mkundef()))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffRet, jitasm.RAX)
+			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitReturn))
+			a.MovRegImm64(jitasm.RAX, jitmem.ExitReturn)
+			a.Ret()
+			returned = true
+			ip++
 
 		case OpReturn:
 			if sp != 1 {
@@ -342,6 +423,31 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	return &jitCode{block: block, entry: block.Addr()}
 }
 
+// jitUnsupported reports the first opcode in the body that this tier has no
+// template for.
+func jitUnsupported(fn *svFunc, start int) (string, bool) {
+	code := fn.code
+	for ip := start; ip < len(code); {
+		op := Opcode(code[ip])
+		size := int(opTable[op].Size)
+		if size <= 0 || ip+size > len(code) {
+			return "undecodable", false
+		}
+		switch op {
+		case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse,
+			OpGetLocal, OpPutLocal, OpSetLocal, OpPop,
+			OpAdd, OpSub, OpMul, OpDiv,
+			OpLt, OpLe, OpGt, OpGe,
+			OpJmp, OpJmpFalse, OpJmpTrue,
+			OpReturn, OpReturnUndef, OpThis:
+		default:
+			return opTable[op].Name, false
+		}
+		ip += size
+	}
+	return "", true
+}
+
 // jitScanTargets collects every branch target, which the emitter needs before it
 // starts so that a forward branch has a label to name.
 //
@@ -371,41 +477,6 @@ func jitScanTargets(fn *svFunc, start int) (map[int]bool, bool) {
 		}
 	}
 	return targets, true
-}
-
-// jitPrefixAssigned reports which locals are certainly assigned by the time any
-// branch can be taken.
-//
-// Only the straight-line run from the start of the body to the first jump or the
-// first branch target counts, because that run always executes. A local assigned
-// only inside a branch is not in the set, and reading one refuses the function
-// rather than reading whatever the slot happened to hold — which for a `var` not
-// yet reached is undefined, and for a `let` is a value that should have thrown.
-func jitPrefixAssigned(fn *svFunc, start int, targets map[int]bool) ([]bool, bool) {
-	code := fn.code
-	assigned := make([]bool, fn.maxLocals)
-	for ip := start; ip < len(code); {
-		if targets[ip] {
-			return assigned, true
-		}
-		op := Opcode(code[ip])
-		size := int(opTable[op].Size)
-		if size <= 0 || ip+size > len(code) {
-			return nil, false
-		}
-		switch op {
-		case OpJmp, OpJmpFalse, OpJmpTrue:
-			return assigned, true
-		case OpPutLocal, OpSetLocal:
-			i := int(readU16(code, ip+1))
-			if i >= fn.maxLocals {
-				return nil, false
-			}
-			assigned[i] = true
-		}
-		ip += size
-	}
-	return assigned, true
 }
 
 // jitCompareBranch emits the branch for a fused compare.
