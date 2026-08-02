@@ -148,6 +148,15 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if !ok {
 		return refuse(why, "stack-across-blocks")
 	}
+	if fn.jit.unchecked {
+		// This function has turned its arguments away often enough to stop
+		// betting on them. Demanding nothing means the prologue accepts every
+		// frame; the arithmetic that would have relied on a checked parameter
+		// emits its guard instead, which is what the generic operators are for.
+		for i := range demand {
+			demand[i] = false
+		}
+	}
 	numeric, ok := jitNumericLocals(fn, blocks, demand)
 	if !ok {
 		return refuse(why, "stack-across-blocks")

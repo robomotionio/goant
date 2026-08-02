@@ -103,6 +103,54 @@ func TestTieringCompilesSomething(t *testing.T) {
 	}
 }
 
+// TestJITStopsCheckingParametersItKeepsTurningAway is the decline backoff.
+//
+// The prologue's parameter check is a bet that the caller passes Numbers, and it
+// is worth making — a checked parameter needs neither a type guard nor a call
+// out. What was missing is the other side: a function whose callers pass objects
+// used to enter compiled code, refuse, and hand the frame back, for every call
+// for the life of the program. Richards did that 195,342 times against 639
+// entries that ran.
+func TestJITStopsCheckingParametersItKeepsTurningAway(t *testing.T) {
+	saved := jitEnabled
+	jitEnabled = true
+	defer func() { jitEnabled = saved }()
+
+	rt := New()
+	// Arithmetic on the parameter, so the prologue demands it, and a caller that
+	// passes a String every time — which the interpreter turns into a number and
+	// the prologue turns away.
+	const src = `function w(a){ return a * 2 + 1; }
+	             var r = 0; for (var k = 0; k < 400; k++) r += w("3"); w;`
+	v, err := rt.RunString("decline.js", src)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	o := rt.objPtr(v)
+	if o == nil || o.clPtr == nil || o.clPtr.fn == nil {
+		t.Fatal("the script's last expression was not a closure")
+	}
+	fn := o.clPtr.fn
+	if fn.jit.code == nil {
+		t.Fatal("w was never compiled, so this proves nothing about declining")
+	}
+	if !fn.jit.unchecked {
+		t.Errorf("w declined %d times and still checks its parameters", fn.jit.declines)
+	}
+	// And it must still be right: the rebuilt code accepts the String and the
+	// generic multiply produces the same 7 the interpreter does.
+	jitEnabled = false
+	want, _ := New().RunString("decline.js", src[:len(src)-3]+"r;")
+	jitEnabled = true
+	got, err := rt.RunString("check.js", "r;")
+	if err != nil {
+		t.Fatalf("reading back: %v", err)
+	}
+	if uint64(got) != uint64(want) {
+		t.Errorf("compiled %v, interpreted %v", got, want)
+	}
+}
+
 // TestJITFrameEntryDoesNotAllocate guards the cost of entering compiled code.
 //
 // The context compiled code shares with the runtime is 160 bytes, and building

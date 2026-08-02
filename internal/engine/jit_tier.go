@@ -110,6 +110,46 @@ type jitAttempt struct {
 	why     uint32
 	sole    uint32
 	entries uint32
+	// declines counts entries the prologue's parameter check turned away, and
+	// unchecked records that it has stopped making that check. See
+	// jitNoteDecline.
+	declines  int32
+	unchecked bool
+}
+
+// jitDeclineLimit is how many times a compiled function may turn its arguments
+// away before it is rebuilt without the parameter check.
+//
+// The check is a bet that the caller passes Numbers, and the bet is worth making
+// — a checked parameter needs neither a type guard nor a call out, which is most
+// of what a numeric kernel gains. What changed is that losing it used to be
+// invisible: the functions that lose it are methods, and methods did not compile
+// at all until the receiver reached compiled code. Richards then declined 195,342
+// entries against 639 that ran.
+const jitDeclineLimit = 32
+
+// jitNoteDecline records that compiled code turned its arguments away, and
+// rebuilds the function without the parameter check once that has happened often
+// enough to stop being an accident.
+//
+// Rebuilding is sound at any moment because a decline happens before compiled
+// code has written anything. The old code is deliberately *not* freed: a
+// recursive function can have an outer frame suspended inside the very block
+// being replaced, and its resume address has to stay mapped. One orphaned block
+// per function that ever recompiles is a bounded cost; an unmapped resume
+// address is not a cost, it is a crash.
+func jitNoteDecline(fn *svFunc) {
+	if fn.jit.unchecked {
+		return
+	}
+	fn.jit.declines++
+	if fn.jit.declines < jitDeclineLimit {
+		return
+	}
+	fn.jit.unchecked = true
+	if c := jitCompile(fn, nil); c != nil {
+		fn.jit.code = c
+	}
 }
 
 // jitTryLoop moves a loop that is already running into compiled code.
@@ -176,6 +216,9 @@ func jitTry(rt *Runtime, fn *svFunc, locals []Value, this Value) (Value, *ThrowE
 			} else {
 				jitStats.declined++
 			}
+		}
+		if !ok {
+			jitNoteDecline(fn)
 		}
 		return v, e, ok
 	}

@@ -715,6 +715,46 @@ the same name and lives in a declarative record that no shape describes. It does
 not need checking here — registering one bumps the cache epoch, which the probe
 already tests.
 
+## The receiver, and the first thing that moved
+
+`this` was the last piece of a frame compiled code could not see. It was handed a
+locals slice, and the prologue that binds `this` writes a slot from a value that
+is not in it, so the emitter stepped over that prologue and refused every read of
+the slot — which is to say it refused every method and every constructor.
+
+The fix is one field in the context, beside the pool and the runtime, and `THIS`
+becomes a template like any other. Unlike everything else in the context it holds
+a Value, so the collector traces it: a getter is JavaScript and can run a
+collection while the frame is suspended in a helper, with the receiver reachable
+from nowhere the collector's walk descends into.
+
+It is the first change in this tier to move the share of frame entries that land
+in compiled code by more than a rounding error:
+
+| | before | after |
+| --- | --- | --- |
+| DeltaBlue, compiled frame entries | 2.1% | **22.4%** |
+| static coverage, Octane | 521 | **919** of 6,976 |
+
+DeltaBlue's compiled code now executes 3.96M property reads at a 72% hit rate,
+173k stores at 89%, and 258k global reads at 100% — against 283,096 reads and
+nothing else two changes ago.
+
+### How it was found, which is the part worth keeping
+
+Not from the histogram. `this` never appears in one, because it is not an opcode
+the emitter lacks a template for — it was a rule the emitter relied on without
+ever writing down. The prologue skip was documented as sound *because* an
+unproven read refused the function, so relaxing `local-not-assigned` silently
+removed a second rule that had been riding on the first. `this.x = 1` in a
+compiled constructor started reading the undefined the frame was filled with, and
+what caught it was Richards, not a test.
+
+The weighted diagnostic then named it in one line — `this-local`, 1.10M entries
+in richards and 1.99M in deltablue, in exactly the eleven functions per benchmark
+that had been charged to definite assignment. Those functions were never blocked
+by definite assignment at all.
+
 ## What the tier is worth on Octane: nothing yet
 
 `GOANT_JIT_STATS=1` counts frame entries by where they ran. Static coverage —
@@ -810,19 +850,21 @@ static histogram is still worth reading — 521 of 6,976 functions compile, and
 refusals — but the entry-weighted table above is what decides what to build. It
 has disagreed with the corpus count every time they have been compared.
 
-1. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
+1. **The declines.** Richards now enters compiled code 195,342 times and turns
+   the arguments away at the prologue's parameter check, against 639 entries that
+   run. The check is a bet that the caller passes Numbers, and the generic
+   operators mean it is no longer a bet that has to be made — arithmetic on an
+   unchecked parameter guards instead of refusing. Recompiling with the demand
+   set suppressed after a function has declined enough times costs one extra
+   compare per operand in the functions that need it and nothing anywhere else.
+   Invisible until this week, because those functions did not compile at all.
+2. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
    the emitter's stack discipline model every block as starting empty, so a
    block reached with an operand still live refuses the whole function. One
-   function in richards and two in deltablue, and between them 1.43M and 1.98M
-   frame entries — the largest single item in both.
-2. **`local-not-assigned`**, also not an opcode: a local the emitter cannot prove
-   was written on every path that reaches the read. The interpreter's rule is one
-   compare — an empty slot is a lexical binding in its dead zone and throws,
-   anything else is the value — so the template is a compare and a helper that
-   throws. The care is in `jitNumericLocals`, which must stop calling such a
-   local numeric or an ADDSD gets `undefined`. 1.04M and 1.82M entries.
-3. **`GET_ELEM`**, worth 1.16M entries in deltablue on its own and nothing in
-   richards.
+   function in richards and two in deltablue, and between them 1.04M and 1.55M
+   frame entries.
+3. **`non-numeric-operand`** (556k in richards, 4 functions) and **`GET_ELEM`**
+   (910k in deltablue, 2 functions).
 4. **Calls, compiled to compiled.** Measured at 1.15 ns against 4.69 ns for the
    detour through the runtime, so the convention has to be decided before the
    first one is emitted. This is also the 70 ns of frame setup that phase 3
@@ -834,6 +876,12 @@ has disagreed with the corpus count every time they have been compared.
 `GET_FIELD2` has come *off* this list, having been item 2 on it. It is the
 second-largest blocker in the static corpus and worth exactly zero entries on its
 own, because `CALL` is always the next instruction.
+
+`local-not-assigned` has come off it too, and it is the one that taught the most:
+it was worth 1.04M and 1.82M entries on the table, it was implemented, and the
+entries went to `this-local` rather than to compiled code. Those eleven functions
+per benchmark were never blocked by definite assignment. The table names the
+first wall, and behind it there is sometimes another one.
 
 The inline cache has come off this list, and so has the thing that turned out to
 be underneath it: a prologue that checked every parameter meant no object could
