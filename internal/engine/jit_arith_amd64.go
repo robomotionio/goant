@@ -188,8 +188,8 @@ func jitEqualsValue(a *jitasm.Asm, negate bool, r jitasm.Reg) {
 	unordered := a.NewLabel()
 	done := a.NewLabel()
 
-	a.SetccReg(c, r)      // neither SETcc nor MOVZX disturbs the flags, so
-	a.MovzxRegReg8(r, r)  // parity is still the one UCOMISD set
+	a.SetccReg(c, r)     // neither SETcc nor MOVZX disturbs the flags, so
+	a.MovzxRegReg8(r, r) // parity is still the one UCOMISD set
 	a.Jcc(jitasm.CondP, unordered)
 	a.MovRegImm64(jitRegScratch, uint64(mkfalse()))
 	a.OrRegReg(r, jitRegScratch)

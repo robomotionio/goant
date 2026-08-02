@@ -297,7 +297,28 @@ func (a *Asm) AddRegImm32(r Reg, v uint32) {
 	a.emit32(v)
 }
 
+// AndRegImm32 masks against a sign-extended 32-bit immediate.
+func (a *Asm) AndRegImm32(r Reg, v uint32) {
+	a.emitRM(true, []byte{0x81}, 4, uint8(r))
+	a.emit32(v)
+}
+
+// AddRegMem adds the memory operand at base+disp, which is how a base pointer is
+// folded in without needing a register to hold it first.
+func (a *Asm) AddRegMem(dst, base Reg, disp int32) {
+	a.emitMem(true, []byte{0x03}, uint8(dst), uint8(base), disp)
+}
+
 func (a *Asm) XchgRegReg(x, y Reg) { a.emitRM(true, []byte{0x87}, uint8(x), uint8(y)) }
+
+// ImulRegImm32 multiplies by a sign-extended 32-bit immediate.
+//
+// Needed because a pool cell is not a power of two in size, so turning an index
+// into a byte offset is a multiply rather than a shift.
+func (a *Asm) ImulRegImm32(dst, src Reg, v uint32) {
+	a.emitRM(true, []byte{0x69}, uint8(dst), uint8(src))
+	a.emit32(v)
+}
 
 // Lea32RegMem computes base+disp and keeps the low 32 bits, zero-extended.
 //
