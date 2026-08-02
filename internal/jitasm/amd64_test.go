@@ -471,6 +471,79 @@ func TestByteAndWordLoads(t *testing.T) {
 	}
 }
 
+// target is what the store tests write into.
+//
+// A package-level variable rather than a local one, and not for convenience: a
+// local the emitted code writes to is a local Go can see nothing write to, so
+// the compiler folds the read-back to the zero it was made with and the test
+// passes or fails on nothing. A global is reloaded after a call, because Go does
+// not try to prove what a call it cannot see through leaves alone.
+var target [64]uint64
+
+// TestScaledIndexStore is MovRegMemIndex's counterpart over every base and
+// index, for the same reason: a dropped REX writes a real value to the wrong
+// place, and a store that lands somewhere else is harder to trace back than a
+// load that comes from somewhere else.
+func TestScaledIndexStore(t *testing.T) {
+	addr := uint64(uintptr(unsafe.Pointer(&target[0])))
+	for _, base := range allocatable {
+		for _, index := range allocatable {
+			// RAX carries the value being stored, so it cannot also carry an
+			// address.
+			if index == base || base == RAX || index == RAX {
+				continue
+			}
+			for _, disp := range []int32{0, 8, 200} {
+				const idx, want = 5, 0x123456789ABCDEF0
+				target = [64]uint64{}
+
+				a := NewAsm()
+				a.MovRegMem(base, RegCtx, jitmem.CtxOffArgs)
+				a.MovRegMem(index, RegCtx, jitmem.CtxOffArgs+8)
+				a.MovRegImm64(RAX, want)
+				a.MovMemIndexReg(base, index, 8, disp, RAX)
+				a.Ret()
+
+				ctx := jitmem.ExecContext{Args: [4]uint64{addr, idx}}
+				run(t, a.Code(), &ctx)
+				at := idx + int(disp)/8
+				if target[at] != want {
+					t.Errorf("base %d index %d disp %d: element %d is %#x, want %#x",
+						base, index, disp, at, target[at], want)
+				}
+				for i := range target {
+					if i != at && target[i] != 0 {
+						t.Errorf("base %d index %d disp %d: also wrote element %d",
+							base, index, disp, i)
+						break
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestByteStoreTouchesOneByte is the whole reason MovMem8Imm exists: the field
+// it is aimed at has other fields packed against it, and the failure mode of a
+// wider store is not a wrong value in the target but a changed value beside it.
+func TestByteStoreTouchesOneByte(t *testing.T) {
+	addr := uint64(uintptr(unsafe.Pointer(&target[0])))
+	for _, disp := range []int32{0, 1, 7} {
+		target = [64]uint64{}
+
+		a := NewAsm()
+		a.MovRegMem(RSI, RegCtx, jitmem.CtxOffArgs)
+		a.MovMem8Imm(RSI, disp, 1)
+		a.Ret()
+
+		ctx := jitmem.ExecContext{Args: [4]uint64{addr}}
+		run(t, a.Code(), &ctx)
+		if want := uint64(1) << (8 * uint(disp)); target[0] != want {
+			t.Errorf("disp %d: word is %#016x, want %#016x", disp, target[0], want)
+		}
+	}
+}
+
 // TestEncodings pins a handful of sequences byte for byte. Execution catches
 // most mistakes, but not one that encodes a different instruction which happens
 // to produce the same answer for the values a test used.
@@ -496,6 +569,12 @@ func TestEncodings(t *testing.T) {
 			[]byte{0x48, 0x8B, 0x04, 0xFE}},
 		{"mov rax, [r13+r12*8+16]", func(a *Asm) { a.MovRegMemIndex(RAX, R13, R12, 8, 16) },
 			[]byte{0x4B, 0x8B, 0x44, 0xE5, 0x10}},
+		{"mov [rsi+rdi*8], rax", func(a *Asm) { a.MovMemIndexReg(RSI, RDI, 8, 0, RAX) },
+			[]byte{0x48, 0x89, 0x04, 0xFE}},
+		{"mov byte [rsi+8], 1", func(a *Asm) { a.MovMem8Imm(RSI, 8, 1) },
+			[]byte{0xC6, 0x46, 0x08, 0x01}},
+		{"mov byte [r13+0], 1", func(a *Asm) { a.MovMem8Imm(R13, 0, 1) },
+			[]byte{0x41, 0xC6, 0x45, 0x00, 0x01}},
 		{"lea rdx, [rsi+rdi*1+8]", func(a *Asm) { a.LeaRegMemIndex(RDX, RSI, RDI, 1, 8) },
 			[]byte{0x48, 0x8D, 0x54, 0x3E, 0x08}},
 		{"cmp rax, [rsi+8]", func(a *Asm) { a.CmpRegMem(RAX, RSI, 8) },

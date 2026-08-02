@@ -53,6 +53,15 @@ const (
 	// in its overflow slice.
 	jitOffShapeInobjLimit = unsafe.Offsetof(shape{}.inobjLimit)
 
+	// The invocation-dirty pair, which a compiled store has to maintain itself:
+	// the handle below which an object predates the running invocation, and the
+	// flag saying one was written to. See noteSharedMutation.
+	//
+	// invDirty is a bool with other bools around it, which is why the store to
+	// it is a byte store rather than the word store everything else here uses.
+	jitOffRTWatermark = unsafe.Offsetof(Runtime{}.invWatermark)
+	jitOffRTDirty     = unsafe.Offsetof(Runtime{}.invDirty)
+
 	// One cache site, and one way within it.
 	jitSizeofICWay  = unsafe.Sizeof(icWay{})
 	jitOffICWays    = unsafe.Offsetof(propIC{}.ways)
@@ -97,9 +106,17 @@ func jitEpochAddr() uintptr { return uintptr(unsafe.Pointer(&icEpochCounter)) }
 // compiled code emits when GOANT_JIT_STATS is set.
 func jitICHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.icHit)) }
 
+// jitICPutHitAddr is the same for the store probe.
+func jitICPutHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.putHit)) }
+
 // jitGenericFastAddr is the address of the counter for generic operators whose
 // operands turned out to be Numbers after all.
 func jitGenericFastAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.genFast)) }
+
+// jitRuntimeAddr is the address of the Runtime, passed to compiled code for the
+// same reason the pool is: a compiled store maintains the invocation-dirty pair
+// itself, and two Runtimes have two of them.
+func jitRuntimeAddr(rt *Runtime) uintptr { return uintptr(unsafe.Pointer(rt)) }
 
 // jitICWayAddr is the address of a cache site's first way.
 //

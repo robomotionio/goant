@@ -53,6 +53,17 @@ type ExecContext struct {
 	// load per property access is what makes that impossible rather than
 	// unlikely.
 	Pool uintptr
+	// Host is the address of the runtime itself, for the few pieces of runtime
+	// state compiled code has to read or write directly rather than through a
+	// helper. A property store is the one that matters: it has to record that it
+	// reached an object older than the running invocation, and a call out to
+	// report that would cost more than the store.
+	//
+	// A uintptr rather than a pointer for the same reason as everything else
+	// here — the field is not a root, and it does not need to be: the runtime is
+	// live for as long as any of its compiled frames can run, held by the call
+	// that entered them.
+	Host uintptr
 }
 
 // SpillSlots bounds the operand stack a compiled function may hold across a
@@ -69,7 +80,8 @@ const (
 	CtxOffSpill  = 64
 	CtxOffSpillN = 64 + 8*SpillSlots
 	CtxOffPool   = 72 + 8*SpillSlots
-	CtxSize      = 80 + 8*SpillSlots
+	CtxOffHost   = 80 + 8*SpillSlots
+	CtxSize      = 88 + 8*SpillSlots
 )
 
 // Which fields hold a Value, and so must be traced by the runtime's collector

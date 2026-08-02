@@ -609,6 +609,41 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			kind[sp-1] = false
 			ip += 7
 
+		case OpPutField:
+			// The store side of the same cache, declining the same things and
+			// two of its own: a receiver whose property this store would create,
+			// and one whose slot lives past the inline area.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			idx := readU32(code, ip+1)
+			if int(idx) >= len(fn.constNames) || idx > 0x7FFFFFFF {
+				return refuse(why, "shape")
+			}
+			if isPrivateKey(fn.constNames[idx]) {
+				return refuse(why, "private-name")
+			}
+			icx := int(readU16(code, ip+5))
+			recv, val := jitStackRegs[sp-2], jitStackRegs[sp-1]
+			slow := a.NewLabel()
+			done := a.NewLabel()
+			if icx != icNoSlot && icx < len(ics) && sp+jitICPutSpareRegs <= len(jitStackRegs) {
+				jitEmitICPut(a, recv, val, jitStackRegs[sp], jitStackRegs[sp+1],
+					jitICWayAddr(ics, icx), jitEpochAddr(), slow, done)
+			}
+			a.Bind(slow)
+			// Only the name and the site go in an argument. The receiver and the
+			// value are already where the helper wants them: spilling roots the
+			// whole operand stack, and these are the top two of it.
+			a.MovRegImm64(jitRegScratch, uint64(idx)|uint64(uint32(icx))<<32)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperPutField, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.Bind(done)
+			sp -= 2
+			ip += 7
+
 		case OpReturnUndef:
 			if sp != 0 {
 				return refuse(why, "return-stack")
@@ -772,7 +807,7 @@ func jitUnsupported(fn *svFunc, start int) (string, bool) {
 			OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr, OpBnot,
 			OpNeg, OpInc, OpDec, OpNot,
 			OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
-			OpJmp, OpJmpFalse, OpJmpTrue, OpGetField,
+			OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpPutField,
 			OpReturn, OpReturnUndef, OpThis:
 		default:
 			return opTable[op].Name, false
@@ -887,6 +922,7 @@ const (
 	jitHelperArith      = 3
 	jitHelperRelational = 4
 	jitHelperEquals     = 5
+	jitHelperPutField   = 6
 )
 
 // jitCallHelper emits a call out to the runtime.
@@ -1004,6 +1040,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, entry uintpt
 			jitFuel,
 		},
 		Pool: jitObjectPoolAddr(rt),
+		Host: jitRuntimeAddr(rt),
 	}
 	if n < cap(rt.jitFrames) {
 		rt.jitFrames = rt.jitFrames[:n+1]
@@ -1062,6 +1099,52 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 			jitStats.icMiss++
 		}
 		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperPutField:
+		// The interpreter's PUT_FIELD with its cache fast path already tried and
+		// declined, which is exactly what the compiled probe reaching here means.
+		//
+		// The operands come out of the spill area rather than an argument slot.
+		// They have to be there anyway — they are the top of the operand stack,
+		// and the collector traces it while this runs — so passing them again
+		// would be two stores to say what SpillN already says.
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		obj, val := Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1])
+		name := fn.constNames[uint32(ctx.Args[3])]
+		// The shape before the store, which is what tells the fill below whether
+		// the store created the property. Read before, because after it is gone.
+		var preShape *shape
+		icx := uint32(ctx.Args[3] >> 32)
+		recv := rt.icReceiver(obj)
+		if icx != icNoSlot && recv != nil {
+			preShape = recv.shape
+		}
+		ok, e := rt.setFieldR(obj, name, val)
+		if e != nil {
+			return e
+		}
+		if !ok && fn.isStrict {
+			return rt.typeError("Cannot assign to read only property '" + name + "'")
+		}
+		if icx != icNoSlot && ok {
+			if ics := frameICs(fn); int(icx) < len(ics) && !ics[icx].dead() {
+				// icReceiver again: setFieldR may have been handed something
+				// that was not an object at all, and a store that reached a
+				// prototype's setter can have replaced what obj resolves to.
+				o := rt.icReceiver(obj)
+				if o != nil && preShape != nil && o.shape != preShape {
+					rt.icFillPutTransition(&ics[icx], o, preShape, name)
+				} else {
+					rt.icFillPut(&ics[icx], o, name)
+				}
+			}
+		}
+		if jitStats.enabled {
+			jitStats.putMiss++
+		}
 		return nil
 	case jitHelperToInt32:
 		// Reached only for a finite magnitude of 2^63 or more, which CVTTSD2SI

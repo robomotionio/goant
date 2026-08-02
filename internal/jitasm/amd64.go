@@ -311,6 +311,16 @@ func (a *Asm) MovMemImm32(base Reg, disp int32, v uint32) {
 	a.emit32(v)
 }
 
+// MovMem8Imm stores a single byte.
+//
+// Go lays a run of bool fields out one byte apart, so a wider store aimed at one
+// of them writes the ones after it as well. This is the only instruction that
+// can set such a field without knowing what it neighbours.
+func (a *Asm) MovMem8Imm(base Reg, disp int32, v uint8) {
+	a.emitMem(false, []byte{0xC6}, 0, uint8(base), disp)
+	a.emit(v)
+}
+
 // Mov32RegMem loads the low 32 bits of a memory operand, zero-extended.
 //
 // The engine stores a slot number and a cache epoch as uint32, and reading one
@@ -323,6 +333,13 @@ func (a *Asm) Mov32RegMem(dst, base Reg, disp int32) {
 // element of an array whose index is not known until run time takes.
 func (a *Asm) MovRegMemIndex(dst, base, index Reg, scale uint8, disp int32) {
 	a.emitMemIndex(true, []byte{0x8B}, uint8(dst), uint8(base), uint8(index), scale, disp)
+}
+
+// MovMemIndexReg stores src at base+index*scale+disp — MovRegMemIndex written
+// backwards, and what assigning to a property whose slot is not known until run
+// time takes.
+func (a *Asm) MovMemIndexReg(base, index Reg, scale uint8, disp int32, src Reg) {
+	a.emitMemIndex(true, []byte{0x89}, uint8(src), uint8(base), uint8(index), scale, disp)
 }
 
 // MovzxRegMem8 loads one byte and zero-extends it, for the uint8 fields of a

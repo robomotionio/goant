@@ -49,6 +49,8 @@ var jitStats struct {
 	interp   uint64
 	icHit    uint64
 	icMiss   uint64
+	putHit   uint64
+	putMiss  uint64
 	genFast  uint64
 	genSlow  uint64
 }
@@ -64,6 +66,11 @@ func JITStats() (compiled, declined, interpreted uint64) {
 // JITPropertyStats reports compiled property reads served by the emitted
 // inline-cache probe, and those that fell through to the runtime.
 func JITPropertyStats() (hit, miss uint64) { return jitStats.icHit, jitStats.icMiss }
+
+// JITStoreStats is JITPropertyStats for the other direction. Counted apart
+// because the two probes decline for different reasons and a combined figure
+// would hide whichever of them is doing worse.
+func JITStoreStats() (hit, miss uint64) { return jitStats.putHit, jitStats.putMiss }
 
 // JITOperatorStats reports operators compiled without a known operand type, by
 // whether the guard let them take the machine instruction or sent them to the

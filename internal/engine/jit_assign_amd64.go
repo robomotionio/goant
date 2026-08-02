@@ -310,6 +310,17 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 						return nil, false
 					}
 					push(noOrigin)
+				case OpPutField:
+					// Neither the receiver nor the value is demanded, for the
+					// same reason, and the store leaves nothing behind — an
+					// assignment used as an expression duplicates the value
+					// first (INSERT2).
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
 				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpThis:
 					push(noOrigin)
 				case OpPop, OpJmpFalse, OpJmpTrue, OpReturn:
@@ -479,6 +490,14 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bo
 						return nil, false
 					}
 					push(false)
+				case OpPutField:
+					// Receiver and value in, nothing out.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
 				case OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne:
 					if _, ok := pop(); !ok {
 						return nil, false

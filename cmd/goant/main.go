@@ -126,6 +126,11 @@ func dumpJITStats() {
 		fmt.Fprintf(os.Stderr, "jit: %d property reads, %d served by the compiled cache (%.1f%%)\n",
 			reads, hit, 100*float64(hit)/float64(reads))
 	}
+	phit, pmiss := engine.JITStoreStats()
+	if stores := phit + pmiss; stores > 0 {
+		fmt.Fprintf(os.Stderr, "jit: %d property stores, %d served by the compiled cache (%.1f%%)\n",
+			stores, phit, 100*float64(phit)/float64(stores))
+	}
 	fast, slow := engine.JITOperatorStats()
 	if ops := fast + slow; ops > 0 {
 		fmt.Fprintf(os.Stderr, "jit: %d untyped operators, %d took the machine instruction (%.1f%%)\n",
