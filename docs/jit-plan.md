@@ -874,27 +874,23 @@ static histogram is still worth reading — 521 of 6,976 functions compile, and
 refusals — but the entry-weighted table above is what decides what to build. It
 has disagreed with the corpus count every time they have been compared.
 
-1. **The declines.** Richards now enters compiled code 195,342 times and turns
-   the arguments away at the prologue's parameter check, against 639 entries that
-   run. The check is a bet that the caller passes Numbers, and the generic
-   operators mean it is no longer a bet that has to be made — arithmetic on an
-   unchecked parameter guards instead of refusing. Recompiling with the demand
-   set suppressed after a function has declined enough times costs one extra
-   compare per operand in the functions that need it and nothing anywhere else.
-   Invisible until this week, because those functions did not compile at all.
-2. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
+1. **`stack-across-blocks`**, which is not an opcode: the two analyses that walk
    the emitter's stack discipline model every block as starting empty, so a
-   block reached with an operand still live refuses the whole function. One
-   function in richards and two in deltablue, and between them 1.04M and 1.55M
-   frame entries.
-3. **`non-numeric-operand`** (556k in richards, 4 functions) and **`GET_ELEM`**
-   (910k in deltablue, 2 functions).
-4. **Calls, compiled to compiled.** Measured at 1.15 ns against 4.69 ns for the
+   block reached with an operand still live refuses the whole function. It is now
+   the largest item in both benchmarks — 1.08M entries in richards in *one*
+   function, 1.60M in deltablue in two — and the shape that produces it is
+   ordinary: `a && b`, `a || b` and `a ? b : c` all jump with a value on the
+   stack. The work is a per-block entry depth in place of the "must be zero"
+   rule, which the positional register assignment then follows for free provided
+   every predecessor agrees.
+2. **`non-numeric-operand`** (579k in richards, 4 functions) and **`GET_ELEM`**
+   (940k in deltablue, 2 functions).
+3. **Calls, compiled to compiled.** Measured at 1.15 ns against 4.69 ns for the
    detour through the runtime, so the convention has to be decided before the
    first one is emitted. This is also the 70 ns of frame setup that phase 3
    could not touch — and it is what makes `GET_FIELD2`, `NEW` and `CLOSURE` worth
    anything, since all three are refused in functions that call.
-5. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
+4. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
    emitter is mechanical once the amd64 shape has stopped moving.
 
 `GET_FIELD2` has come *off* this list, having been item 2 on it. It is the
@@ -906,6 +902,12 @@ it was worth 1.04M and 1.82M entries on the table, it was implemented, and the
 entries went to `this-local` rather than to compiled code. Those eleven functions
 per benchmark were never blocked by definite assignment. The table names the
 first wall, and behind it there is sometimes another one.
+
+The declines have come off it as the same lesson pointing the other way. They
+were not on any list, because nothing was refusing: the functions compiled, ran,
+and turned every caller away at the door. A refusal is counted and a decline was
+not, so the one thing costing 195,342 frame entries in richards was the one thing
+no histogram had a column for.
 
 The inline cache has come off this list, and so has the thing that turned out to
 be underneath it: a prologue that checked every parameter meant no object could
