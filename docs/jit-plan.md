@@ -605,17 +605,24 @@ interleaved per benchmark so drift cannot favour either.
 
 | | off | on |
 | --- | --- | --- |
-| Richards | 226 | 221 |
-| DeltaBlue | 252 | 246 |
-| Crypto | 256 | 252 |
-| RayTrace | 397 | 394 |
-| EarleyBoyer | 624 | 613 |
-| Splay | 1981 | 1978 |
-| NavierStokes | 462 | 454 |
-| RegExp | 147 | 147 |
+| Richards | 224 | 221 |
+| DeltaBlue | 253 | 250 |
+| Crypto | 253 | 248 |
+| RayTrace | 399 | 396 |
+| EarleyBoyer | 624 | 617 |
+| Splay | 2009 | 1966 |
+| NavierStokes | 455 | 446 |
+| RegExp | 147 | 146 |
 
-Unchanged, and slightly down in every column — the tier costs a compile attempt
-and a check per frame entry, and returns nothing here.
+Unchanged, and slightly down in every column, which was still true after the
+probe and the frame entry were fixed — `dist` goes from 10% behind the
+interpreter to 17% ahead in the same build and Octane does not move at all.
+
+The residual cost is the tiering check rather than compiled code: every frame
+entry reads two fields of `fn.jit` and most of them are entries into a function
+that will never compile. EarleyBoyer makes 29.4 million of them. That is the
+price of having a tier at all, and it only turns into a gain when the tier
+covers something the program spends its time in.
 
 The generic operators did change one thing the scores cannot show. Compiled code
 used to execute **zero** property reads across the whole suite, because the 6% of
