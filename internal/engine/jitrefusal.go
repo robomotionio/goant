@@ -41,7 +41,15 @@ func jitWhy(dst *string) *string {
 	return dst
 }
 
-// jitNoteRefusal records why fn will be interpreted from here on.
+// jitNoteRefusal records why fn will be interpreted from here on, and whether
+// that reason is the only thing in its way.
+//
+// The second part is what makes the output actionable. A first-blocker count
+// answers "what does the emitter trip over first", which is not the same
+// question: GET_FIELD2 is what `o.m()` compiles to and CALL is always the
+// instruction after it, so a template for GET_FIELD2 alone would move the
+// refusal one opcode along and unblock nothing. A sole-blocker count says how
+// much running code one template would actually reach.
 func jitNoteRefusal(fn *svFunc, why string) {
 	if !jitStats.enabled {
 		return
@@ -49,14 +57,31 @@ func jitNoteRefusal(fn *svFunc, why string) {
 	if why == "" {
 		why = "unstated"
 	}
-	id, ok := jitRefusals.index[why]
-	if !ok {
-		id = uint32(len(jitRefusals.names))
-		jitRefusals.names = append(jitRefusals.names, why)
-		jitRefusals.index[why] = id
-	}
+	id := jitReasonID(why)
 	fn.jit.why = id
+
+	// Sole when the emitter's complaint is the whole story: either the one
+	// opcode it has no template for, or — with no template missing at all — the
+	// structural reason it gave. Anything else needs at least two pieces of work
+	// and is charged to neither.
+	missing := jitMissingTemplates(fn)
+	switch {
+	case len(missing) == 0:
+		fn.jit.sole = id
+	case len(missing) == 1 && why == "op:"+missing[0]:
+		fn.jit.sole = id
+	}
 	jitRefusals.funcs = append(jitRefusals.funcs, fn)
+}
+
+func jitReasonID(why string) uint32 {
+	if id, ok := jitRefusals.index[why]; ok {
+		return id
+	}
+	id := uint32(len(jitRefusals.names))
+	jitRefusals.names = append(jitRefusals.names, why)
+	jitRefusals.index[why] = id
+	return id
 }
 
 // jitNoteEntry charges one interpreted frame entry to fn.
@@ -70,38 +95,48 @@ func jitNoteEntry(fn *svFunc) {
 	}
 }
 
-// JITRefusalWeights reports, per refusal reason, how many frame entries went to
-// the interpreter because of it — heaviest first.
+// JITRefusalWeight is one refusal reason and what it costs.
 //
-// A reason with a large count and few functions is a small amount of work that
-// would reach a lot of running code, which is exactly what the static histogram
-// cannot distinguish from a large amount of work that would reach none.
-func JITRefusalWeights() []struct {
-	Reason  string
-	Entries uint64
-	Funcs   int
-} {
-	type row = struct {
-		Reason  string
-		Entries uint64
-		Funcs   int
-	}
-	byReason := map[string]*row{}
-	for _, fn := range jitRefusals.funcs {
-		name := jitRefusals.names[fn.jit.why]
+// Entries is how many interpreted frame entries hit this reason first. Unblocks
+// is how many of those would compile if this reason alone were dealt with, and
+// is the one to build from: a reason with a large Entries and a small Unblocks
+// is a queue, not a blocker.
+type JITRefusalWeight struct {
+	Reason   string
+	Entries  uint64
+	Unblocks uint64
+	Funcs    int
+}
+
+// JITRefusalWeights reports the refusal reasons by what they would unblock,
+// heaviest first.
+func JITRefusalWeights() []JITRefusalWeight {
+	byReason := map[string]*JITRefusalWeight{}
+	at := func(id uint32) *JITRefusalWeight {
+		name := jitRefusals.names[id]
 		r := byReason[name]
 		if r == nil {
-			r = &row{Reason: name}
+			r = &JITRefusalWeight{Reason: name}
 			byReason[name] = r
 		}
+		return r
+	}
+	for _, fn := range jitRefusals.funcs {
+		r := at(fn.jit.why)
 		r.Entries += uint64(fn.jit.entries)
 		r.Funcs++
+		if fn.jit.sole != 0 {
+			at(fn.jit.sole).Unblocks += uint64(fn.jit.entries)
+		}
 	}
-	out := make([]row, 0, len(byReason))
+	out := make([]JITRefusalWeight, 0, len(byReason))
 	for _, r := range byReason {
 		out = append(out, *r)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].Unblocks != out[j].Unblocks {
+			return out[i].Unblocks > out[j].Unblocks
+		}
 		if out[i].Entries != out[j].Entries {
 			return out[i].Entries > out[j].Entries
 		}

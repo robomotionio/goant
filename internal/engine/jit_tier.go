@@ -102,6 +102,7 @@ type jitAttempt struct {
 	// hottest path in the engine and must not grow a hash lookup even in a
 	// diagnostic build.
 	why     uint32
+	sole    uint32
 	entries uint32
 }
 

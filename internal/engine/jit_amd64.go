@@ -790,6 +790,26 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	return c
 }
 
+// jitHasTemplate reports whether the emitter can compile this opcode at all.
+//
+// The emitter can still refuse an opcode it has a template for — a stack too
+// deep for the registers, an operand whose type it does not know — so this is a
+// necessary condition rather than a sufficient one.
+func jitHasTemplate(op Opcode) bool {
+	switch op {
+	case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse,
+		OpGetLocal, OpPutLocal, OpSetLocal, OpPop, OpDup, OpInsert2,
+		OpAdd, OpSub, OpMul, OpDiv,
+		OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr, OpBnot,
+		OpNeg, OpInc, OpDec, OpNot,
+		OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
+		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpPutField,
+		OpReturn, OpReturnUndef, OpThis:
+		return true
+	}
+	return false
+}
+
 // jitUnsupported reports the first opcode in the body that this tier has no
 // template for.
 func jitUnsupported(fn *svFunc, start int) (string, bool) {
@@ -800,21 +820,36 @@ func jitUnsupported(fn *svFunc, start int) (string, bool) {
 		if size <= 0 || ip+size > len(code) {
 			return "undecodable", false
 		}
-		switch op {
-		case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse,
-			OpGetLocal, OpPutLocal, OpSetLocal, OpPop, OpDup, OpInsert2,
-			OpAdd, OpSub, OpMul, OpDiv,
-			OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr, OpBnot,
-			OpNeg, OpInc, OpDec, OpNot,
-			OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
-			OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpPutField,
-			OpReturn, OpReturnUndef, OpThis:
-		default:
+		if !jitHasTemplate(op) {
 			return opTable[op].Name, false
 		}
 		ip += size
 	}
 	return "", true
+}
+
+// jitMissingTemplates lists the distinct opcodes in fn's body the emitter has no
+// template for, capped at two — the diagnostic that uses it only asks whether
+// there is exactly one, so counting past that is work for an answer nobody
+// reads.
+func jitMissingTemplates(fn *svFunc) []string {
+	code := fn.code
+	var out []string
+	for ip := fn.startIP; ip < len(code) && len(out) < 2; {
+		op := Opcode(code[ip])
+		size := int(opTable[op].Size)
+		if size <= 0 || ip+size > len(code) {
+			return []string{"undecodable", "undecodable"}
+		}
+		if !jitHasTemplate(op) {
+			name := opTable[op].Name
+			if len(out) == 0 || out[0] != name {
+				out = append(out, name)
+			}
+		}
+		ip += size
+	}
+	return out
 }
 
 // jitScanTargets collects every branch target, which the emitter needs before it

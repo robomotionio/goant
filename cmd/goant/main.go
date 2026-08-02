@@ -140,13 +140,13 @@ func dumpJITStats() {
 	// how many functions there were. Only the top few: the tail is long and
 	// every entry in it is, by construction, cold.
 	if w := engine.JITRefusalWeights(); len(w) > 0 {
-		fmt.Fprintln(os.Stderr, "jit: interpreted frame entries by what refused the function:")
+		fmt.Fprintln(os.Stderr, "jit: interpreted frame entries by refusal (unblocks = this reason alone):")
 		for i, r := range w {
-			if i == 8 || r.Entries == 0 {
+			if i == 8 || (r.Entries == 0 && r.Unblocks == 0) {
 				break
 			}
-			fmt.Fprintf(os.Stderr, "jit:   %-24s %12d entries in %d functions\n",
-				r.Reason, r.Entries, r.Funcs)
+			fmt.Fprintf(os.Stderr, "jit:   %-22s %11d entries  %11d unblocks  (%d functions)\n",
+				r.Reason, r.Entries, r.Unblocks, r.Funcs)
 		}
 	}
 }

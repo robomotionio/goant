@@ -24,3 +24,6 @@ func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value) (Value, *Throw
 func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, locals []Value, header int) (Value, *ThrowError, bool) {
 	return mkundef(), nil, false
 }
+
+// Every function is missing the same one thing here, and it is not an opcode.
+func jitMissingTemplates(fn *svFunc) []string { return nil }
