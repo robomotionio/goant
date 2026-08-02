@@ -116,12 +116,22 @@ func TestJITStopsCheckingParametersItKeepsTurningAway(t *testing.T) {
 	jitEnabled = true
 	defer func() { jitEnabled = saved }()
 
-	rt := New()
 	// Arithmetic on the parameter, so the prologue demands it, and a caller that
 	// passes a String every time — which the interpreter turns into a number and
 	// the prologue turns away.
-	const src = `function w(a){ return a * 2 + 1; }
-	             var r = 0; for (var k = 0; k < 400; k++) r += w("3"); w;`
+	const body = `function w(a){ return a * 2 + 1; }
+	              var r = 0; for (var k = 0; k < 400; k++) r += w("3");`
+
+	// The answer the interpreter gives, before anything is compiled.
+	jitEnabled = false
+	want, err := New().RunString("decline.js", body+" r;")
+	if err != nil {
+		t.Fatalf("interpreted run: %v", err)
+	}
+	jitEnabled = true
+
+	rt := New()
+	const src = body + " w;"
 	v, err := rt.RunString("decline.js", src)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -137,11 +147,8 @@ func TestJITStopsCheckingParametersItKeepsTurningAway(t *testing.T) {
 	if !fn.jit.unchecked {
 		t.Errorf("w declined %d times and still checks its parameters", fn.jit.declines)
 	}
-	// And it must still be right: the rebuilt code accepts the String and the
-	// generic multiply produces the same 7 the interpreter does.
-	jitEnabled = false
-	want, _ := New().RunString("decline.js", src[:len(src)-3]+"r;")
-	jitEnabled = true
+	// And it must still be right: the rebuilt code accepts the String, and the
+	// generic multiply gives what the interpreter gave.
 	got, err := rt.RunString("check.js", "r;")
 	if err != nil {
 		t.Fatalf("reading back: %v", err)
