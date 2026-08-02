@@ -304,6 +304,30 @@ enough to refuse the arithmetic instead. This is the change everything else
 depends on — no further opcode could have been added while the tier could only
 represent Numbers.
 
+### One thing designing this found
+
+Emitting the bitwise operators means emitting ToInt32, which is why its
+definition was read closely — and the interpreter's was wrong. It truncated
+straight to `int64`, a conversion Go leaves undefined outside that type's range
+and which amd64 answers with `INT64_MIN`, so every operand at or above 2**63
+reported as zero. `1e20 | 0` is 1661992960; goant said 0.
+
+Fixing it correctly and fixing it cheaply turned out to be the same problem. The
+first three attempts all cost about 6% of Crypto — a benchmark that is almost
+entirely bitwise — measured against a build differing in nothing else. The cause
+was the inliner: `toUint32` is called from every bitwise operator, and any
+version large enough to hold the out-of-range case, or containing a call to it,
+exceeded the budget and stopped being inlined.
+
+What made it free was making the fast path *wider* rather than the function
+smaller. Guarding on `math.Abs(d) < 2**63` covers every operand a program
+actually has, and the reduction that follows turns NaN and both infinities into
+NaN — so one comparison replaces `IsNaN` and `IsInf` and the whole thing stays
+inlinable. Crypto measures 255 against 256, which is to say no cost at all.
+
+test262 does not cover the range that was wrong, which is worth remembering about
+a 99.998% score: the suite is a floor, not a proof.
+
 ## Still to do
 
 In the order the table argues for:
@@ -316,7 +340,12 @@ In the order the table argues for:
    after stores have happened, which is real deoptimisation rather than a bail
    before anything was written.
 2. **The remaining numeric operators** — `MOD`, the shifts and the bitwise
-   operations, all ordinary integer instructions over the NaN box.
+   operations. Tempting because `SHR` is the second most common *first* refusal,
+   but the sole-blocker column is the one that matters and it puts them at two or
+   three functions each. They also need ToInt32 emitted inline, which is a
+   twenty-instruction sequence needing three scratch registers once the range
+   above 2**63 is handled correctly — so they are neither as cheap nor as
+   valuable as they first look.
 3. **Globals, upvalues, closures and calls.** Calls are also the 70 ns of frame
    setup the phase 3 measurement could not touch.
 4. **Tiering** — counters, a compile threshold, and the lifecycle rules that keep

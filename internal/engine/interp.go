@@ -3009,19 +3009,36 @@ func boolToNum(v Value) float64 {
 // ---- numeric helpers (ant numbers.cc) ----
 
 // toInt32 implements ECMAScript ToInt32.
-func toInt32(d float64) int32 {
-	if math.IsNaN(d) || math.IsInf(d, 0) {
-		return 0
-	}
-	return int32(uint32(int64(math.Trunc(d))))
-}
+func toInt32(d float64) int32 { return int32(toUint32(d)) }
 
-// toUint32 implements ECMAScript ToUint32.
+// toUint32 implements ECMAScript ToUint32: truncate towards zero, then take the
+// result modulo 2**32.
+//
+// The modulo is not decoration. Converting a float64 outside int64's range to
+// int64 is undefined in Go, and on amd64 it yields INT64_MIN — so truncating
+// straight to int64 reported every operand at or above 2**63 as zero. `1e20 | 0`
+// is 1661992960, not 0, and 2**63 + 2048 is 2048, not 0.
+//
+// Every branch here is call-free on purpose. Crypto is almost entirely bitwise,
+// and the version with the out-of-range half behind a call measured 254 against
+// 229: one call is most of the inliner's budget, so toUint32 stopped being
+// inlined and every bitwise operator started paying for the boundary.
 func toUint32(d float64) uint32 {
-	if math.IsNaN(d) || math.IsInf(d, 0) {
+	if math.Abs(d) < 9223372036854775808 { // 2**63
+		// Everything the conversion can represent exactly, which is nearly
+		// every operand a program actually has. Go truncates towards zero here
+		// exactly as ToIntegerOrInfinity does, and uint32() then takes it
+		// modulo 2**32. NaN and the infinities fail this comparison.
+		return uint32(int64(d))
+	}
+	r := d - math.Floor(d*(1.0/4294967296))*4294967296
+	if r != r {
+		// The reduction turns NaN into NaN and either infinity into one too,
+		// so a single test covers all three — cheaper than asking IsNaN and
+		// IsInf separately, and small enough to keep this function inlinable.
 		return 0
 	}
-	return uint32(int64(math.Trunc(d)))
+	return uint32(int64(r))
 }
 
 // jsMod implements the ECMAScript "%" (remainder) operator.
