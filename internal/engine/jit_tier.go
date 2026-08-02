@@ -102,19 +102,19 @@ type jitAttempt struct {
 	loops int32
 	code  *jitCode
 	tried bool
-	// why and entries are the diagnostic in jitrefusal.go and are only ever
-	// written when GOANT_JIT_STATS is set. They live here rather than in a map
-	// because the increment is on the interpreter's frame entry, which is the
-	// hottest path in the engine and must not grow a hash lookup even in a
+	// declines counts entries the prologue's parameter check turned away, and
+	// unchecked records that it has stopped making that check. Functional, not
+	// diagnostic — see jitNoteDecline.
+	declines  int32
+	unchecked bool
+	// why, sole and entries are the diagnostic in jitrefusal.go and are only
+	// ever written when GOANT_JIT_STATS is set. They live here rather than in a
+	// map because the increment is on the interpreter's frame entry, which is
+	// the hottest path in the engine and must not grow a hash lookup even in a
 	// diagnostic build.
 	why     uint32
 	sole    uint32
 	entries uint32
-	// declines counts entries the prologue's parameter check turned away, and
-	// unchecked records that it has stopped making that check. See
-	// jitNoteDecline.
-	declines  int32
-	unchecked bool
 }
 
 // jitDeclineLimit is how many times a compiled function may turn its arguments
