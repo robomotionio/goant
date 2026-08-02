@@ -265,3 +265,52 @@ func BenchmarkCallIntoALoop(b *testing.B) {
 	b.Run("interpreted", func(b *testing.B) { run(b, false) })
 	b.Run("compiled", func(b *testing.B) { run(b, true) })
 }
+
+// TestJITConstructAgreesWithTheInterpreter covers `new F(...)`, which is CALL
+// with a different runtime entry point and everything that makes construction
+// different from calling: the object's prototype, what a constructor returning
+// an object means, and what happens when the callee is not one.
+func TestJITConstructAgreesWithTheInterpreter(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"a-plain-constructor", `
+			function P(a, b) { this.a = a; this.b = b; }
+			function f(k) { var p = new P(k, k + 1); return p.a + p.b; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
+		{"the-prototype-is-bound", `
+			function P(v) { this.v = v; }
+			P.prototype.twice = function () { return this.v * 2; };
+			function f(k) { return new P(k).twice(); }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
+		{"a-constructor-returning-an-object", `
+			function P(v) { this.v = v; return {v: v * 10}; }
+			function f(k) { return new P(k).v; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
+		{"a-constructor-returning-a-primitive", `
+			function P(v) { this.v = v; return 7; }
+			function f(k) { return new P(k).v; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
+		{"no-arguments", `
+			function P() { this.v = 3; }
+			function f() { return new P().v; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(); s;`},
+		{"not-a-constructor", `
+			var g = 5;
+			function f() { return new g(); }
+			var c = 0; for (var k = 0; k < 200; k++) { try { f(); } catch (e) { c++; } } c;`},
+		{"an-arrow-is-not-a-constructor", `
+			var g = function () { return 1; };
+			var h = (x) => x;
+			function f() { return new h(); }
+			var c = 0; for (var k = 0; k < 200; k++) { try { f(); } catch (e) { c++; } } c;`},
+		{"a-builtin-constructor", `
+			function f(k) { return new Array(3).length + new Number(k).valueOf(); }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
+		{"nested-construction", `
+			function Inner(v) { this.v = v; }
+			function Outer(v) { this.inner = new Inner(v); }
+			function f(k) { return new Outer(k).inner.v; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
+	}
+}

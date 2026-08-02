@@ -845,6 +845,26 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp -= argc + 1
 			ip += 3
 
+		case OpNew:
+			// `new F(...)`, which is CALL with a different runtime entry point:
+			// the object, its prototype and what a constructor returning an
+			// object means are all rt.construct's. 15.2 million interpreted
+			// instructions in DeltaBlue across ten functions.
+			argc := int(readU16(code, ip+1))
+			if argc < 0 || sp < argc+1 {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(uint32(argc)))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperNew, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			dst := jitStackRegs[sp-argc-1]
+			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-argc-1] = false
+			sp -= argc
+			ip += 3
+
 		case OpCall:
 			// The operands are already where the helper wants them. A call site
 			// holds [callee, arg0 .. argN-1] on the operand stack, spilling
@@ -1187,7 +1207,7 @@ func jitHasTemplate(op Opcode) bool {
 		OpNeg, OpInc, OpDec, OpNot,
 		OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
 		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpGetField2, OpPutField,
-		OpGetGlobal, OpGetUpval, OpGetElem, OpCall, OpCallMethod,
+		OpGetGlobal, OpGetUpval, OpGetElem, OpCall, OpCallMethod, OpNew,
 		OpReturn, OpReturnUndef, OpThis:
 		return true
 	}
@@ -1350,6 +1370,7 @@ const (
 	jitHelperBitwise    = 12
 	jitHelperToBoolean  = 13
 	jitHelperUnary      = 14
+	jitHelperNew        = 15
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1573,7 +1594,7 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		}
 		ctx.Ret = uint64(v)
 		return nil
-	case jitHelperCall, jitHelperCallMethod:
+	case jitHelperCall, jitHelperCallMethod, jitHelperNew:
 		// The interpreter's CALL and CALL_METHOD, reading their operands out of
 		// the spill area. The two differ only in whether a receiver sits below
 		// the callee.
@@ -1603,7 +1624,13 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		for i := 0; i < argc; i++ {
 			args[i] = Value(ctx.Spill[base+1+i])
 		}
-		v, e := rt.callValue(callee, thisArg, args)
+		var v Value
+		var e *ThrowError
+		if ctx.Helper == jitHelperNew {
+			v, e = rt.construct(callee, args)
+		} else {
+			v, e = rt.callValue(callee, thisArg, args)
+		}
 		if e != nil {
 			return e
 		}

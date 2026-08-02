@@ -345,7 +345,7 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					}
 					push(o)
 					push(noOrigin)
-				case OpCall, OpCallMethod:
+				case OpCall, OpCallMethod, OpNew:
 					// The callee, its arguments and — for a method call — the
 					// receiver, none of them demanded: what a call does with a
 					// value is the callee's business.
@@ -392,13 +392,21 @@ func jitStackEffect(fn *svFunc, ip int) (pop, push int, ok bool) {
 	if !jitHasTemplate(op) {
 		return 0, 0, false
 	}
-	info := opTable[op]
-	pop, push = int(info.NPop), int(info.NPush)
+	// The call forms are written out rather than taken from opTable, because
+	// their operand is how many arguments follow and the table's fixed counts do
+	// not all agree with what the interpreter pops — NEW's says two and the
+	// interpreter takes the callee and the arguments, which is one plus the
+	// count. A wrong effect here would refuse a function rather than
+	// miscompile it, the emitter checking the prediction at every label, but a
+	// refusal nobody can explain is its own cost.
 	switch op {
-	case OpCall, OpCallMethod:
-		pop += int(readU16(code, ip+1))
+	case OpCall, OpNew:
+		return int(readU16(code, ip+1)) + 1, 1, true
+	case OpCallMethod:
+		return int(readU16(code, ip+1)) + 2, 1, true
 	}
-	return pop, push, true
+	info := opTable[op]
+	return int(info.NPop), int(info.NPush), true
 }
 
 // jitBlockDepths reports the operand-stack depth each block is entered with.
@@ -691,7 +699,7 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 					}
 					push(k)
 					push(false)
-				case OpCall, OpCallMethod:
+				case OpCall, OpCallMethod, OpNew:
 					// Callee, arguments and receiver in, one result out, and a
 					// call can return anything.
 					n := int(readU16(code, ip+1)) + 1
