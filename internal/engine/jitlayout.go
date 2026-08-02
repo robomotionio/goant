@@ -97,6 +97,10 @@ func jitEpochAddr() uintptr { return uintptr(unsafe.Pointer(&icEpochCounter)) }
 // compiled code emits when GOANT_JIT_STATS is set.
 func jitICHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.icHit)) }
 
+// jitGenericFastAddr is the address of the counter for generic operators whose
+// operands turned out to be Numbers after all.
+func jitGenericFastAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.genFast)) }
+
 // jitICWayAddr is the address of a cache site's first way.
 //
 // Constant for the life of the function: frameICs allocates the array once and

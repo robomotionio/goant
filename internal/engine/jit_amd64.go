@@ -16,11 +16,11 @@ import (
 // else.
 //
 // What makes it tractable is an invariant rather than a restriction on shape.
-// Every value an arithmetic instruction is handed is known to be a Number before
-// the instruction is emitted: either it was produced by other arithmetic, or it
-// came from a local the prologue checked. Nothing inside the body can therefore
-// fail a type check, which means no guard is needed after entry, and the only
-// way out is the one at the top — before a single store has happened.
+// Wherever an arithmetic instruction is emitted bare, its operands are known to
+// be Numbers already: either they were produced by other arithmetic, or they
+// came from a local the prologue checked. Nothing on that path can fail a type
+// check, so no guard is needed after entry, and the only way out is the one at
+// the top — before a single store has happened.
 //
 // The prologue checks the parameters the body needs to be Numbers and no others,
 // which is what lets an object be a parameter at all: the check is "untagged or
@@ -32,6 +32,13 @@ import (
 // because none was changed. Rebuilding an interpreter frame from a half-executed
 // compiled one is the hardest part of a JavaScript JIT, and a tier that cannot
 // need it is the right place to prove the rest of the machinery.
+//
+// Where a type is not known — a field's value, most of all — the same
+// instructions are emitted behind a guard, with a call out to the runtime's own
+// operator for whatever the guard turns away. That is not deoptimisation and
+// does not weaken any of the above: the guard runs before the operands have been
+// touched, and a helper is a call rather than an exit from the frame. See
+// jit_generic_amd64.go.
 //
 // Registers. R13 carries the ExecContext and R14 the goroutine, both fixed by
 // jitmem. R12 holds the base of the locals array and R15 the NaN-box threshold.
@@ -236,14 +243,14 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if int(idx) >= len(fn.constants) || sp >= len(jitStackRegs) {
 				return refuse(why, "stack-too-deep")
 			}
-			c := fn.constants[idx]
-			if !c.IsNumber() {
-				// A String or an object constant would mean the generic
-				// operators, which is the next tier's problem.
-				return refuse(why, "non-numeric-constant")
-			}
-			a.MovRegImm64(jitStackRegs[sp], uint64(c))
-			kind[sp] = true
+			// A String or a regexp constant is a handle, and baking one into
+			// code is safe for exactly the reason reading it from the pool is:
+			// the pool does not move, and the collector marks fn.constants for
+			// as long as fn is reachable — which is longer than the code, since
+			// fn owns it. A constant pool belongs to the runtime that built it,
+			// and so does the function, so the two can never be crossed.
+			a.MovRegImm64(jitStackRegs[sp], uint64(fn.constants[idx]))
+			kind[sp] = fn.constants[idx].IsNumber()
 			sp++
 			ip += 5
 
@@ -291,13 +298,17 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 2 {
 				return refuse(why, "stack-underflow")
 			}
-			if !kind[sp-1] || !kind[sp-2] {
-				// An operand may not be a Number, and the generic operators are
-				// the next tier's problem: `+` on a String concatenates, and on
-				// an object calls valueOf.
-				return refuse(why, "non-numeric-operand")
-			}
 			x, y := jitStackRegs[sp-2], jitStackRegs[sp-1]
+			// When either operand's type is unknown the same SSE sequence is
+			// emitted behind a guard, with a call out to the runtime's operator
+			// for everything it turns away — a String to concatenate, an object
+			// with a valueOf, a BigInt. See jit_generic_amd64.go.
+			generic := !kind[sp-1] || !kind[sp-2]
+			var slow, done *jitasm.Label
+			if generic {
+				slow, done = a.NewLabel(), a.NewLabel()
+				jitEmitNumberPair(a, x, y, slow)
+			}
 			a.MovqXReg(jitasm.X0, x)
 			a.MovqXReg(jitasm.X1, y)
 			switch op {
@@ -312,34 +323,68 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovqRegX(x, jitasm.X0)
 			jitCanonicalizeNaN(a, x)
-			kind[sp-2] = true
+			if generic {
+				a.Jmp(done)
+				a.Bind(slow)
+				if !jitCallBinary(a, sp, op, jitHelperArith, &fixups) {
+					return refuse(why, "stack-too-deep")
+				}
+				a.MovRegMem(x, jitasm.RegCtx, jitmem.CtxOffRet)
+				a.Bind(done)
+			}
+			// Only the guarded path is known to have produced a Number. `+` on
+			// two Strings is a String, and `*` on two BigInts is a BigInt.
+			kind[sp-2] = !generic
 			sp--
 			ip++
 
 		case OpLt, OpLe, OpGt, OpGe:
-			// A comparison produces a Boolean, which this tier has no way to
-			// represent. It only compiles one when the very next instruction
-			// consumes it as a branch, so the Boolean never exists.
-			next := ip + 1
-			if next >= len(code) || sp < 2 {
-				return refuse(why, "shape")
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
 			}
-			if !kind[sp-1] || !kind[sp-2] {
-				return refuse(why, "non-numeric-operand")
+			x, y := jitStackRegs[sp-2], jitStackRegs[sp-1]
+			generic := !kind[sp-1] || !kind[sp-2]
+			// A comparison whose result a branch consumes never has to produce
+			// the Boolean at all, which is both faster and how this tier managed
+			// before it could represent one.
+			l, whenTrue, after, fused := jitFuse(code, labels, ip+1)
+
+			var slow, done *jitasm.Label
+			if generic {
+				slow, done = a.NewLabel(), a.NewLabel()
+				jitEmitNumberPair(a, x, y, slow)
 			}
-			l, whenTrue, after, ok := jitFuse(code, labels, next)
-			if !ok {
-				return refuse(why, "compare-not-branched")
-			}
-			a.MovqXReg(jitasm.X0, jitStackRegs[sp-2])
-			a.MovqXReg(jitasm.X1, jitStackRegs[sp-1])
+			a.MovqXReg(jitasm.X0, x)
+			a.MovqXReg(jitasm.X1, y)
 			a.UcomisdXX(jitasm.X0, jitasm.X1)
-			jitCompareBranch(a, op, whenTrue, l)
-			sp -= 2
-			if sp != 0 {
-				return nil
+			if fused {
+				jitCompareBranch(a, op, whenTrue, l)
+			} else {
+				jitRelationalValue(a, op, x)
 			}
-			ip = after
+			if generic {
+				a.Jmp(done)
+				a.Bind(slow)
+				if !jitCallBinary(a, sp, op, jitHelperRelational, &fixups) {
+					return refuse(why, "stack-too-deep")
+				}
+				a.MovRegMem(x, jitasm.RegCtx, jitmem.CtxOffRet)
+				if fused {
+					jitBoolBranch(a, whenTrue, x, l)
+				}
+				a.Bind(done)
+			}
+			if fused {
+				sp -= 2
+				if sp != 0 {
+					return refuse(why, "stack-at-target")
+				}
+				ip = after
+				continue
+			}
+			kind[sp-2] = false
+			sp--
+			ip++
 
 		case OpJmp:
 			target := int(readU32(code, ip+1))
@@ -471,30 +516,52 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 
 		case OpEq, OpNe, OpSeq, OpSne:
 			// Between two Numbers, abstract and strict equality are the same
-			// comparison, so all four differ only in polarity.
+			// comparison, so all four differ only in polarity. Between anything
+			// else they are two quite different operators, which is what the
+			// runtime is asked for when the guard turns the operands away.
 			if sp < 2 {
 				return refuse(why, "stack-underflow")
 			}
-			if !kind[sp-1] || !kind[sp-2] {
-				return refuse(why, "non-numeric-operand")
-			}
+			x, y := jitStackRegs[sp-2], jitStackRegs[sp-1]
+			generic := !kind[sp-1] || !kind[sp-2]
 			negate := op == OpNe || op == OpSne
-			a.MovqXReg(jitasm.X0, jitStackRegs[sp-2])
-			a.MovqXReg(jitasm.X1, jitStackRegs[sp-1])
-			a.UcomisdXX(jitasm.X0, jitasm.X1)
+			l, whenTrue, after, fused := jitFuse(code, labels, ip+1)
 
-			if l, whenTrue, after, ok := jitFuse(code, labels, ip+1); ok {
+			var slow, done *jitasm.Label
+			if generic {
+				slow, done = a.NewLabel(), a.NewLabel()
+				jitEmitNumberPair(a, x, y, slow)
+			}
+			a.MovqXReg(jitasm.X0, x)
+			a.MovqXReg(jitasm.X1, y)
+			a.UcomisdXX(jitasm.X0, jitasm.X1)
+			if fused {
 				jitEqualsBranch(a, negate, whenTrue, l)
+			} else {
+				// Not consumed by a branch, so the Boolean has to exist.
+				// Emitting it is what lets `a === b` be stored or returned.
+				jitEqualsValue(a, negate, x)
+			}
+			if generic {
+				a.Jmp(done)
+				a.Bind(slow)
+				if !jitCallBinary(a, sp, op, jitHelperEquals, &fixups) {
+					return refuse(why, "stack-too-deep")
+				}
+				a.MovRegMem(x, jitasm.RegCtx, jitmem.CtxOffRet)
+				if fused {
+					jitBoolBranch(a, whenTrue, x, l)
+				}
+				a.Bind(done)
+			}
+			if fused {
 				sp -= 2
 				if sp != 0 {
-					return nil
+					return refuse(why, "stack-at-target")
 				}
 				ip = after
 				continue
 			}
-			// Not consumed by a branch, so the Boolean has to exist. Emitting it
-			// is what lets `a === b` be stored, returned, or passed on.
-			jitEqualsValue(a, negate, jitStackRegs[sp-2])
 			kind[sp-2] = false
 			sp--
 			ip++
@@ -815,8 +882,11 @@ func jitBackEdge(a *jitasm.Asm, top *jitasm.Label, fixups *[]jitResumeFixup) {
 // Helper identifiers. Compiled code cannot call a Go function, so it records
 // which one it wants and returns; jitHelper runs it and execution resumes.
 const (
-	jitHelperGetField = 1
-	jitHelperToInt32  = 2
+	jitHelperGetField   = 1
+	jitHelperToInt32    = 2
+	jitHelperArith      = 3
+	jitHelperRelational = 4
+	jitHelperEquals     = 5
 )
 
 // jitCallHelper emits a call out to the runtime.
@@ -975,6 +1045,66 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		// cannot report. Zero-extended, because compiled code keeps every
 		// intermediate integer that way — see jitToInt32.
 		ctx.Ret = uint64(uint32(toInt32(Value(ctx.Args[2]).Number())))
+		return nil
+
+	// The three below are what an operator does when its operands turned out not
+	// to be Numbers. Each is the call the interpreter makes for the same opcode,
+	// which is what keeps a compiled `+` and an interpreted one from disagreeing
+	// about a Date, a Symbol, or a String that looks like a number.
+	case jitHelperArith:
+		op, x, y, ok := jitBinaryOperands(ctx)
+		if !ok {
+			return rt.typeError("JIT operand stack")
+		}
+		if jitStats.enabled {
+			jitStats.genSlow++
+		}
+		var v Value
+		var e *ThrowError
+		if op == OpAdd {
+			v, e = rt.jsAdd(x, y)
+		} else {
+			v, e = rt.jsArith(op, x, y)
+		}
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperRelational:
+		op, x, y, ok := jitBinaryOperands(ctx)
+		if !ok {
+			return rt.typeError("JIT operand stack")
+		}
+		if jitStats.enabled {
+			jitStats.genSlow++
+		}
+		v, e := rt.jsRelational(op, x, y)
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperEquals:
+		op, x, y, ok := jitBinaryOperands(ctx)
+		if !ok {
+			return rt.typeError("JIT operand stack")
+		}
+		if jitStats.enabled {
+			jitStats.genSlow++
+		}
+		switch op {
+		case OpSeq, OpSne:
+			// Strict equality coerces nothing, so it cannot throw and needs no
+			// error path of its own.
+			ctx.Ret = uint64(mkbool(rt.strictEquals(x, y) == (op == OpSeq)))
+			return nil
+		}
+		r, e := rt.abstractEquals(x, y)
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(mkbool(r == (op == OpEq)))
 		return nil
 	}
 	return rt.typeError("unknown JIT helper")

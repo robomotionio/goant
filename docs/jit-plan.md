@@ -462,27 +462,128 @@ called `getField` with the mangled name, which finds nothing:
 Unreachable while parameters were checked, because the object argument bailed
 before the read. The first thing letting objects in did was to make it reachable.
 
+## Operators without a type
+
+The cache made a field's value fast to read and left it useless. A field holds
+anything, so `sum += o.a` had no template — every operator in this tier required
+both operands to be known Numbers before it would emit anything, and a function
+containing one went back to the interpreter, cache and all.
+
+The fix is not deoptimisation, and specifically does not need it. Deoptimisation
+is for a guard that fails after the frame has been changed; here the operands are
+still in their registers, untouched, and the runtime already has an
+implementation of every one of these operators. So the guard tests both operands
+for the tag bits, takes the SSE path when neither has them, and otherwise calls
+what the interpreter would have called:
+
+```
+cmp  x, r15      ; r15 is the NaN-box threshold; an untagged Value IS a double
+ja   slow
+cmp  y, r15
+ja   slow
+movq xmm0, x
+movq xmm1, y
+addsd xmm0, xmm1
+...
+```
+
+Two compares and a branch that is not taken. `+`, `-`, `*`, `/`, the four
+relational operators and all four equality operators have this form, and the
+runtime side of it is literally the call the interpreter makes for the same
+opcode — `jsAdd`, `jsArith`, `jsRelational`, `abstractEquals`, `strictEquals` —
+so a compiled `+` and an interpreted one cannot disagree about a Date, a Symbol,
+or a String that looks like a number.
+
+The operands are not passed to the helper. Calling out already spills the operand
+stack into the context and records its depth, which is what roots those values
+for the collector, so the helper reads its two operands from the top of `Spill`
+and is handed only the opcode and the depth. That mattered more than it looks: a
+spilled operand used to be a Number, which refers to nothing, and now it can be a
+String while a `valueOf` on the other side runs a collection.
+
+Two things fall out of the same change. A comparison no longer has to be consumed
+by a branch — the Boolean can be materialised, which is what `jitRelationalValue`
+is for — and a String constant can be loaded, because baking the handle into an
+immediate is sound for the same reason reading it from the pool is: the pool does
+not move, and the collector marks `fn.constants` for as long as `fn` is
+reachable, which is longer than the code `fn` owns.
+
+Three refusal reasons disappeared — `non-numeric-operand`, `non-numeric-constant`
+and `compare-not-branched` — and static coverage went from 417 functions to 460.
+
+**What it costs when it is not needed: nothing.** The guard is emitted only where
+the type is unknown, so every function that compiled before this emits the same
+bytes. `TestKnownNumbersStillSkipTheGuard` measures that rather than asserting
+it: one more `+` costs 43 bytes between two known Numbers and 177 generically,
+and the first number is the bare SSE sequence with no room for a guard in it.
+
+`GOANT_JIT_STATS=1` now reports both sides of that guard, for the same reason the
+cache needed a hit counter: a guard that always sends its operands to the runtime
+and one that never does produce identical answers, and nothing else can tell them
+apart.
+
+### What that made visible: the probe is aimed at the wrong shape
+
+`dist(p)` compiles now, so the benchmark from the previous section can be run
+again — and it is *worse*:
+
+| `dist` over 100 points, 2M calls | |
+| --- | --- |
+| interpreted | 1137 ms |
+| compiled, delegating every read | 1244 ms |
+| compiled, with the cache and the generic operators | **1361 ms** |
+| node | 8 ms |
+
+The counters say exactly where it goes. Every frame entry is compiled, all
+5,999,979 untyped operators take the machine instruction — the generic path is
+working perfectly — and of 3,999,986 property reads the emitted cache serves
+**39,998, or 1.0%.** Four million helper round trips is 200 ms, which is the
+regression to the byte.
+
+The reason is not polymorphism. It is that compiled code probes *one* way, and
+`icWay` fills fill in order, so way 0 holds the first shape the site ever saw:
+
+```
+100 objects from the same {x, y} literal occupy three shapes: 1, 1, and 98.
+```
+
+The first two objects each get a shape of their own while the transition memo
+warms up, and from the third on they share. So way 0 is filled by an object whose
+shape never recurs, ways 1 and 2 hold the one that does, and the interpreter —
+which probes all `ic.n` ways — hits while compiled code misses 98% of the time
+by construction.
+
+That is the same mistake as the prologue guard, one level down: the probe was
+verified against a site with one receiver, and one receiver is the case where way
+0 is the answer. Probing more than one way is the fix and it is the next thing.
+
 ## What the tier is worth on Octane: nothing yet
 
 `GOANT_JIT_STATS=1` counts frame entries by where they ran. Static coverage —
-6.0% of functions — turns out to be a poor guide to anything. Scores are
-higher-is-better; the tier is on for the second column.
+6.6% of functions — turns out to be a poor guide to anything. Scores are
+higher-is-better; the tier is on for the second column, and the two arms are
+interleaved per benchmark so drift cannot favour either.
 
-| | off | on | entries served by compiled code |
-| --- | --- | --- | --- |
-| Richards | 220 | 217 | 0 of 5,020,416 |
-| DeltaBlue | 249 | 243 | 34,214 of 8,385,875 (0.4%) |
-| Crypto | 254 | 251 | 668 of 3,059,884 |
-| RayTrace | 397 | 395 | 0 of 9,026,997 |
-| EarleyBoyer | 623 | 618 | 252 of 29,358,351 |
-| Splay | 1967 | 1983 | 0 of 2,984,153 |
-| NavierStokes | 466 | 453 | 12 of 2,743 (0.4%) |
+| | off | on |
+| --- | --- | --- |
+| Richards | 226 | 221 |
+| DeltaBlue | 252 | 246 |
+| Crypto | 256 | 252 |
+| RayTrace | 397 | 394 |
+| EarleyBoyer | 624 | 613 |
+| Splay | 1981 | 1978 |
+| NavierStokes | 462 | 454 |
+| RegExp | 147 | 147 |
 
-Unchanged, and the property counters say something sharper than the scores do:
-**across the whole suite, compiled code executes zero property reads.** Not a low
-hit rate — no reads at all. The 6% of functions that compile are numeric leaves
-that never touch a field, so the fastest inline cache in the world sits in code
-Octane does not run.
+Unchanged, and slightly down in every column — the tier costs a compile attempt
+and a check per frame entry, and returns nothing here.
+
+The generic operators did change one thing the scores cannot show. Compiled code
+used to execute **zero** property reads across the whole suite, because the 6% of
+functions that compiled were numeric leaves that never touched a field. Now
+DeltaBlue executes 283,096 of them and EarleyBoyer 225,432. Against 8.4M and
+29.4M frame entries that is still a rounding error, which is why the scores do
+not move — but the cache is no longer sitting in code nothing runs.
 
 The hope was that the split would favour the tier — that a numeric compiler would
 miss many functions but catch the ones that run in loops. It is the other way
@@ -532,8 +633,9 @@ opcodes against 135 — and not speed per opcode.
 
 ## Still to do
 
-Rewritten 2 August, twice: once after measuring the numeric operators, and again
-after the inline cache landed and moved the ordering under it.
+Rewritten 2 August, three times: after measuring the numeric operators, after
+the inline cache landed, and after the generic operators made the cache's hit
+rate measurable on real code.
 
 **What the histogram says.** The list here used to argue that the numeric
 operators were not worth building. They were: `SHR` alone blocked 892 functions
@@ -544,24 +646,26 @@ left is **88% memory access** — GET_GLOBAL 1761, GET_FIELD2 962, PUT_FIELD 870
 SPECIAL_OBJ 832, GET_UPVAL 824, GET_ELEM 323, CLOSURE 277.
 
 **What the histogram does not say.** None of it moved Octane, which is unchanged
-with the tier on. Integer kernels went 1.6x to 5.6x in the same build and
-property reads 14.6x. A tier is worth what its *hot* coverage is worth, and
-static coverage is a poor proxy for it: 6.0% of functions compile and 0.0% to
-0.4% of frame entries land in them.
+with the tier on. Integer kernels went 1.6x to 5.6x in the same build and a
+property read in isolation 14.6x. A tier is worth what its *hot* coverage is
+worth, and static coverage is a poor proxy for it: 6.6% of functions compile and
+0.0% to 0.4% of frame entries land in them. Nor is a microbenchmark a proxy for
+a hit rate — the same cache that is 14.6x on one receiver serves 1.0% of the
+reads on a hundred.
 
-1. **Generic operators with a runtime fallback**, which is what the cache is
-   waiting on. A field's value has no known type, so `sum += o.a` refuses to
-   compile and every cache hit feeds a value this tier can only store or pass
-   on. The fix is not deoptimisation and does not need it: test both operands
-   for the tag bits, take ADDSD when neither has them, and otherwise call the
-   helper that does what the interpreter's ADD does. A helper is a call, not an
-   exit from the frame, so nothing has to be reconstructed. Two compares and a
-   not-taken branch is the whole cost, and it is the difference between the
-   cache being fast and the cache being useful.
+1. **Probe more than one way.** Compiled code checks way 0 and the interpreter
+   checks all of them, and way 0 is whichever shape the site saw first — which
+   for an object literal is the one the transition memo produced while it was
+   warming up and never produces again. Measured at a **1.0% hit rate** on
+   `dist`, against an interpreter that hits, and worth 200 ms of a 1361 ms run.
+   Nothing else on this list matters until a compiled read is actually served.
 2. **`PUT_FIELD`**, the store side of the same cache. `icFillPutTransition`
    already records the case that matters most — a store that *creates* the
    property, which is what initialising a fresh object is made of — and it was
-   measured at 8% of EarleyBoyer on the interpreter side alone.
+   measured at 8% of EarleyBoyer on the interpreter side alone. It is now the
+   largest sole blocker in the corpus by a factor of seven: 597 functions have
+   no other unsupported opcode in them, and it reuses the read's guard chain
+   whole.
 3. **`GET_FIELD2`**, which is the same probe with a different stack effect (962
    functions), and is what `o.m()` compiles to. Worth little before calls and
    nearly free after this one.
@@ -581,6 +685,13 @@ enter compiled code, so the cache would have been correct and unreachable. That
 is the lesson worth carrying forward — a guard that rejects a type is also a
 guard that prevents ever handling it, and the two are easy to confuse when the
 guard is the one making everything else sound.
+
+The generic operators have come off it too, and they are the smaller half of
+that lesson. They were listed first because the cache was waiting on them, and
+they were: `dist(p)` above could not compile at all while `dx*dx` needed a known
+Number. But by function count they were worth 43 of 6,976, because the wall in
+front of this tier is not what it can do with a value — it is that it cannot
+store one, read a global, or call anything.
 
 Tiering has come off this list too. Counters and a compile threshold are in, and
 so is the case a threshold cannot see: a function called once whose loop is hot

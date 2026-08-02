@@ -38,6 +38,10 @@ const jitThreshold = 8
 // icHit is incremented by compiled code, which is why the increment is only
 // emitted when this is on — a counter nobody reads is still a store to a shared
 // line on the hottest path there is.
+// genFast and genSlow are the same question asked of the generic operators: an
+// operator emitted behind a type guard is worth having only if the guard is
+// sometimes satisfied, and a guard that always fails is indistinguishable from
+// one that always passes unless both sides are counted.
 var jitStats struct {
 	enabled  bool
 	compiled uint64
@@ -45,6 +49,8 @@ var jitStats struct {
 	interp   uint64
 	icHit    uint64
 	icMiss   uint64
+	genFast  uint64
+	genSlow  uint64
 }
 
 func init() { jitStats.enabled = os.Getenv("GOANT_JIT_STATS") != "" }
@@ -58,6 +64,11 @@ func JITStats() (compiled, declined, interpreted uint64) {
 // JITPropertyStats reports compiled property reads served by the emitted
 // inline-cache probe, and those that fell through to the runtime.
 func JITPropertyStats() (hit, miss uint64) { return jitStats.icHit, jitStats.icMiss }
+
+// JITOperatorStats reports operators compiled without a known operand type, by
+// whether the guard let them take the machine instruction or sent them to the
+// runtime.
+func JITOperatorStats() (fast, slow uint64) { return jitStats.genFast, jitStats.genSlow }
 
 // jitOSRThreshold is how many times a loop may go round in the interpreter
 // before the function it is in gets compiled.

@@ -197,6 +197,12 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 // being stored, being returned: none of those demand anything, because the
 // templates for them work on any value.
 //
+// Arithmetic still demands even though it no longer has to. A generic operator
+// would take any operand, but it would take it behind a guard and with a call
+// out on the other side of it, where a checked parameter needs neither — so a
+// parameter this function does arithmetic on is worth guessing is a Number, and
+// worth leaving on the interpreter when the guess is wrong.
+//
 // The relation is transitive through the locals, which is what the outer loop is
 // for: `let t = o; t * 2` demands a Number of t, and therefore of o. The origin
 // of a stack slot is the local whose read produced it, or none for a computed
@@ -413,15 +419,29 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bo
 					if op == OpSetLocal {
 						push(k) // SET_LOCAL leaves the value behind
 					}
-				case OpAdd, OpSub, OpMul, OpDiv,
-					OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr:
+				case OpAdd, OpSub, OpMul, OpDiv:
+					// Only when both operands were Numbers. The generic form of
+					// these calls the runtime's operator, and `+` on two Strings
+					// is a String, `*` on two BigInts a BigInt.
+					y, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					x, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					push(x && y)
+				case OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr:
+					// Still refused unless both operands are Numbers, so the
+					// 32-bit result always is one.
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
-					push(true) // double arithmetic yields a Number, and so does 32-bit
+					push(true)
 				case OpNeg, OpBnot, OpInc, OpDec:
 					if _, ok := pop(); !ok {
 						return nil, false
