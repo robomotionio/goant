@@ -525,14 +525,8 @@ apart.
 ### What that made visible: the probe is aimed at the wrong shape
 
 `dist(p)` compiles now, so the benchmark from the previous section can be run
-again — and it is *worse*:
-
-| `dist` over 100 points, 2M calls | |
-| --- | --- |
-| interpreted | 1137 ms |
-| compiled, delegating every read | 1244 ms |
-| compiled, with the cache and the generic operators | **1361 ms** |
-| node | 8 ms |
+again — and it comes out at **1361 ms** against the interpreter's 1137, which is
+worse than the 1244 ms it managed when it delegated every read to a helper.
 
 The counters say exactly where it goes. Every frame entry is compiled, all
 5,999,979 untyped operators take the machine instruction — the generic path is
@@ -541,7 +535,7 @@ working perfectly — and of 3,999,986 property reads the emitted cache serves
 regression to the byte.
 
 The reason is not polymorphism. It is that compiled code probes *one* way, and
-`icWay` fills fill in order, so way 0 holds the first shape the site ever saw:
+ways fill in order, so way 0 holds the first shape the site ever saw:
 
 ```
 100 objects from the same {x, y} literal occupy three shapes: 1, 1, and 98.
@@ -572,9 +566,11 @@ looking at it, and the two readers have to mean the same thing by empty.
 
 | `dist` over 100 points, 2M calls | |
 | --- | --- |
-| interpreted | 1122–1149 ms |
-| compiled, one way | 1361 ms, **1.0%** of reads served |
-| compiled, eight ways | **1163 ms**, **100.0%** of reads served |
+| interpreted | 1138–1167 ms |
+| compiled, delegating every read | 1244 ms |
+| compiled, cache emitted, one way probed | 1361 ms, **1.0%** of reads served |
+| compiled, eight ways probed | 1163 ms, **100.0%** served |
+| compiled, and no allocation per entry | **944–998 ms** |
 | node | 8 ms |
 
 The 198 ms is exactly the four million helper round trips that are no longer
@@ -595,7 +591,10 @@ published rather than after, because the collector reads `Ret` and the spill
 slots and the previous call's are stale.
 
 Entering compiled code now allocates nothing, and
-`TestJITFrameEntryDoesNotAllocate` is what keeps it that way.
+`TestJITFrameEntryDoesNotAllocate` is what keeps it that way. `dist` runs in 944
+to 998 ms against the interpreter's 1138 to 1167 — the first time on this
+benchmark that compiling a function has been worth doing at all, and it took the
+cache, the operators and the frame together to get there.
 
 ## What the tier is worth on Octane: nothing yet
 
