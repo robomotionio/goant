@@ -861,24 +861,24 @@ verified to compile nothing:
 
 | | off | on | off | on | |
 | --- | --- | --- | --- | --- | --- |
-| **DeltaBlue** | 248 | **307** | 248 | **306** | **+23.6%** |
-| **Richards** | 220 | **253** | 220 | **251** | **+14.5%** |
-| RayTrace | 394 | 401 | 394 | 401 | +1.8% |
-| EarleyBoyer | 620 | 618 | 620 | 623 | +0.1% |
-| RegExp | 145 | 145 | 147 | 145 | −0.7% |
-| Splay | 1998 | 1954 | 1963 | 1963 | −1.1% |
-| Crypto | 239 | 234 | 239 | 234 | −2.1% |
-| NavierStokes | 451 | 440 | 451 | 440 | −2.4% |
-| | | | | | **geomean +3.9%** |
+| **DeltaBlue** | 245 | **304** | 244 | **305** | **+24.5%** |
+| **Richards** | 216 | **257** | 216 | **256** | **+18.8%** |
+| RayTrace | 387 | 392 | 386 | 394 | +1.7% |
+| EarleyBoyer | 610 | 620 | 609 | 618 | +1.6% |
+| RegExp | 145 | 144 | 146 | 145 | −0.7% |
+| Splay | 2012 | 1996 | 2013 | 1961 | −1.7% |
+| Crypto | 238 | 234 | 238 | 234 | −1.7% |
+| NavierStokes | 439 | 429 | 439 | 430 | −2.2% |
+| | | | | | **geomean +4.6%** |
 
 Both arms are steady to the point, so none of these are drift.
 
-**Carrying operands across a branch is the fourth demonstration of the same
-thing.** It took DeltaBlue from 59.1% of its frame entries in compiled code to
-72.2% and Richards from 32.7% to 38.5% — the largest coverage gain of any single
-change here — and the geomean went from +4.5% to +3.9%, which is to say it did
-nothing outside the drift. More of the interpreter's work now happens in compiled
-code, and compiled code does that work at about the same speed.
+Compiled code holds 72.2% of DeltaBlue's frame entries and 52.6% of Richards'.
+
+**Coverage measured by count kept not paying.** Carrying operands across a branch
+was the clearest case: DeltaBlue 59.1% → 72.2% of frame entries, the largest
+single coverage gain here, and the geomean moved from +4.5% to +3.9% — nothing
+outside the drift. That happened four times before the denominator was fixed.
 
 NavierStokes makes **2,826 frame entries in the whole benchmark** — its time is
 inside a handful of enormous loops rather than spread over calls — so its share
