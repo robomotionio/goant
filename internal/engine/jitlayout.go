@@ -69,6 +69,11 @@ const (
 	jitOffRTWatermark = unsafe.Offsetof(Runtime{}.invWatermark)
 	jitOffRTDirty     = unsafe.Offsetof(Runtime{}.invDirty)
 
+	// An upvalue: a pointer to wherever the captured binding lives, which is a
+	// frame's locals slot while the frame is open and the cell itself once it has
+	// been closed. Reading one is the same load either way.
+	jitOffUpvalLocation = unsafe.Offsetof(upvalue{}.location)
+
 	// The global object, which a compiled global read starts from. Loaded every
 	// time rather than baked in: BeginInvocation swaps a fresh one in and End
 	// puts the old one back, so a compiled site outlives several of them.

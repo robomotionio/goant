@@ -345,7 +345,7 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 					}
 					push(noOrigin)
 				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpThis,
-					OpGetGlobal:
+					OpGetGlobal, OpGetUpval:
 					push(noOrigin)
 				case OpPop, OpJmpFalse, OpJmpTrue, OpReturn:
 					if _, ok := pop(); !ok {
@@ -564,8 +564,8 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, demand []bool) ([]bo
 						return nil, false
 					}
 					push(false)
-				case OpGetGlobal:
-					// A global holds anything at all.
+				case OpGetGlobal, OpGetUpval:
+					// A global or a captured binding holds anything at all.
 					push(false)
 				case OpGetField2:
 					// obj -> obj val: the receiver stays as it was, and a field

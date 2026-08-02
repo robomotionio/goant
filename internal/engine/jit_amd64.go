@@ -732,6 +732,43 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp -= argc
 			ip += 3
 
+		case OpGetUpval:
+			// A closed-over variable: the closure's upvalue array, the upvalue,
+			// the location it points at, and the value there. Four dependent
+			// loads and no guard chain — much less work than the property cache
+			// this tier already emits, and it is what NavierStokes is refused
+			// for. That benchmark compiles 0.4% of its frame entries, so all it
+			// gets from the tier today is the tiering check.
+			//
+			// The index is checked here rather than emitted, because the count
+			// is known: a function's upvalDescs say how many it captures, and
+			// every closure over it is built with exactly that many.
+			idx := int(readU16(code, ip+1))
+			if idx >= len(fn.upvalDescs) {
+				return refuse(why, "shape")
+			}
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			dst := jitStackRegs[sp]
+			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffUpvals)
+			a.MovRegMem(dst, dst, int32(idx)*8)
+			a.MovRegMem(dst, dst, int32(jitOffUpvalLocation))
+			a.MovRegMem(dst, dst, 0)
+			// A captured binding has a dead zone of its own, and the sentinel
+			// for it is the same one a local carries.
+			ok := a.NewLabel()
+			a.MovRegImm64(jitRegScratch, uint64(tEmpty))
+			a.CmpRegReg(dst, jitRegScratch)
+			a.Jcc(jitasm.CondNE, ok)
+			if !jitCallHelper(a, sp, jitHelperDeadZone, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.Bind(ok)
+			kind[sp] = false
+			sp++
+			ip += 3
+
 		case OpThis:
 			// The receiver, from the context rather than the locals, because it
 			// is the one thing a frame carries that is neither a local nor an
@@ -981,7 +1018,8 @@ func jitHasTemplate(op Opcode) bool {
 		OpNeg, OpInc, OpDec, OpNot,
 		OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
 		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpGetField2, OpPutField,
-		OpGetGlobal, OpCall, OpCallMethod, OpReturn, OpReturnUndef, OpThis:
+		OpGetGlobal, OpGetUpval, OpCall, OpCallMethod,
+		OpReturn, OpReturnUndef, OpThis:
 		return true
 	}
 	return false
@@ -1214,8 +1252,8 @@ func jitCanonicalizeNaN(a *jitasm.Asm, r jitasm.Reg) {
 // A throw is not a decline. It comes from a helper, by which point the frame has
 // run, and this tier has no exception handlers of its own — TRY_PUSH is refused
 // — so the only thing left to do is what the interpreter would: leave.
-func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value, this Value) (Value, *ThrowError, bool) {
-	return c.jitRunAt(rt, fn, locals, this, c.entry)
+func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, cl *closure, locals []Value, this Value) (Value, *ThrowError, bool) {
+	return c.jitRunAt(rt, fn, cl, locals, this, c.entry)
 }
 
 // jitRunOSR enters at the stub for a loop header, if there is one.
@@ -1223,15 +1261,15 @@ func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value, this Value) (V
 // Reports false when there is not, or when the stub's guards decline the locals
 // the interpreter has produced — in which case nothing has happened and the
 // interpreter carries on from where it was.
-func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
+func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, cl *closure, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
 	pc, ok := c.osr[header]
 	if !ok {
 		return mkundef(), nil, false
 	}
-	return c.jitRunAt(rt, fn, locals, this, pc)
+	return c.jitRunAt(rt, fn, cl, locals, this, pc)
 }
 
-func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, this Value, entry uintptr) (Value, *ThrowError, bool) {
+func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, locals []Value, this Value, entry uintptr) (Value, *ThrowError, bool) {
 	if len(locals) == 0 {
 		return mkundef(), nil, false
 	}
@@ -1278,6 +1316,14 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, this Value, 
 	ctx.Pool = jitObjectPoolAddr(rt)
 	ctx.Host = jitRuntimeAddr(rt)
 	ctx.This = uint64(this)
+	// The closure's upvalue array, or zero when there is none. A function with
+	// no GET_UPVAL never reads it, and one with a GET_UPVAL is only ever
+	// entered through a closure that has the array the index was compiled
+	// against.
+	ctx.Upvals = 0
+	if cl != nil && len(cl.upvalues) > 0 {
+		ctx.Upvals = uintptr(unsafe.Pointer(&cl.upvalues[0]))
+	}
 	if n < cap(rt.jitFrames) {
 		rt.jitFrames = rt.jitFrames[:n+1]
 		rt.jitFrames[n] = ctx

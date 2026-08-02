@@ -140,7 +140,7 @@ func TestJITReadsTheReceiver(t *testing.T) {
 		rt.objPtr(recv).defineOwn("x", tov(99), attrDefault)
 		locals := make([]Value, fn.maxLocals)
 		locals[0] = tov(1)
-		got, e, ok := c.jitRun(rt, fn, locals, recv)
+		got, e, ok := c.jitRun(rt, fn, nil, locals, recv)
 		if !ok || e != nil {
 			t.Errorf("%q declined (%v) or threw (%v)", src, !ok, e != nil)
 		} else if got != tov(99) {
@@ -179,7 +179,7 @@ func TestJITReceiverSurvivesACollection(t *testing.T) {
 
 	locals := make([]Value, fn.maxLocals)
 	locals[0] = tov(1)
-	got, e, ok := c.jitRun(rt, fn, locals, recv)
+	got, e, ok := c.jitRun(rt, fn, nil, locals, recv)
 	if !ok || e != nil {
 		t.Fatalf("declined (%v) or threw (%v)", !ok, e != nil)
 	}
@@ -244,5 +244,79 @@ func TestJITDeadZoneLocalIsNotNumeric(t *testing.T) {
 		if u && numeric[i] {
 			t.Errorf("local %d is read before it is proven written and is still marked numeric", i)
 		}
+	}
+}
+
+// TestJITReadsAnUpvalue covers the last thing a frame carries that compiled code
+// could not see.
+//
+// NavierStokes compiles 0.4% of its frame entries — GET_UPVAL refuses fifteen of
+// its functions on its own — so what the tier was worth there was the tiering
+// check and nothing else. A captured binding is a pointer to wherever it lives,
+// which is a frame's locals slot while that frame is open and a cell of its own
+// once it has closed; reading one is the same load either way, and both are
+// exercised here.
+func TestJITReadsAnUpvalue(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"an-open-upvalue", `
+			function outer(n) {
+				var base = n * 10;
+				function inner(a) { return base + a; }
+				var s = 0;
+				for (var k = 0; k < 60; k++) s += inner(k);
+				return s;
+			}
+			var t = 0; for (var j = 0; j < 20; j++) t += outer(j); t;`},
+		{"a-closed-upvalue", `
+			function make(n) { var base = n * 10; return function (a) { return base + a; }; }
+			var f = make(7), s = 0;
+			for (var k = 0; k < 200; k++) s += f(k);
+			s;`},
+		{"written-through-after-capture", `
+			function make() { var n = 0; return [function () { n = n + 1; }, function () { return n; }]; }
+			var p = make(), s = 0;
+			for (var k = 0; k < 200; k++) { p[0](); s = p[1](); }
+			s;`},
+		{"two-closures-over-one-binding", `
+			function make() { var n = 5; return [function () { return n * 2; }, function () { return n * 3; }]; }
+			var p = make(), s = 0;
+			for (var k = 0; k < 200; k++) s = p[0]() + p[1]();
+			s;`},
+		{"a-const-in-its-dead-zone", `
+			function make() {
+				var g = function () { return c; };
+				var caught = 0;
+				for (var k = 0; k < 60; k++) { try { g(); } catch (e) { caught++; } }
+				const c = 1;
+				return caught;
+			}
+			make();`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
+	}
+}
+
+// TestJITCompilesAnUpvalueRead is what stops the agreement above from being the
+// interpreter agreeing with itself.
+func TestJITCompilesAnUpvalueRead(t *testing.T) {
+	rt := New()
+	saved := jitEnabled
+	jitEnabled = true
+	defer func() { jitEnabled = saved }()
+
+	v, err := rt.RunString("upval.js", `
+		function make(n) { var base = n; return function (a) { return base + a; }; }
+		var f = make(1), s = 0;
+		for (var k = 0; k < 200; k++) s += f(k);
+		f;`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	o := rt.objPtr(v)
+	if o == nil || o.clPtr == nil || o.clPtr.fn == nil {
+		t.Fatal("the script's last expression was not a closure")
+	}
+	if o.clPtr.fn.jit.code == nil {
+		t.Error("a function whose only unusual opcode is GET_UPVAL was not compiled")
 	}
 }

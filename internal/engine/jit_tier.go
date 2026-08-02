@@ -177,9 +177,9 @@ func jitNoteDecline(fn *svFunc) {
 // means nothing happened and interpretation continues from the same place;
 // there is no half-transferred state, because the stub either takes the whole
 // frame or declines before touching it.
-func jitTryLoop(rt *Runtime, fn *svFunc, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
+func jitTryLoop(rt *Runtime, fn *svFunc, cl *closure, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
 	if fn.jit.code != nil {
-		return fn.jit.code.jitRunOSR(rt, fn, locals, this, header)
+		return fn.jit.code.jitRunOSR(rt, fn, cl, locals, this, header)
 	}
 	if fn.jit.tried {
 		return mkundef(), nil, false
@@ -199,7 +199,7 @@ func jitTryLoop(rt *Runtime, fn *svFunc, locals []Value, this Value, header int)
 		jitNoteRefusal(fn, why)
 		return mkundef(), nil, false
 	}
-	return fn.jit.code.jitRunOSR(rt, fn, locals, this, header)
+	return fn.jit.code.jitRunOSR(rt, fn, cl, locals, this, header)
 }
 
 // jitEligible rejects the frame shapes the compiler does not model, before it
@@ -225,9 +225,9 @@ func jitEligible(fn *svFunc) bool {
 // nothing was compiled, or the compiled code declined the arguments it was
 // given. Declining is safe at any point, because the only exit that reports it
 // is the entry check — which happens before compiled code has written anything.
-func jitTry(rt *Runtime, fn *svFunc, locals []Value, this Value) (Value, *ThrowError, bool) {
+func jitTry(rt *Runtime, fn *svFunc, cl *closure, locals []Value, this Value) (Value, *ThrowError, bool) {
 	if fn.jit.code != nil {
-		v, e, ok := fn.jit.code.jitRun(rt, fn, locals, this)
+		v, e, ok := fn.jit.code.jitRun(rt, fn, cl, locals, this)
 		if jitStats.enabled {
 			if ok {
 				jitStats.compiled++
@@ -262,5 +262,5 @@ func jitTry(rt *Runtime, fn *svFunc, locals []Value, this Value) (Value, *ThrowE
 		jitNoteRefusal(fn, why)
 		return mkundef(), nil, false
 	}
-	return fn.jit.code.jitRun(rt, fn, locals, this)
+	return fn.jit.code.jitRun(rt, fn, cl, locals, this)
 }

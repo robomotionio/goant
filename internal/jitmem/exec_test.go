@@ -27,6 +27,7 @@ func TestExecContextLayout(t *testing.T) {
 		{"Pool", unsafe.Offsetof(c.Pool), CtxOffPool},
 		{"Host", unsafe.Offsetof(c.Host), CtxOffHost},
 		{"This", unsafe.Offsetof(c.This), CtxOffThis},
+		{"Upvals", unsafe.Offsetof(c.Upvals), CtxOffUpvals},
 		{"size", unsafe.Sizeof(c), CtxSize},
 	} {
 		if tc.got != tc.want {

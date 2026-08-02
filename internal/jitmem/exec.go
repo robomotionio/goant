@@ -72,6 +72,14 @@ type ExecContext struct {
 	// Unlike everything else here it holds a Value, so the runtime's collector
 	// must trace it — see the jitFrames loop in collect.go.
 	This uint64
+	// Upvals is the address of the closure's upvalue array — the `[]*upvalue`
+	// itself, not a copy — for the frames that have one. Zero when the closure
+	// has no upvalues, which is also every frame whose function contains no
+	// GET_UPVAL, so compiled code never reads it in that case.
+	//
+	// The array holds Go pointers and this does not root them; the closure does,
+	// and the frame publishes the closure for as long as it runs.
+	Upvals uintptr
 }
 
 // SpillSlots bounds the operand stack a compiled function may hold across a
@@ -90,7 +98,8 @@ const (
 	CtxOffPool   = 72 + 8*SpillSlots
 	CtxOffHost   = 80 + 8*SpillSlots
 	CtxOffThis   = 88 + 8*SpillSlots
-	CtxSize      = 96 + 8*SpillSlots
+	CtxOffUpvals = 96 + 8*SpillSlots
+	CtxSize      = 104 + 8*SpillSlots
 )
 
 // Which fields hold a Value, and so must be traced by the runtime's collector
