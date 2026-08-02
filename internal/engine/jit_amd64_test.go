@@ -312,11 +312,9 @@ func TestJITBailsOnNonNumbers(t *testing.T) {
 func TestJITRefusesWhatItCannotModel(t *testing.T) {
 	for _, src := range []string{
 		"function f(a,b){ return new g(a); }",             // a construct
-		"function f(a,b){ if (a) return 1; return 2; }",   // a bare value as a condition
 		"function f(a,b){ return a%b; }",                  // modulo is not in this tier
 		"function f(a,b){ return typeof a; }",             // TYPEOF is not in this tier
 		"function f(a,b){ a[b] = 1; return 1; }",          // an element write
-		"function f(a,b){ return a===b ? 1 : 2; }",        // the Boolean is not branched on directly
 		"function f(a,b){ try { return a; } catch(e){} }", // an exception handler
 	} {
 		if c := jitCompile(jitFn(t, src), nil); c != nil {

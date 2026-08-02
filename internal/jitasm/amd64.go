@@ -543,6 +543,10 @@ func (a *Asm) MovsdMemX(base Reg, disp int32, src XReg) {
 	a.emitSSEMem(0xF2, []byte{0x0F, 0x11}, uint8(src), uint8(base), disp)
 }
 
+// XorpdXX clears a register when both operands are the same one, which is how a
+// zero to compare a double against is produced without a constant.
+func (a *Asm) XorpdXX(dst, src XReg) { a.emitSSE(0x66, []byte{0x0F, 0x57}, uint8(dst), uint8(src)) }
+
 func (a *Asm) AddsdXX(dst, src XReg) { a.emitSSE(0xF2, []byte{0x0F, 0x58}, uint8(dst), uint8(src)) }
 func (a *Asm) SubsdXX(dst, src XReg) { a.emitSSE(0xF2, []byte{0x0F, 0x5C}, uint8(dst), uint8(src)) }
 func (a *Asm) MulsdXX(dst, src XReg) { a.emitSSE(0xF2, []byte{0x0F, 0x59}, uint8(dst), uint8(src)) }

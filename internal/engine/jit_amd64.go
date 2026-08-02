@@ -234,8 +234,18 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			returned = false
 		}
 		if returned {
-			// Unreachable trailer after a return, most often RETURN_UNDEF.
-			break
+			// Unreachable: control cannot fall in here and no label was bound
+			// above. Skip the instruction and keep walking rather than stop —
+			// stopping left every branch target beyond this point unbound, which
+			// then refused the whole function as `unreachable-target`, and that
+			// was 12.6 million interpreted instructions in Richards. A `return`
+			// in one arm of a conditional is enough to produce it.
+			size := int(opTable[Opcode(code[ip])].Size)
+			if size <= 0 {
+				return refuse(why, "undecodable")
+			}
+			ip += size
+			continue
 		}
 
 		switch op := Opcode(code[ip]); op {
@@ -460,6 +470,38 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			} else {
 				a.Jmp(l)
 			}
+			// An unconditional jump ends the block: what follows is reachable
+			// only through a label, so the operand depth here says nothing about
+			// it. Leaving this unset carried a stale depth into the next label
+			// and refused `a ? b : c` as a target mismatch.
+			returned = true
+			ip += 5
+
+		case OpJmpFalse, OpJmpTrue:
+			// Reached only when the branch was not fused with a comparison: the
+			// fused form is emitted from the comparison's own case, which
+			// consumes both together. This is the other one — `if (x)`,
+			// `a && b`, `a ? b : c` — where the condition is a value and the
+			// branch has to ask whether it is true. See jit_truthy_amd64.go.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			target := int(readU32(code, ip+1))
+			l, known := labels[target]
+			if !known {
+				return refuse(why, "branch-into-instruction")
+			}
+			if sp-1 != depths[target] {
+				return refuse(why, "stack-at-target")
+			}
+			back := target <= ip
+			if !jitEmitTruthyBranch(a, jitStackRegs[sp-1], op == OpJmpTrue, back, l, sp, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			if back {
+				loopHeaders[target] = true
+			}
+			sp--
 			ip += 5
 
 		case OpDup:
@@ -1260,6 +1302,7 @@ const (
 	jitHelperCallMethod = 10
 	jitHelperGetElem    = 11
 	jitHelperBitwise    = 12
+	jitHelperToBoolean  = 13
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1666,6 +1709,18 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 			return e
 		}
 		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperToBoolean:
+		// A String or a BigInt, whose truth is in what the Value points at. The
+		// emitted branch answers every other type itself.
+		n := int(ctx.SpillN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		ctx.Ret = 0
+		if rt.toBoolean(Value(ctx.Spill[n-1])) {
+			ctx.Ret = 1
+		}
 		return nil
 	case jitHelperBitwise:
 		op, x, y, ok := jitBinaryOperands(ctx)
