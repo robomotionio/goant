@@ -395,3 +395,79 @@ func TestJITBranchWithOperandsLiveAgreesWithTheInterpreter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
 	}
 }
+
+// TestJITTruthyBranchAgreesWithTheInterpreter covers branching on a value
+// rather than on a comparison.
+//
+// ToBoolean is a switch over the type and the emitted form answers all of it
+// except a String and a BigInt, so the cases are the types: every falsy value
+// the specification has, and enough truthy ones to catch a guard that inverted.
+// The falsy set is small and exact — false, undefined, null, +0, -0, NaN, "" —
+// and getting any one of them wrong takes the wrong branch silently.
+func TestJITTruthyBranchAgreesWithTheInterpreter(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"every-falsy-value", `
+			var vals = [false, true, undefined, null, 0, -0, NaN, "", "x", 1, -1, 0.5,
+			            {}, [], function(){}, Infinity, -Infinity, 0n, 1n, Symbol("s")];
+			function f(v) { if (v) { return 1; } return 0; }
+			var s = "";
+			for (var k = 0; k < 60; k++) { s = ""; for (var i = 0; i < vals.length; i++) s += f(vals[i]); }
+			s;`},
+		{"and-or-over-the-same-set", `
+			var vals = [false, true, undefined, null, 0, -0, NaN, "", "x", 1, {}, 0n, 1n];
+			function f(a, b) { return "" + (a && b) + "|" + (a || b); }
+			var s = "";
+			for (var k = 0; k < 20; k++) {
+				s = "";
+				for (var i = 0; i < vals.length; i++) s += f(vals[i], vals[(i + 1) % vals.length]);
+			}
+			s;`},
+		{"a-ternary-over-the-same-set", `
+			var vals = [false, true, undefined, null, 0, NaN, "", "x", 1, {}, 0n];
+			function f(v) { return v ? "T" : "F"; }
+			var s = "";
+			for (var k = 0; k < 40; k++) { s = ""; for (var i = 0; i < vals.length; i++) s += f(vals[i]); }
+			s;`},
+		{"a-while-loop-on-a-value", `
+			function f(n) { var s = 0; var i = n; while (i) { s += i; i = i - 1; } return s; }
+			var t = 0; for (var k = 0; k < 200; k++) t += f(k % 12); t;`},
+		{"a-return-inside-a-conditional", `
+			function f(a) { if (a > 5) { return a * 2; } if (a) { return a; } return -1; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k % 10); s;`},
+		{"short-circuit-must-not-evaluate", `
+			var calls = 0;
+			function side() { calls++; return 1; }
+			function f(a) { return (a && side()) + (a || side()); }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k % 2);
+			s * 100000 + calls;`},
+		{"a-string-condition", `
+			function f(s) { return s ? s.length : -1; }
+			var strs = ["", "a", "abc"], out = "";
+			for (var k = 0; k < 200; k++) { out = ""; for (var i = 0; i < 3; i++) out += f(strs[i]); }
+			out;`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
+	}
+}
+
+// TestJITCompilesABareCondition is what stops the agreement above from being
+// the interpreter agreeing with itself.
+func TestJITCompilesABareCondition(t *testing.T) {
+	for _, src := range []string{
+		"function f(a,b){ return a && b; }",
+		"function f(a,b){ return a || b; }",
+		"function f(a,b){ return a ? b : a; }",
+		"function f(a,b){ if (a) { return 1; } return 2; }",
+		"function f(a,b){ var s=0; while (a) { s=s+1; a=a-1; } return s; }",
+		"function f(a,b){ if (a) { return 1; } if (b) { return 2; } return 3; }",
+	} {
+		_, fn := jitFnRT(t, src)
+		var why string
+		c := jitCompile(fn, &why)
+		if c == nil {
+			t.Errorf("refused %q: %s", src, why)
+			continue
+		}
+		c.free()
+	}
+}
