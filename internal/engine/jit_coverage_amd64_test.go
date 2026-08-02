@@ -14,9 +14,14 @@ import (
 // bug in the thing it is measuring.
 var jitSupported = map[Opcode]bool{
 	OpThis: true, OpPutLocal: true, OpSetLocal: true, OpGetLocal: true,
-	OpConst: true, OpConstI8: true, OpPop: true,
+	OpConst: true, OpConstI8: true, OpPop: true, OpDup: true, OpInsert2: true,
+	OpUndef: true, OpNull: true, OpTrue: true, OpFalse: true,
 	OpAdd: true, OpSub: true, OpMul: true, OpDiv: true,
+	OpBand: true, OpBor: true, OpBxor: true, OpBnot: true,
+	OpShl: true, OpShr: true, OpUshr: true,
+	OpNeg: true, OpInc: true, OpDec: true, OpNot: true,
 	OpLt: true, OpLe: true, OpGt: true, OpGe: true,
+	OpEq: true, OpNe: true, OpSeq: true, OpSne: true,
 	OpJmp: true, OpJmpFalse: true, OpJmpTrue: true, OpGetField: true,
 	OpReturn: true, OpReturnUndef: true,
 }

@@ -75,6 +75,9 @@ const (
 	// has to route unordered to false, so this is not an edge case.
 	CondP  Cond = 0xA // parity set: unordered
 	CondNP Cond = 0xB // parity clear: ordered
+	// Set when a signed operation overflowed. Used to recognise the one input
+	// CVTTSD2SI cannot convert, which it reports by returning INT64_MIN.
+	CondO Cond = 0x0 // overflow
 )
 
 // Label is a branch target. A label may be jumped to before it is bound; Code
@@ -288,6 +291,67 @@ func (a *Asm) CmpRegImm32(r Reg, v uint32) {
 	a.emit32(v)
 }
 
+// AddRegImm32 adds a sign-extended 32-bit immediate and sets the flags.
+func (a *Asm) AddRegImm32(r Reg, v uint32) {
+	a.emitRM(true, []byte{0x81}, 0, uint8(r))
+	a.emit32(v)
+}
+
+func (a *Asm) XchgRegReg(x, y Reg) { a.emitRM(true, []byte{0x87}, uint8(x), uint8(y)) }
+
+// Lea32RegMem computes base+disp and keeps the low 32 bits, zero-extended.
+//
+// The address is never dereferenced. It is here because LEA is the one
+// instruction that adds and truncates without touching the flags, which is what
+// a caller wants when it has just branched on them.
+func (a *Asm) Lea32RegMem(dst, base Reg, disp int32) {
+	a.emitMem(false, []byte{0x8D}, uint8(dst), uint8(base), disp)
+}
+
+// ---- 32-bit integer operations ----
+//
+// JavaScript's bitwise operators are defined on 32 bits: both operands go
+// through ToInt32, the operation happens there, and the result comes back as a
+// double. These are the middle step, so they are deliberately the 32-bit forms —
+// dropping REX.W is not an optimisation but the semantics. Writing a 32-bit
+// register also clears the upper half, which is what makes the unsigned result
+// of `>>>` a zero-extension for free.
+//
+// The shift forms take their count in CL and need no masking: x86 masks a 32-bit
+// shift count to five bits, which is exactly the `& 31` the specification asks
+// for.
+
+func (a *Asm) And32RegReg(dst, src Reg) { a.emitRM(false, []byte{0x21}, uint8(src), uint8(dst)) }
+func (a *Asm) Or32RegReg(dst, src Reg)  { a.emitRM(false, []byte{0x09}, uint8(src), uint8(dst)) }
+func (a *Asm) Xor32RegReg(dst, src Reg) { a.emitRM(false, []byte{0x31}, uint8(src), uint8(dst)) }
+func (a *Asm) Mov32RegReg(dst, src Reg) { a.emitRM(false, []byte{0x89}, uint8(src), uint8(dst)) }
+func (a *Asm) Not32Reg(r Reg)           { a.emitRM(false, []byte{0xF7}, 2, uint8(r)) }
+
+func (a *Asm) Shl32RegCL(r Reg) { a.emitRM(false, []byte{0xD3}, 4, uint8(r)) }
+func (a *Asm) Shr32RegCL(r Reg) { a.emitRM(false, []byte{0xD3}, 5, uint8(r)) }
+func (a *Asm) Sar32RegCL(r Reg) { a.emitRM(false, []byte{0xD3}, 7, uint8(r)) }
+
+// MovsxdRegReg sign-extends a 32-bit register into a 64-bit one, which is how a
+// signed ToInt32 result becomes something CVTSI2SD will turn back into the right
+// double.
+func (a *Asm) MovsxdRegReg(dst, src Reg) { a.emitRM(true, []byte{0x63}, uint8(dst), uint8(src)) }
+
+// SetccReg writes 1 or 0 into the low byte of a register.
+//
+// The REX prefix is emitted unconditionally. Without one, encodings 4 to 7 name
+// AH..BH rather than SPL..DIL, so a byte operation on RSI would silently write
+// to the high half of RBP instead.
+func (a *Asm) SetccReg(c Cond, r Reg) {
+	a.emit(rex(false, 0, 0, uint8(r)))
+	a.emit(0x0F, 0x90|byte(c), modrm(3, 0, uint8(r)))
+}
+
+// MovzxRegReg8 widens that byte to the whole register.
+func (a *Asm) MovzxRegReg8(dst, src Reg) {
+	a.emit(rex(false, uint8(dst), 0, uint8(src)))
+	a.emit(0x0F, 0xB6, modrm(3, uint8(dst), uint8(src)))
+}
+
 // ---- doubles ----
 
 func (a *Asm) emitSSE(prefix byte, opcode []byte, reg, rm uint8) {
@@ -366,6 +430,22 @@ func (a *Asm) MovqXReg(dst XReg, src Reg) {
 
 func (a *Asm) MovqRegX(dst Reg, src XReg) {
 	a.emit(0x66, rex(true, uint8(src), 0, uint8(dst)), 0x0F, 0x7E, modrm(3, uint8(src), uint8(dst)))
+}
+
+// Cvttsd2siRegX truncates a double towards zero into a 64-bit integer.
+//
+// When the result will not fit — the double is too large, or is a NaN or an
+// infinity — it returns INT64_MIN rather than faulting. That value is what
+// callers test for, because it is the only signal that the conversion did not
+// happen; it is also a legitimate result for exactly one input, which is why the
+// test has to be arranged so that treating it as a failure is still correct.
+func (a *Asm) Cvttsd2siRegX(dst Reg, src XReg) {
+	a.emit(0xF2, rex(true, uint8(dst), 0, uint8(src)), 0x0F, 0x2C, modrm(3, uint8(dst), uint8(src)))
+}
+
+// Cvtsi2sdXReg converts a signed 64-bit integer back into a double.
+func (a *Asm) Cvtsi2sdXReg(dst XReg, src Reg) {
+	a.emit(0xF2, rex(true, uint8(dst), 0, uint8(src)), 0x0F, 0x2A, modrm(3, uint8(dst), uint8(src)))
 }
 
 // ---- control flow ----

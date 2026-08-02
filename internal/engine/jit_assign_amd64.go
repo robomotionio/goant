@@ -265,14 +265,45 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 					if op == OpSetLocal {
 						push(k) // SET_LOCAL leaves the value behind
 					}
-				case OpAdd, OpSub, OpMul, OpDiv:
+				case OpAdd, OpSub, OpMul, OpDiv,
+					OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr:
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
-					push(true) // double arithmetic yields a Number
+					push(true) // double arithmetic yields a Number, and so does 32-bit
+				case OpNeg, OpBnot, OpInc, OpDec:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(true)
+				case OpNot:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(false) // a Boolean
+				case OpDup:
+					k, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					push(k)
+					push(k)
+				case OpInsert2:
+					// obj a -> a obj a
+					av, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					obj, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					push(av)
+					push(obj)
+					push(av)
 				case OpGetField:
 					// The object goes in and whatever it held comes out, which
 					// is not a Number as far as this tier can tell.
@@ -280,7 +311,7 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock) ([]bool, bool) {
 						return nil, false
 					}
 					push(false)
-				case OpLt, OpLe, OpGt, OpGe:
+				case OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne:
 					if _, ok := pop(); !ok {
 						return nil, false
 					}

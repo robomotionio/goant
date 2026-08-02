@@ -149,6 +149,69 @@ func TestJITAgreesWithTheInterpreter(t *testing.T) {
 	for _, src := range jitLoops {
 		check(src, jitLoopInputs)
 	}
+	for _, src := range jitIntegerOps {
+		check(src, jitWildInputs)
+		check(src, jitIntegerInputs)
+	}
+}
+
+// jitIntegerOps are the operators defined on 32 bits rather than on doubles,
+// plus the ones that produce a Boolean. What makes them worth a list of their
+// own is that every one of them goes through a conversion the arithmetic
+// operators do not, and that conversion has a range it cannot do in a register.
+var jitIntegerOps = []string{
+	"function f(a,b){ return a&b; }",
+	"function f(a,b){ return a|b; }",
+	"function f(a,b){ return a^b; }",
+	"function f(a,b){ return a<<b; }",
+	"function f(a,b){ return a>>b; }",
+	"function f(a,b){ return a>>>b; }",
+	"function f(a,b){ return ~a; }",
+	"function f(a,b){ return ~(a&b); }",
+	"function f(a,b){ return (a|0)+(b|0); }",
+	"function f(a,b){ return (a>>>0)&255; }",
+	"function f(a,b){ return ((a<<b)|(a>>>b))&4095; }",
+	// Two conversions in one expression, so the second runs while the first has
+	// already left a bare integer in a register the collector may scan.
+	"function f(a,b){ return (a&b)|(a^b); }",
+	"function f(a,b){ return -a; }",
+	"function f(a,b){ return -(a*b); }",
+	"function f(a,b){ return !a; }",
+	"function f(a,b){ return !(a-b); }",
+	"function f(a,b){ return a===b; }",
+	"function f(a,b){ return a!==b; }",
+	"function f(a,b){ return a==b; }",
+	"function f(a,b){ return a!=b; }",
+	"function f(a,b){ if (a===b) { return 1; } return 2; }",
+	"function f(a,b){ if (a!==b) { return 1; } return 2; }",
+	"function f(a,b){ if (!(a===b)) { return 1; } return 2; }",
+	"function f(a,b){ var x = a===b; return x; }",
+}
+
+// jitIntegerInputs are chosen for the conversion rather than for the operator.
+//
+// The interesting ones are at 2^63, where CVTTSD2SI stops being able to answer
+// and the compiled code has to leave for the runtime mid-expression, and just
+// below it, where it still can. Shift counts above 31 and negative ones are here
+// because the specification masks them to five bits and a compiler that emitted
+// a 64-bit shift would not.
+var jitIntegerInputs = []struct{ a, b float64 }{
+	{0, 0}, {1, 1}, {255, 8}, {-1, 3}, {-256, 4},
+	{2147483647, 1}, {-2147483648, 1}, {2147483648, 1}, {4294967295, 1},
+	{1e9, 7}, {-1e9, 7}, {1e10, 3}, {1e15, 2},
+	// At and beyond what a register conversion can do.
+	{9223372036854775808, 1},  // 2^63 exactly
+	{9223372036854777856, 1},  // 2^63 + 2^11: the low bits survive the reduction
+	{-9223372036854775808, 1}, // -2^63
+	{1e20, 3}, {-1e20, 3}, {1e30, 5}, {1.5e300, 2},
+	{9007199254740993, 1}, {4503599627370497, 1},
+	// Shift counts the mask has to fold.
+	{1, 32}, {1, 33}, {1, 63}, {1, 64}, {1, -1}, {255, 100},
+	{-1, 31}, {-1, 32},
+	// Values that are not integers at all.
+	{2.5, 1.5}, {-2.5, 1.5}, {0.9, 0.9}, {-0.9, 3},
+	{math.NaN(), 1}, {1, math.NaN()}, {math.Inf(1), 1}, {math.Inf(-1), 1},
+	{-0, 0}, {0, -0},
 }
 
 // TestJITLoopOutlivesItsFuel drives a loop past the point where compiled code
@@ -248,11 +311,15 @@ func TestJITBailsOnNonNumbers(t *testing.T) {
 // to be refused rather than mis-compiled.
 func TestJITRefusesWhatItCannotModel(t *testing.T) {
 	for _, src := range []string{
-		"function f(a,b){ return g(a); }",               // a call
-		"function f(a,b){ if (a) return 1; return 2; }", // a branch
-		"function f(a,b){ return 'x'; }",                // a String constant
-		"function f(a,b){ return a%b; }",                // modulo is not in this tier
-		"function f(a,b){ return -a; }",                 // negation is not in this tier
+		"function f(a,b){ return g(a); }",                 // a call
+		"function f(a,b){ if (a) return 1; return 2; }",   // a bare value as a condition
+		"function f(a,b){ return 'x'; }",                  // a String constant
+		"function f(a,b){ return a%b; }",                  // modulo is not in this tier
+		"function f(a,b){ return typeof a; }",             // TYPEOF is not in this tier
+		"function f(a,b){ return a[b]; }",                 // an element read
+		"function f(a,b){ return a===b ? 1 : 2; }",        // the Boolean is not branched on directly
+		"function f(a,b){ var x = a.p; return x&1; }",     // a field is not known to be a Number
+		"function f(a,b){ try { return a; } catch(e){} }", // an exception handler
 	} {
 		if c := jitCompile(jitFn(t, src), nil); c != nil {
 			c.free()

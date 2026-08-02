@@ -32,18 +32,24 @@ import (
 //
 // Registers. R13 carries the ExecContext and R14 the goroutine, both fixed by
 // jitmem. R12 holds the base of the locals array and R15 the NaN-box threshold.
+// RCX is kept aside as a scratch: a variable shift count has to be in CL,
+// whatever the machine would rather do, and a spare register is also what lets a
+// 64-bit constant be built where one is needed.
+//
 // What is left is the operand stack, which a template compiler assigns
 // positionally rather than allocating: an expression that nests deeper than this
-// is simply not compiled.
+// is simply not compiled. Nine slots rather than ten is not a real loss —
+// nothing in a corpus of seven thousand functions is refused for depth.
 var jitStackRegs = []jitasm.Reg{
-	jitasm.RAX, jitasm.RCX, jitasm.RDX, jitasm.RBX,
+	jitasm.RAX, jitasm.RDX, jitasm.RBX,
 	jitasm.RSI, jitasm.RDI, jitasm.R8, jitasm.R9,
 	jitasm.R10, jitasm.R11,
 }
 
 const (
-	jitRegLocals = jitasm.R12
-	jitRegGuard  = jitasm.R15
+	jitRegLocals  = jitasm.R12
+	jitRegGuard   = jitasm.R15
+	jitRegScratch = jitasm.RCX
 )
 
 // jitFuel is how many loop iterations compiled code runs before returning to Go.
@@ -307,32 +313,19 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if !kind[sp-1] || !kind[sp-2] {
 				return refuse(why, "non-numeric-operand")
 			}
-			nop := Opcode(code[next])
-			if nop != OpJmpFalse && nop != OpJmpTrue {
+			l, whenTrue, after, ok := jitFuse(code, labels, next)
+			if !ok {
 				return refuse(why, "compare-not-branched")
-			}
-			if _, isTarget := labels[next]; isTarget {
-				return nil // something branches between the compare and its use
-			}
-			target := int(readU32(code, next+1))
-			l, known := labels[target]
-			if !known {
-				return nil
 			}
 			a.MovqXReg(jitasm.X0, jitStackRegs[sp-2])
 			a.MovqXReg(jitasm.X1, jitStackRegs[sp-1])
 			a.UcomisdXX(jitasm.X0, jitasm.X1)
-			jitCompareBranch(a, op, nop == OpJmpTrue, l)
+			jitCompareBranch(a, op, whenTrue, l)
 			sp -= 2
 			if sp != 0 {
 				return nil
 			}
-			if target <= next {
-				// A backward conditional branch is a do-while, whose target is
-				// reached with the stack in a shape this tier does not model.
-				return nil
-			}
-			ip = next + 5
+			ip = after
 
 		case OpJmp:
 			target := int(readU32(code, ip+1))
@@ -346,6 +339,150 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				a.Jmp(l)
 			}
 			ip += 5
+
+		case OpDup:
+			if sp < 1 || sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegReg(jitStackRegs[sp], jitStackRegs[sp-1])
+			kind[sp] = kind[sp-1]
+			sp++
+			ip++
+
+		case OpInsert2:
+			// obj a -> a obj a. Three moves rather than a rotate, because the
+			// value being duplicated has to survive its own slot being written.
+			if sp < 2 || sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			obj, av := jitStackRegs[sp-2], jitStackRegs[sp-1]
+			a.MovRegReg(jitStackRegs[sp], av)
+			a.MovRegReg(av, obj)
+			a.MovRegReg(obj, jitStackRegs[sp])
+			kind[sp] = kind[sp-1]
+			kind[sp-1] = kind[sp-2]
+			kind[sp-2] = kind[sp]
+			sp++
+			ip++
+
+		case OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr:
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			if !kind[sp-1] || !kind[sp-2] {
+				// A String or an object operand would mean ToPrimitive, and a
+				// BigInt a different operator entirely.
+				return refuse(why, "non-numeric-operand")
+			}
+			if !jitBitwise(a, op, jitStackRegs[sp-2], jitStackRegs[sp-1], sp, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			kind[sp-2] = true
+			sp--
+			ip++
+
+		case OpBnot:
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if !kind[sp-1] {
+				return refuse(why, "non-numeric-operand")
+			}
+			r := jitStackRegs[sp-1]
+			if !jitToInt32(a, r, r, sp, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.Not32Reg(r)
+			jitFromInt32(a, r, true)
+			kind[sp-1] = true
+			ip++
+
+		case OpNeg:
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if !kind[sp-1] {
+				return refuse(why, "non-numeric-operand")
+			}
+			// Negation is the sign bit and nothing else, which is also why it
+			// needs canonicalising: flipping the sign of the canonical NaN puts
+			// it above the tag threshold.
+			a.MovRegImm64(jitRegScratch, 1<<63)
+			a.XorRegReg(jitStackRegs[sp-1], jitRegScratch)
+			jitCanonicalizeNaN(a, jitStackRegs[sp-1])
+			ip++
+
+		case OpInc, OpDec:
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if !kind[sp-1] {
+				// ToNumeric on anything else, and a BigInt would increment as
+				// one rather than coercing.
+				return refuse(why, "non-numeric-operand")
+			}
+			r := jitStackRegs[sp-1]
+			a.MovRegImm64(jitRegScratch, uint64(tov(1)))
+			a.MovqXReg(jitasm.X1, jitRegScratch)
+			a.MovqXReg(jitasm.X0, r)
+			if op == OpInc {
+				a.AddsdXX(jitasm.X0, jitasm.X1)
+			} else {
+				a.SubsdXX(jitasm.X0, jitasm.X1)
+			}
+			a.MovqRegX(r, jitasm.X0)
+			jitCanonicalizeNaN(a, r)
+			ip++
+
+		case OpNot:
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if !kind[sp-1] {
+				// ToBoolean of anything else is a different question: the empty
+				// string is false, and every object is true.
+				return refuse(why, "non-numeric-operand")
+			}
+			// A Number is falsy when it is zero or a NaN, and UCOMISD sets the
+			// zero flag for both — equal, or unordered. So the flag is `!x`
+			// already, for either signed zero.
+			a.XorRegReg(jitRegScratch, jitRegScratch)
+			a.MovqXReg(jitasm.X1, jitRegScratch)
+			a.MovqXReg(jitasm.X0, jitStackRegs[sp-1])
+			a.UcomisdXX(jitasm.X0, jitasm.X1)
+			jitBoolean(a, jitasm.CondE, jitStackRegs[sp-1])
+			kind[sp-1] = false
+			ip++
+
+		case OpEq, OpNe, OpSeq, OpSne:
+			// Between two Numbers, abstract and strict equality are the same
+			// comparison, so all four differ only in polarity.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			if !kind[sp-1] || !kind[sp-2] {
+				return refuse(why, "non-numeric-operand")
+			}
+			negate := op == OpNe || op == OpSne
+			a.MovqXReg(jitasm.X0, jitStackRegs[sp-2])
+			a.MovqXReg(jitasm.X1, jitStackRegs[sp-1])
+			a.UcomisdXX(jitasm.X0, jitasm.X1)
+
+			if l, whenTrue, after, ok := jitFuse(code, labels, ip+1); ok {
+				jitEqualsBranch(a, negate, whenTrue, l)
+				sp -= 2
+				if sp != 0 {
+					return nil
+				}
+				ip = after
+				continue
+			}
+			// Not consumed by a branch, so the Boolean has to exist. Emitting it
+			// is what lets `a === b` be stored, returned, or passed on.
+			jitEqualsValue(a, negate, jitStackRegs[sp-2])
+			kind[sp-2] = false
+			sp--
+			ip++
 
 		case OpGetField:
 			// The lookup itself is the runtime's: a shape probe, a prototype
@@ -459,9 +596,11 @@ func jitUnsupported(fn *svFunc, start int) (string, bool) {
 		}
 		switch op {
 		case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse,
-			OpGetLocal, OpPutLocal, OpSetLocal, OpPop,
+			OpGetLocal, OpPutLocal, OpSetLocal, OpPop, OpDup, OpInsert2,
 			OpAdd, OpSub, OpMul, OpDiv,
-			OpLt, OpLe, OpGt, OpGe,
+			OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr, OpBnot,
+			OpNeg, OpInc, OpDec, OpNot,
+			OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
 			OpJmp, OpJmpFalse, OpJmpTrue, OpGetField,
 			OpReturn, OpReturnUndef, OpThis:
 		default:
@@ -573,6 +712,7 @@ func jitBackEdge(a *jitasm.Asm, top *jitasm.Label, fixups *[]jitResumeFixup) {
 // which one it wants and returns; jitHelper runs it and execution resumes.
 const (
 	jitHelperGetField = 1
+	jitHelperToInt32  = 2
 )
 
 // jitCallHelper emits a call out to the runtime.
@@ -690,6 +830,12 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 			return e
 		}
 		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperToInt32:
+		// Reached only for a finite magnitude of 2^63 or more, which CVTTSD2SI
+		// cannot report. Zero-extended, because compiled code keeps every
+		// intermediate integer that way — see jitToInt32.
+		ctx.Ret = uint64(uint32(toInt32(Value(ctx.Args[2]).Number())))
 		return nil
 	}
 	return rt.typeError("unknown JIT helper")
