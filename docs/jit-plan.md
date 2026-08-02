@@ -441,6 +441,39 @@ closures, upvalues, globals, arrays and exceptions — most of the language, not
 numeric core with a long tail. The measurement is worth having early: it is the
 difference between a plan and a hope.
 
+## Can this reach ant's speed in Go?
+
+ant is the same engine in C with a complete MIR JIT, so it is the ceiling for
+this architecture. The question is whether Go costs anything structural, and it
+turns out to cost almost nothing — provided compiled code calls compiled code.
+
+| | ns/op |
+| --- | --- |
+| a plain Go call, which is what `jit_helper_*` costs ant | 1.61 |
+| entering generated code and returning | 2.89 |
+| entering, then one compiled-to-compiled CALL | 4.04 |
+| a full round trip through the runtime | 7.58 |
+
+**A call between two compiled functions costs 1.15 ns** — less than a Go call and
+level with a C one. Going through the runtime instead costs 4.69 ns. Both sides
+are already machine code, so nothing forces the detour, and a JIT that takes it
+anyway pays four times over on every call in the program.
+
+That was the one place Go could have imposed a structural tax, and it does not.
+What remains is a fuel check per loop iteration and one register given up to `g`
+— measured at about 0.1% of `numeric.js`, where 3M iterations and 3,000 entries
+cost roughly 11 µs of a 9 ms run.
+
+Everything else is already the same as ant by construction: a NaN-boxed `uint64`
+over non-moving pools, a collector of our own that Go never traces through, and —
+if MIR-gen's allocator is ported — the same register allocation over the same IR
+from the same bytecode.
+
+Where the tier is complete it already performs like one. A numeric loop runs
+2.25x behind node; ant's own published `fib(40)` is 2.85x behind. Different
+workloads, so not a head-to-head, but it says the gap to ant is coverage — 24
+opcodes against 135 — and not speed per opcode.
+
 ## Still to do
 
 In the order the table argues for:

@@ -143,3 +143,64 @@ func BenchmarkHelperRoundTrip(b *testing.B) {
 		Run(pc, ctx, goHelper)
 	}
 }
+
+// nativeCallCode builds two compiled functions in one block, where the first
+// calls the second with an ordinary CALL and never returns to Go.
+//
+// This is the measurement that decides how a JIT should compile a JavaScript
+// call. Going through the runtime costs a boundary crossing each way; staying in
+// generated code costs a CALL. Both sides are already machine code, so nothing
+// forces the detour — but a JIT that takes it anyway pays for every call in the
+// program, which on a call-heavy workload is most of them.
+//
+// base is where the block will live, because the callee's address is an absolute
+// immediate.
+func nativeCallCode(base uintptr) (code []byte, callerOff int) {
+	callee := []byte{
+		0x48, 0xC7, 0xC0, 0x2A, 0x00, 0x00, 0x00, // MOV RAX, 42
+		0xC3, // RET
+	}
+	caller := []byte{0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0} // MOV RAX, imm64
+	binary.LittleEndian.PutUint64(caller[2:], uint64(base))
+	caller = append(caller, 0xFF, 0xD0) // CALL RAX
+	caller = append(caller, 0xC3)       // RET
+	return append(callee, caller...), len(callee)
+}
+
+func TestNativeCall(t *testing.T) {
+	b, err := Alloc(64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Free()
+	code, callerOff := nativeCallCode(b.Addr())
+	if _, err := b.Write(code); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Protect(); err != nil {
+		t.Fatal(err)
+	}
+	var ctx ExecContext
+	if got := Enter(b.AddrAt(callerOff), &ctx); got != 42 {
+		t.Errorf("compiled code calling compiled code returned %d, want 42", got)
+	}
+}
+
+// BenchmarkNativeCall is the cost of one compiled function calling another
+// without leaving generated code. Subtract BenchmarkEnter to get the call
+// itself; compare against BenchmarkHelperRoundTrip for what the detour costs.
+func BenchmarkNativeCall(b *testing.B) {
+	bl, err := Alloc(64)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer bl.Free()
+	code, callerOff := nativeCallCode(bl.Addr())
+	bl.Write(code)
+	bl.Protect()
+	pc := bl.AddrAt(callerOff)
+	ctx := &ExecContext{}
+	for b.Loop() {
+		Enter(pc, ctx)
+	}
+}
