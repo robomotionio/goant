@@ -979,6 +979,34 @@ doing — and the constraint on doing it: **whatever attacks the frame entry mus
 not perturb `runFrameBody`'s codegen**, which most likely means doing the work at
 the call site rather than at the frame.
 
+### The denominator was wrong three times
+
+A profile of compiled code, taken once DeltaBlue was running 72% of its frame
+entries there, said something the coverage numbers could not: that code is **11%
+of the CPU time**. The rest is still the interpreter, running the functions the
+tier refuses — and those have long bodies rather than many calls.
+
+So the diagnostic got its third denominator. Functions were wrong because a
+program's time is not spread evenly over them. Frame entries were wrong because
+it is not spread evenly over calls either. **Interpreted bytecode instructions**
+are what the interpreter actually does, and they name different work:
+
+| richards | insns | entries | functions |
+| --- | --- | --- | --- |
+| `non-numeric-operand` | 66.6M | 3.4M | 8 |
+| `op:JMP_FALSE` | 41.0M | **165** | 1 |
+| `unreachable-target` | 12.7M | 0.6M | 2 |
+
+The second row is the case entry-counting is blind to by construction: one
+function, entered a hundred and sixty-five times, executing forty-one million
+instructions.
+
+The first row was the bitwise operators, which never got the guard-and-call the
+arithmetic ones did. Giving it to them took Richards from 38.5% of its frame
+entries in compiled code to 52.6% and its score from +14.5% to **+19.3%** — the
+first change in this document chosen by work rather than by count, and the first
+in four to move a score in proportion to the coverage it added.
+
 ### What that changes about the plan
 
 The hope early on was that a numeric compiler would miss many functions but catch
