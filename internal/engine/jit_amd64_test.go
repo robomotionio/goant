@@ -317,7 +317,6 @@ func TestJITRefusesWhatItCannotModel(t *testing.T) {
 		"function f(a,b){ return typeof a; }",             // TYPEOF is not in this tier
 		"function f(a,b){ a[b] = 1; return 1; }",          // an element write
 		"function f(a,b){ return a===b ? 1 : 2; }",        // the Boolean is not branched on directly
-		"function f(a,b){ var x = a.p; return x&1; }",     // a bitwise operator still needs a Number
 		"function f(a,b){ try { return a; } catch(e){} }", // an exception handler
 	} {
 		if c := jitCompile(jitFn(t, src), nil); c != nil {

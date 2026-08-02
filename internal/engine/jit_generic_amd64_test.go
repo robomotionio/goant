@@ -152,7 +152,8 @@ func jitOperands(t testing.TB, rt *Runtime) []struct {
 // throws.
 func TestJITGenericOperatorsAgreeWithTheInterpreter(t *testing.T) {
 	jitInterpretOnly(t)
-	for _, expr := range []string{"+", "-", "*", "/", "<", "<=", ">", ">=", "==", "!=", "===", "!=="} {
+	for _, expr := range []string{"+", "-", "*", "/", "&", "|", "^", "<<", ">>", ">>>",
+		"<", "<=", ">", ">=", "==", "!=", "===", "!=="} {
 		t.Run(expr, func(t *testing.T) {
 			rt, fn, c, fnVal := jitGenericFn(t, expr)
 			ops := jitOperands(t, rt)

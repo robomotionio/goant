@@ -475,17 +475,41 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			ip++
 
 		case OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr:
+			// Guarded when the operands' types are unknown, exactly as the
+			// arithmetic operators are: two compares against the NaN-box
+			// threshold, then the same instructions, and on the other side of the
+			// guard the call the interpreter makes for this opcode.
+			//
+			// The arithmetic operators got this and these did not, and it was
+			// worth 66.6 million interpreted bytecode instructions in Richards —
+			// the largest single item once refusals were weighted by work rather
+			// than by frame entries. Richards is bit manipulation over packet
+			// queues, and a String or an object operand means ToPrimitive while a
+			// BigInt means a different operator entirely.
 			if sp < 2 {
 				return refuse(why, "stack-underflow")
 			}
-			if !kind[sp-1] || !kind[sp-2] {
-				// A String or an object operand would mean ToPrimitive, and a
-				// BigInt a different operator entirely.
-				return refuse(why, "non-numeric-operand")
+			x, y := jitStackRegs[sp-2], jitStackRegs[sp-1]
+			generic := !kind[sp-1] || !kind[sp-2]
+			var slow, done *jitasm.Label
+			if generic {
+				slow, done = a.NewLabel(), a.NewLabel()
+				jitEmitNumberPair(a, x, y, slow)
 			}
-			if !jitBitwise(a, op, jitStackRegs[sp-2], jitStackRegs[sp-1], sp, &fixups) {
+			if !jitBitwise(a, op, x, y, sp, &fixups) {
 				return refuse(why, "stack-too-deep")
 			}
+			if generic {
+				a.Jmp(done)
+				a.Bind(slow)
+				if !jitCallBinary(a, sp, op, jitHelperBitwise, &fixups) {
+					return refuse(why, "stack-too-deep")
+				}
+				a.MovRegMem(x, jitasm.RegCtx, jitmem.CtxOffRet)
+				a.Bind(done)
+			}
+			// A bitwise operator produces an integer either way, so the result is
+			// a Number whichever side of the guard it came from.
 			kind[sp-2] = true
 			sp--
 			ip++
@@ -1218,6 +1242,7 @@ const (
 	jitHelperCall       = 9
 	jitHelperCallMethod = 10
 	jitHelperGetElem    = 11
+	jitHelperBitwise    = 12
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1620,6 +1645,20 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		} else {
 			v, e = rt.jsArith(op, x, y)
 		}
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperBitwise:
+		op, x, y, ok := jitBinaryOperands(ctx)
+		if !ok {
+			return rt.typeError("JIT operand stack")
+		}
+		if jitStats.enabled {
+			jitStats.genSlow++
+		}
+		v, e := rt.jsBitwise(op, x, y)
 		if e != nil {
 			return e
 		}
