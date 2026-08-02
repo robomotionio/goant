@@ -34,7 +34,7 @@ func jitGet(t testing.TB, rt *Runtime, fn *svFunc, c *jitCode, recv Value) (Valu
 	t.Helper()
 	locals := make([]Value, fn.maxLocals)
 	locals[0] = recv
-	v, e, ok := c.jitRun(rt, fn, locals)
+	v, e, ok := c.jitRun(rt, fn, locals, mkundef())
 	if !ok {
 		t.Fatalf("compiled code declined a receiver it should have handled")
 	}
@@ -360,7 +360,7 @@ func TestJITChecksOnlyTheParametersItComputesWith(t *testing.T) {
 		o := rt.newObject(rt.objectProto)
 		rt.objPtr(o).defineOwn("x", rt.newObject(rt.objectProto), attrDefault)
 		locals[0] = o
-		_, _, ok := c.jitRun(rt, fn, locals)
+		_, _, ok := c.jitRun(rt, fn, locals, mkundef())
 		if ok != tc.accepted {
 			verb := "declined"
 			if ok {
@@ -398,7 +398,7 @@ func BenchmarkJITProperty(b *testing.B) {
 		locals := make([]Value, fn.maxLocals)
 		locals[0], locals[1] = o, tov(iters)
 		for b.Loop() {
-			if _, _, ok := c.jitRun(rt, fn, locals); !ok {
+			if _, _, ok := c.jitRun(rt, fn, locals, mkundef()); !ok {
 				b.Fatal("declined")
 			}
 		}

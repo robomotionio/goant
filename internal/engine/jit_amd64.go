@@ -117,24 +117,10 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	code := fn.code
 	ip := fn.startIP
 
-	// A non-arrow body opens by binding `this` to a local. Compiled code is
-	// handed a frame's locals and nothing else — the receiver is not among them —
-	// so it steps over the prologue and refuses any read of the slot it writes.
-	//
-	// Recorded explicitly rather than left to the assigned-set analysis. It used
-	// to be implicit: the slot was outside the analysed region, so it was never
-	// proven assigned, and an unproven read refused the whole function. When
-	// unproven reads stopped refusing, this slot silently started reading the
-	// undefined the frame was filled with — and `this.x = 1` in a compiled
-	// constructor threw "cannot set properties of undefined". Two rules sharing
-	// one mechanism, where only one of them was written down.
-	unbound := make([]bool, fn.maxLocals)
-	if ip+3 < len(code) && Opcode(code[ip]) == OpThis && Opcode(code[ip+1]) == OpPutLocal {
-		if i := int(readU16(code, ip+2)); i < fn.maxLocals {
-			unbound[i] = true
-		}
-		ip += 4
-	}
+	// The prologue that binds `this` to a local used to be stepped over, because
+	// compiled code was handed a frame's locals and the receiver was not among
+	// them. It is now, so the prologue is compiled like anything else and a
+	// method can be one of the functions this tier takes.
 	start := ip
 
 	// Check for an opcode with no template before anything else, so that the
@@ -275,11 +261,6 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			i := int(readU16(code, ip+1))
 			if i >= fn.maxLocals || sp >= len(jitStackRegs) {
 				return refuse(why, "stack-too-deep")
-			}
-			if unbound[i] {
-				// The `this` binding, which the skipped prologue would have
-				// written and compiled code has no way to produce.
-				return refuse(why, "this-local")
 			}
 			a.MovRegMem(jitStackRegs[sp], jitRegLocals, int32(i)*8)
 			if !cur[i] {
@@ -650,6 +631,20 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			// this tier knows. Arithmetic on it is refused rather than guarded.
 			kind[sp-1] = false
 			ip += 7
+
+		case OpThis:
+			// The receiver, from the context rather than the locals, because it
+			// is the one thing a frame carries that is neither a local nor an
+			// operand. The interpreter has already resolved it — coerced to an
+			// object in sloppy mode, left alone in strict — so there is nothing
+			// to do here but read it.
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp], jitasm.RegCtx, jitmem.CtxOffThis)
+			kind[sp] = false
+			sp++
+			ip++
 
 		case OpGetGlobal:
 			// The same cache again, over a receiver compiled code fetches
@@ -1117,8 +1112,8 @@ func jitCanonicalizeNaN(a *jitasm.Asm, r jitasm.Reg) {
 // A throw is not a decline. It comes from a helper, by which point the frame has
 // run, and this tier has no exception handlers of its own — TRY_PUSH is refused
 // — so the only thing left to do is what the interpreter would: leave.
-func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value) (Value, *ThrowError, bool) {
-	return c.jitRunAt(rt, fn, locals, c.entry)
+func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value, this Value) (Value, *ThrowError, bool) {
+	return c.jitRunAt(rt, fn, locals, this, c.entry)
 }
 
 // jitRunOSR enters at the stub for a loop header, if there is one.
@@ -1126,15 +1121,15 @@ func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, locals []Value) (Value, *Throw
 // Reports false when there is not, or when the stub's guards decline the locals
 // the interpreter has produced — in which case nothing has happened and the
 // interpreter carries on from where it was.
-func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, locals []Value, header int) (Value, *ThrowError, bool) {
+func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
 	pc, ok := c.osr[header]
 	if !ok {
 		return mkundef(), nil, false
 	}
-	return c.jitRunAt(rt, fn, locals, pc)
+	return c.jitRunAt(rt, fn, locals, this, pc)
 }
 
-func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, entry uintptr) (Value, *ThrowError, bool) {
+func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, this Value, entry uintptr) (Value, *ThrowError, bool) {
 	if len(locals) == 0 {
 		return mkundef(), nil, false
 	}
@@ -1165,6 +1160,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, locals []Value, entry uintpt
 		},
 		Pool: jitObjectPoolAddr(rt),
 		Host: jitRuntimeAddr(rt),
+		This: uint64(this),
 	}
 	if n < cap(rt.jitFrames) {
 		rt.jitFrames = rt.jitFrames[:n+1]

@@ -111,34 +111,80 @@ func TestJITCompilesAnUnprovenLocal(t *testing.T) {
 	c.free()
 }
 
-// TestJITRefusesTheThisLocal is the test that was missing.
+// TestJITReadsTheReceiver is the test that was missing when this was a refusal.
 //
-// Compiled code is handed a frame's locals and nothing else, so it steps over
-// the prologue that binds `this` and must refuse every read of the slot that
-// prologue writes. That used to happen by accident: the slot was outside the
-// analysed region, so it was never proven assigned, and an unproven read refused
-// the whole function. The moment unproven reads stopped refusing, this slot
-// started reading the undefined the frame was filled with, and `this.x = 1` in a
-// compiled constructor threw "cannot set properties of undefined" — on Richards,
-// not in any test, because two rules were sharing one mechanism and only one of
-// them was written down.
-func TestJITRefusesTheThisLocal(t *testing.T) {
+// Compiled code used to be handed a frame's locals and nothing else, so it
+// stepped over the prologue that binds `this` and relied on the read of that
+// slot refusing for want of a proof of assignment. Two rules sharing one
+// mechanism: relaxing the documented one silently removed the undocumented one,
+// and `this.x = 1` in a compiled constructor started reading the undefined the
+// frame was filled with. Richards found it; no test did.
+//
+// The receiver now travels in the context, so this checks the value that comes
+// back rather than the refusal — the same property, stated in a way that stays
+// true once the feature exists.
+func TestJITReadsTheReceiver(t *testing.T) {
 	for _, src := range []string{
-		"function f(a){ this.x = a; return 0; }",
 		"function f(a){ return this.x; }",
 		"function f(a){ var t = this; return t.x; }",
-		"function f(a){ if (a > 0) { this.x = a; } return 0; }",
+		"function f(a){ if (a > 0) { return this.x; } return this.x; }",
 	} {
-		_, fn := jitFnRT(t, src)
+		rt, fn := jitFnRT(t, src)
 		var why string
-		if c := jitCompile(fn, &why); c != nil {
-			c.free()
-			t.Errorf("compiled %q, which reads a receiver it was never handed", src)
+		c := jitCompile(fn, &why)
+		if c == nil {
+			t.Errorf("refused %q: %s", src, why)
 			continue
 		}
-		if why != "this-local" {
-			t.Errorf("%q refused as %q, want this-local", src, why)
+		recv := rt.newObject(rt.objectProto)
+		rt.objPtr(recv).defineOwn("x", tov(99), attrDefault)
+		locals := make([]Value, fn.maxLocals)
+		locals[0] = tov(1)
+		got, e, ok := c.jitRun(rt, fn, locals, recv)
+		if !ok || e != nil {
+			t.Errorf("%q declined (%v) or threw (%v)", src, !ok, e != nil)
+		} else if got != tov(99) {
+			t.Errorf("%q read %v from the receiver, want 99", src, got)
 		}
+		c.free()
+	}
+}
+
+// TestJITReceiverSurvivesACollection is the root the context field needs.
+//
+// The receiver reaches compiled code as an integer in the context, and while a
+// helper runs it is reachable from nowhere else — the interpreter frame that
+// entered compiled code is not something the collector's walk descends into. A
+// getter is JavaScript, so a collection can happen at exactly that moment.
+func TestJITReceiverSurvivesACollection(t *testing.T) {
+	const src = "function f(a){ var t = this.trigger; return this.x; }"
+	rt, fn := jitFnRT(t, src)
+	c := jitCompile(fn, nil)
+	if c == nil {
+		t.Fatal("refused")
+	}
+	defer c.free()
+
+	// Built here and referred to by nothing else the collector can see once it
+	// is in the context.
+	recv, err := rt.RunString("recv.js", "({ get trigger() { collect(); return 1; }, x: 99 })")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	collector := rt.newNativeFunc("collect", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		rt.collect()
+		return mkundef(), nil
+	})
+	rt.setField(rt.global, "collect", collector)
+
+	locals := make([]Value, fn.maxLocals)
+	locals[0] = tov(1)
+	got, e, ok := c.jitRun(rt, fn, locals, recv)
+	if !ok || e != nil {
+		t.Fatalf("declined (%v) or threw (%v)", !ok, e != nil)
+	}
+	if got != tov(99) {
+		t.Errorf("read %v after a collection ran inside the getter, want 99", got)
 	}
 }
 

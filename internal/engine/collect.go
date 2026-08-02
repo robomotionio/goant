@@ -649,6 +649,10 @@ func (rt *Runtime) markRoots() {
 		for _, ctx := range r.jitFrames {
 			rt.markValue(Value(ctx.Args[2]))
 			rt.markValue(Value(ctx.Ret))
+			// The receiver, which reaches compiled code as an integer and is
+			// otherwise reachable only from the interpreter frame that entered
+			// it — a frame this walk does not descend into.
+			rt.markValue(Value(ctx.This))
 			for i := uint64(0); i < ctx.SpillN && i < jitmem.SpillSlots; i++ {
 				rt.markValue(Value(ctx.Spill[i]))
 			}

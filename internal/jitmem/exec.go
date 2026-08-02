@@ -64,6 +64,14 @@ type ExecContext struct {
 	// live for as long as any of its compiled frames can run, held by the call
 	// that entered them.
 	Host uintptr
+	// This is the frame's receiver, which is the one thing a frame carries that
+	// is neither a local nor an operand. Compiled code is handed a locals slice
+	// and the prologue that binds `this` writes a slot from a value that is not
+	// in it, so without this field a method could not be compiled at all.
+	//
+	// Unlike everything else here it holds a Value, so the runtime's collector
+	// must trace it — see the jitFrames loop in collect.go.
+	This uint64
 }
 
 // SpillSlots bounds the operand stack a compiled function may hold across a
@@ -81,7 +89,8 @@ const (
 	CtxOffSpillN = 64 + 8*SpillSlots
 	CtxOffPool   = 72 + 8*SpillSlots
 	CtxOffHost   = 80 + 8*SpillSlots
-	CtxSize      = 88 + 8*SpillSlots
+	CtxOffThis   = 88 + 8*SpillSlots
+	CtxSize      = 96 + 8*SpillSlots
 )
 
 // Which fields hold a Value, and so must be traced by the runtime's collector
@@ -90,6 +99,7 @@ const (
 //	Args[2]  the operand a helper was handed
 //	Ret      the operand it produced
 //	Spill[0:SpillN]
+//	This     the frame's receiver
 //
 // Args[0] and Args[1] are a pointer and a counter, and Args[3] is an immediate.
 // Tracing either as a Value would be worse than missing one.

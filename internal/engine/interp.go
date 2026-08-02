@@ -400,7 +400,7 @@ restart:
 	// it produced the answer; anything else falls through to the interpreter
 	// below, which is what makes declining free.
 	if jitEnabled {
-		if v, e, ok := jitTry(rt, fn, locals); ok {
+		if v, e, ok := jitTry(rt, fn, locals, thisVal); ok {
 			return v, e
 		}
 	}
@@ -1843,7 +1843,7 @@ restart:
 				// would have to be carried across.
 				if jitEnabled && sp == 0 {
 					syncFrame()
-					if v, e, ok := jitTryLoop(rt, fn, locals, t); ok {
+					if v, e, ok := jitTryLoop(rt, fn, locals, thisVal, t); ok {
 						return v, e
 					}
 				}

@@ -40,7 +40,7 @@ func jitPut(t testing.TB, rt *Runtime, fn *svFunc, c *jitCode, recv, val Value) 
 	t.Helper()
 	locals := make([]Value, fn.maxLocals)
 	locals[0], locals[1] = recv, val
-	_, e, ok := c.jitRun(rt, fn, locals)
+	_, e, ok := c.jitRun(rt, fn, locals, mkundef())
 	if !ok {
 		t.Fatalf("compiled code declined arguments it should have handled")
 	}
@@ -548,7 +548,7 @@ func BenchmarkJITStore(b *testing.B) {
 		locals := make([]Value, fn.maxLocals)
 		locals[0], locals[1] = o, tov(iters)
 		for b.Loop() {
-			if _, _, ok := c.jitRun(rt, fn, locals); !ok {
+			if _, _, ok := c.jitRun(rt, fn, locals, mkundef()); !ok {
 				b.Fatal("declined")
 			}
 		}
