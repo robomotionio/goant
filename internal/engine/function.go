@@ -320,7 +320,22 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 	rt.pendingNewTarget = newTarget
 	savedNTProto, savedNTErr := rt.pendingNewTargetProto, rt.pendingNewTargetProtoErr
 	rt.pendingNewTargetProto, rt.pendingNewTargetProtoErr = proto, perr
-	ret, e := rt.callValue(fnVal, thisObj, args)
+	// The constructor body is an ordinary function call, and a compiled one
+	// reaches machine code the same way any other call does. Without this, `new`
+	// was the one call shape that always took the general path: DeltaBlue spent
+	// 21% of its run inside this line, in callValue's dispatch and the
+	// interpreted frame under it, for constructors whose bodies were already
+	// compiled.
+	//
+	// It cannot observe new.target, which is what makes the shortcut sound rather
+	// than merely fast. new.target compiles to SPECIAL_OBJ, that opcode has no
+	// template, so a function mentioning it never compiles — and everything this
+	// skips between here and the body is about binding it. A decline puts back
+	// what the general path is about to read, pendingNewTarget included.
+	ret, e, ok := rt.jitCallCompiled(fnVal, thisObj, args)
+	if !ok {
+		ret, e = rt.callValue(fnVal, thisObj, args)
+	}
 	rt.pendingNewTarget = mkundef()
 	rt.pendingNewTargetProto, rt.pendingNewTargetProtoErr = savedNTProto, savedNTErr
 	if e != nil {
