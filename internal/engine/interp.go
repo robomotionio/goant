@@ -159,6 +159,94 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	return rt.runFrameBody(fn, cl, fnVal, thisVal, args)
 }
 
+// jitCallCompiled is callValue, runFrame, runCompiledFrame and jitTry collapsed
+// into the one case compiled code makes most: an ordinary compiled function
+// calling another one.
+//
+// Those four together are about 28% of DeltaBlue with the tier on, against 25%
+// for the machine code itself, and most of what they do on this path is decide
+// things that are already known — that the callee is not a Proxy, a native, a
+// generator or an async function, that it has compiled code, that it is worth
+// compiling. What is left is what a frame genuinely owes: a depth, an interrupt
+// check, its values published for the collector, a receiver, and locals.
+//
+// Reporting false means it recognised nothing and the caller should take the
+// general path; everything it touched is restored first, so the two are
+// interchangeable. It is not a shortcut around any of runFrame's obligations —
+// the depth limit, the interrupt, publishFrame and maybeCollect are all here,
+// because a compiled frame is still a frame.
+func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *ThrowError, bool) {
+	o := rt.objPtr(fnVal)
+	if o == nil || o.native != nil || o.proxy != nil || !o.flags.isCallable {
+		return mkundef(), nil, false
+	}
+	cl := o.clPtr
+	if cl == nil || cl.fn == nil {
+		return mkundef(), nil, false
+	}
+	fn := cl.fn
+	if fn.jit.code == nil || fn.isGenerator || fn.isAsync || rt.pendingModule != nil {
+		return mkundef(), nil, false
+	}
+
+	rt.frameDepth++
+	if rt.frameDepth > maxFrameDepth {
+		rt.frameDepth--
+		return mkundef(), rt.rangeError("Maximum call stack size exceeded"), true
+	}
+	savedStrict, savedActiveNT := rt.frameStrict, rt.activeNewTarget
+	// Function entry is a check point for the host interrupt, so unbounded
+	// recursion is caught without waiting on a loop back edge.
+	if rt.interruptPending() {
+		rt.frameDepth--
+		return mkundef(), rt.terminated(), true
+	}
+	rt.frameStrict = fn.isStrict
+
+	// The arguments have no other reference: the caller spilled them out of its
+	// operand stack into a slice of their own.
+	f := rt.publishFrame(rt.frameDepth)
+	f.args, f.thisVal, f.fnVal = args, thisVal, fnVal
+	f.fn, f.cl = fn, cl
+	rt.maybeCollect()
+
+	if !fn.isStrict {
+		if thisVal.IsNullish() {
+			thisVal = rt.global
+		} else if !thisVal.IsObjectType() && thisVal.Type() != TTypedArray {
+			thisVal, _ = rt.toObjectValue(thisVal)
+		}
+	}
+	pendingNT := rt.pendingNewTarget
+	rt.pendingNewTarget = mkundef()
+
+	locals := rt.frameLocals(rt.frameDepth, fn.maxLocals)
+	for i := 0; i < fn.paramCount && i < fn.maxLocals && i < len(args); i++ {
+		locals[i] = args[i]
+	}
+	f.locals = locals
+
+	v, e, ok := fn.jit.code.jitRun(rt, fn, cl, locals, thisVal)
+
+	rt.frameDepth--
+	rt.frameStrict, rt.activeNewTarget = savedStrict, savedActiveNT
+	if jitStats.enabled {
+		if ok {
+			jitStats.compiled++
+		} else {
+			jitStats.declined++
+		}
+	}
+	if !ok {
+		// Declined its arguments at the prologue guard. Put back what the
+		// general path is about to consume and let it run the function.
+		rt.pendingNewTarget = pendingNT
+		jitNoteDecline(fn)
+		return mkundef(), nil, false
+	}
+	return v, e, true
+}
+
 // runCompiledFrame enters compiled code without building an interpreted frame
 // around it, reporting false if the compiled code declined its arguments.
 //

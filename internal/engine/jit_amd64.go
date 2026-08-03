@@ -1698,10 +1698,20 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 		}
 		var v Value
 		var e *ThrowError
-		if ctx.Helper == jitHelperNew {
+		switch {
+		case ctx.Helper == jitHelperNew:
 			v, e = rt.construct(callee, args)
-		} else {
-			v, e = rt.callValue(callee, thisArg, args)
+		default:
+			// The call compiled code makes most often is to another compiled
+			// function, and reaching one goes through callValue's dispatch,
+			// runFrame's bookkeeping, runCompiledFrame and jitTry — four
+			// functions and about 28% of DeltaBlue. jitCallCompiled is those
+			// four collapsed for that one case; anything it does not recognise
+			// falls through to the general path unchanged.
+			var ok bool
+			if v, e, ok = rt.jitCallCompiled(callee, thisArg, args); !ok {
+				v, e = rt.callValue(callee, thisArg, args)
+			}
 		}
 		if e != nil {
 			return e
