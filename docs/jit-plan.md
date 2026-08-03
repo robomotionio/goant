@@ -909,6 +909,85 @@ DeltaBlue from +19% to +24% and Richards from +8% to +15%. Static coverage went
 from 919 functions to 2,006 of 6,976 along the way, but the two changes that
 mattered most — inherited slots and the cached store — added no coverage at all.
 
+### The call path, and where the Go side stops giving
+
+`GOANT_JIT_STATS=1` on DeltaBlue says what the tier is now made of:
+
+```
+jit: 20284071 compiled (100.0% of frame entries), 64 declined, 590 interpreted
+jit: 59733670 property reads, 52397316 served by the compiled cache (87.7%)
+jit:  3997361 property stores, 3230867 served by the compiled cache (80.8%)
+jit:  6656556 global reads, 6655693 served by the compiled cache (100.0%)
+jit: 11249847 untyped operators, 10304521 took the machine instruction (91.6%)
+```
+
+Twenty million calls against about nine million other helper exits, so **69% of
+every round trip out of compiled code is a call**. That is what makes the call
+path the only thing left worth attacking, and three changes to it paid:
+
+| | | |
+| --- | --- | --- |
+| the callee's arguments read out of the caller's spill area, not copied | Richards +12.3%, DeltaBlue +8.0% | geomean +3.5% |
+| `new` reaching a compiled constructor the way a call does | +0.5%, inside the drift | — |
+| what a callee Value resolved to, remembered | DeltaBlue +4.5%, Richards +3.6% | |
+
+The first is the one worth reading twice. A call site holds
+`[callee, arg0 .. argN-1]` on the operand stack and spilling writes the whole
+stack to the context before leaving generated code, so the arguments are already
+contiguous, in order, and rooted by `SpillN` — and the helper copied them into a
+slice of its own anyway, 20 million times. `makeslice` was 9.3% of the
+benchmark.
+
+Aliasing them is not sound in general, and the reason it is sound here is
+structural rather than a check: a sloppy function's mapped `arguments` writes
+*through* to the array it was given, a mapped `arguments` needs `SPECIAL_OBJ`,
+that opcode has no template, so a function containing one never compiles.
+`TestCompiledCalleeCannotSeeArguments` asserts the link rather than the
+conclusion, and fails the day `SPECIAL_OBJ` gets a template.
+
+The collector's half is the part that would have bitten. `markFrames` walks
+every frame rather than the live prefix, so a returned frame still holding the
+window is scanned after that context has been popped and handed to an unrelated
+call — over whatever the next frame wrote, stale handles included. That is a
+poison panic, not a wrong answer, and the fix is one store on the way out.
+
+### Four things that did not work, and what they cost to find out
+
+Everything after those three landed inside the noise floor or below it. They are
+recorded because the next person to look at this path will think of them too:
+
+| | |
+| --- | --- |
+| remember the compiled code alongside the function | DeltaBlue +0.9%, Richards **−1.1%** |
+| …with only a collection retiring the entry | EarleyBoyer **−4.3%** |
+| fill each locals slot once instead of once and a bit | EarleyBoyer **−1.5%** |
+| hoist `runtime.KeepAlive` out of the re-entry loop | no change |
+
+The second row is the interesting failure. `fn.jit.code` is the one part of a
+callee's resolution that changes with time — a function compiles after eight
+entries — so an entry recorded while the callee was cold keeps it interpreted for
+the rest of the run. Retiring on every compile instead fixes that and costs
+Richards more than it gives DeltaBlue. Reading the field is cheaper than keeping
+a copy of it honest.
+
+The third is the one that reads like an obvious win. `frameLocals` sets every
+slot to undefined and the caller then overwrites the parameters, so an argument
+is written twice; splitting the fill writes each slot exactly once and was
+*slower*, because it replaced one inlined fill with two calls on a path whose
+frames are small enough that the calls cost more than the writes.
+
+The fourth was chosen off a profile line that cannot cost anything: `KeepAlive`
+emits no instructions, so the 30ms attributed to it belonged to its neighbours.
+Hoisting it only extends a slice's live range across the helper call.
+
+**What that says about the path.** The Go side of a compiled call has been
+squeezed to where per-call micro-optimisation no longer registers above a ~1%
+run-to-run floor, and about 29% of DeltaBlue is still `jitCallCompiled`,
+`jitRunAt`, `jitHelper` and the two trampoline transitions. That number does not
+come down by making those functions cheaper. It comes down by not calling them:
+a compiled caller entering a compiled callee directly, which is measured at 1.15
+ns against 4.69 for the detour.
+
 ### EarleyBoyer: 18.75 million stores at a 0.8% hit rate
 
 Before the last commit this table read −18.2% for EarleyBoyer and −3.4% for
@@ -952,6 +1031,34 @@ that should have measured the same; EarleyBoyer's read 623 and then 511. That is
 are comparable to each other, and a 1–2% difference between them is at the noise
 floor rather than above it. The +16.9% above is well clear of it, and its two
 pairs agree to the point.
+
+### Where the call work left it
+
+Interleaved on the benchmark VM, tier on in both arms, median of three, against
+the build the call work started from:
+
+| | before | after | | vs node |
+| --- | --- | --- | --- | --- |
+| **Richards** | 722 | **838** | **+16.1%** | 45x -> **39x** |
+| **DeltaBlue** | 549 | **626** | **+14.0%** | 165x -> **145x** |
+| EarleyBoyer | 637 | **652** | +2.4% | |
+| Crypto | 1053 | **1075** | +2.1% | 36x -> 35x |
+| Splay | 2079 | **2110** | +1.5% | |
+| RegExp | 157 | **158** | +0.6% | |
+| RayTrace | 466 | **467** | +0.2% | |
+| NavierStokes | 1823 | 1810 | -0.7% | 18x |
+| | | | **geomean +4.4%** | |
+
+NavierStokes is the one that does not move, and it cannot: 2,826 frame entries
+in the whole benchmark, so nothing about the cost of a call reaches it.
+
+test262 core 42739/42740 with `GOANT_JIT=1`, 23173/23173 under
+`GOANT_GC_POISON=1`, `go vet` clean on all five targets.
+
+**A gate that gated nothing.** The first core run of this session scored
+`./goant`, which is what `-runner` defaults to and was still the previous build.
+It reported 42739/42740 and meant nothing at all. The runner has to be rebuilt,
+not merely present.
 
 ### Why: entering a frame costs more than a small method does
 
@@ -1076,56 +1183,64 @@ opcodes against 135 — and not speed per opcode.
 
 ## Still to do
 
-Rewritten 2 August, three times: after measuring the numeric operators, after
-the inline cache landed, and after the generic operators made the cache's hit
-rate measurable on real code.
+Rewritten 3 August, after the call path.
 
 **This list is ordered by measurement rather than by corpus count.** The static
-histogram is still worth reading — 1,485 of 6,976 functions now compile — but the
-entry-weighted table above is what decides what to build, and it has disagreed
-with the corpus count every time the two have been compared.
+histogram is still worth reading — 4,971 of 6,976 functions now compile, 71.3% —
+but it has pointed at the wrong work every time it has been consulted, and the
+frame gate behind it is nearly empty: only 4 of those 6,976 are refused by
+`jitEligible` rather than by a missing template. Octane is 2012-era JavaScript
+and contains no generators, no async functions and no class constructors, which
+is the corpus flattering the tier rather than the tier being complete.
 
 No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
-1. **`stack-across-blocks`**, now Crypto's largest blocker at 313,372 frame
-   entries across eleven functions, all of them fully unblocking. The two
-   analyses that walk the emitter's stack discipline model every block as
-   starting empty, so a block reached with an operand still live refuses the
-   whole function — and the shape that produces it is ordinary: `a && b`,
-   `a || b` and `a ? b : c` all jump with a value on the stack. The work is a
-   per-block entry depth in place of the "must be zero" rule, which the
-   positional register assignment then follows for free provided every
-   predecessor agrees. Richards has 1.08M entries in a single function.
-2. **Element *writes*** — `INSERT3` and `PUT_ELEM`. `a[i] = v` is what
-   NavierStokes has left, and it is the store counterpart of the read below.
+1. **Calls, compiled to compiled.** Now the only item on this list with a
+   number large enough to matter: 69% of every round trip out of compiled code
+   is a call, the Go side of one has been squeezed to the noise floor, and the
+   detour costs 4.69 ns against 1.15 for a direct one. Six things have to be
+   emitted rather than called — a per-site guard on the callee, a locals arena,
+   the frame publication the collector needs *without* storing a Go pointer from
+   machine code, a nested context, the depth and interrupt checks, and a way to
+   propagate a callee that exits to a helper. The last is the one that decides
+   the design: the caller can check the nested `Exit` and hand a non-Return back
+   to Go, which costs a round trip only when the callee needed one anyway.
 
-   NavierStokes is worth a caveat whichever way it goes: it makes **2,826 frame
-   entries in the whole benchmark**, so its share of entries in compiled code
-   says nothing at all. Its time is inside a handful of enormous loops, which is
-   what the OSR entry stubs are for, and measuring it needs a counter of
-   *iterations* rather than of entries.
-3. **The store that creates a property, emitted rather than helped.** The helper
-   now reaches it, which recovered EarleyBoyer's 18% and Splay's 3.4%, but each
-   one still costs an exit and a re-entry where the interpreter pays neither.
-   Everything needed is recorded by `icFillPutTransition`; the hit path is the
-   read's guard chain plus an extensibility test, then installing `toShape` and
-   writing the slot. Installing a shape is the first *Go pointer* this tier
-   would store from machine code, so it is the first that needs an argument
-   about write barriers rather than the standing one that a Value is an integer.
-4. **`op:NEW`** (2.39M frame entries in EarleyBoyer, 175k in Splay, both fully
-   unblocking) and **`op:TYPEOF`** (1.24M, fully unblocking).
-5. **Calls, compiled to compiled**, with a constraint attached. Measured at 1.15
-   ns against 4.69 ns for the detour through the runtime, plus the ~100 ns of
-   interpreted frame entry that disappears with it. Every compiled function is
-   still an island: entered from the interpreter, and every call it makes goes
-   back out. The constraint, from the attempt recorded above: the saving has to
-   be taken **without adding a branch to `runFrameBody` or `runFrame`**, because
-   doing so costs the interpreter more than the saving is worth. Which points at
-   the call site rather than at a cheaper frame entry bolted onto the shared
-   path.
-6. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
-   emitter is mechanical once the amd64 shape has stopped moving.
+   The constraint from the frame-entry attempt still holds: the saving has to be
+   taken **without adding a branch to `runFrameBody` or `runFrame`**.
+2. **The 1.56 million reads the emitted probe declines that the cache answers
+   anyway** — `JITNarrowStats()` counts them, and the guard chain in machine
+   code is narrower than `icWay.hit` for a receiver that is not a plain object.
+   Widening the tag check to the object family is not free: the tags are not
+   contiguous, and a naive mask test costs about three instructions on all 59.7
+   million reads against the round trips it saves. It has to keep the `TObj`
+   path at its current cost, and it has to be measured rather than reasoned
+   about.
+3. **A scan bounded by `propIC.n`.** Ways fill densely from zero and the
+   unrolled probe walks all eight regardless. This is what would let `icWays`
+   rise to 16, which measured DeltaBlue +8% and EarleyBoyer −5% — the −5% being
+   entirely the cost of scanning sixteen ways to miss.
+4. **The store that creates a property, emitted rather than helped.** The helper
+   reaches it, which recovered EarleyBoyer's 18%, but each one still costs an
+   exit and a re-entry where the interpreter pays neither. Installing a shape
+   would be the first *Go pointer* this tier stores from machine code, so it is
+   the first that needs an argument about write barriers rather than the
+   standing one that a Value is an integer.
+5. **`op:SPECIAL_OBJ`** — 469 functions in the corpus have it as their only
+   missing opcode and 832 meet it first, both the largest by some way. It is
+   `arguments`, and the two halves are not the same problem: unmapped (strict)
+   is a plain array-like, while a sloppy mapped one writes through to the
+   frame's argument array — which is exactly the invariant that lets a compiled
+   callee be handed the caller's spill area. Building one closes the door on the
+   other.
+6. **`op:CLOSURE`** — 307 alone, 378 first. The allocation is a helper call; the
+   problem underneath is that a captured local has to outlive the frame, and
+   compiled code addresses locals as a raw pointer into a slice. Boxed locals is
+   a frame-model change, and `SET_UPVAL`/`PUT_UPVAL` are the same problem.
+7. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
+   emitter is mechanical once the amd64 shape has stopped moving. Not speed —
+   darwin/arm64 is most developer machines and currently gets the interpreter.
 
 Coverage led this list for three sessions and is no longer at the top of it.
 Twice in one session, compiling more code made a benchmark *slower* — the method
