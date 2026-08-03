@@ -859,29 +859,32 @@ higher-is-better; the two arms are interleaved per benchmark so drift cannot
 favour either. Two runs of each arm on the benchmark VM, with the control arm
 verified to compile nothing:
 
-| | off | on | off | on | |
-| --- | --- | --- | --- | --- | --- |
-| **Crypto** | 238 | **1028** | 239 | **1027** | **+330.8%** |
-| **NavierStokes** | 434 | **1829** | 434 | **1834** | **+322.0%** |
-| **Richards** | 215 | **479** | 214 | **477** | **+122.8%** |
-| **DeltaBlue** | 238 | **381** | 238 | **382** | **+60.3%** |
-| **Splay** | 1978 | **2331** | 1979 | **2318** | **+17.5%** |
-| **RayTrace** | 392 | **450** | 391 | **451** | **+15.1%** |
-| **RegExp** | 145 | **156** | 145 | **156** | **+7.6%** |
-| **EarleyBoyer** | 602 | **613** | 601 | **619** | **+2.4%** |
-| | | | | | **geomean +77.1%** |
+| | off | on | off | on | | vs node |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Crypto** | 237 | **1055** | 237 | **1054** | **+344.9%** | 161x → **36x** |
+| **NavierStokes** | 432 | **1811** | 432 | **1812** | **+319.3%** | 77x → **18x** |
+| **Richards** | 209 | **574** | 210 | **572** | **+173.5%** | 159x → **58x** |
+| **DeltaBlue** | 240 | **483** | 241 | **489** | **+102.1%** | 375x → **181x** |
+| **RayTrace** | 392 | **459** | 391 | **459** | **+17.2%** | 140x → 120x |
+| **Splay** | 1967 | **2290** | 1947 | **2288** | **+17.0%** | |
+| **RegExp** | 144 | **155** | 144 | **155** | **+7.6%** | 57x → 52x |
+| **EarleyBoyer** | 593 | **629** | 596 | **626** | **+5.6%** | 94x → 89x |
+| | | | | | **geomean +88.7%** | |
 
 Both arms are steady to the point, so none of these are drift.
 
 All eight positive, and compiled code holds **100.0%** of both Richards' and
-DeltaBlue's frame entries. The distance from node on the benchmarks that moved
-most: NavierStokes **77x to 18x**, Crypto **161x to 37x**, Richards 155x to 69x.
+DeltaBlue's frame entries. Crypto and NavierStokes were *negative* for most of
+this document; they are array mathematics and what they were waiting for was
+`a[i] = v`, which the entry-weighted table never ranked and the
+instruction-weighted one put at the top the moment it existed.
 
-Crypto and NavierStokes were *negative* for this whole document until the last
-change. They are array mathematics, and what they were waiting for was `a[i] = v`
-— the element write, which arrived last because the entry-weighted table never
-ranked it and the instruction-weighted one put it at the top the moment it
-existed.
+The profile of compiled code has moved with it. It was 11% of DeltaBlue's CPU
+when 72% of frame entries reached it; it is **25%** now, and what sits beside it
+is the call path — `callValue`, `runCompiledFrame`, `jitRunAt`, `Enter` — at
+about 22%, plus the helpers at 15% and allocation at 5%. That is the case for
+compiled-to-compiled calls, and it is now a measured one rather than an
+extrapolated one.
 
 **Coverage measured by count kept not paying, and then it did.** Four changes in
 a row moved the share of frame entries substantially and the score not at all —
