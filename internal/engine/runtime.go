@@ -179,6 +179,12 @@ type Runtime struct {
 	// Cleared wherever a handle can stop naming its cell.
 	objMemo [objMemoSize]objMemoEntry
 
+	// calleeMemo remembers what a callee Value resolved to, for jitCallCompiled.
+	// A table of its own rather than a wider objMemo: the callee and the
+	// receivers a compiled body reads are both hot and would evict each other.
+	// See jitResolveCallee.
+	calleeMemo [calleeMemoSize]calleeMemoEntry
+
 	// agent is shared by every realm built on these pools. A handle means the
 	// same cell in all of them, so a collection driven from any one realm must
 	// trace the roots of all of them or it frees a sibling's heap.

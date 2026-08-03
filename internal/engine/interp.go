@@ -175,17 +175,63 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 // interchangeable. It is not a shortcut around any of runFrame's obligations —
 // the depth limit, the interrupt, publishFrame and maybeCollect are all here,
 // because a compiled frame is still a frame.
-func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *ThrowError, bool) {
+// calleeMemoSize is how many callees jitResolveCallee remembers. Direct-mapped
+// on the handle's low bits, and sized for the number of distinct functions a hot
+// loop calls rather than for a program's whole function count: DeltaBlue reaches
+// 20.3 million compiled calls through about thirty closures.
+const calleeMemoSize = 64
+
+type calleeMemoEntry struct {
+	callee Value
+	fn     *svFunc
+	cl     *closure
+	epoch  uint32
+}
+
+// jitResolveCallee turns a callee Value into the function and closure behind it,
+// remembering the answer.
+//
+// The walk it replaces is four dependent loads — handle to cell, cell to
+// closure, closure to function — plus three flag tests, and it ran on every one
+// of DeltaBlue's 20.3 million compiled calls. objPtr has a memo of its own but
+// it is four entries wide and shared with every receiver a compiled body reads,
+// so a call site and the properties around it evict each other.
+//
+// Nil for anything the compiled path must not take: a native, a proxy, a
+// non-callable, a bound function with no closure, a generator or an async
+// function. The caller checks fn.jit.code separately and deliberately — that
+// field is replaced when a function is rebuilt after too many declines, so it is
+// read fresh rather than remembered.
+//
+// Soundness rests on the epoch. The key is a Value, and a handle names a cell
+// only for as long as that cell lives — after a collection the same bits can
+// name something else entirely. icEpoch is bumped by collect() for exactly this
+// reason (the property caches hold raw *object pointers across the same
+// boundary), so validating against it costs one compare and closes the window.
+func (rt *Runtime) jitResolveCallee(fnVal Value) (*svFunc, *closure) {
+	e := &rt.calleeMemo[uint32(fnVal.handle())&(calleeMemoSize-1)]
+	if e.callee == fnVal && e.epoch == icEpoch() {
+		return e.fn, e.cl
+	}
 	o := rt.objPtr(fnVal)
 	if o == nil || o.native != nil || o.proxy != nil || !o.flags.isCallable {
-		return mkundef(), nil, false
+		return nil, nil
 	}
 	cl := o.clPtr
 	if cl == nil || cl.fn == nil {
-		return mkundef(), nil, false
+		return nil, nil
 	}
 	fn := cl.fn
-	if fn.jit.code == nil || fn.isGenerator || fn.isAsync || rt.pendingModule != nil {
+	if fn.isGenerator || fn.isAsync {
+		return nil, nil
+	}
+	*e = calleeMemoEntry{callee: fnVal, fn: fn, cl: cl, epoch: icEpoch()}
+	return fn, cl
+}
+
+func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *ThrowError, bool) {
+	fn, cl := rt.jitResolveCallee(fnVal)
+	if fn == nil || fn.jit.code == nil || rt.pendingModule != nil {
 		return mkundef(), nil, false
 	}
 

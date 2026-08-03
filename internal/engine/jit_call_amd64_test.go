@@ -348,3 +348,64 @@ func TestMappedArgumentsThroughACompiledCaller(t *testing.T) {
 	`
 	jitBothWays(t, "mapped-args.js", src)
 }
+
+// The callee memo is keyed on a Value, and a handle names a cell only until the
+// collector frees it — after which the same bits can name a different function.
+// icEpoch is what closes that window, so this checks the check: an entry from a
+// previous epoch must be re-resolved rather than believed.
+func TestCalleeMemoDoesNotSurviveAnEpoch(t *testing.T) {
+	rt := New()
+	fnVal, err := rt.RunString("memo.js", "(function f(a){ return a + 1; })")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn, cl := rt.jitResolveCallee(fnVal)
+	if fn == nil || cl == nil {
+		t.Fatal("an ordinary closure did not resolve")
+	}
+	slot := &rt.calleeMemo[uint32(fnVal.handle())&(calleeMemoSize-1)]
+	if slot.callee != fnVal || slot.fn != fn {
+		t.Fatal("resolving did not fill the memo")
+	}
+
+	// What a recycled handle would look like: the entry still names this callee,
+	// but the function behind it is somebody else's.
+	other, err := rt.RunString("memo2.js", "(function g(a){ return a + 2; })")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherFn, _ := rt.jitResolveCallee(other)
+	if otherFn == nil || otherFn == fn {
+		t.Fatal("needed a second, distinct function")
+	}
+	*slot = calleeMemoEntry{callee: fnVal, fn: otherFn, cl: cl, epoch: icEpoch()}
+	if got, _ := rt.jitResolveCallee(fnVal); got != otherFn {
+		t.Fatal("the memo is not being consulted, so this test proves nothing")
+	}
+
+	icEpochBump()
+	if got, _ := rt.jitResolveCallee(fnVal); got != fn {
+		t.Fatalf("a stale memo entry survived an epoch bump: got %p, want %p", got, fn)
+	}
+}
+
+// Natives, proxies and generators must not reach the compiled path at all, memo
+// or no memo. A remembered "no" would be as wrong as a remembered wrong answer.
+func TestCalleeMemoRefusesWhatTheCompiledPathCannotRun(t *testing.T) {
+	rt := New()
+	for _, src := range []string{
+		"Math.max",
+		"(function*(){ yield 1; })",
+		"(async function(){ return 1; })",
+		"new Proxy(function(){}, {})",
+		"({})",
+	} {
+		v, err := rt.RunString("refuse.js", src)
+		if err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		if fn, _ := rt.jitResolveCallee(v); fn != nil {
+			t.Errorf("%s resolved to a compilable callee", src)
+		}
+	}
+}
