@@ -148,7 +148,70 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	// between them.
 	rt.maybeCollect()
 
+	// A compiled frame needs almost none of what the interpreter's frame entry
+	// builds, so it gets its own way in. See runCompiledFrame.
+	if jitEnabled && fn.jit.code != nil {
+		if v, e, ok := rt.runCompiledFrame(fn, cl, thisVal, args); ok {
+			return v, e
+		}
+	}
+
 	return rt.runFrameBody(fn, cl, fnVal, thisVal, args)
+}
+
+// runCompiledFrame enters compiled code without building an interpreted frame
+// around it, reporting false if the compiled code declined its arguments.
+//
+// This was written once, measured as a 2-4% loss, and reverted; the measurement
+// was right and it is now wrong. At the time 22% of DeltaBlue's frame entries
+// reached compiled code, so the branch here was paid by the 78% that did not and
+// the saving went to the few that did. Both benchmarks now compile **100%** of
+// their frame entries, and what the profile shows instead is that building an
+// interpreted frame for them — the operand stack nobody reads, the eight
+// closures that capture and therefore escape, publishFrame, fillUndef — is about
+// 23% of the whole run.
+//
+// What is left is what compiled code genuinely needs, and it is short: the
+// receiver bound, the locals filled, and new.target consumed so a nested
+// ordinary call does not inherit it.
+//
+// Everything else runFrameBody does is excluded by jitEligible before a function
+// is ever compiled — no upvalues, no try handlers, no with-chain, no module
+// environment, no dynamic variable object. The one exception is pendingModule,
+// which is keyed on the *hoisting* function rather than on the body, so it is
+// checked here rather than assumed away.
+func (rt *Runtime) runCompiledFrame(fn *svFunc, cl *closure, thisVal Value, args []Value) (Value, *ThrowError, bool) {
+	if rt.pendingModule != nil {
+		return mkundef(), nil, false
+	}
+	rt.frameStrict = fn.isStrict
+	if !fn.isStrict {
+		if thisVal.IsNullish() {
+			thisVal = rt.global
+		} else if !thisVal.IsObjectType() && thisVal.Type() != TTypedArray {
+			thisVal, _ = rt.toObjectValue(thisVal) // non-nullish: cannot error
+		}
+	}
+	// Consumed rather than read, so a call the compiled body makes does not see
+	// the `new` that reached this one. Put back if the compiled code declines,
+	// because the interpreted path is going to consume it itself.
+	pendingNT := rt.pendingNewTarget
+	rt.pendingNewTarget = mkundef()
+
+	locals := rt.frameLocals(rt.frameDepth, fn.maxLocals)
+	for i := 0; i < fn.paramCount && i < fn.maxLocals && i < len(args); i++ {
+		locals[i] = args[i]
+	}
+	// Published because frameLocals hands back a plain slice rather than a slab
+	// one past the cached depth or size, and only a slab is traced by walking
+	// the slabs.
+	rt.frames[rt.frameDepth].locals = locals
+
+	v, e, ok := jitTry(rt, fn, cl, locals, thisVal)
+	if !ok {
+		rt.pendingNewTarget = pendingNT
+	}
+	return v, e, ok
 }
 
 // publishFrame returns the slot this depth publishes its live values in,
