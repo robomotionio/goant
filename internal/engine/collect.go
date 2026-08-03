@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"github.com/robomotionio/goant/internal/jitmem"
 	"os"
 	"reflect"
 	"strconv"
@@ -656,8 +655,12 @@ func (rt *Runtime) markRoots() {
 			// The running function itself, for the self-reference a named
 			// function expression binds.
 			rt.markValue(Value(ctx.FnVal))
-			for i := uint64(0); i < ctx.SpillN && i < jitmem.SpillSlots; i++ {
-				rt.markValue(Value(ctx.Spill[i]))
+			// The operand stack the frame left behind when it called out.
+			// StackN is compiled code's own statement of how much of it is
+			// live; past that the slots hold whatever an earlier frame at this
+			// depth wrote, which is exactly what must not be traced.
+			for _, v := range jitFrameStack(ctx) {
+				rt.markValue(v)
 			}
 		}
 

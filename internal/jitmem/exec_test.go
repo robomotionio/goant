@@ -22,14 +22,14 @@ func TestExecContextLayout(t *testing.T) {
 		{"Args", unsafe.Offsetof(c.Args), CtxOffArgs},
 		{"Ret", unsafe.Offsetof(c.Ret), CtxOffRet},
 		{"Resume", unsafe.Offsetof(c.Resume), CtxOffResume},
-		{"Spill", unsafe.Offsetof(c.Spill), CtxOffSpill},
-		{"SpillN", unsafe.Offsetof(c.SpillN), CtxOffSpillN},
+		{"Stack", unsafe.Offsetof(c.Stack), CtxOffStack},
+		{"StackN", unsafe.Offsetof(c.StackN), CtxOffStackN},
 		{"Pool", unsafe.Offsetof(c.Pool), CtxOffPool},
 		{"Host", unsafe.Offsetof(c.Host), CtxOffHost},
 		{"This", unsafe.Offsetof(c.This), CtxOffThis},
 		{"Upvals", unsafe.Offsetof(c.Upvals), CtxOffUpvals},
 		{"FnVal", unsafe.Offsetof(c.FnVal), CtxOffFnVal},
-		{"size", unsafe.Sizeof(c), CtxSize},
+		{"FnVal end", unsafe.Offsetof(c.FnVal) + 8, CtxSize},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s at %d, ABI says %d", tc.name, tc.got, tc.want)

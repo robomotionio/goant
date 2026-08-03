@@ -35,21 +35,28 @@ type ExecContext struct {
 	Args   [4]uint64
 	Ret    uint64
 	Resume uintptr
-	// Spill is where compiled code leaves its operand stack when it has to
-	// return to the runtime part way through a function.
+	// Stack is the frame's operand stack: the address of an array of Values,
+	// one per slot, indexed by depth.
 	//
-	// Generated code keeps the operand stack in registers, and returning to Go
-	// loses every one of them. A compiler that knows its stack depth at each
-	// point — which a template compiler does, because it assigns the stack
-	// positionally — can write exactly the live slots here and read them back on
-	// the way in. That, rather than anything about deoptimisation, is what a
-	// compiled function needs before it can call out mid-expression.
-	Spill [SpillSlots]uint64
-	// SpillN is how many of Spill are live, written by compiled code before it
-	// leaves. The runtime's collector has no other way to know: a spilled slot
-	// holds a Value, and a stale one from an earlier call holds a handle to a
-	// cell that may since have been freed.
-	SpillN uint64
+	// Generated code keeps the top of it in registers, because that is what
+	// makes arithmetic worth compiling, and returning to Go loses every one of
+	// them. A compiler that knows its depth at each point — which a template
+	// compiler does, because it assigns the stack positionally — writes exactly
+	// the live slots here and reads them back on the way in. That, rather than
+	// anything about deoptimisation, is what a compiled function needs before it
+	// can call out mid-expression.
+	//
+	// A pointer rather than an array in this struct because the depth a function
+	// needs is a property of the function. Most want two or three; a source file
+	// that is one enormous array literal wants seventeen thousand, and sizing
+	// every frame for that — or refusing the ones that ask — are both worse than
+	// one load.
+	Stack uintptr
+	// StackN is how many slots are live, written by compiled code before it
+	// leaves. The runtime's collector has no other way to know: a slot holds a
+	// Value, and a stale one from an earlier call holds a handle to a cell that
+	// may since have been freed.
+	StackN uint64
 	// Pool is the address of the runtime's object pool, which compiled code
 	// needs to turn a Value's handle into an object.
 	//
@@ -96,20 +103,43 @@ type ExecContext struct {
 	// by, and a root that is usually redundant is cheaper than one that is
 	// usually absent.
 	FnVal uint64
+	// stack is the array Stack points into. Held here so that Go's collector
+	// keeps it alive for as long as the context can be entered, and unexported
+	// so that it sits past every offset generated code compiles against.
+	stack []uint64
 }
 
-// SpillSlots bounds the operand stack a compiled function may hold.
+// EnsureStack gives the context room for n operand slots and points Stack at
+// them.
 //
-// It used to match the register bank, because the whole operand stack was in
-// registers and this was only where they went across a call out. It is now the
-// stack itself: the emitter keeps the top nine slots in registers and the rest
-// here, so this is the depth past which a function is refused.
+// Called once per frame entry, never while generated code is running, so the
+// address it publishes cannot move under a frame that is using it. A context is
+// reused at its own depth, so a function that once needed a large stack leaves
+// one behind for the next frame at that depth rather than allocating again.
+func (ctx *ExecContext) EnsureStack(n int) {
+	if n < 8 {
+		n = 8
+	}
+	if len(ctx.stack) < n {
+		ctx.stack = make([]uint64, n)
+	}
+	ctx.Stack = uintptr(unsafe.Pointer(&ctx.stack[0]))
+	ctx.StackN = 0
+}
+
+// Slots is the live part of the operand stack.
 //
-// Thirty-two rather than nine covers three quarters of what the old limit
-// refused, and rather than everything because the tail is long — the deepest
-// function in the Octane corpus wants 746 slots, and a context per frame depth
-// is not the place to pay for that.
-const SpillSlots = 32
+// The runtime reads it through the slice rather than through Stack, because a
+// uintptr keeps nothing alive and the slice does. Generated code reads it
+// through Stack, because it indexes by a compile-time offset and cannot follow
+// a slice header. They are the same array.
+func (ctx *ExecContext) Slots() []uint64 {
+	n := int(ctx.StackN)
+	if n > len(ctx.stack) {
+		n = len(ctx.stack)
+	}
+	return ctx.stack[:n]
+}
 
 // Field offsets generated code compiles against.
 const (
@@ -118,14 +148,14 @@ const (
 	CtxOffArgs   = 16
 	CtxOffRet    = 48
 	CtxOffResume = 56
-	CtxOffSpill  = 64
-	CtxOffSpillN = 64 + 8*SpillSlots
-	CtxOffPool   = 72 + 8*SpillSlots
-	CtxOffHost   = 80 + 8*SpillSlots
-	CtxOffThis   = 88 + 8*SpillSlots
-	CtxOffUpvals = 96 + 8*SpillSlots
-	CtxOffFnVal  = 104 + 8*SpillSlots
-	CtxSize      = 112 + 8*SpillSlots
+	CtxOffStack  = 64
+	CtxOffStackN = 72
+	CtxOffPool   = 80
+	CtxOffHost   = 88
+	CtxOffThis   = 96
+	CtxOffUpvals = 104
+	CtxOffFnVal  = 112
+	CtxSize      = 120
 )
 
 // Which fields hold a Value, and so must be traced by the runtime's collector
@@ -133,7 +163,7 @@ const (
 //
 //	Args[2]  the operand a helper was handed
 //	Ret      the operand it produced
-//	Spill[0:SpillN]
+//	Stack[0:StackN]
 //	This     the frame's receiver
 //	FnVal    the running function itself
 //

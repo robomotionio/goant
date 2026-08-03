@@ -76,7 +76,7 @@ func jitEmitNumber(a *jitasm.Asm, x jitasm.Reg, slow *jitasm.Label) {
 // jitCallUnary is jitCallBinary for one operand: the opcode goes in the
 // untraced argument slot and the operand comes off the top of the spill area.
 func jitCallUnary(a *jitasm.Asm, sp int, op Opcode, fixups *[]jitResumeFixup) bool {
-	if sp < 1 || sp > jitmem.SpillSlots {
+	if sp < 1 || sp > jitMaxDepth {
 		return false
 	}
 	a.MovRegImm64(jitRegScratch, uint64(op))
@@ -85,7 +85,7 @@ func jitCallUnary(a *jitasm.Asm, sp int, op Opcode, fixups *[]jitResumeFixup) bo
 }
 
 func jitCallBinary(a *jitasm.Asm, sp int, op Opcode, helper uint32, fixups *[]jitResumeFixup) bool {
-	if sp < 2 || sp > jitmem.SpillSlots {
+	if sp < 2 || sp > jitMaxDepth {
 		return false
 	}
 	a.MovRegImm64(jitRegScratch, uint64(op)|uint64(uint32(sp))<<32)
@@ -102,10 +102,11 @@ func jitCallBinary(a *jitasm.Asm, sp int, op Opcode, helper uint32, fixups *[]ji
 func jitBinaryOperands(ctx *jitmem.ExecContext) (Opcode, Value, Value, bool) {
 	op := Opcode(uint32(ctx.Args[3]))
 	sp := int(uint32(ctx.Args[3] >> 32))
-	if sp < 2 || sp > jitmem.SpillSlots || uint64(sp) != ctx.SpillN {
+	if sp < 2 || sp > jitMaxDepth || uint64(sp) != ctx.StackN {
 		return 0, 0, 0, false
 	}
-	return op, Value(ctx.Spill[sp-2]), Value(ctx.Spill[sp-1]), true
+	stack := jitFrameStack(ctx)
+	return op, stack[sp-2], stack[sp-1], true
 }
 
 // jitRelationalValue materialises a relational comparison of two Numbers as a

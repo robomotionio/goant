@@ -766,7 +766,6 @@ func (rt *Runtime) arraySet(o *object, idx uint32, v Value) {
 	}
 }
 
-
 // setArrayLength implements ArraySetLength for a plain value. Returns ok=false
 // (no error) when a non-configurable index in [newLen, oldLen) blocks the shrink
 // (length is clamped just above it); an invalid length value is a RangeError.

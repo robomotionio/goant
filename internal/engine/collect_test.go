@@ -213,7 +213,7 @@ func TestCollectKeepsUnreachedConstants(t *testing.T) {
 		for (var j = 0; j < 80000; j++) ({m: j});
 		// The strings array behind this was built at compile time and has sat in
 		// the constant pool, unreferenced, across both loops.
-		tag` + "`head-${42}-tail`" + `;
+		tag`+"`head-${42}-tail`"+`;
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)

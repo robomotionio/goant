@@ -1016,7 +1016,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		}
 		idx := 0
 		done := false
-		running := false           // guards against re-entrant next/return (generator "executing")
+		running := false // guards against re-entrant next/return (generator "executing")
 		// The open inner iterator and its `next`, in a slice rather than two
 		// captured variables: they are reassigned per segment, so a snapshot
 		// taken at creation would go stale. inner[0] is 0 when none is open.

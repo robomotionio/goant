@@ -126,17 +126,24 @@ func TestDeepStacksCompile(t *testing.T) {
 		c.free()
 	}
 
-	// Past the array it is still a refusal, and one that names the reason.
-	deep := make([]string, jitMaxDepth+8)
+	// And there is no shallow ceiling above it. The deepest function in the
+	// Octane corpus is a source file that is one array literal — seventeen
+	// thousand operands live at once — and it compiles because the array the
+	// window slides over is allocated per frame at the depth the function needs
+	// rather than being a fixed part of every context.
+	deep := make([]string, 20000)
 	for i := range deep {
-		deep[i] = fmt.Sprint(i)
+		deep[i] = fmt.Sprint(i % 97)
 	}
-	src := "function f(k){ return [" + strings.Join(deep, ",") + ", k]; }"
+	src := "function f(k){ var a = [" + strings.Join(deep, ",") + ", k]; return a.length + a[0] + a[20000]; }"
+	fn := jitFn(t, src)
 	var why string
-	if c := jitCompile(jitFn(t, src), &why); c != nil {
-		c.free()
-		t.Errorf("compiled a stack deeper than the array can hold")
-	} else if why != "stack-too-deep" {
-		t.Errorf("refused a too-deep stack as %q", why)
+	c := jitCompile(fn, &why)
+	if c == nil {
+		t.Fatalf("refused a 20,000-deep literal: %s", why)
+	}
+	defer c.free()
+	if c.slots < 20000 {
+		t.Errorf("recorded %d operand slots for a 20,000-element literal", c.slots)
 	}
 }

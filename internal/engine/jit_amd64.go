@@ -77,8 +77,14 @@ var jitStackRegs = []jitasm.Reg{
 const jitStackWindow = 9
 
 // jitMaxDepth is how deep the operand stack may get before a function is
-// refused, which is the size of the array the window slides over.
-const jitMaxDepth = jitmem.SpillSlots
+// refused.
+//
+// The array it slides over is allocated per frame at the depth the function
+// actually needs, so this is not a budget — it is a bound on how far a wrong
+// answer from the stack analysis could go before it is caught. The deepest real
+// function in the Octane corpus is a source file that is one array literal,
+// which wants seventeen thousand slots.
+const jitMaxDepth = 1 << 20
 
 func jitSlot(i int) jitasm.Reg { return jitStackRegs[i%jitStackWindow] }
 
@@ -94,8 +100,12 @@ func jitWindowBase(sp int) int {
 // depth goes from sp to after. It has to run before the template that pushes
 // them: the register a new slot wants is the one the slot nine below it is in.
 func jitEvictSlots(a *jitasm.Asm, sp, after int) {
+	if jitWindowBase(after) <= jitWindowBase(sp) {
+		return
+	}
+	a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
 	for k := jitWindowBase(sp); k < jitWindowBase(after); k++ {
-		a.MovMemReg(jitasm.RegCtx, int32(jitmem.CtxOffSpill+8*k), jitSlot(k))
+		a.MovMemReg(jitRegScratch, int32(8*k), jitSlot(k))
 	}
 }
 
@@ -113,8 +123,12 @@ func jitRefillSlots(a *jitasm.Asm, sp, after, push int) {
 	if after-push < end {
 		end = after - push
 	}
+	if end <= jitWindowBase(after) {
+		return
+	}
+	a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
 	for k := jitWindowBase(after); k < end; k++ {
-		a.MovRegMem(jitSlot(k), jitasm.RegCtx, int32(jitmem.CtxOffSpill+8*k))
+		a.MovRegMem(jitSlot(k), jitRegScratch, int32(8*k))
 	}
 }
 
@@ -154,6 +168,10 @@ type jitCode struct {
 	block *jitmem.Block
 	entry uintptr
 	osr   map[int]uintptr
+	// slots is how many operand slots the body needs, which is what the frame's
+	// stack array is sized to. Not a property of the tier — a property of the
+	// function, and the reason the array is not in the context.
+	slots int
 	// catchAt maps a call site's resume address to where a throw from it is
 	// caught. Keyed that way because a resume address is the only thing jitRunAt
 	// holds when a helper hands back an error, and nil for a function with no
@@ -299,7 +317,15 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	// Arithmetic needs that guarantee; storing and returning do not, which is
 	// what lets undefined, null and the Booleans travel through compiled code
 	// without any of it having to guard.
-	kind := make([]bool, jitMaxDepth+jitStackWindow+1)
+	// Sized from the body rather than from jitMaxDepth: the depth cannot exceed
+	// the number of instructions, since no single one leaves more than one more
+	// operand than it found, and jitMaxDepth is a bound on nonsense rather than
+	// a budget — allocating a megabyte per compile made the test suite eight
+	// times slower.
+	kind := make([]bool, len(code)+jitStackWindow+1)
+	// The deepest the operand stack gets, which is how much of one the frame is
+	// given.
+	maxSp := 0
 	// The previous instruction, maintained across the loop below.
 	prevOp, prevIP := Opcode(0), -1
 	// The handlers in force here, seeded from the block's entry set the same way
@@ -389,6 +415,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		spAfter := sp - effPop + effPush
 		if spAfter > jitMaxDepth {
 			return refuse(why, "stack-too-deep")
+		}
+		if spAfter > maxSp {
+			maxSp = spAfter
 		}
 		if spAfter > spBefore {
 			jitEvictSlots(a, spBefore, spAfter)
@@ -1501,10 +1530,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp > jitMaxDepth {
 				return refuse(why, "stack-too-deep")
 			}
+			a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
 			for i := jitWindowBase(sp); i < sp; i++ {
-				a.MovMemReg(jitasm.RegCtx, int32(jitmem.CtxOffSpill+8*i), jitSlot(i))
+				a.MovMemReg(jitRegScratch, int32(8*i), jitSlot(i))
 			}
-			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffSpillN, uint32(sp))
+			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffStackN, uint32(sp))
 			// The count, and whether a receiver sits below the callee, in the
 			// one immediate the exit protocol carries.
 			recv := uint64(0)
@@ -1954,7 +1984,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if why != nil {
 		*why = ""
 	}
-	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset())}
+	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset()), slots: maxSp}
 	for _, f := range fixups {
 		if f.catch == nil {
 			continue
@@ -2217,14 +2247,15 @@ func jitCallHelperIn(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFi
 
 	// Only the window: everything below it is already in these slots, which is
 	// where it lives between instructions rather than only across a call.
+	a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
 	for i := jitWindowBase(sp); i < sp; i++ {
-		a.MovMemReg(jitasm.RegCtx, int32(jitmem.CtxOffSpill+8*i), jitSlot(i))
+		a.MovMemReg(jitRegScratch, int32(8*i), jitSlot(i))
 	}
 	// SpillN is what tells the collector how much of Spill to trace. Writing it
 	// before the exit rather than after is the whole point: between the RET
 	// below and the helper returning, this context is the only reference to
 	// those values.
-	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffSpillN, uint32(sp))
+	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffStackN, uint32(sp))
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffHelper, helper)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitHelper))
 	immOff := a.MovRegImm64At(jitasm.RAX, 0)
@@ -2236,14 +2267,15 @@ func jitCallHelperIn(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFi
 	a.Bind(resume)
 	a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
 	a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
+	a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
 	for i := jitWindowBase(sp); i < sp; i++ {
-		a.MovRegMem(jitSlot(i), jitasm.RegCtx, int32(jitmem.CtxOffSpill+8*i))
+		a.MovRegMem(jitSlot(i), jitRegScratch, int32(8*i))
 	}
 	// Back to zero, and the slots below the window keep holding operands with
 	// nothing pointing at them. Sound because the only places compiled code can
 	// be collected at are this one, where SpillN covers the whole stack, and a
 	// back edge, which the emitter refuses to emit with operands live.
-	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffSpillN, 0)
+	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffStackN, 0)
 	return true
 }
 
@@ -2357,7 +2389,10 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		ctx.Args[1] = jitFuel
 		ctx.Args[2], ctx.Args[3] = 0, 0
 		ctx.Ret, ctx.Resume = 0, 0
-		ctx.SpillN = 0
+		// The frame's operand stack, sized to what this function needs. Reused
+		// across frames at this depth, so a function with a large one leaves it
+		// behind rather than allocating again.
+		ctx.EnsureStack(c.slots)
 		ctx.Pool = jitObjectPoolAddr(rt)
 		ctx.Host = jitRuntimeAddr(rt)
 		ctx.This = uint64(this)
@@ -2430,7 +2465,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 					if !e.control {
 						if catch, ok := c.catchAt[ctx.Resume]; ok {
 							ctx.Ret = uint64(e.Value)
-							ctx.SpillN = 0
+							ctx.StackN = 0
 							pc = catch
 							continue
 						}
@@ -2461,7 +2496,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		if ctx.Args[3]>>32 != 0 {
 			need++
 		}
-		sn := int(ctx.SpillN)
+		sn := int(ctx.StackN)
 		if argc < 0 || sn < need {
 			rt.jitFrames = rt.jitFrames[:n]
 			if rt.jitOpenUpvals != nil {
@@ -2469,13 +2504,14 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 			}
 			return mkundef(), rt.typeError("JIT operand stack"), true
 		}
+		stack := jitFrameStack(ctx)
 		base := sn - need
 		tailThis := mkundef()
 		if ctx.Args[3]>>32 != 0 {
-			tailThis = Value(ctx.Spill[base])
+			tailThis = Value(stack[base])
 			base++
 		}
-		callee := Value(ctx.Spill[base])
+		callee := Value(stack[base])
 		// Copied rather than borrowed. Everywhere else a callee reads its arguments
 		// out of the caller's spill area while the caller waits; here the caller is
 		// finished and its context goes back on the free list on the next line.
@@ -2572,7 +2608,7 @@ func jitSpillArgs(ctx *jitmem.ExecContext, base, argc int) []Value {
 	if argc == 0 {
 		return nil
 	}
-	return unsafe.Slice((*Value)(unsafe.Pointer(&ctx.Spill[base])), argc)
+	return jitFrameStack(ctx)[base : base+argc : base+argc]
 }
 
 // jitCopyArgs is the copy the general path still needs, for a callee that may
@@ -2585,6 +2621,9 @@ func jitCopyArgs(window []Value) []Value {
 
 // jitHelper runs what compiled code asked for.
 func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *jitmem.ExecContext) *ThrowError {
+	// The frame's operand stack, as the slice it already is. Compiled code left
+	// the live slots there before it returned, and StackN is how many.
+	stack := jitFrameStack(ctx)
 	switch ctx.Helper {
 	case jitHelperGetField:
 		recv := Value(ctx.Args[2])
@@ -2646,17 +2685,17 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if ctx.Helper == jitHelperCallMethod {
 			depth++
 		}
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if argc < 0 || n < depth {
 			return rt.typeError("JIT operand stack")
 		}
 		base := n - depth
 		thisArg := mkundef()
 		if ctx.Helper == jitHelperCallMethod {
-			thisArg = Value(ctx.Spill[base])
+			thisArg = Value(stack[base])
 			base++
 		}
-		callee := Value(ctx.Spill[base])
+		callee := Value(stack[base])
 		// The arguments as they already sit in the spill area, without copying
 		// them anywhere. See jitSpillArgs for why that is sound for a compiled
 		// callee and not in general.
@@ -2687,11 +2726,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 	case jitHelperGetElem:
 		// The interpreter's GET_ELEM. Its operands are the top two of the spill
 		// area, like every other multi-operand helper here.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		v, e := rt.getElement(Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1]))
+		v, e := rt.getElement(Value(stack[n-2]), Value(stack[n-1]))
 		if e != nil {
 			return e
 		}
@@ -2747,11 +2786,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// They have to be there anyway — they are the top of the operand stack,
 		// and the collector traces it while this runs — so passing them again
 		// would be two stores to say what SpillN already says.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		obj, val := Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1])
+		obj, val := Value(stack[n-2]), Value(stack[n-1])
 		// The cache first, because the emitted probe serves strictly less than
 		// the cache does. It declines the store that *creates* a property, and
 		// that is what building an object is made of: EarleyBoyer makes 18.75
@@ -2835,11 +2874,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 	case jitHelperPutElem:
 		// The interpreter's PUT_ELEM, including the strict-mode report of a
 		// store that did not happen.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 3 {
 			return rt.typeError("JIT operand stack")
 		}
-		ok, e := rt.setElementR(Value(ctx.Spill[n-3]), Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1]))
+		ok, e := rt.setElementR(Value(stack[n-3]), Value(stack[n-2]), Value(stack[n-1]))
 		if e != nil {
 			return e
 		}
@@ -2851,11 +2890,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// The interpreter's PUT_GLOBAL: the declarative record first, because a
 		// Script-level let shadows a property of the same name, then the strict
 		// requirement that the binding already exist.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		val := Value(ctx.Spill[n-1])
+		val := Value(stack[n-1])
 		name := fn.constNames[uint32(ctx.Args[3])]
 		if b := rt.lookupGlobalLex(name); b != nil {
 			return rt.globalLexWrite(b, name, val)
@@ -2871,11 +2910,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// The operand this tier could not prove was a Number. jsUnary is what the
 		// interpreter runs for the same opcode, so a BigInt increments as one and
 		// an object coerces through valueOf exactly as it would there.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		v, e := rt.jsUnary(Opcode(uint32(ctx.Args[3])), Value(ctx.Spill[n-1]))
+		v, e := rt.jsUnary(Opcode(uint32(ctx.Args[3])), Value(stack[n-1]))
 		if e != nil {
 			return e
 		}
@@ -2887,12 +2926,12 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 	case jitHelperToBoolean:
 		// A String or a BigInt, whose truth is in what the Value points at. The
 		// emitted branch answers every other type itself.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
 		ctx.Ret = 0
-		if rt.toBoolean(Value(ctx.Spill[n-1])) {
+		if rt.toBoolean(Value(stack[n-1])) {
 			ctx.Ret = 1
 		}
 		return nil
@@ -2915,11 +2954,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// arms are rt.jsInstanceof's, so a compiled `instanceof` and an
 		// interpreted one cannot disagree about a bound function, a @@hasInstance
 		// or a proxy.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		r, e := rt.jsInstanceof(Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1]))
+		r, e := rt.jsInstanceof(Value(stack[n-2]), Value(stack[n-1]))
 		if e != nil {
 			return e
 		}
@@ -2934,11 +2973,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// the other reason this helper takes the closure: a private field
 		// resolves against the class environment and its double-install and
 		// non-extensible cases are TypeErrors that must not go missing.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		recv, val := Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1])
+		recv, val := Value(stack[n-2]), Value(stack[n-1])
 		name := fn.constNames[uint32(ctx.Args[3])]
 		o := rt.objPtr(recv)
 		if o == nil {
@@ -3036,7 +3075,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// Writing through an upvalue the running closure holds. SET_UPVAL leaves
 		// the value on the stack and PUT_UPVAL does not; the emitter decides
 		// that, so both reach here the same way.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
@@ -3044,7 +3083,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if cl == nil || i >= len(cl.upvalues) || cl.upvalues[i] == nil {
 			return rt.typeError("JIT upvalue")
 		}
-		v := Value(ctx.Spill[n-1])
+		v := Value(stack[n-1])
 		cl.upvalues[i].set(v)
 		ctx.Ret = uint64(v)
 		return nil
@@ -3111,11 +3150,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		}
 	case jitHelperUplus:
 		// Unary `+`, which is ToNumber and can run a valueOf.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		v, e := rt.toNumber(Value(ctx.Spill[n-1]))
+		v, e := rt.toNumber(Value(stack[n-1]))
 		if e != nil {
 			return e
 		}
@@ -3124,11 +3163,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 	case jitHelperToPropkey:
 		// ToPropertyKey, which is ToPrimitive with hint "string" and can run
 		// user code through toString or Symbol.toPrimitive.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		pk, e := rt.toPropertyKey(Value(ctx.Spill[n-1]))
+		pk, e := rt.toPropertyKey(Value(stack[n-1]))
 		if e != nil {
 			return e
 		}
@@ -3144,11 +3183,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		ctx.Ret = uint64(mkbool(rt.lookupGlobalLex(nm) != nil || rt.hasProp(rt.global, nm)))
 		return nil
 	case jitHelperGetLength:
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		v, e := rt.getField(Value(ctx.Spill[n-1]), "length")
+		v, e := rt.getField(Value(stack[n-1]), "length")
 		if e != nil {
 			return e
 		}
@@ -3157,42 +3196,42 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 	case jitHelperForIn:
 		// The keys a for-in walks, snapshotted the way the interpreter takes
 		// them: a proxy's ownKeys trap runs here.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		keys, e := rt.forInKeys(Value(ctx.Spill[n-1]))
+		keys, e := rt.forInKeys(Value(stack[n-1]))
 		if e != nil {
 			return e
 		}
 		ctx.Ret = uint64(keys)
 		return nil
 	case jitHelperStillEnum:
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		ctx.Ret = uint64(mkbool(rt.forInStillEnumerable(Value(ctx.Spill[n-1]), Value(ctx.Spill[n-2]))))
+		ctx.Ret = uint64(mkbool(rt.forInStillEnumerable(Value(stack[n-1]), Value(stack[n-2]))))
 		return nil
 	case jitHelperSetHomeObj:
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		rt.setMethodHome(Value(ctx.Spill[n-1]), Value(ctx.Spill[n-2]))
+		rt.setMethodHome(Value(stack[n-1]), Value(stack[n-2]))
 		return nil
 	case jitHelperPutConst:
 		// The write half of a strict assignment to an unqualified name. The
 		// resolvable flag DELETE_VAR left is checked here, and HasProperty is
 		// checked again because the right-hand side has run in between and may
 		// have deleted the binding the reference resolved to.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		val := Value(ctx.Spill[n-1])
+		val := Value(stack[n-1])
 		name := fn.constNames[uint32(ctx.Args[3])]
-		if !rt.toBoolean(Value(ctx.Spill[n-2])) {
+		if !rt.toBoolean(Value(stack[n-2])) {
 			return rt.referenceError(name + " is not defined")
 		}
 		if b := rt.lookupGlobalLex(name); b != nil {
@@ -3209,7 +3248,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 	case jitHelperDefineMethod:
 		// [target, method] -> [target]. The private arms need the class
 		// environment the closure carries, the same as `#x in obj`.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
@@ -3218,22 +3257,22 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			privEnv = cl.privEnv
 		}
 		name := fn.constNames[uint32(ctx.Args[3])]
-		return rt.defineMethod(name, byte(ctx.Args[3]>>32), Value(ctx.Spill[n-1]), Value(ctx.Spill[n-2]), privEnv)
+		return rt.defineMethod(name, byte(ctx.Args[3]>>32), Value(stack[n-1]), Value(stack[n-2]), privEnv)
 	case jitHelperTypeof:
 		// `typeof v`. The string is interned, so what lands on the operand stack
 		// is a handle into the runtime's own table rather than a fresh string.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		ctx.Ret = uint64(rt.internString(rt.typeofString(Value(ctx.Spill[n-1]))))
+		ctx.Ret = uint64(rt.internString(rt.typeofString(Value(stack[n-1]))))
 		return nil
 	case jitHelperIn:
 		// `key in obj`, which is why this helper takes the closure: `#x in obj`
 		// resolves the private name against the class environment the closure
 		// carries, and passing nil there would answer the wrong question rather
 		// than fail.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
@@ -3241,7 +3280,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if cl != nil {
 			privEnv = cl.privEnv
 		}
-		r, e := rt.jsIn(Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1]), privEnv)
+		r, e := rt.jsIn(Value(stack[n-2]), Value(stack[n-1]), privEnv)
 		if e != nil {
 			return e
 		}
@@ -3250,11 +3289,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 	case jitHelperDelete:
 		// `delete o[k]`. The strict-mode arm is the interpreter's: a failed
 		// delete is a TypeError there and silently false in sloppy code.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		ok, e := rt.deleteElement(Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1]))
+		ok, e := rt.deleteElement(Value(stack[n-2]), Value(stack[n-1]))
 		if e != nil {
 			return e
 		}
@@ -3267,11 +3306,11 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// `throw v`. This tier has no handlers of its own — TRY_PUSH is still
 		// refused — so the throw leaves the frame, which is what returning an
 		// error from here does.
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		return &ThrowError{Value: Value(ctx.Spill[n-1]), rt: rt}
+		return &ThrowError{Value: Value(stack[n-1]), rt: rt}
 	case jitHelperObject:
 		ctx.Ret = uint64(rt.newPlainObject())
 		return nil
@@ -3280,7 +3319,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// immediate rather than the spill depth, because a literal can appear
 		// with operands of the surrounding expression beneath it.
 		want := int(uint32(ctx.Args[3]))
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if want < 0 || n < want {
 			return rt.typeError("JIT operand stack")
 		}
@@ -3289,16 +3328,16 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		ao.arr = make([]Value, want)
 		ao.arrLen = uint32(want)
 		for i := 0; i < want; i++ {
-			ao.arr[i] = Value(ctx.Spill[n-want+i])
+			ao.arr[i] = Value(stack[n-want+i])
 		}
 		ctx.Ret = uint64(arrv)
 		return nil
 	case jitHelperRegexp:
-		n := int(ctx.SpillN)
+		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		v, e := rt.newRegExp(rt.strGo(Value(ctx.Spill[n-2])), rt.strGo(Value(ctx.Spill[n-1])))
+		v, e := rt.newRegExp(rt.strGo(Value(stack[n-2])), rt.strGo(Value(stack[n-1])))
 		if e != nil {
 			return e
 		}

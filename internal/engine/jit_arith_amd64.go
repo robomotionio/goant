@@ -37,7 +37,7 @@ import (
 // Reports false if the operand stack is deeper than a helper call can spill,
 // which is a refusal rather than an error.
 func jitToInt32(a *jitasm.Asm, dst, src jitasm.Reg, sp int, fixups *[]jitResumeFixup) bool {
-	if sp > jitmem.SpillSlots {
+	if sp > jitMaxDepth {
 		return false
 	}
 	slow := a.NewLabel()
