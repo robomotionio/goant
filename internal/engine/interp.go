@@ -273,7 +273,7 @@ func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *
 	}
 	f.locals = locals
 
-	v, e, ok := fn.jit.code.jitRun(rt, fn, cl, fnVal, locals, thisVal)
+	v, e, ok := fn.jit.code.jitRun(rt, fn, cl, fnVal, args, locals, thisVal)
 
 	// The collector walks every frame rather than the live prefix, so a frame
 	// left behind holding the caller's spill window would still be scanned after
@@ -348,7 +348,7 @@ func (rt *Runtime) runCompiledFrame(fn *svFunc, cl *closure, fnVal, thisVal Valu
 	// the slabs.
 	rt.frames[rt.frameDepth].locals = locals
 
-	v, e, ok := jitTry(rt, fn, cl, fnVal, locals, thisVal)
+	v, e, ok := jitTry(rt, fn, cl, fnVal, args, locals, thisVal)
 	if !ok {
 		rt.pendingNewTarget = pendingNT
 	}
@@ -604,7 +604,7 @@ restart:
 	// it produced the answer; anything else falls through to the interpreter
 	// below, which is what makes declining free.
 	if jitEnabled {
-		if v, e, ok := jitTry(rt, fn, cl, fnVal, locals, thisVal); ok {
+		if v, e, ok := jitTry(rt, fn, cl, fnVal, args, locals, thisVal); ok {
 			return v, e
 		}
 	}
@@ -2001,7 +2001,7 @@ restart:
 				// would have to be carried across.
 				if jitEnabled && sp == 0 {
 					syncFrame()
-					if v, e, ok := jitTryLoop(rt, fn, cl, fnVal, locals, thisVal, t); ok {
+					if v, e, ok := jitTryLoop(rt, fn, cl, fnVal, args, locals, thisVal, t); ok {
 						return v, e
 					}
 				}

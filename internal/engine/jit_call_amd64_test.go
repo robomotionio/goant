@@ -315,65 +315,35 @@ func TestJITConstructAgreesWithTheInterpreter(t *testing.T) {
 	}
 }
 
-// The aliasing in jitSpillArgs rests on one structural fact: a compiled callee
-// cannot observe the array it was handed, so handing it the caller's spill area
-// is indistinguishable from handing it a copy.
+// The aliasing in jitSpillArgs rests on the callee never retaining or writing
+// through the array it is handed.
 //
-// The fact is that a mapped `arguments` object writes through to that array, and
-// a function that builds one never compiles. That used to be checkable as
-// "SPECIAL_OBJ has no template", and is not any more: the opcode carries five
-// unrelated things and the self-reference among them is now emitted, while
-// `arguments` is refused by kind. So this asks the question directly — compile a
-// function that builds one and require a refusal — which is the property
-// jitSpillArgs actually depends on rather than a proxy for it.
-func TestCompiledCalleeCannotSeeArguments(t *testing.T) {
-	// Walks every function in each source, not just the outermost. A nested
-	// function that builds `arguments` is a separate svFunc and is refused
-	// separately — the enclosing one compiling is fine and is what the third
-	// case checks, because the invariant is about the callee that would be
-	// handed the spill area, not about who declared it.
-	for _, src := range []string{
-		"function f(a){ return arguments.length; }",
-		"function f(a){ arguments[0] = 1; return a; }",
-		"function f(a){ var x = arguments; return x[0]; }",
-		"function f(a){ return (function(){ return arguments; })(a); }",
-		"function f(a){ function g(){ return arguments[0]; } return g(a); }",
-	} {
-		rt := New()
-		prog, err := Parse("args.js", src)
-		if err != nil {
-			t.Fatalf("%s: %v", src, err)
+// That used to be structural — `arguments` needs SPECIAL_OBJ, which had no
+// template — and it is not any more: a compiled function can build one. The
+// property still holds, for a different and narrower reason. A mapped
+// `arguments` aliases the frame's **locals**, which every frame owns, and its
+// indexed properties are copied out of the argument values. The one place that
+// reads the window is jitHelperArguments, and it takes a copy first.
+//
+// So this checks the narrow thing rather than the structural one: the arguments
+// object a compiled frame builds must not change when the caller's spill area is
+// overwritten afterwards, which is what a retained window would do.
+func TestArgumentsDoesNotAliasTheCallersSpillArea(t *testing.T) {
+	src := `
+		function callee(a, b) {
+			var args = arguments;
+			// A call in between reuses the caller's spill area for its own
+			// operands; if ` + "`args`" + ` were a window onto it, these would change.
+			other(a + 1, b + 1);
+			return "" + args[0] + "," + args[1] + "," + args.length;
 		}
-		top, err := rt.Compile(prog, "args.js", src)
-		if err != nil {
-			t.Fatalf("%s: %v", src, err)
-		}
-		walkFuncs(top, func(fn *svFunc) {
-			builds := false
-			code := fn.code
-			for ip := fn.startIP; ip < len(code); {
-				op := Opcode(code[ip])
-				sz := int(opTable[op].Size)
-				if sz <= 0 {
-					break
-				}
-				if op == OpSpecialObj && code[ip+1] == 0 {
-					builds = true
-				}
-				ip += sz
-			}
-			if !builds {
-				return
-			}
-			var why string
-			if c := jitCompile(fn, &why); c != nil {
-				c.free()
-				t.Errorf("in %q, a function that builds `arguments` compiled — "+
-					"jitSpillArgs hands a compiled callee the caller's spill area, "+
-					"and a mapped `arguments` writes through to the array it is given", src)
-			}
-		})
-	}
+		function other(x, y) { return x + y; }
+		function caller(i) { return callee(i, i * 2); }
+		var out = "";
+		for (var i = 0; i < 4000; i++) out = caller(i);
+		out;
+	`
+	jitBothWays(t, "args/no-alias", src)
 }
 
 // And the behaviour that depends on it, end to end: a sloppy callee whose mapped

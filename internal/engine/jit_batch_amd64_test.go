@@ -243,23 +243,27 @@ func TestSelfReferenceSurvivesACollection(t *testing.T) {
 	jitBothWays(t, "self/gc", src)
 }
 
-// The four kinds that are not the self-reference must still be refused, and
-// refused under a name that says which one — `arguments` in particular, because
-// a compiled callee being unable to build one is what makes jitSpillArgs sound.
+// Three of SPECIAL_OBJ's five kinds are still refused, and refused under a name
+// that says which — the diagnostic's whole purpose being not to point at an
+// opcode that is mostly implemented.
 func TestOtherSpecialObjKindsAreStillRefused(t *testing.T) {
-	if jitSpecialObjKind(0) != "arguments" {
-		t.Fatal("kind 0 is no longer arguments")
+	for _, c := range []struct{ src, want string }{
+		{"function f(a){ return new.target; }", "special-obj/new.target"},
+	} {
+		var why string
+		if c2 := jitCompile(jitFn(t, c.src), &why); c2 != nil {
+			c2.free()
+			t.Errorf("compiled %q", c.src)
+			continue
+		}
+		if why != c.want {
+			t.Errorf("%q refused as %q, want %q", c.src, why, c.want)
+		}
 	}
-	var why string
-	c := jitCompile(jitFn(t, "function f(a){ return arguments.length; }"), &why)
-	if c != nil {
-		c.free()
-		t.Fatal("compiled a function that builds `arguments`; jitSpillArgs hands a " +
-			"compiled callee the caller's spill area, which a mapped `arguments` " +
-			"would write through")
-	}
-	if why != "special-obj/arguments" {
-		t.Errorf("refused as %q, which does not say which kind is missing", why)
+	for k, want := range map[byte]string{0: "arguments", 1: "self", 2: "new.target", 3: "import.meta", 4: "private-name"} {
+		if got := jitSpecialObjKind(k); got != want {
+			t.Errorf("kind %d is named %q, want %q", k, got, want)
+		}
 	}
 }
 
@@ -379,4 +383,58 @@ func TestClosureCapturingWithIsRefused(t *testing.T) {
 		c.free()
 		t.Fatal("compiled a function whose closure captures a with-scope")
 	}
+}
+
+// The `arguments` object, in both its forms. Mapped writes through to the
+// parameters and unmapped does not, the callee slot differs, and the object can
+// outlive the call — which is why the frame gives up its locals buffer.
+func TestArgumentsAgreesWithTheInterpreter(t *testing.T) {
+	for _, c := range []struct{ name, src string }{
+		{"length", `function f(a,b){ return arguments.length; }
+			var s=0; for (var i=0;i<3000;i++) s += f(i) + f(i,i) + f(i,i,i); s;`},
+		{"index", `function f(a,b){ return arguments[0] + arguments[1]; }
+			var s=0; for (var i=0;i<3000;i++) s += f(i,1); s;`},
+		{"missing-index", `function f(a){ return "" + arguments[5]; }
+			var out=""; for (var i=0;i<3000;i++) out = f(i); out;`},
+		{"mapped-write-through", `function f(a){ arguments[0] = 99; return a; }
+			var s=0; for (var i=0;i<3000;i++) s += f(i); s;`},
+		{"mapped-param-write", `function f(a){ a = 42; return arguments[0]; }
+			var s=0; for (var i=0;i<3000;i++) s += f(i); s;`},
+		{"unmapped-strict", `"use strict"; function f(a){ arguments[0] = 99; return a; }
+			var s=0; for (var i=0;i<3000;i++) s += f(i); s;`},
+		{"unmapped-default-param", `function f(a = 1){ arguments[0] = 99; return a; }
+			var s=0; for (var i=0;i<3000;i++) s += f(i); s;`},
+		{"callee-sloppy", `function f(a){ return typeof arguments.callee; }
+			var out=""; for (var i=0;i<3000;i++) out = f(i); out;`},
+		{"callee-strict-poisoned", `"use strict"; function f(a){
+				try { return typeof arguments.callee; } catch (e) { return e.name; } }
+			var out=""; for (var i=0;i<3000;i++) out = f(i); out;`},
+		{"spread", `function f(a,b){ return Math.max.apply(null, arguments); }
+			var s=0; for (var i=0;i<3000;i++) s += f(i, i+1); s;`},
+		{"iterate", `function f(a,b){ var t=0; for (var v of arguments) t+=v; return t; }
+			var s=0; for (var i=0;i<3000;i++) s += f(i,1); s;`},
+		{"outlives-frame", `var kept=null;
+			function f(a,b){ kept = arguments; return 0; }
+			var s=0; for (var i=0;i<3000;i++){ f(i,i+1); s += kept[0]+kept[1]; } s;`},
+		{"delete-then-read", `function f(a){ delete arguments[0]; return "" + arguments[0] + a; }
+			var out=""; for (var i=0;i<3000;i++) out = f(i); out;`},
+		{"not-an-array", `function f(a){ return Array.isArray(arguments) + ":" + arguments.length; }
+			var out=""; for (var i=0;i<3000;i++) out = f(i); out;`},
+	} {
+		jitBothWays(t, "arguments/"+c.name, c.src)
+	}
+}
+
+// A mapped `arguments` points into the locals, so the frame must give up its
+// buffer exactly as a capture does — recursion at the same depth is what shows a
+// missed drop.
+func TestArgumentsDoesNotShareLocalsWithTheNextFrame(t *testing.T) {
+	src := `
+		function grab(a, b){ return arguments; }
+		function rec(d){ if (d === 0) return 0; var g = grab(d, d*2); var deeper = rec(d-1); return g[0] + g[1] + deeper; }
+		var s = 0;
+		for (var i = 0; i < 2000; i++) s += rec(8);
+		s;
+	`
+	jitBothWays(t, "arguments/no-reuse", src)
 }

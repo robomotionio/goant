@@ -54,7 +54,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 		}
 		switch op {
 		case OpJmp, OpJmpFalse, OpJmpTrue, OpJmpNotNullish,
-			OpReturn, OpReturnUndef, OpThrow:
+			OpReturn, OpReturnUndef, OpThrow, OpThrowError:
 			if ip+size < len(code) {
 				leaders[ip+size] = true
 			}
@@ -90,7 +90,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 			cur.succ = []int{int(readU32(code, ip+1))}
 		case OpJmpFalse, OpJmpTrue, OpJmpNotNullish:
 			cur.succ = []int{int(readU32(code, ip+1)), ip + size}
-		case OpReturn, OpReturnUndef, OpThrow:
+		case OpReturn, OpReturnUndef, OpThrow, OpThrowError:
 			cur.succ = []int{} // nothing follows
 		}
 		ip += size
@@ -418,7 +418,9 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
-				case OpTypeof, OpIsUndefOrNull:
+				case OpThrowError:
+					// Consumes nothing and never returns.
+				case OpUplus, OpTypeof, OpIsUndefOrNull:
 					// One operand consumed and demanded of nothing. `typeof`
 					// takes any value, and the nullish test is a tag comparison
 					// that a Number simply fails.
@@ -823,9 +825,13 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
-				case OpTypeof, OpIsUndefOrNull:
-					// Consumes one and produces a value that is not a Number: a
-					// string for typeof, a Boolean for the nullish test.
+				case OpThrowError:
+					// Consumes nothing and never returns.
+				case OpUplus, OpTypeof, OpIsUndefOrNull:
+					// Consumes one and produces a value this tier does not model
+					// as a Number — even UPLUS, whose result is one, because it
+					// arrives through a helper that can hand back anything
+					// ToNumber produced.
 					if _, ok := pop(); !ok {
 						return nil, false
 					}

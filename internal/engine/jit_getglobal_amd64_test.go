@@ -36,7 +36,7 @@ func jitGlobal(t testing.TB, setup, name string) (*Runtime, *svFunc, *jitCode) {
 func jitReadGlobal(t testing.TB, rt *Runtime, fn *svFunc, c *jitCode) (Value, *ThrowError) {
 	t.Helper()
 	locals := make([]Value, fn.maxLocals)
-	v, e, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef())
+	v, e, ok := c.jitRun(rt, fn, nil, 0, nil, locals, mkundef())
 	if !ok {
 		t.Fatal("compiled code declined a frame it should have handled")
 	}

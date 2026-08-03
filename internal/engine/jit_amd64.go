@@ -577,6 +577,29 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp--
 			ip++
 
+		case OpThrowError:
+			// Never returns, like THROW. The name index and the kind travel
+			// together in the one immediate the exit protocol carries.
+			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1))|uint64(code[ip+5])<<32)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperThrowError, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			sp = 0
+			returned = true
+			ip += 6
+
+		case OpUplus:
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperUplus, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-1], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-1] = false
+			ip++
+
 		case OpClosure:
 			// Making a function, which is what 583 of the corpus's remaining
 			// refusals were waiting for — the largest single blocker once the
@@ -640,13 +663,20 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			// The rest are refused by name rather than as "op:SPECIAL_OBJ", so
 			// the diagnostic says which one is missing instead of pointing at an
 			// opcode that is already half implemented.
-			if code[ip+1] != 1 {
-				return refuse(why, "special-obj/"+jitSpecialObjKind(code[ip+1]))
+			if k := code[ip+1]; k != 1 && k != 0 {
+				return refuse(why, "special-obj/"+jitSpecialObjKind(k))
 			}
 			if sp >= len(jitStackRegs) {
 				return refuse(why, "stack-too-deep")
 			}
-			a.MovRegMem(jitStackRegs[sp], jitasm.RegCtx, jitmem.CtxOffFnVal)
+			if code[ip+1] == 1 {
+				a.MovRegMem(jitStackRegs[sp], jitasm.RegCtx, jitmem.CtxOffFnVal)
+			} else {
+				if !jitCallHelper(a, sp, jitHelperArguments, &fixups) {
+					return refuse(why, "stack-too-deep")
+				}
+				a.MovRegMem(jitStackRegs[sp], jitasm.RegCtx, jitmem.CtxOffRet)
+			}
 			kind[sp] = false
 			sp++
 			ip += 2
@@ -1560,7 +1590,7 @@ func jitHasTemplate(op Opcode) bool {
 		OpInstanceof, OpMod, OpTypeof, OpIsUndefOrNull, OpIn, OpDelete,
 		OpObject, OpRegexp, OpGetGlobalUndef, OpThrow, OpArray,
 		OpDefineField, OpJmpNotNullish, OpSpecialObj,
-		OpClosure, OpPutUpval, OpSetUpval:
+		OpClosure, OpPutUpval, OpSetUpval, OpThrowError, OpUplus:
 		return true
 	}
 	return false
@@ -1737,6 +1767,9 @@ const (
 	jitHelperDefineField = 27
 	jitHelperClosure     = 28
 	jitHelperPutUpval    = 29
+	jitHelperThrowError  = 30
+	jitHelperUplus       = 31
+	jitHelperArguments   = 32
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1812,8 +1845,8 @@ func jitCanonicalizeNaN(a *jitasm.Asm, r jitasm.Reg) {
 // A throw is not a decline. It comes from a helper, by which point the frame has
 // run, and this tier has no exception handlers of its own — TRY_PUSH is refused
 // — so the only thing left to do is what the interpreter would: leave.
-func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, locals []Value, this Value) (Value, *ThrowError, bool) {
-	return c.jitRunAt(rt, fn, cl, fnVal, locals, this, c.entry)
+func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals []Value, this Value) (Value, *ThrowError, bool) {
+	return c.jitRunAt(rt, fn, cl, fnVal, args, locals, this, c.entry)
 }
 
 // jitRunOSR enters at the stub for a loop header, if there is one.
@@ -1821,15 +1854,15 @@ func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, loca
 // Reports false when there is not, or when the stub's guards decline the locals
 // the interpreter has produced — in which case nothing has happened and the
 // interpreter carries on from where it was.
-func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
+func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
 	pc, ok := c.osr[header]
 	if !ok {
 		return mkundef(), nil, false
 	}
-	return c.jitRunAt(rt, fn, cl, fnVal, locals, this, pc)
+	return c.jitRunAt(rt, fn, cl, fnVal, args, locals, this, pc)
 }
 
-func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, locals []Value, this Value, entry uintptr) (Value, *ThrowError, bool) {
+func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals []Value, this Value, entry uintptr) (Value, *ThrowError, bool) {
 	if len(locals) == 0 {
 		return mkundef(), nil, false
 	}
@@ -1931,7 +1964,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, lo
 			ctx.Args[1] = jitFuel
 			pc = ctx.Resume
 		case jitmem.ExitHelper:
-			if e := jitHelper(rt, fn, cl, locals, ctx); e != nil {
+			if e := jitHelper(rt, fn, cl, args, locals, ctx); e != nil {
 				rt.jitFrames = rt.jitFrames[:n]
 				if rt.jitOpenUpvals != nil {
 					delete(rt.jitOpenUpvals, rt.frameDepth)
@@ -1989,7 +2022,7 @@ func jitCopyArgs(window []Value) []Value {
 }
 
 // jitHelper runs what compiled code asked for.
-func jitHelper(rt *Runtime, fn *svFunc, cl *closure, locals []Value, ctx *jitmem.ExecContext) *ThrowError {
+func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *jitmem.ExecContext) *ThrowError {
 	switch ctx.Helper {
 	case jitHelperGetField:
 		recv := Value(ctx.Args[2])
@@ -2452,6 +2485,79 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, locals []Value, ctx *jitmem
 		v := Value(ctx.Spill[n-1])
 		cl.upvalues[i].set(v)
 		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperArguments:
+		// The `arguments` object, which is the last of SPECIAL_OBJ's five kinds
+		// this tier refuses and the largest block of functions left in the
+		// corpus at 213.
+		//
+		// The reason it was held back turned out to be the wrong reason. A
+		// compiled callee is handed the caller's spill area as its arguments
+		// rather than a copy — see jitSpillArgs — and a mapped `arguments`
+		// writes through to an array, so the two looked incompatible. They are
+		// not: newArgumentsMap aliases the frame's **locals**, which every frame
+		// owns, and the indexed properties are copied out of the argument values
+		// rather than aliasing them.
+		//
+		// The copy below is what keeps that a fact rather than an observation.
+		// It costs one allocation on a path that already allocates an object and
+		// a property per argument, and it means the caller's spill area is read
+		// exactly once, here, by code that cannot retain it.
+		own := jitCopyArgs(args)
+		a := rt.newObject(rt.objectProto)
+		ao := rt.objPtr(a)
+		for i, v := range own {
+			ao.defineOwn(numberToString(float64(i)), v, attrDefault)
+		}
+		if fn.mappedArgs {
+			// The map points into the locals and the object can outlive the
+			// call, so this depth gives up its buffer — the same commitment a
+			// capture makes, and for the same reason.
+			ao.argMap = newArgumentsMap(locals, fn.paramCount, len(own))
+			rt.dropFrameLocals(rt.frameDepth)
+		}
+		ao.defineOwn("length", mknum(float64(len(own))), attrWritable|attrConfigurable)
+		if fn.mappedArgs {
+			ao.defineOwn("callee", Value(ctx.FnVal), attrWritable|attrConfigurable)
+		} else {
+			// Unmapped covers strict code and a sloppy function with a
+			// non-simple parameter list; `callee` is the poison pill.
+			ao.defineAccessor("callee", rt.poison, rt.poison, true, true, 0)
+		}
+		if rt.symIterator != 0 {
+			if vals, e := rt.getField(rt.arrayProto, "values"); e == nil {
+				ao.defineOwnSymbol(rt.symIterator.handle(), vals, attrWritable|attrConfigurable)
+			}
+		}
+		ctx.Ret = uint64(a)
+		return nil
+	case jitHelperThrowError:
+		// A native error with a constant message, which the compiler emits where
+		// the language requires a specific throw — assigning to a constant, a
+		// class constructor called without `new`. The kind is packed above the
+		// name index because both are immediates of the same instruction.
+		msg := fn.constNames[uint32(ctx.Args[3])]
+		switch byte(ctx.Args[3] >> 32) {
+		case 1:
+			return rt.referenceError(msg)
+		case 2:
+			return rt.syntaxError(msg)
+		case 3:
+			return rt.rangeError(msg)
+		default:
+			return rt.typeError(msg)
+		}
+	case jitHelperUplus:
+		// Unary `+`, which is ToNumber and can run a valueOf.
+		n := int(ctx.SpillN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		v, e := rt.toNumber(Value(ctx.Spill[n-1]))
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(mknum(v))
 		return nil
 	case jitHelperTypeof:
 		// `typeof v`. The string is interned, so what lands on the operand stack

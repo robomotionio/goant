@@ -43,7 +43,7 @@ func jitReadElem(t testing.TB, rt *Runtime, fn *svFunc, c *jitCode, recv, key Va
 	t.Helper()
 	locals := make([]Value, fn.maxLocals)
 	locals[0], locals[1] = recv, key
-	v, e, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef())
+	v, e, ok := c.jitRun(rt, fn, nil, 0, nil, locals, mkundef())
 	if !ok {
 		t.Fatal("compiled code declined arguments it should have handled")
 	}
