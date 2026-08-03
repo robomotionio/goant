@@ -1242,62 +1242,10 @@ restart:
 			}
 			ip += 5
 		case OpDefineMethod:
-			name := fn.constNames[readU32(code, ip+1)]
-			flags := code[ip+5]
-			enumerable := flags&4 != 0 // bit 2: object-literal accessor (enumerable)
-			shared := flags&8 != 0     // bit 3: shared private method, already homed
-			flags &= 3
 			accFn := pop()
-			if !shared {
-				rt.setMethodHome(accFn, peek()) // [[HomeObject]] for a super-using method
-			}
-			if isPrivateKey(name) {
-				if o := rt.objPtr(peek()); o != nil {
-					if !o.flags.extensible {
-						// PrivateMethodOrAccessorAdd, like PrivateFieldAdd, refuses a
-						// non-extensible object.
-						thrown = rt.typeError("Cannot add private member " + privDisplay(name) + " to a non-extensible object")
-						goto unwind
-					}
-					ok := true
-					switch flags {
-					case 1:
-						ok = o.definePrivateAccessor(name, privEnv, accFn, true)
-					case 2:
-						ok = o.definePrivateAccessor(name, privEnv, accFn, false)
-					default:
-						ok = o.definePrivateMethod(name, privEnv, accFn)
-					}
-					if !ok {
-						thrown = rt.typeError("Cannot install private method " + privDisplay(name) + " twice on the same object")
-						goto unwind
-					}
-				}
-				ip += 6
-				break
-			}
-			if o := rt.objPtr(peek()); o != nil {
-				switch flags {
-				case 0: // data method: non-enumerable, writable, configurable
-					o.defineOwn(name, accFn, attrWritable|attrConfigurable)
-				default: // accessor: 1=getter, 2=setter (merging with existing)
-					g, s := mkundef(), mkundef()
-					hg, hs := false, false
-					if d := o.ownDescriptor(name); d.exists && d.isAccessor {
-						g, s = d.getter, d.setter
-						hg, hs = !d.getter.IsUndefined(), !d.setter.IsUndefined()
-					}
-					if flags == 1 {
-						g, hg = accFn, true
-					} else {
-						s, hs = accFn, true
-					}
-					attrs := uint8(attrConfigurable) // class accessors are non-enumerable
-					if enumerable {
-						attrs |= attrEnumerable
-					}
-					o.defineAccessor(name, g, s, hg, hs, attrs)
-				}
+			if e := rt.defineMethod(fn.constNames[readU32(code, ip+1)], code[ip+5], accFn, peek(), privEnv); e != nil {
+				thrown = e
+				goto unwind
 			}
 			ip += 6
 

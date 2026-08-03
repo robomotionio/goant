@@ -119,6 +119,75 @@ func (rt *Runtime) setMethodHome(fnVal, home Value) {
 	}
 }
 
+// defineMethod installs a method or accessor on target, which is DEFINE_METHOD's
+// whole body. rawFlags is the instruction's flags byte: bits 0-1 pick data
+// method, getter or setter, bit 2 makes an accessor enumerable (an object
+// literal's, not a class's) and bit 3 says the method is a shared private one
+// that already has its [[HomeObject]].
+//
+// Private names go through the object's private table rather than its shape, and
+// that is the arm that can throw: a non-extensible object refuses the addition,
+// and installing the same private name twice is a TypeError rather than a
+// redefinition.
+func (rt *Runtime) defineMethod(name string, rawFlags byte, accFn, target Value, privEnv *privScope) *ThrowError {
+	enumerable := rawFlags&4 != 0
+	shared := rawFlags&8 != 0
+	flags := rawFlags & 3
+	if !shared {
+		rt.setMethodHome(accFn, target) // [[HomeObject]] for a super-using method
+	}
+	if isPrivateKey(name) {
+		o := rt.objPtr(target)
+		if o == nil {
+			return nil
+		}
+		if !o.flags.extensible {
+			// PrivateMethodOrAccessorAdd, like PrivateFieldAdd, refuses a
+			// non-extensible object.
+			return rt.typeError("Cannot add private member " + privDisplay(name) + " to a non-extensible object")
+		}
+		ok := true
+		switch flags {
+		case 1:
+			ok = o.definePrivateAccessor(name, privEnv, accFn, true)
+		case 2:
+			ok = o.definePrivateAccessor(name, privEnv, accFn, false)
+		default:
+			ok = o.definePrivateMethod(name, privEnv, accFn)
+		}
+		if !ok {
+			return rt.typeError("Cannot install private method " + privDisplay(name) + " twice on the same object")
+		}
+		return nil
+	}
+	o := rt.objPtr(target)
+	if o == nil {
+		return nil
+	}
+	switch flags {
+	case 0: // data method: non-enumerable, writable, configurable
+		o.defineOwn(name, accFn, attrWritable|attrConfigurable)
+	default: // accessor: 1=getter, 2=setter (merging with existing)
+		g, s := mkundef(), mkundef()
+		hg, hs := false, false
+		if d := o.ownDescriptor(name); d.exists && d.isAccessor {
+			g, s = d.getter, d.setter
+			hg, hs = !d.getter.IsUndefined(), !d.setter.IsUndefined()
+		}
+		if flags == 1 {
+			g, hg = accFn, true
+		} else {
+			s, hs = accFn, true
+		}
+		attrs := uint8(attrConfigurable) // class accessors are non-enumerable
+		if enumerable {
+			attrs |= attrEnumerable
+		}
+		o.defineAccessor(name, g, s, hg, hs, attrs)
+	}
+	return nil
+}
+
 // newNativeFunc creates a callable built-in function object.
 func (rt *Runtime) newNativeFunc(name string, length int, fn nativeFunc) Value {
 	oh, obj := rt.objects.alloc()

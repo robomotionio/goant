@@ -92,6 +92,41 @@ func TestJITDeadZoneThrowsLikeTheInterpreter(t *testing.T) {
 		{"const-before-its-declaration", `
 			function f(a) { if (a > 0) { return c; } const c = 1; return 0; }
 			var s = 0; for (var k = 0; k < 40; k++) s += f(k - 20); s;`},
+		// A store is what proves a slot readable, and the compiler emits one to
+		// put a lexical binding INTO its dead zone: EMPTY then PUT_LOCAL. Once
+		// EMPTY had a template that store started counting as a proof, the
+		// dead-zone check went away, and every case above began answering with
+		// the sentinel instead of throwing. The three below are the shapes that
+		// make it a dataflow question rather than a local one.
+		{"seeded-then-really-assigned", `
+			function f(a) { let x = a * 2; if (a > 0) { return x; } return x + 1; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k - 100); s;`},
+		{"seeded-inside-a-loop", `
+			function f(n) { var t = 0; for (var i = 0; i < n; i++) { let q = i * 2; t += q; } return t; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k % 7); s;`},
+		{"read-in-the-zone-on-a-later-iteration", `
+			function f(n) { var t = 0; for (var i = 0; i < n; i++) { if (i > 1) { t += q; } let q = i; } return t; }
+			var s = 0, m = "";
+			for (var k = 0; k < 200; k++) { try { s += f(k % 4); } catch (e) { m = e.name; } }
+			"" + s + ":" + m;`},
+		// The seed and the read in one block, with no branch between them, which
+		// is the case the block entry sets cannot answer: what the emitter
+		// believes about the slot between the two is its own to get right.
+		{"self-reference-in-the-initialiser", `
+			function f(a) { let x = x + a; return x; }
+			var s = 0, m = "";
+			for (var k = 0; k < 200; k++) { try { s += f(k); } catch (e) { m = e.name; } }
+			"" + s + ":" + m;`},
+		{"const-self-reference", `
+			function f(a) { const c = c * a; return c; }
+			var s = 0, m = "";
+			for (var k = 0; k < 200; k++) { try { s += f(k); } catch (e) { m = e.message.length; } }
+			"" + s + ":" + m;`},
+		// The class name is seeded the same way, so a computed key that reads it
+		// while the class is still being built throws.
+		{"class-name-in-its-own-computed-key", `
+			function f(a) { try { return (class C { [C.name]() {} }), 0; } catch (e) { return e.name.length; } }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
 	} {
 		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
 	}
@@ -469,5 +504,82 @@ func TestJITCompilesABareCondition(t *testing.T) {
 			continue
 		}
 		c.free()
+	}
+}
+
+// The seed is a store, so it also has to un-assign the slot across a block
+// boundary, and that needs a kill set rather than the union `in || gen`.
+//
+// The shape is default parameters: the prologue checks the parameters, so they
+// start assigned, and the default-binding sequence then puts every one of them
+// back into its dead zone before binding any — an entry set that says assigned
+// and a block that ends with the slot un-assigned. `function f(a = a)` is a
+// ReferenceError for exactly that reason.
+//
+// It is tested here rather than through jitBothWays because the emitter still
+// refuses a function with a default parameter, for want of a GET_ARG template.
+// The dataflow has to be right before that changes, not after: what a missing
+// kill set would cost then is a dead-zone check silently dropped, which is the
+// same bug the EMPTY template introduced and the hardest kind to find twice.
+func TestASeedUnassignsAcrossBlocks(t *testing.T) {
+	const src = "function f(c, a = (c ? b : 1), b = 2) { return a; }"
+	fn := jitFn(t, src)
+
+	tdz := jitTDZStores(fn)
+	if len(tdz) == 0 {
+		t.Fatalf("no dead-zone seeds in %q — the fixture no longer tests anything", src)
+	}
+	targets, ok := jitScanTargets(fn, 0)
+	if !ok {
+		t.Fatal("undecodable")
+	}
+	blocks, ok := jitAnalyze(fn, 0, targets)
+	if !ok {
+		t.Fatal("no blocks")
+	}
+
+	// The seeded slots, and the block each seed sits in.
+	seeded := map[int]int{} // slot -> block start
+	for ip := range tdz {
+		slot := int(readU16(fn.code, ip+1))
+		for bs, b := range blocks {
+			if ip >= b.start && ip < b.end {
+				seeded[slot] = bs
+			}
+		}
+	}
+	if len(seeded) == 0 {
+		t.Fatal("seeds found but none inside a block")
+	}
+
+	// Every block after the one that seeds a slot must enter with that slot
+	// un-assigned, unless something in between really assigned it.
+	checked := 0
+	for slot, seedBlock := range seeded {
+		for bs, b := range blocks {
+			if !b.reachable || bs <= seedBlock || b.gen[slot] {
+				continue
+			}
+			reachesReal := false
+			for ip := blocks[seedBlock].start; ip < bs && ip < len(fn.code); {
+				op := Opcode(fn.code[ip])
+				if (op == OpPutLocal || op == OpSetLocal) && !tdz[ip] &&
+					int(readU16(fn.code, ip+1)) == slot {
+					reachesReal = true
+				}
+				ip += int(opTable[op].Size)
+			}
+			if reachesReal {
+				continue
+			}
+			checked++
+			if b.in[slot] {
+				t.Errorf("block %d enters with slot %d assigned, but the only store to it "+
+					"before here seeds its dead zone — the read there would skip its check", bs, slot)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatalf("nothing checked: the fixture no longer produces a block after a seed")
 	}
 }

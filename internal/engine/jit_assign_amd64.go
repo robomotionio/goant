@@ -23,8 +23,52 @@ type jitBlock struct {
 	start, end int    // [start, end)
 	succ       []int  // start ip of each successor
 	gen        []bool // locals this block assigns
+	kill       []bool // locals this block puts back into their dead zone
 	in         []bool // locals assigned on entry, on every path
 	reachable  bool
+}
+
+// jitTDZStores reports the stores that put a local into its temporal dead zone
+// rather than giving it a value.
+//
+// `let x`, `const x`, a class name, a parameter with a default and a for-head
+// binding all compile to EMPTY followed by PUT_LOCAL, and the sentinel that
+// lands in the slot is not a value: every read of it before the initialiser
+// runs has to throw. Definite assignment therefore has to count such a store as
+// un-assigning the slot, or GET_LOCAL drops its dead-zone check and hands
+// compiled code the sentinel as though it were data.
+//
+// Reading the instruction before the store, rather than tracking what the
+// operand stack holds, is the same choice jitSingletonRHS makes and it is exact
+// here: the compiler emits the two adjacently everywhere it emits them at all,
+// and EMPTY's other uses — an array hole, a derived constructor's `this`, a
+// generator's barrier yield — never reach a local. A store wrongly counted as
+// a seed costs a dead-zone check; the converse is a miscompilation, so where
+// the rule is imprecise it is imprecise in the safe direction.
+//
+// The three walks that model assignment — this file's two and the emitter's —
+// consult the same set, keyed by ip, so none of them has to reproduce the
+// reasoning or keep its own idea of what came before.
+func jitTDZStores(fn *svFunc) map[int]bool {
+	code := fn.code
+	var seeds map[int]bool
+	prev := Opcode(0)
+	for ip := 0; ip < len(code); {
+		op := Opcode(code[ip])
+		size := int(opTable[op].Size)
+		if size <= 0 || ip+size > len(code) {
+			break
+		}
+		if prev == OpEmpty && (op == OpPutLocal || op == OpSetLocal) {
+			if seeds == nil {
+				seeds = map[int]bool{}
+			}
+			seeds[ip] = true
+		}
+		prev = op
+		ip += size
+	}
+	return seeds
 }
 
 // jitAnalyze splits the body into basic blocks and solves definite assignment
@@ -37,6 +81,7 @@ type jitBlock struct {
 func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock, bool) {
 	code := fn.code
 	nloc := fn.maxLocals
+	tdz := jitTDZStores(fn)
 
 	// Leaders begin a block: the entry, every branch target, and whatever
 	// follows a branch or a return.
@@ -74,7 +119,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 					cur.succ = []int{ip} // falls through
 				}
 			}
-			cur = &jitBlock{start: ip, gen: make([]bool, nloc), in: make([]bool, nloc)}
+			cur = &jitBlock{start: ip, gen: make([]bool, nloc), kill: make([]bool, nloc), in: make([]bool, nloc)}
 			blocks[ip] = cur
 		}
 		op := Opcode(code[ip])
@@ -85,7 +130,11 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 			if i >= nloc {
 				return nil, false
 			}
-			cur.gen[i] = true
+			// Last store in the block wins, which is why this clears the other
+			// set rather than only setting one: a slot seeded and then really
+			// assigned is assigned, and one assigned and then re-seeded — a
+			// `let` in a loop body — is back in its dead zone.
+			cur.gen[i], cur.kill[i] = !tdz[ip], tdz[ip]
 		case OpJmp:
 			cur.succ = []int{int(readU32(code, ip+1))}
 		case OpJmpFalse, OpJmpTrue, OpJmpNotNullish:
@@ -155,7 +204,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 	out := func(b *jitBlock) []bool {
 		o := make([]bool, nloc)
 		for i := range o {
-			o[i] = b.in[i] || b.gen[i]
+			o[i] = b.gen[i] || (b.in[i] && !b.kill[i])
 		}
 		return o
 	}
@@ -388,9 +437,9 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 						}
 					}
 					push(noOrigin)
-				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpThis,
+				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpEmpty, OpThis,
 					OpGetGlobal, OpGetUpval, OpObject, OpGetGlobalUndef, OpSpecialObj,
-					OpClosure:
+					OpClosure, OpGlobal, OpDeleteVar:
 					push(noOrigin)
 				case OpArray:
 					for i := int(readU16(code, ip+1)); i > 0; i-- {
@@ -399,7 +448,21 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 						}
 					}
 					push(noOrigin)
-				case OpDefineField, OpPutUpval:
+				case OpSetHomeObj:
+					// Leaves the stack exactly as it found it.
+				case OpPutConst:
+					// [resolvable, value] -> [value]: two consumed, one produced,
+					// and the one produced is whatever was assigned.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(noOrigin)
+				case OpDefineField, OpDefineMethod, OpPutUpval:
+					// [target, value] -> [target]: the value goes, the target
+					// stays exactly as it was.
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
@@ -420,7 +483,7 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					}
 				case OpThrowError:
 					// Consumes nothing and never returns.
-				case OpUplus, OpTypeof, OpIsUndefOrNull:
+				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey:
 					// One operand consumed and demanded of nothing. `typeof`
 					// takes any value, and the nullish test is a tag comparison
 					// that a Number simply fails.
@@ -584,6 +647,7 @@ func jitBlockDepths(fn *svFunc, start int, blocks map[int]*jitBlock) (map[int]in
 // consequence, which is that the value is not a Number.
 func jitUnprovenLocals(fn *svFunc, blocks map[int]*jitBlock) []bool {
 	code := fn.code
+	tdz := jitTDZStores(fn)
 	unproven := make([]bool, fn.maxLocals)
 	cur := make([]bool, fn.maxLocals)
 	for _, b := range blocks {
@@ -604,7 +668,7 @@ func jitUnprovenLocals(fn *svFunc, blocks map[int]*jitBlock) []bool {
 				}
 			case OpPutLocal, OpSetLocal:
 				if i := int(readU16(code, ip+1)); i < fn.maxLocals {
-					cur[i] = true
+					cur[i] = !tdz[ip]
 				}
 			}
 			ip += size
@@ -691,7 +755,7 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 						return nil, false
 					}
 					push(fn.constants[idx].IsNumber())
-				case OpUndef, OpNull, OpTrue, OpFalse:
+				case OpUndef, OpNull, OpTrue, OpFalse, OpEmpty:
 					push(false)
 				case OpThis:
 					push(false)
@@ -812,7 +876,17 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 						}
 					}
 					push(false)
-				case OpDefineField, OpJmpNotNullish, OpPutUpval:
+				case OpSetHomeObj:
+					// Leaves the stack exactly as it found it.
+				case OpPutConst:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(false)
+				case OpDefineField, OpDefineMethod, OpJmpNotNullish, OpPutUpval:
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
@@ -827,7 +901,7 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 					}
 				case OpThrowError:
 					// Consumes nothing and never returns.
-				case OpUplus, OpTypeof, OpIsUndefOrNull:
+				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey:
 					// Consumes one and produces a value this tier does not model
 					// as a Number — even UPLUS, whose result is one, because it
 					// arrives through a helper that can hand back anything
@@ -849,7 +923,8 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 						return nil, false
 					}
 					push(false)
-				case OpObject, OpGetGlobalUndef, OpSpecialObj, OpClosure:
+				case OpObject, OpGetGlobalUndef, OpSpecialObj, OpClosure,
+					OpGlobal, OpDeleteVar:
 					push(false)
 				case OpGetGlobal, OpGetUpval:
 					// A global or a captured binding holds anything at all.

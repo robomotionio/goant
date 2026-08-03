@@ -194,6 +194,10 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	// against a whole-function summary.
 	cur := make([]bool, fn.maxLocals)
 	copy(cur, blocks[start].in)
+	// The stores that seed a dead zone rather than assign a value. See
+	// jitTDZStores: the analyses use the same set, so what this elides a
+	// dead-zone check for and what they call a proven read are the same reads.
+	tdz := jitTDZStores(fn)
 	// kind[i] records whether operand-stack slot i is known to hold a Number.
 	// Arithmetic needs that guarantee; storing and returning do not, which is
 	// what lets undefined, null and the Booleans travel through compiled code
@@ -266,10 +270,15 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp++
 			ip += 2
 
-		case OpUndef, OpNull, OpTrue, OpFalse:
+		case OpUndef, OpNull, OpTrue, OpFalse, OpEmpty:
 			// Immediates with no heap reference, so nothing has to stay alive
 			// for the code to remain valid. A String or object constant would,
 			// which is why OpConst still refuses one.
+			//
+			// EMPTY is the temporal-dead-zone sentinel rather than a language
+			// value: it is pushed only to be stored into a lexical slot that a
+			// later initialiser overwrites, and reading such a slot already
+			// throws through the dead-zone check on GET_LOCAL.
 			if sp >= len(jitStackRegs) {
 				return refuse(why, "stack-too-deep")
 			}
@@ -281,6 +290,8 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				v = mknull()
 			case OpTrue:
 				v = mkbool(true)
+			case OpEmpty:
+				v = tEmpty
 			default:
 				v = mkbool(false)
 			}
@@ -350,9 +361,10 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				return refuse(why, "stack-underflow")
 			}
 			a.MovMemReg(jitRegLocals, int32(i)*8, jitStackRegs[sp-1])
-			// Everything this tier can put on the operand stack is a Number, so
-			// storing one is what makes the slot readable from here on.
-			cur[i] = true
+			// A store makes the slot readable from here on — unless what it
+			// stores is the dead-zone sentinel, which puts the slot back into
+			// the state every read of it has to throw on.
+			cur[i] = !tdz[ip]
 			if op == OpPutLocal {
 				sp-- // PUT_LOCAL consumes the value; SET_LOCAL leaves it
 			}
@@ -599,6 +611,93 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			a.MovRegMem(jitStackRegs[sp-1], jitasm.RegCtx, jitmem.CtxOffRet)
 			kind[sp-1] = false
 			ip++
+
+		case OpToPropkey:
+			// ToPropertyKey, which template substitution emits so `${obj}` takes
+			// the string path. It can run a toString, so it is a call.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperToPropkey, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-1], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-1] = false
+			ip++
+
+		case OpGlobal:
+			// The global object itself. Read through a helper rather than baked in
+			// as an immediate: compiled code hangs off the svFunc, and the same
+			// function can be reached from more than one realm.
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			if !jitCallHelper(a, sp, jitHelperGlobal, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp] = false
+			sp++
+			ip++
+
+		case OpDeleteVar:
+			// Strict-mode ResolveBinding as much as `delete x`: it answers whether
+			// the name is bound, and the OpPutConst after it throws if it was not.
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1)))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperDeleteVar, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp] = false
+			sp++
+			ip += 5
+
+		case OpPutConst:
+			// DELETE_VAR's partner: [resolvable, value] -> [value]. It throws
+			// when the name did not resolve, and again when the right-hand side
+			// deleted the global out from under the reference.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1)))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperPutConst, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-2], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-2] = false
+			sp--
+			ip += 5
+
+		case OpSetHomeObj:
+			// [obj, method] unchanged: the method's [[HomeObject]] becomes obj,
+			// so a `super` reference inside it resolves against obj's prototype.
+			// Nothing moves on the stack and nothing can throw.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperSetHomeObj, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			ip++
+
+		case OpDefineMethod:
+			// [target, method] -> [target]. The name index and the flags byte
+			// travel in one immediate, as THROW_ERROR's pair does.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1))|uint64(code[ip+5])<<32)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperDefineMethod, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			sp--
+			ip += 6
 
 		case OpClosure:
 			// Making a function, which is what 583 of the corpus's remaining
@@ -1578,7 +1677,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 // necessary condition rather than a sufficient one.
 func jitHasTemplate(op Opcode) bool {
 	switch op {
-	case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse,
+	case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpEmpty,
 		OpGetLocal, OpPutLocal, OpSetLocal, OpPop, OpDup, OpInsert2,
 		OpAdd, OpSub, OpMul, OpDiv,
 		OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr, OpBnot,
@@ -1590,7 +1689,9 @@ func jitHasTemplate(op Opcode) bool {
 		OpInstanceof, OpMod, OpTypeof, OpIsUndefOrNull, OpIn, OpDelete,
 		OpObject, OpRegexp, OpGetGlobalUndef, OpThrow, OpArray,
 		OpDefineField, OpJmpNotNullish, OpSpecialObj,
-		OpClosure, OpPutUpval, OpSetUpval, OpThrowError, OpUplus:
+		OpClosure, OpPutUpval, OpSetUpval, OpThrowError, OpUplus,
+		OpToPropkey, OpGlobal, OpDeleteVar, OpDefineMethod, OpPutConst,
+		OpSetHomeObj:
 		return true
 	}
 	return false
@@ -1738,38 +1839,44 @@ func jitBackEdge(a *jitasm.Asm, top *jitasm.Label, fixups *[]jitResumeFixup) {
 // Helper identifiers. Compiled code cannot call a Go function, so it records
 // which one it wants and returns; jitHelper runs it and execution resumes.
 const (
-	jitHelperGetField    = 1
-	jitHelperToInt32     = 2
-	jitHelperArith       = 3
-	jitHelperRelational  = 4
-	jitHelperEquals      = 5
-	jitHelperPutField    = 6
-	jitHelperGetGlobal   = 7
-	jitHelperDeadZone    = 8
-	jitHelperCall        = 9
-	jitHelperCallMethod  = 10
-	jitHelperGetElem     = 11
-	jitHelperBitwise     = 12
-	jitHelperToBoolean   = 13
-	jitHelperUnary       = 14
-	jitHelperNew         = 15
-	jitHelperPutElem     = 16
-	jitHelperPutGlobal   = 17
-	jitHelperInstanceof  = 18
-	jitHelperTypeof      = 19
-	jitHelperIn          = 20
-	jitHelperDelete      = 21
-	jitHelperThrow       = 22
-	jitHelperObject      = 23
-	jitHelperArray       = 24
-	jitHelperRegexp      = 25
-	jitHelperGlobalUndef = 26
-	jitHelperDefineField = 27
-	jitHelperClosure     = 28
-	jitHelperPutUpval    = 29
-	jitHelperThrowError  = 30
-	jitHelperUplus       = 31
-	jitHelperArguments   = 32
+	jitHelperGetField     = 1
+	jitHelperToInt32      = 2
+	jitHelperArith        = 3
+	jitHelperRelational   = 4
+	jitHelperEquals       = 5
+	jitHelperPutField     = 6
+	jitHelperGetGlobal    = 7
+	jitHelperDeadZone     = 8
+	jitHelperCall         = 9
+	jitHelperCallMethod   = 10
+	jitHelperGetElem      = 11
+	jitHelperBitwise      = 12
+	jitHelperToBoolean    = 13
+	jitHelperUnary        = 14
+	jitHelperNew          = 15
+	jitHelperPutElem      = 16
+	jitHelperPutGlobal    = 17
+	jitHelperInstanceof   = 18
+	jitHelperTypeof       = 19
+	jitHelperIn           = 20
+	jitHelperDelete       = 21
+	jitHelperThrow        = 22
+	jitHelperObject       = 23
+	jitHelperArray        = 24
+	jitHelperRegexp       = 25
+	jitHelperGlobalUndef  = 26
+	jitHelperDefineField  = 27
+	jitHelperClosure      = 28
+	jitHelperPutUpval     = 29
+	jitHelperThrowError   = 30
+	jitHelperUplus        = 31
+	jitHelperArguments    = 32
+	jitHelperToPropkey    = 33
+	jitHelperGlobal       = 34
+	jitHelperDeleteVar    = 35
+	jitHelperDefineMethod = 36
+	jitHelperPutConst     = 37
+	jitHelperSetHomeObj   = 38
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -2559,6 +2666,73 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		}
 		ctx.Ret = uint64(mknum(v))
 		return nil
+	case jitHelperToPropkey:
+		// ToPropertyKey, which is ToPrimitive with hint "string" and can run
+		// user code through toString or Symbol.toPrimitive.
+		n := int(ctx.SpillN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		pk, e := rt.toPropertyKey(Value(ctx.Spill[n-1]))
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(pk)
+		return nil
+	case jitHelperGlobal:
+		ctx.Ret = uint64(rt.global)
+		return nil
+	case jitHelperDeleteVar:
+		// Whether the name resolves to anything, which is both `delete x` in
+		// sloppy code and the strict-mode reference check before an assignment.
+		nm := fn.constNames[uint32(ctx.Args[3])]
+		ctx.Ret = uint64(mkbool(rt.lookupGlobalLex(nm) != nil || rt.hasProp(rt.global, nm)))
+		return nil
+	case jitHelperSetHomeObj:
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		rt.setMethodHome(Value(ctx.Spill[n-1]), Value(ctx.Spill[n-2]))
+		return nil
+	case jitHelperPutConst:
+		// The write half of a strict assignment to an unqualified name. The
+		// resolvable flag DELETE_VAR left is checked here, and HasProperty is
+		// checked again because the right-hand side has run in between and may
+		// have deleted the binding the reference resolved to.
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		val := Value(ctx.Spill[n-1])
+		name := fn.constNames[uint32(ctx.Args[3])]
+		if !rt.toBoolean(Value(ctx.Spill[n-2])) {
+			return rt.referenceError(name + " is not defined")
+		}
+		if b := rt.lookupGlobalLex(name); b != nil {
+			if e := rt.globalLexWrite(b, name, val); e != nil {
+				return e
+			}
+		} else if !rt.hasProp(rt.global, name) {
+			return rt.referenceError(name + " is not defined")
+		} else if !rt.setProp(rt.global, name, val) {
+			return rt.typeError("Cannot assign to read only property '" + name + "'")
+		}
+		ctx.Ret = uint64(val)
+		return nil
+	case jitHelperDefineMethod:
+		// [target, method] -> [target]. The private arms need the class
+		// environment the closure carries, the same as `#x in obj`.
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		var privEnv *privScope
+		if cl != nil {
+			privEnv = cl.privEnv
+		}
+		name := fn.constNames[uint32(ctx.Args[3])]
+		return rt.defineMethod(name, byte(ctx.Args[3]>>32), Value(ctx.Spill[n-1]), Value(ctx.Spill[n-2]), privEnv)
 	case jitHelperTypeof:
 		// `typeof v`. The string is interned, so what lands on the operand stack
 		// is a handle into the runtime's own table rather than a fresh string.
