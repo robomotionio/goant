@@ -99,7 +99,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 		}
 		switch op {
 		case OpJmp, OpJmpFalse, OpJmpTrue, OpJmpNotNullish,
-			OpReturn, OpReturnUndef, OpThrow, OpThrowError:
+			OpReturn, OpReturnUndef, OpThrow, OpThrowError, OpTailCall, OpTailCallMethod:
 			if ip+size < len(code) {
 				leaders[ip+size] = true
 			}
@@ -139,7 +139,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 			cur.succ = []int{int(readU32(code, ip+1))}
 		case OpJmpFalse, OpJmpTrue, OpJmpNotNullish:
 			cur.succ = []int{int(readU32(code, ip+1)), ip + size}
-		case OpReturn, OpReturnUndef, OpThrow, OpThrowError:
+		case OpReturn, OpReturnUndef, OpThrow, OpThrowError, OpTailCall, OpTailCallMethod:
 			cur.succ = []int{} // nothing follows
 		}
 		ip += size
@@ -481,6 +481,19 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
+				case OpTailCall, OpTailCallMethod:
+					// Everything it consumes and nothing produced: the frame is
+					// over, and the value the call produces is returned from
+					// somewhere this analysis cannot see.
+					n := int(readU16(code, ip+1)) + 1
+					if op == OpTailCallMethod {
+						n++
+					}
+					for ; n > 0; n-- {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+					}
 				case OpThrowError:
 					// Consumes nothing and never returns.
 				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey, OpForIn, OpGetLength:
@@ -560,6 +573,15 @@ func jitStackEffect(fn *svFunc, ip int) (pop, push int, ok bool) {
 		// should propagate. One popped and none pushed is the honest local
 		// answer; jitBlockDepths stops at the branch this ends the block with.
 		return 1, 0, true
+	case OpTailCall, OpTailCallMethod:
+		// Also a terminator, and opTable's fixed counts do not describe it: the
+		// operand is how many arguments follow, and the table records the one
+		// or two slots below them. The callee and the receiver are those slots.
+		n := int(readU16(code, ip+1)) + 1
+		if op == OpTailCallMethod {
+			n++
+		}
+		return n, 0, true
 	case OpJmpNotNullish:
 		// opTable records one popped and one pushed; the interpreter pops and
 		// pushes nothing. Both are right about their own question — `a ?? b`
@@ -898,6 +920,16 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 				case OpThrow:
 					if _, ok := pop(); !ok {
 						return nil, false
+					}
+				case OpTailCall, OpTailCallMethod:
+					n := int(readU16(code, ip+1)) + 1
+					if op == OpTailCallMethod {
+						n++
+					}
+					for ; n > 0; n-- {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
 					}
 				case OpThrowError:
 					// Consumes nothing and never returns.

@@ -1311,6 +1311,48 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp -= argc + 1
 			ip += 3
 
+		case OpTailCall, OpTailCallMethod:
+			// `return f(args)` in strict code, which the language requires not
+			// grow the stack. The interpreter honours that by resetting its own
+			// frame and jumping back to the top; compiled code cannot, because
+			// the frame it would have to reset is a block of machine code with
+			// its operands in registers.
+			//
+			// So this is an exit rather than a helper. The operands go to the
+			// spill area exactly as CALL's do — [this?, callee, arg0..argN-1] —
+			// and jitRunAt reads them out after this frame is gone, which is the
+			// one point where a tail call can be made without adding to the Go
+			// stack. What it does with them is the trampoline.
+			argc := int(readU16(code, ip+1))
+			need := argc + 1
+			if op == OpTailCallMethod {
+				need++
+			}
+			if argc < 0 || sp < need {
+				return refuse(why, "stack-underflow")
+			}
+			if sp > jitmem.SpillSlots {
+				return refuse(why, "stack-too-deep")
+			}
+			for i := 0; i < sp; i++ {
+				a.MovMemReg(jitasm.RegCtx, int32(jitmem.CtxOffSpill+8*i), jitStackRegs[i])
+			}
+			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffSpillN, uint32(sp))
+			// The count, and whether a receiver sits below the callee, in the
+			// one immediate the exit protocol carries.
+			recv := uint64(0)
+			if op == OpTailCallMethod {
+				recv = 1
+			}
+			a.MovRegImm64(jitRegScratch, uint64(uint32(argc))|recv<<32)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitTailCall))
+			a.MovRegImm64(jitasm.RAX, jitmem.ExitTailCall)
+			a.Ret()
+			sp = 0
+			returned = true
+			ip += 3
+
 		case OpInsert3:
 			// obj prop a -> a obj prop a. A stack shuffle and nothing else, which
 			// in a positional register assignment is three moves — and it is all
@@ -1735,7 +1777,8 @@ func jitHasTemplate(op Opcode) bool {
 		OpDefineField, OpJmpNotNullish, OpSpecialObj,
 		OpClosure, OpPutUpval, OpSetUpval, OpThrowError, OpUplus,
 		OpToPropkey, OpGlobal, OpDeleteVar, OpDefineMethod, OpPutConst,
-		OpSetHomeObj, OpForIn, OpHasPrivate, OpGetLength:
+		OpSetHomeObj, OpForIn, OpHasPrivate, OpGetLength,
+		OpTailCall, OpTailCallMethod:
 		return true
 	}
 	return false
@@ -2000,7 +2043,7 @@ func jitCanonicalizeNaN(a *jitasm.Asm, r jitasm.Reg) {
 // run, and this tier has no exception handlers of its own — TRY_PUSH is refused
 // — so the only thing left to do is what the interpreter would: leave.
 func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals []Value, this Value) (Value, *ThrowError, bool) {
-	return c.jitRunAt(rt, fn, cl, fnVal, args, locals, this, c.entry)
+	return c.jitRunAt(rt, fn, cl, fnVal, args, locals, this, c.entry, true)
 }
 
 // jitRunOSR enters at the stub for a loop header, if there is one.
@@ -2013,126 +2056,234 @@ func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, a
 	if !ok {
 		return mkundef(), nil, false
 	}
-	return c.jitRunAt(rt, fn, cl, fnVal, args, locals, this, pc)
+	// mayTail is false: the frame this is taking over belongs to an interpreted
+	// invocation that is still on the Go stack, and the tail-call trampoline
+	// works by reusing that frame. Its openUpvals point into the locals slab and
+	// handing the slab to a tail callee would leave them pointing at the
+	// callee's variables. A tail call reached this way makes an ordinary call
+	// instead, which costs one Go frame and happens at most once per frame,
+	// because the next invocation enters through jitRun rather than here.
+	return c.jitRunAt(rt, fn, cl, fnVal, args, locals, this, pc, false)
 }
 
-func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals []Value, this Value, entry uintptr) (Value, *ThrowError, bool) {
+// jitRunAt runs compiled code and, when it exits to make a tail call, runs the
+// callee too — which is the only way compiled code can make one.
+//
+// mayTail says whether the JS frame at rt.frameDepth is this call's to reuse.
+// It is what makes the tail call proper: the callee takes over the frame the
+// caller had, so a chain of them occupies one frame however long it runs. See
+// the ExitTailCall arm for what it covers and what it does not.
+func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals []Value, this Value, entry uintptr, mayTail bool) (Value, *ThrowError, bool) {
 	if len(locals) == 0 {
 		return mkundef(), nil, false
 	}
-	// The context is rooted for as long as compiled code can be suspended in a
-	// helper holding values nothing else refers to — see markRoots — and that
-	// root stack is also where it comes from.
-	//
-	// Building one per entry cost an allocation of 160 bytes per call, which for
-	// a callee small enough to be worth compiling is most of what compiling it
-	// saved. The stack is LIFO and a context is dead the moment it is popped, so
-	// the slice past its length is a free list that needs no bookkeeping: the
-	// only care required is that a reused context starts clear, because the
-	// collector reads Ret and the spill slots and the previous call's are stale.
-	n := len(rt.jitFrames)
-	var ctx *jitmem.ExecContext
-	reused := false
-	if n < cap(rt.jitFrames) {
-		if ctx = rt.jitFrames[:n+1][n]; ctx != nil {
-			// Popped by an earlier call and still in the slot, which is what
-			// lets the push below re-extend the slice without storing a pointer
-			// into it again. That store is a Go write barrier and it showed as
-			// 1.5% of DeltaBlue.
-			reused = true
-		}
-	}
-	if ctx == nil {
-		ctx = new(jitmem.ExecContext)
-	}
-	// Written field by field rather than as a struct literal, and this is worth
-	// the ugliness: a literal clears the whole context, and eighty of its bytes
-	// are the spill area. That memset was the largest single item in the profile
-	// of entering a compiled function once the interpreted frame around it was
-	// gone.
-	//
-	// Leaving the spill slots stale is sound for the same reason SpillN exists at
-	// all. The collector reads Spill[0:SpillN] and nothing more, SpillN is zero
-	// here, and the only thing that raises it is compiled code writing the slots
-	// immediately before it exits. A stale slot is therefore never read, and the
-	// alternative — clearing ten words on every call so that nobody looks at them
-	// — is the cost this pays to avoid.
-	//
-	// Everything the collector *does* read unconditionally is written: Args[2],
-	// Ret and This. Cleared before the context is published rather than after, so
-	// the root stack never holds an entry with a previous call's values in it.
-	ctx.Exit, ctx.Helper = 0, 0
-	ctx.Args[0] = uint64(uintptr(unsafe.Pointer(&locals[0])))
-	ctx.Args[1] = jitFuel
-	ctx.Args[2], ctx.Args[3] = 0, 0
-	ctx.Ret, ctx.Resume = 0, 0
-	ctx.SpillN = 0
-	ctx.Pool = jitObjectPoolAddr(rt)
-	ctx.Host = jitRuntimeAddr(rt)
-	ctx.This = uint64(this)
-	// The closure's upvalue array, or zero when there is none. A function with
-	// no GET_UPVAL never reads it, and one with a GET_UPVAL is only ever
-	// entered through a closure that has the array the index was compiled
-	// against.
-	ctx.Upvals = 0
-	ctx.FnVal = uint64(fnVal)
-	if cl != nil && len(cl.upvalues) > 0 {
-		ctx.Upvals = uintptr(unsafe.Pointer(&cl.upvalues[0]))
-	}
-	switch {
-	case reused:
-		rt.jitFrames = rt.jitFrames[:n+1] // the slot already holds ctx
-	case n < cap(rt.jitFrames):
-		rt.jitFrames = rt.jitFrames[:n+1]
-		rt.jitFrames[n] = ctx
-	default:
-		rt.jitFrames = append(rt.jitFrames, ctx)
-	}
-
-	// Popped explicitly on each way out rather than by a deferred closure. A
-	// defer here is a call per compiled frame entry, and this function has three
-	// exits and no panic path of its own — a Go panic below is a bug in the
-	// engine, and the process is going down with it either way.
-	// A frame that captured a local owns cells that only it can have created,
-	// and the next frame at this depth must not find them. Cleared on every way
-	// out, and the map itself is only ever allocated by a capture.
-	if rt.jitOpenUpvals != nil {
-		delete(rt.jitOpenUpvals, rt.frameDepth)
-	}
 	pc := entry
 	for {
-		jitmem.Enter(pc, ctx)
-		// The locals slice reaches compiled code as an integer, so nothing in
-		// the call graph keeps it reachable for the collector.
-		runtime.KeepAlive(locals)
-		switch ctx.Exit {
-		case jitmem.ExitReturn:
-			rt.jitFrames = rt.jitFrames[:n]
-			if rt.jitOpenUpvals != nil {
-				delete(rt.jitOpenUpvals, rt.frameDepth)
+		// The context is rooted for as long as compiled code can be suspended in a
+		// helper holding values nothing else refers to — see markRoots — and that
+		// root stack is also where it comes from.
+		//
+		// Building one per entry cost an allocation of 160 bytes per call, which for
+		// a callee small enough to be worth compiling is most of what compiling it
+		// saved. The stack is LIFO and a context is dead the moment it is popped, so
+		// the slice past its length is a free list that needs no bookkeeping: the
+		// only care required is that a reused context starts clear, because the
+		// collector reads Ret and the spill slots and the previous call's are stale.
+		n := len(rt.jitFrames)
+		var ctx *jitmem.ExecContext
+		reused := false
+		if n < cap(rt.jitFrames) {
+			if ctx = rt.jitFrames[:n+1][n]; ctx != nil {
+				// Popped by an earlier call and still in the slot, which is what
+				// lets the push below re-extend the slice without storing a pointer
+				// into it again. That store is a Go write barrier and it showed as
+				// 1.5% of DeltaBlue.
+				reused = true
 			}
-			return Value(ctx.Ret), nil, true
-		case jitmem.ExitPreempt:
-			// Being here is the safepoint: this is ordinary Go, so the runtime
-			// can collect and preempt before the loop is re-entered.
-			ctx.Args[1] = jitFuel
-			pc = ctx.Resume
-		case jitmem.ExitHelper:
-			if e := jitHelper(rt, fn, cl, args, locals, ctx); e != nil {
+		}
+		if ctx == nil {
+			ctx = new(jitmem.ExecContext)
+		}
+		// Written field by field rather than as a struct literal, and this is worth
+		// the ugliness: a literal clears the whole context, and eighty of its bytes
+		// are the spill area. That memset was the largest single item in the profile
+		// of entering a compiled function once the interpreted frame around it was
+		// gone.
+		//
+		// Leaving the spill slots stale is sound for the same reason SpillN exists at
+		// all. The collector reads Spill[0:SpillN] and nothing more, SpillN is zero
+		// here, and the only thing that raises it is compiled code writing the slots
+		// immediately before it exits. A stale slot is therefore never read, and the
+		// alternative — clearing ten words on every call so that nobody looks at them
+		// — is the cost this pays to avoid.
+		//
+		// Everything the collector *does* read unconditionally is written: Args[2],
+		// Ret and This. Cleared before the context is published rather than after, so
+		// the root stack never holds an entry with a previous call's values in it.
+		ctx.Exit, ctx.Helper = 0, 0
+		ctx.Args[0] = uint64(uintptr(unsafe.Pointer(&locals[0])))
+		ctx.Args[1] = jitFuel
+		ctx.Args[2], ctx.Args[3] = 0, 0
+		ctx.Ret, ctx.Resume = 0, 0
+		ctx.SpillN = 0
+		ctx.Pool = jitObjectPoolAddr(rt)
+		ctx.Host = jitRuntimeAddr(rt)
+		ctx.This = uint64(this)
+		// The closure's upvalue array, or zero when there is none. A function with
+		// no GET_UPVAL never reads it, and one with a GET_UPVAL is only ever
+		// entered through a closure that has the array the index was compiled
+		// against.
+		ctx.Upvals = 0
+		ctx.FnVal = uint64(fnVal)
+		if cl != nil && len(cl.upvalues) > 0 {
+			ctx.Upvals = uintptr(unsafe.Pointer(&cl.upvalues[0]))
+		}
+		switch {
+		case reused:
+			rt.jitFrames = rt.jitFrames[:n+1] // the slot already holds ctx
+		case n < cap(rt.jitFrames):
+			rt.jitFrames = rt.jitFrames[:n+1]
+			rt.jitFrames[n] = ctx
+		default:
+			rt.jitFrames = append(rt.jitFrames, ctx)
+		}
+
+		// Popped explicitly on each way out rather than by a deferred closure. A
+		// defer here is a call per compiled frame entry, and this function has three
+		// exits and no panic path of its own — a Go panic below is a bug in the
+		// engine, and the process is going down with it either way.
+		// A frame that captured a local owns cells that only it can have created,
+		// and the next frame at this depth must not find them. Cleared on every way
+		// out, and the map itself is only ever allocated by a capture.
+		if rt.jitOpenUpvals != nil {
+			delete(rt.jitOpenUpvals, rt.frameDepth)
+		}
+		tail := false
+		for !tail {
+			jitmem.Enter(pc, ctx)
+			// The locals slice reaches compiled code as an integer, so nothing in
+			// the call graph keeps it reachable for the collector.
+			runtime.KeepAlive(locals)
+			switch ctx.Exit {
+			case jitmem.ExitReturn:
 				rt.jitFrames = rt.jitFrames[:n]
 				if rt.jitOpenUpvals != nil {
 					delete(rt.jitOpenUpvals, rt.frameDepth)
 				}
-				return mkundef(), e, true
+				return Value(ctx.Ret), nil, true
+			case jitmem.ExitPreempt:
+				// Being here is the safepoint: this is ordinary Go, so the runtime
+				// can collect and preempt before the loop is re-entered.
+				ctx.Args[1] = jitFuel
+				pc = ctx.Resume
+			case jitmem.ExitHelper:
+				if e := jitHelper(rt, fn, cl, args, locals, ctx); e != nil {
+					rt.jitFrames = rt.jitFrames[:n]
+					if rt.jitOpenUpvals != nil {
+						delete(rt.jitOpenUpvals, rt.frameDepth)
+					}
+					return mkundef(), e, true
+				}
+				pc = ctx.Resume
+			case jitmem.ExitTailCall:
+				tail = true
+			default:
+				rt.jitFrames = rt.jitFrames[:n]
+				if rt.jitOpenUpvals != nil {
+					delete(rt.jitOpenUpvals, rt.frameDepth)
+				}
+				return mkundef(), nil, false
 			}
-			pc = ctx.Resume
-		default:
+		}
+
+		// A proper tail call. The operands are laid out as CALL's are —
+		// [this?, callee, arg0..argN-1] at the top of the spill area — and the
+		// immediate carries the count and whether a receiver is there.
+		argc := int(uint32(ctx.Args[3]))
+		need := argc + 1
+		if ctx.Args[3]>>32 != 0 {
+			need++
+		}
+		sn := int(ctx.SpillN)
+		if argc < 0 || sn < need {
 			rt.jitFrames = rt.jitFrames[:n]
 			if rt.jitOpenUpvals != nil {
 				delete(rt.jitOpenUpvals, rt.frameDepth)
 			}
-			return mkundef(), nil, false
+			return mkundef(), rt.typeError("JIT operand stack"), true
 		}
+		base := sn - need
+		tailThis := mkundef()
+		if ctx.Args[3]>>32 != 0 {
+			tailThis = Value(ctx.Spill[base])
+			base++
+		}
+		callee := Value(ctx.Spill[base])
+		// Copied rather than borrowed. Everywhere else a callee reads its arguments
+		// out of the caller's spill area while the caller waits; here the caller is
+		// finished and its context goes back on the free list on the next line.
+		callArgs := jitCopyArgs(jitSpillArgs(ctx, base+1, argc))
+
+		rt.jitFrames = rt.jitFrames[:n]
+		if rt.jitOpenUpvals != nil {
+			delete(rt.jitOpenUpvals, rt.frameDepth)
+		}
+
+		// The callee this can take over the frame for: an ordinary JS function with
+		// compiled code of its own. That covers a function tail-calling itself,
+		// which is what the language's guarantee is nearly always about and what
+		// every tail-call test in test262 is about.
+		//
+		// Anything else is an ordinary call one frame deeper, and the guarantee is
+		// weaker there than the interpreter's: a compiled function alternating tail
+		// calls with one the tier permanently refuses grows the Go stack by a frame
+		// per bounce. Closing that needs the request handed back to the interpreter
+		// so its own trampoline can take it, which is a change to four signatures
+		// for a shape nothing measured has produced.
+		var next *svFunc
+		var nextCl *closure
+		if mayTail {
+			next, nextCl = rt.jitResolveCallee(callee)
+			if next != nil && (next.jit.code == nil || next.isGenerator || next.isAsync ||
+				next.isClassCtor || next.maxLocals == 0 || !jitEligible(next)) {
+				next = nil
+			}
+		}
+		if next == nil {
+			v, e := rt.callValue(callee, tailThis, callArgs)
+			return v, e, true
+		}
+		// Entering a function is a check point for the host interrupt, and a tail
+		// call is the one entry that never reaches the depth check — so unbounded
+		// tail recursion has nothing else to stop it.
+		if rt.interruptPending() {
+			return mkundef(), rt.terminated(), true
+		}
+
+		// Everything jitCallCompiled does on entry, at the same depth rather than
+		// one deeper. Reusing the depth is the whole of the optimisation.
+		rt.frameStrict = next.isStrict
+		f := rt.publishFrame(rt.frameDepth)
+		f.args, f.thisVal, f.fnVal = callArgs, tailThis, callee
+		f.fn, f.cl = next, nextCl
+		rt.maybeCollect()
+		if !next.isStrict {
+			if tailThis.IsNullish() {
+				tailThis = rt.global
+			} else if !tailThis.IsObjectType() && tailThis.Type() != TTypedArray {
+				tailThis, _ = rt.toObjectValue(tailThis)
+			}
+		}
+		rt.pendingNewTarget = mkundef()
+		locals = rt.frameLocals(rt.frameDepth, next.maxLocals)
+		for i := 0; i < next.paramCount && i < next.maxLocals && i < len(callArgs); i++ {
+			locals[i] = callArgs[i]
+		}
+		f.locals = locals
+
+		fn, cl, fnVal, this, args = next, nextCl, callee, tailThis, callArgs
+		c = next.jit.code
+		pc = c.entry
 	}
 }
 

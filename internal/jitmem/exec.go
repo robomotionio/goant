@@ -10,6 +10,12 @@ const (
 	ExitHelper                // run Helper with Args, put the result in Ret, resume
 	ExitPreempt               // Go wants this goroutine to yield
 	ExitDeopt                 // a guard failed; fall back to the interpreter
+	// ExitTailCall is a proper tail call: the frame is finished and the spill
+	// area holds the callee, its arguments and — for the method form — the
+	// receiver. It is an exit rather than a helper because the point of a tail
+	// call is that this frame is gone before the next one starts, and a helper
+	// runs with the compiled frame still on the Go stack.
+	ExitTailCall
 )
 
 // ExecContext is the state that generated code and the runtime share.
