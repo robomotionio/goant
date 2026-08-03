@@ -1638,7 +1638,12 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 				if o := rt.icReceiver(recv); o != nil {
 					if v, ok := rt.icCachedRead(&ics[icx], o); ok {
 						if jitStats.enabled {
+							// The emitted probe declined a read the cache could
+							// answer, which means a guard it emits is narrower
+							// than icWay.hit. Counted apart from a genuine miss
+							// because the two want opposite work.
 							jitStats.icMiss++
+							jitStats.icNarrow++
 						}
 						ctx.Ret = uint64(v)
 						return nil

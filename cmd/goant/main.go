@@ -126,6 +126,9 @@ func dumpJITStats() {
 		fmt.Fprintf(os.Stderr, "jit: %d property reads, %d served by the compiled cache (%.1f%%)\n",
 			reads, hit, 100*float64(hit)/float64(reads))
 	}
+	if n := engine.JITNarrowStats(); n > 0 {
+		fmt.Fprintf(os.Stderr, "jit:   of those misses, %d were served by the cache anyway (the emitted guard is narrower)\n", n)
+	}
 	phit, pmiss := engine.JITStoreStats()
 	if stores := phit + pmiss; stores > 0 {
 		fmt.Fprintf(os.Stderr, "jit: %d property stores, %d served by the compiled cache (%.1f%%)\n",

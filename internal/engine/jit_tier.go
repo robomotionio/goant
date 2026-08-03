@@ -67,6 +67,7 @@ var jitStats struct {
 	interp   uint64
 	icHit    uint64
 	icMiss   uint64
+	icNarrow uint64
 	putHit   uint64
 	putMiss  uint64
 	glbHit   uint64
@@ -88,6 +89,12 @@ func JITStats() (compiled, declined, interpreted uint64) {
 // JITPropertyStats reports compiled property reads served by the emitted
 // inline-cache probe, and those that fell through to the runtime.
 func JITPropertyStats() (hit, miss uint64) { return jitStats.icHit, jitStats.icMiss }
+
+// JITNarrowStats reports reads the emitted probe declined that the cache could
+// answer anyway — the gap between what icWay.hit accepts and what the guard
+// chain in machine code accepts. Every one is a helper round trip that a wider
+// guard would remove.
+func JITNarrowStats() uint64 { return jitStats.icNarrow }
 
 // JITStoreStats is JITPropertyStats for the other direction. Counted apart
 // because the two probes decline for different reasons and a combined figure
