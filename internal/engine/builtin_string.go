@@ -106,21 +106,34 @@ func (rt *Runtime) isRegExpValue(v Value) bool {
 	return o.regex != nil
 }
 
-// thisStringBytes coerces a method receiver to its WTF-8 string bytes.
-func (rt *Runtime) thisStringBytes(this Value) ([]byte, *ThrowError) {
+// thisString coerces a method receiver to a string, returning both the string
+// and its WTF-8 bytes.
+//
+// Both, because a String.prototype method needs both and one cannot be got back
+// from the other. The bytes are what every search and slice works over; the
+// value is what carries the cached UTF-16 length and code-unit index, so a
+// method that returns only bytes forces its caller to rescan the string to find
+// out how long it is — which is what made walking a string quadratic.
+func (rt *Runtime) thisString(this Value) (Value, []byte, *ThrowError) {
 	if this.IsString() {
-		return rt.strBytes(this), nil
+		return this, rt.strBytes(this), nil
 	}
 	// RequireObjectCoercible: a String.prototype method rejects a null/undefined
 	// receiver before ToString (which would otherwise stringify it to "null").
 	if this.IsNullish() {
-		return nil, rt.typeError("String.prototype method called on null or undefined")
+		return mkundef(), nil, rt.typeError("String.prototype method called on null or undefined")
 	}
 	s, e := rt.toStringValue(this)
 	if e != nil {
-		return nil, e
+		return mkundef(), nil, e
 	}
-	return rt.strBytes(s), nil
+	return s, rt.strBytes(s), nil
+}
+
+// thisStringBytes is thisString for a caller that needs only the bytes.
+func (rt *Runtime) thisStringBytes(this Value) ([]byte, *ThrowError) {
+	_, b, e := rt.thisString(this)
+	return b, e
 }
 
 // maxStringLength is the greatest length a String value may have. There is no
@@ -156,7 +169,7 @@ func (rt *Runtime) initStringBuiltin() {
 	})
 
 	rt.defMethod(proto, "charAt", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, _, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -164,13 +177,13 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if idx < 0 || idx >= utf16Len(b) {
+		if idx < 0 || idx >= rt.strLen16(sv) {
 			return rt.internString(""), nil
 		}
-		return rt.charAt(b, idx), nil
+		return rt.strCharAt(sv, idx), nil
 	})
 	rt.defMethod(proto, "charCodeAt", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, _, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -178,13 +191,13 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if idx < 0 || idx >= utf16Len(b) {
+		if idx < 0 || idx >= rt.strLen16(sv) {
 			return mknum(math.NaN()), nil
 		}
-		return mknum(float64(utf16CodeUnitAt(b, idx))), nil
+		return mknum(float64(rt.strUnitAt(sv, idx))), nil
 	})
 	rt.defMethod(proto, "codePointAt", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, _, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -192,13 +205,13 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if idx < 0 || idx >= utf16Len(b) {
+		if idx < 0 || idx >= rt.strLen16(sv) {
 			return mkundef(), nil
 		}
-		return mknum(float64(utf16CodepointAt(b, idx))), nil
+		return mknum(float64(rt.strCodepointAt(sv, idx))), nil
 	})
 	rt.defMethod(proto, "indexOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -206,14 +219,14 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		start, e := rt.strClampPos(arg(args, 1), utf16Len(b))
+		start, e := rt.strClampPos(arg(args, 1), rt.strLen16(sv))
 		if e != nil {
 			return mkundef(), e
 		}
 		return mknum(float64(utf16IndexOf(b, sub, start))), nil
 	})
 	rt.defMethod(proto, "lastIndexOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -227,7 +240,7 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		n := utf16Len(b)
+		n := rt.strLen16(sv)
 		start := n
 		if !math.IsNaN(numPos) {
 			switch {
@@ -255,7 +268,7 @@ func (rt *Runtime) initStringBuiltin() {
 		return mknum(float64(result)), nil
 	})
 	rt.defMethod(proto, "includes", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -268,14 +281,14 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		start, e := rt.strClampPos(arg(args, 1), utf16Len(b))
+		start, e := rt.strClampPos(arg(args, 1), rt.strLen16(sv))
 		if e != nil {
 			return mkundef(), e
 		}
 		return mkbool(utf16IndexOf(b, sub, start) >= 0), nil
 	})
 	rt.defMethod(proto, "startsWith", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -288,7 +301,7 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		n := utf16Len(b)
+		n := rt.strLen16(sv)
 		start, e := rt.strClampPos(arg(args, 1), n)
 		if e != nil {
 			return mkundef(), e
@@ -297,7 +310,7 @@ func (rt *Runtime) initStringBuiltin() {
 		return mkbool(strings.HasPrefix(string(b[bs:]), string(sub))), nil
 	})
 	rt.defMethod(proto, "endsWith", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -310,7 +323,7 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		n := utf16Len(b)
+		n := rt.strLen16(sv)
 		end := n
 		if !arg(args, 1).IsUndefined() {
 			if end, e = rt.strClampPos(arg(args, 1), n); e != nil {
@@ -322,11 +335,11 @@ func (rt *Runtime) initStringBuiltin() {
 	})
 
 	rt.defMethod(proto, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		n := utf16Len(b)
+		n := rt.strLen16(sv)
 		start, e := rt.relativeIndexE(arg(args, 0), n)
 		if e != nil {
 			return mkundef(), e
@@ -343,11 +356,11 @@ func (rt *Runtime) initStringBuiltin() {
 		return rt.newStringBytes(substringUnits(b, start, end)), nil
 	})
 	rt.defMethod(proto, "substring", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		n := utf16Len(b)
+		n := rt.strLen16(sv)
 		start, e := rt.strClampPos(arg(args, 0), n)
 		if e != nil {
 			return mkundef(), e
@@ -364,14 +377,14 @@ func (rt *Runtime) initStringBuiltin() {
 		return rt.newStringBytes(substringUnits(b, start, end)), nil
 	})
 	rt.defMethod(proto, "toUpperCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
 		return rt.newString(jsToUpperCase(b)), nil
 	})
 	rt.defMethod(proto, "toLowerCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -383,28 +396,28 @@ func (rt *Runtime) initStringBuiltin() {
 	// encodings, so utf8.Valid is not sufficient — the units must be paired.
 	// toWellFormed replaces each unpaired surrogate with U+FFFD.
 	rt.defMethod(proto, "isWellFormed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
 		return mkbool(wtf8WellFormed(b)), nil
 	})
 	rt.defMethod(proto, "toWellFormed", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
 		if utf8.Valid(b) {
 			return rt.newStringBytes(append([]byte{}, b...)), nil
 		}
-		n := utf16Len(b)
+		n := rt.strLen16(sv)
 		units := make([]uint16, 0, n)
 		for i := 0; i < n; i++ {
-			cu := utf16CodeUnitAt(b, i)
+			cu := rt.strUnitAt(sv, i)
 			switch {
 			case cu >= 0xD800 && cu <= 0xDBFF: // high surrogate
 				if i+1 < n {
-					if next := utf16CodeUnitAt(b, i+1); next >= 0xDC00 && next <= 0xDFFF {
+					if next := rt.strUnitAt(sv, i+1); next >= 0xDC00 && next <= 0xDFFF {
 						units = append(units, uint16(cu), uint16(next))
 						i++
 						continue
@@ -420,14 +433,14 @@ func (rt *Runtime) initStringBuiltin() {
 		return rt.newStringBytes(utf16ToWTF8(units)), nil
 	})
 	rt.defMethod(proto, "trim", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
 		return rt.newString(strings.TrimFunc(string(b), jsStrWhitespace)), nil
 	})
 	rt.defMethod(proto, "concat", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -442,7 +455,7 @@ func (rt *Runtime) initStringBuiltin() {
 		return rt.newStringBytes(out), nil
 	})
 	rt.defMethod(proto, "repeat", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -462,7 +475,7 @@ func (rt *Runtime) initStringBuiltin() {
 		// the count, and V8 allows it — but it must return before the conversion,
 		// not merely skip the length check, or the same overflow reaches
 		// strings.Repeat.
-		cur := utf16Len(b)
+		cur := rt.strLen16(sv)
 		if cur == 0 {
 			return rt.newString(""), nil
 		}
@@ -472,7 +485,7 @@ func (rt *Runtime) initStringBuiltin() {
 		return rt.newStringBytes([]byte(strings.Repeat(string(b), int(nf)))), nil
 	})
 	rt.defMethod(proto, "split", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -489,8 +502,8 @@ func (rt *Runtime) initStringBuiltin() {
 		var parts []string
 		if len(sep) == 0 {
 			// split into UTF-16 units
-			for i := 0; i < utf16Len(b); i++ {
-				el := rt.charAt(b, i)
+			for i := 0; i < rt.strLen16(sv); i++ {
+				el := rt.strCharAt(sv, i)
 				rt.arraySet(ro, ro.arrLen, el)
 			}
 			return res, nil
@@ -503,11 +516,11 @@ func (rt *Runtime) initStringBuiltin() {
 	})
 
 	rt.defMethod(proto, "substr", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		size := utf16Len(b)
+		size := rt.strLen16(sv)
 		// ToIntegerOrInfinity(start) and, if present, (length) — a throwing valueOf
 		// on either argument propagates.
 		intStart, e := rt.toIntegerOrInfinity(arg(args, 0))
@@ -536,7 +549,7 @@ func (rt *Runtime) initStringBuiltin() {
 		return rt.newStringBytes(substringUnits(b, start, start+int(resultLen))), nil
 	})
 	rt.defMethod(proto, "localeCompare", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -550,14 +563,14 @@ func (rt *Runtime) initStringBuiltin() {
 		return mknum(float64(strings.Compare(norm.NFC.String(string(b)), norm.NFC.String(string(other))))), nil
 	})
 	rt.defMethod(proto, "toLocaleLowerCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
 		return rt.newString(jsToLowerCase(b)), nil
 	})
 	rt.defMethod(proto, "toLocaleUpperCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -566,7 +579,7 @@ func (rt *Runtime) initStringBuiltin() {
 
 	pad := func(atStart bool) nativeFunc {
 		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			b, e := rt.thisStringBytes(this)
+			sv, b, e := rt.thisString(this)
 			if e != nil {
 				return mkundef(), e
 			}
@@ -585,7 +598,7 @@ func (rt *Runtime) initStringBuiltin() {
 			if mlF > 0 {
 				targetLen = int(mlF)
 			}
-			cur := utf16Len(b)
+			cur := rt.strLen16(sv)
 			if cur >= targetLen {
 				return rt.newStringBytes(append([]byte{}, b...)), nil
 			}
@@ -616,11 +629,11 @@ func (rt *Runtime) initStringBuiltin() {
 	rt.defMethod(proto, "padStart", 1, pad(true))
 	rt.defMethod(proto, "padEnd", 1, pad(false))
 	rt.defMethod(proto, "at", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		sv, _, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		n := utf16Len(b)
+		n := rt.strLen16(sv)
 		rel, e := rt.toIntegerOrInfinity(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
@@ -638,17 +651,17 @@ func (rt *Runtime) initStringBuiltin() {
 		if k < 0 || k >= n {
 			return mkundef(), nil
 		}
-		return rt.charAt(b, k), nil
+		return rt.strCharAt(sv, k), nil
 	})
 	rt.defMethod(proto, "trimStart", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
 		return rt.newString(strings.TrimLeftFunc(string(b), jsStrWhitespace)), nil
 	})
 	rt.defMethod(proto, "trimEnd", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -686,7 +699,7 @@ func (rt *Runtime) initStringBuiltin() {
 			// non-writable, non-enumerable length own property.
 			o := rt.objPtr(this)
 			o.boxed = sv
-			o.defineOwn("length", mknum(float64(utf16Len(rt.strBytes(sv)))), 0)
+			o.defineOwn("length", mknum(float64(rt.strLen16(sv))), 0)
 			return this, nil
 		}
 		return sv, nil
@@ -710,7 +723,7 @@ func (rt *Runtime) initStringBuiltin() {
 		proto.defineOwnSymbol(rt.symIterator.handle(), strIter, attrWritable|attrConfigurable)
 	}
 	rt.defMethod(proto, "normalize", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		b, e := rt.thisStringBytes(this)
+		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}

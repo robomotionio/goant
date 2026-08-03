@@ -673,7 +673,7 @@ func (rt *Runtime) regexpStrIterNext(this Value) (Value, *ThrowError) {
 	if e != nil {
 		return mkundef(), e
 	}
-	if utf16Len(rt.strBytes(matchStr)) == 0 {
+	if rt.strLen16(matchStr) == 0 {
 		li, e := rt.getField(st.r, "lastIndex")
 		if e != nil {
 			return mkundef(), e

@@ -46,7 +46,7 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 		}
 	case TStr:
 		if name == "length" {
-			return mknum(float64(utf16Len(rt.strBytes(obj)))), nil
+			return mknum(float64(rt.strLen16(obj))), nil
 		}
 	}
 	if obj.IsObjectType() || obj.Type() == TTypedArray {
@@ -203,7 +203,7 @@ func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError
 	// assignment then throws).
 	if o := rt.objPtr(obj); o != nil && o.boxed.Type() == TStr {
 		if fidx, isNum := canonicalNumericIndex(name); isNum {
-			if idx, integral := integerIndex(fidx); integral && idx >= 0 && idx < utf16Len(rt.strBytes(o.boxed)) {
+			if idx, integral := integerIndex(fidx); integral && idx >= 0 && idx < rt.strLen16(o.boxed) {
 				return false, nil
 			}
 		}
@@ -388,18 +388,16 @@ func (rt *Runtime) getElement(obj Value, key Value) (Value, *ThrowError) {
 			// attributes or as an accessor lives as a named property — fall through
 			// to the named-property + prototype-chain lookup below.
 		case TStr:
-			b := rt.strBytes(obj)
-			if int(idx) < utf16Len(b) {
-				return rt.charAt(b, int(idx)), nil
+			if int(idx) < rt.strLen16(obj) {
+				return rt.strCharAt(obj, int(idx)), nil
 			}
 			return mkundef(), nil
 		default:
 			// String exotic object (new String / a String subclass instance): an
 			// index in range reads the wrapped character.
 			if o := rt.objPtr(obj); o != nil && o.boxed.Type() == TStr {
-				b := rt.strBytes(o.boxed)
-				if int(idx) < utf16Len(b) {
-					return rt.charAt(b, int(idx)), nil
+				if int(idx) < rt.strLen16(o.boxed) {
+					return rt.strCharAt(o.boxed, int(idx)), nil
 				}
 			}
 		}
@@ -848,12 +846,6 @@ func (rt *Runtime) setArrayLengthTo(obj Value, newLen uint32) (bool, *ThrowError
 	}
 	o.arrLen = effective
 	return ok, nil
-}
-
-// charAt returns the one-UTF-16-unit string at index i.
-func (rt *Runtime) charAt(b []byte, i int) Value {
-	cu := utf16CodeUnitAt(b, i)
-	return rt.newStringBytes(utf16ToWTF8([]uint16{uint16(cu)}))
 }
 
 // ---- key coercion ----

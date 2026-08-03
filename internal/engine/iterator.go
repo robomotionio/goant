@@ -306,11 +306,10 @@ func (rt *Runtime) iterableValues(v Value) ([]Value, *ThrowError) {
 		}
 		return out, nil
 	case TStr:
-		b := rt.strBytes(v)
 		var out []Value
-		n := utf16Len(b)
+		n := rt.strLen16(v)
 		for i := 0; i < n; {
-			cp := utf16CodepointAt(b, i)
+			cp := rt.strCodepointAt(v, i)
 			out = append(out, rt.newStringBytes(wtf8Encode(nil, cp)))
 			if cp >= 0x10000 {
 				i += 2 // astral code point spans two UTF-16 units

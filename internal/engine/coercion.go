@@ -157,7 +157,7 @@ func (rt *Runtime) toObjectValue(v Value) (Value, *ThrowError) {
 	if v.Type() == TStr {
 		// A String exotic object carries a non-writable, non-enumerable,
 		// non-configurable "length" own property (matches new String(...)).
-		o.defineOwn("length", mknum(float64(utf16Len(rt.strBytes(v)))), 0)
+		o.defineOwn("length", mknum(float64(rt.strLen16(v))), 0)
 	}
 	return w, nil
 }

@@ -32,9 +32,8 @@ func (rt *Runtime) ownDescOf(o *object, pk Value) ownDesc {
 				return ownDesc{exists: true, writable: !o.flags.frozen, enumerable: true, configable: !o.flags.frozen && !o.flags.sealed, value: o.arrAt(idx)}
 			}
 		case o.boxed.Type() == TStr:
-			b := rt.strBytes(o.boxed)
-			if int(idx) < utf16Len(b) {
-				return ownDesc{exists: true, writable: false, enumerable: true, configable: false, value: rt.charAt(b, int(idx))}
+			if int(idx) < rt.strLen16(o.boxed) {
+				return ownDesc{exists: true, writable: false, enumerable: true, configable: false, value: rt.strCharAt(o.boxed, int(idx))}
 			}
 		}
 	}
@@ -377,7 +376,7 @@ func (rt *Runtime) initReflectBuiltin() {
 		// A String exotic object owns an index property per code unit; they come
 		// first, ahead of "length" and every other own key.
 		if o.boxed.Type() == TStr {
-			for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+			for i, l := 0, rt.strLen16(o.boxed); i < l; i++ {
 				rt.arraySet(ra, ra.arrLen, rt.newString(strconv.Itoa(i)))
 			}
 		}

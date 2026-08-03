@@ -685,7 +685,7 @@ func (rt *Runtime) hasProp(obj Value, key string) bool {
 	// own property and the prototype walk starts at the wrapper prototype (so e.g.
 	// inherited Boolean.prototype/Number.prototype properties are observable).
 	if !obj.IsObjectType() && obj.Type() != TTypedArray && !obj.IsNullish() {
-		if isIdx && obj.Type() == TStr && int(idx) < utf16Len(rt.strBytes(obj)) {
+		if isIdx && obj.Type() == TStr && int(idx) < rt.strLen16(obj) {
 			return true
 		}
 		cur = rt.primitiveProto(obj)
@@ -722,7 +722,7 @@ func (rt *Runtime) hasPropE(obj Value, key string) (bool, *ThrowError) {
 	idx, isIdx := canonicalIndex(key)
 	cur := obj
 	if !obj.IsObjectType() && obj.Type() != TTypedArray && !obj.IsNullish() {
-		if isIdx && obj.Type() == TStr && int(idx) < utf16Len(rt.strBytes(obj)) {
+		if isIdx && obj.Type() == TStr && int(idx) < rt.strLen16(obj) {
 			return true, nil
 		}
 		cur = rt.primitiveProto(obj)
@@ -778,7 +778,7 @@ func (rt *Runtime) hasOwnPropertyOf(obj Value, key string) (bool, *ThrowError) {
 // an inherited array element during a prototype walk.
 func (rt *Runtime) hasOwnIndex(obj Value, o *object, idx uint32) bool {
 	if o == nil {
-		return obj.Type() == TStr && int(idx) < utf16Len(rt.strBytes(obj))
+		return obj.Type() == TStr && int(idx) < rt.strLen16(obj)
 	}
 	switch {
 	case o.ta != nil:
@@ -789,7 +789,7 @@ func (rt *Runtime) hasOwnIndex(obj Value, o *object, idx uint32) bool {
 	case o.boxed.Type() == TStr:
 		// String exotic object (new String(...)): indices below the wrapped
 		// string's length are own data properties.
-		return int(idx) < utf16Len(rt.strBytes(o.boxed))
+		return int(idx) < rt.strLen16(o.boxed)
 	}
 	return false
 }
@@ -801,9 +801,8 @@ func (rt *Runtime) hasOwnIndex(obj Value, o *object, idx uint32) bool {
 func (rt *Runtime) ownIndexElement(o *object, obj Value, idx uint32) (Value, bool) {
 	if o == nil {
 		if obj.Type() == TStr {
-			b := rt.strBytes(obj)
-			if int(idx) < utf16Len(b) {
-				return rt.charAt(b, int(idx)), true
+			if int(idx) < rt.strLen16(obj) {
+				return rt.strCharAt(obj, int(idx)), true
 			}
 		}
 		return mkundef(), false
@@ -816,9 +815,8 @@ func (rt *Runtime) ownIndexElement(o *object, obj Value, idx uint32) (Value, boo
 			return o.arr[idx], true
 		}
 	case o.boxed.Type() == TStr:
-		b := rt.strBytes(o.boxed)
-		if int(idx) < utf16Len(b) {
-			return rt.charAt(b, int(idx)), true
+		if int(idx) < rt.strLen16(o.boxed) {
+			return rt.strCharAt(o.boxed, int(idx)), true
 		}
 	}
 	return mkundef(), false

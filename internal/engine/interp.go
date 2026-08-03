@@ -9,6 +9,7 @@ package engine
 // adopts ant's exact branch encoding (reconciled via the bytecode-diff harness).
 
 import (
+	"bytes"
 	"math"
 	"math/big"
 )
@@ -3017,12 +3018,21 @@ func jsExp(base, exp float64) float64 {
 }
 
 // compareStrings compares two WTF-8 strings by UTF-16 code unit (JS ordering).
+//
+// Not a byte comparison: WTF-8 orders by code point, and UTF-16 does not — a
+// surrogate pair (0xD800…) sorts below U+E000 in code units and above it in code
+// points, so `"\u{10000}" < "\uE000"` is true in JS and false byte-wise. The
+// common case is settled first anyway: two ASCII strings agree on both orders,
+// and one memcmp answers them.
 func compareStrings(a, b []byte) int {
-	la, lb := utf16Len(a), utf16Len(b)
+	if isASCIIBytes(a) && isASCIIBytes(b) {
+		return bytes.Compare(a, b)
+	}
+	ua, ub := wtf8ToUTF16Runes(a), wtf8ToUTF16Runes(b)
+	la, lb := len(ua), len(ub)
 	n := min(la, lb)
 	for i := 0; i < n; i++ {
-		ca := utf16CodeUnitAt(a, i)
-		cb := utf16CodeUnitAt(b, i)
+		ca, cb := ua[i], ub[i]
 		if ca != cb {
 			if ca < cb {
 				return -1

@@ -120,10 +120,7 @@ func (rt *Runtime) strUTF16(v Value) []rune {
 	if fs == nil {
 		return nil
 	}
-	if fs.utf16 == nil && len(fs.bytes) > 0 {
-		fs.utf16 = wtf8ToUTF16Runes(fs.bytes)
-	}
-	return fs.utf16
+	return flatUnits(fs)
 }
 
 // strIsASCII reports whether the flat string is pure ASCII (tri-state cached).
@@ -132,6 +129,13 @@ func (rt *Runtime) strIsASCII(v Value) bool {
 	if fs == nil {
 		return false
 	}
+	return flatIsASCII(fs)
+}
+
+// flatIsASCII is strIsASCII for a caller that already has the cell, which the
+// indexing helpers below all do — resolving the handle twice for one answer is
+// most of what those helpers cost.
+func flatIsASCII(fs *flatString) bool {
 	if fs.isASCII == strAsciiUnknown {
 		fs.isASCII = strAsciiYes
 		for _, b := range fs.bytes {
@@ -142,6 +146,107 @@ func (rt *Runtime) strIsASCII(v Value) bool {
 		}
 	}
 	return fs.isASCII == strAsciiYes
+}
+
+// ---- indexing a string, in constant time ----
+//
+// The three below are the whole reason the caches above exist. A JS string is
+// indexed in UTF-16 code units and stored here in WTF-8, so `s.length` and
+// `s.charCodeAt(i)` are both, taken literally, a decode of the string from its
+// first byte — which makes the ordinary way to walk a string quadratic. Octane's
+// gbemu decodes a ROM held in a non-ASCII string exactly that way, and spent 94%
+// of its time here.
+//
+// The answer is not a faster scan. An ASCII string needs no scan at all, because
+// its code units are its bytes; a string that is not ASCII gets decoded once
+// into the same code-unit array the RegExp engine already caches, and every
+// index after that is a load. What remains proportional to the string is the
+// first access to it, and nothing else.
+
+// strLen16 is the UTF-16 length of a string value.
+func (rt *Runtime) strLen16(v Value) int {
+	fs := rt.flatOf(v)
+	if fs == nil {
+		return utf16Len(rt.strBytes(v))
+	}
+	if fs.len16 != 0 {
+		return int(fs.len16)
+	}
+	n := len(fs.bytes)
+	if !flatIsASCII(fs) {
+		n = utf16Len(fs.bytes)
+	}
+	if n <= 1<<31-1 {
+		fs.len16 = int32(n)
+	}
+	return n
+}
+
+// flatUnits returns the cached code-unit view of a string that is not ASCII,
+// decoding it on first use. Shared with strUTF16 and, like it, MUST NOT be
+// mutated.
+func flatUnits(fs *flatString) []rune {
+	if fs.utf16 == nil && len(fs.bytes) > 0 {
+		fs.utf16 = wtf8ToUTF16Runes(fs.bytes)
+	}
+	return fs.utf16
+}
+
+// strUnitAt is utf16CodeUnitAt over a string value (0xFFFFFFFF out of range).
+func (rt *Runtime) strUnitAt(v Value, idx int) uint32 {
+	fs := rt.flatOf(v)
+	if fs == nil {
+		return utf16CodeUnitAt(rt.strBytes(v), idx)
+	}
+	if flatIsASCII(fs) {
+		if idx < 0 || idx >= len(fs.bytes) {
+			return 0xFFFFFFFF
+		}
+		return uint32(fs.bytes[idx])
+	}
+	u := flatUnits(fs)
+	if idx < 0 || idx >= len(u) {
+		return 0xFFFFFFFF
+	}
+	return uint32(u[idx])
+}
+
+// strCodepointAt is utf16CodepointAt over a string value: the code unit at idx,
+// or the whole code point when idx begins a surrogate pair.
+func (rt *Runtime) strCodepointAt(v Value, idx int) uint32 {
+	fs := rt.flatOf(v)
+	if fs == nil {
+		return utf16CodepointAt(rt.strBytes(v), idx)
+	}
+	if flatIsASCII(fs) {
+		if idx < 0 || idx >= len(fs.bytes) {
+			return 0xFFFFFFFF
+		}
+		return uint32(fs.bytes[idx])
+	}
+	u := flatUnits(fs)
+	if idx < 0 || idx >= len(u) {
+		return 0xFFFFFFFF
+	}
+	hi := uint32(u[idx])
+	if hi >= 0xD800 && hi <= 0xDBFF && idx+1 < len(u) {
+		if lo := uint32(u[idx+1]); lo >= 0xDC00 && lo <= 0xDFFF {
+			return 0x10000 + (hi-0xD800)<<10 + (lo - 0xDC00)
+		}
+	}
+	return hi
+}
+
+// strCharAt is the one-code-unit string at idx, the `s[i]` and s.charAt(i)
+// result. The single-unit strings are interned: a loop over a string produces
+// the same handful of them over and over, and allocating a fresh cell per
+// character made walking a string cost a garbage collection.
+func (rt *Runtime) strCharAt(v Value, idx int) Value {
+	cu := rt.strUnitAt(v, idx)
+	if cu < 0x80 {
+		return rt.internString(string([]byte{byte(cu)}))
+	}
+	return rt.newStringBytes(utf16ToWTF8([]uint16{uint16(cu)}))
 }
 
 // internString returns a canonical flat string for s (ant intern_string).

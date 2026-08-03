@@ -112,7 +112,7 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 	// A String exotic object's in-range index is non-configurable, so [[Delete]]
 	// fails; it has no shape slot for deleteOwn to notice.
 	if o.boxed.Type() == TStr {
-		if idx, ok := canonicalIndex(name); ok && int(idx) < utf16Len(rt.strBytes(o.boxed)) {
+		if idx, ok := canonicalIndex(name); ok && int(idx) < rt.strLen16(o.boxed) {
 			return false, nil
 		}
 	}
@@ -219,7 +219,7 @@ func (rt *Runtime) forInKeys(obj Value) (Value, *ThrowError) {
 		}
 		if o.boxed.Type() == TStr {
 			// A String wrapper's characters are enumerable own index properties.
-			for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+			for i, l := 0, rt.strLen16(o.boxed); i < l; i++ {
 				k := numberToString(float64(i))
 				if !seen[k] {
 					seen[k] = true

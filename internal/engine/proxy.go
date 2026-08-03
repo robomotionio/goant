@@ -479,7 +479,7 @@ func (rt *Runtime) targetOwnKeyList(target Value) []Value {
 	// A String exotic object owns an index property per code unit, ahead of
 	// "length" and its other keys.
 	if to.boxed.Type() == TStr {
-		for i, l := 0, utf16Len(rt.strBytes(to.boxed)); i < l; i++ {
+		for i, l := 0, rt.strLen16(to.boxed); i < l; i++ {
 			out = append(out, rt.newString(itoaSmall(i)))
 		}
 	}

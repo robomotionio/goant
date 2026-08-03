@@ -311,9 +311,8 @@ func (rt *Runtime) initObjectBuiltin() {
 				// String exotic [[GetOwnProperty]]: an in-range index is a
 				// non-writable, enumerable, non-configurable data property.
 				if idx, ok := canonicalIndex(name); ok {
-					b := rt.strBytes(o.boxed)
-					if int(idx) < utf16Len(b) {
-						return rt.makeDataDescriptor(rt.charAt(b, int(idx)), false, true, false), nil
+					if int(idx) < rt.strLen16(o.boxed) {
+						return rt.makeDataDescriptor(rt.strCharAt(o.boxed, int(idx)), false, true, false), nil
 					}
 				}
 			}
@@ -468,9 +467,8 @@ func (rt *Runtime) initObjectBuiltin() {
 			}
 		}
 		if o.boxed.Type() == TStr {
-			b := rt.strBytes(o.boxed)
-			for i, l := 0, utf16Len(b); i < l; i++ {
-				reso.defineOwn(strconv.Itoa(i), rt.makeDataDescriptor(rt.charAt(b, i), false, true, false), attrDefault)
+			for i, l := 0, rt.strLen16(o.boxed); i < l; i++ {
+				reso.defineOwn(strconv.Itoa(i), rt.makeDataDescriptor(rt.strCharAt(o.boxed, i), false, true, false), attrDefault)
 			}
 		}
 		for _, k := range o.ownKeys() {
@@ -735,7 +733,7 @@ func (rt *Runtime) enumerableOwnKeysE(v Value) ([]string, *ThrowError) {
 	}
 	if o.boxed.Type() == TStr {
 		// A String wrapper's characters are enumerable own index properties.
-		for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+		for i, l := 0, rt.strLen16(o.boxed); i < l; i++ {
 			keys = append(keys, strconv.Itoa(i))
 		}
 	}
@@ -768,7 +766,7 @@ func (rt *Runtime) ownKeyValues(v Value) ([]Value, *ThrowError) {
 		}
 	}
 	if o.boxed.Type() == TStr {
-		for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+		for i, l := 0, rt.strLen16(o.boxed); i < l; i++ {
 			keys = append(keys, rt.newString(strconv.Itoa(i)))
 		}
 	}
@@ -1000,9 +998,8 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 		// its value (or making it configurable) has to be rejected rather than
 		// treated as a fresh definition.
 		if !existing.exists && o.boxed.Type() == TStr {
-			b := rt.strBytes(o.boxed)
-			if idx, ok := canonicalIndex(name); ok && int(idx) < utf16Len(b) {
-				existing = ownDesc{exists: true, value: rt.charAt(b, int(idx)), enumerable: true}
+			if idx, ok := canonicalIndex(name); ok && int(idx) < rt.strLen16(o.boxed) {
+				existing = ownDesc{exists: true, value: rt.strCharAt(o.boxed, int(idx)), enumerable: true}
 			}
 		}
 	}
@@ -1331,7 +1328,7 @@ func (rt *Runtime) ownPropertyKeyValues(v Value) ([]Value, *ThrowError) {
 			out = append(out, rt.newString(numberToString(float64(i))))
 		}
 	case o.boxed.Type() == TStr:
-		for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+		for i, l := 0, rt.strLen16(o.boxed); i < l; i++ {
 			out = append(out, rt.newString(numberToString(float64(i))))
 		}
 	}
@@ -1458,7 +1455,7 @@ func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) (Value, *Throw
 	arr := rt.newArray()
 	if v.IsString() {
 		ao := rt.objPtr(arr)
-		n := utf16Len(rt.strBytes(v))
+		n := rt.strLen16(v)
 		for i := 0; i < n; i++ {
 			rt.arraySet(ao, ao.arrLen, rt.newString(strconv.Itoa(i)))
 		}
@@ -1504,7 +1501,7 @@ func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) (Value, *Throw
 		}
 	}
 	if o.boxed.Type() == TStr { // String wrapper: char indices are own (then "length")
-		for i, l := 0, utf16Len(rt.strBytes(o.boxed)); i < l; i++ {
+		for i, l := 0, rt.strLen16(o.boxed); i < l; i++ {
 			rt.arraySet(ao, ao.arrLen, rt.newString(strconv.Itoa(i)))
 		}
 	}
@@ -1769,7 +1766,7 @@ func (rt *Runtime) objectKeys(v Value) Value {
 	arr := rt.newArray()
 	if v.IsString() {
 		ao := rt.objPtr(arr)
-		n := utf16Len(rt.strBytes(v))
+		n := rt.strLen16(v)
 		for i := 0; i < n; i++ {
 			rt.arraySet(ao, ao.arrLen, rt.newString(strconv.Itoa(i)))
 		}

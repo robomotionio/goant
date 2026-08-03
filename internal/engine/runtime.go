@@ -403,6 +403,11 @@ type flatString struct {
 	gostr   string // lazily cached Go view of bytes; see (*Runtime).strGo
 	utf16   []rune // lazily cached UTF-16 code units; see (*Runtime).strUTF16
 	isASCII int8   // STR_ASCII_UNKNOWN/YES/NO
+	// len16 caches the UTF-16 length, which is otherwise a scan of the whole
+	// string — and `s.length` is read once per iteration of every loop over a
+	// string there is. Zero means "not computed yet"; an empty string recomputes
+	// it, which costs nothing. It fits in the padding after the two bytes above.
+	len16 int32
 	// extendable marks this string as the sole owner of the unused capacity in
 	// its backing array, so a concatenation may append into it instead of
 	// copying. See (*Runtime).concatStrings.
