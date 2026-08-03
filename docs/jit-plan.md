@@ -951,6 +951,68 @@ window is scanned after that context has been popped and handed to an unrelated
 call — over whatever the next frame wrote, stale handles included. That is a
 poison panic, not a wrong answer, and the fix is one store on the way out.
 
+### Counting exits by helper, which named the largest win in the tier
+
+The profile says where the time is; it does not say what compiled code is
+*asking for*. Charging each exit to its helper does, and the answer was not the
+one the call work had assumed:
+
+| exits | richards | deltablue | earley-boyer |
+| --- | --- | --- | --- |
+| `CallMethod` | 17.9M | 20.9M | — |
+| **`Equals`** | **14.7M** | 0.6M | **11.6M** |
+| `PutField` | — | 0.8M | **19.9M** |
+| `GetField` | 0.2M | 7.4M | 0.2M |
+| `Call` / `New` | — | 0.4M | 4.0M / 2.4M |
+
+Equality was leaving compiled code almost as often as calls were, and the reason
+is that the generic operators guard on both operands being Numbers. Richards has
+fourteen `== null` / `!= null` sites; EarleyBoyer has a hundred and thirty-eight
+`=== null` / `!== false` / `=== true`. A comparison against a literal is what
+this code is made of.
+
+Against a literal the answer is exact and needs no guard at all:
+
+  - `x === undefined|null|true|false` is bit equality with that singleton — each
+    has a payload fixed by its constructor and a Number is untagged, so nothing
+    can collide. One compare.
+  - `x == undefined|null` is `x` being one of the two. TUndef is 7 and TNull is
+    8, so a subtract and an unsigned compare; the subtract disposes of Numbers
+    too, which wrap to a large value.
+
+**Richards 840 → 991, +18.0%** — the largest single change in this tier since
+the element write — with NavierStokes +3.4% and nothing negative.
+
+Knowing the operand is a literal is done by reading the previous opcode rather
+than by tracking a constant kind per stack slot. That is not laziness: a tracked
+kind has to be maintained at every site that writes a slot, and a slot wrongly
+believed constant is a miscompilation. The only extra fact the local answer needs
+is that the comparison is not itself a branch target.
+
+`x == true` is deliberately left to the helper. Abstract equality coerces the
+Boolean through ToNumber and then runs ToPrimitive on an object operand, which is
+user code and can throw.
+
+**What EarleyBoyer says about scores.** Its untyped-operator exits fell from
+11.76M to 3.02M — 8.7 million round trips removed — and its score did not move,
+because only 50.9% of its frame entries are compiled and the interpreted half is
+what sets the score. Removing work from the compiled half of a half-compiled
+program is invisible.
+
+### The measurement that inverted, again
+
+Before the singleton templates, 59.5% of Richards' compiled frames left for a
+helper at least once, which made a compiled-to-compiled call look worth less than
+half of what it had seemed: a direct call only avoids the round trip if the
+callee never exits anyway.
+
+After them, Richards' exits are **96% `CallMethod`** and nothing else. The
+argument now runs the other way and compounds: a frame whose only exit is a call
+becomes helper-free the moment that call is direct, and so does its caller. This
+is the third time in this document that a measurement has had to be re-taken
+because the thing it measured had moved — and the second time the conclusion
+reversed.
+
 ### Four things that did not work, and what they cost to find out
 
 Everything after those three landed inside the noise floor or below it. They are
@@ -1039,15 +1101,15 @@ the build the call work started from:
 
 | | before | after | | vs node |
 | --- | --- | --- | --- | --- |
-| **Richards** | 722 | **838** | **+16.1%** | 45x -> **39x** |
-| **DeltaBlue** | 549 | **626** | **+14.0%** | 165x -> **145x** |
-| EarleyBoyer | 637 | **652** | +2.4% | |
-| Crypto | 1053 | **1075** | +2.1% | 36x -> 35x |
-| Splay | 2079 | **2110** | +1.5% | |
-| RegExp | 157 | **158** | +0.6% | |
-| RayTrace | 466 | **467** | +0.2% | |
-| NavierStokes | 1823 | 1810 | -0.7% | 18x |
-| | | | **geomean +4.4%** | |
+| **Richards** | 716 | **990** | **+38.3%** | 45x -> **33x** |
+| **DeltaBlue** | 548 | **626** | **+14.2%** | 165x -> **145x** |
+| NavierStokes | 1827 | **1870** | +2.4% | 18x -> **17.6x** |
+| Crypto | 1053 | **1077** | +2.3% | 36x -> 35x |
+| EarleyBoyer | 639 | **650** | +1.7% | |
+| RegExp | 156 | **158** | +1.3% | |
+| RayTrace | 462 | **463** | +0.2% | |
+| Splay | 2108 | 2108 | 0% | |
+| | | | **geomean +6.9%** | |
 
 NavierStokes is the one that does not move, and it cannot: 2,826 frame entries
 in the whole benchmark, so nothing about the cost of a call reaches it.
@@ -1197,9 +1259,13 @@ No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
 1. **Calls, compiled to compiled.** Now the only item on this list with a
-   number large enough to matter: 69% of every round trip out of compiled code
-   is a call, the Go side of one has been squeezed to the noise floor, and the
-   detour costs 4.69 ns against 1.15 for a direct one. Six things have to be
+   number large enough to matter, and worth more than it was an hour before it
+   was written down: with equality no longer exiting, **96% of Richards' exits
+   are `CallMethod`** and 89% of DeltaBlue's are calls of some kind. The Go side
+   of one has been squeezed to the noise floor and the detour costs 4.69 ns
+   against 1.15 for a direct one. The argument compounds — a frame whose only
+   exit is a call becomes helper-free the moment that call is direct, and so
+   does its caller. Six things have to be
    emitted rather than called — a per-site guard on the callee, a locals arena,
    the frame publication the collector needs *without* storing a Go pointer from
    machine code, a nested context, the depth and interrupt checks, and a way to
