@@ -1428,3 +1428,61 @@ is 5.6x.
 
 Phase 1's type feedback is not on this list because this tier guards rather than
 speculates. It moves back up when there is a second tier to feed.
+
+## Static coverage, and where it stops
+
+Coverage of the Octane corpus went from 71.3% to 99.9% (6,966 of 6,976
+functions) across eleven commits, and the shape of that work was the same every
+time: a template is half of it, and three separate analyses are the other half.
+
+`jitStackEffect`, `jitNumberDemand` and `jitNumericLocals` each end in a
+`default: return false`, so an opcode with a template but no arm in all three
+compiles nothing — the function is refused for the stack discipline instead,
+which names the wrong thing. Eight templates in a row moved coverage by zero
+before that was clear. `TestEveryTemplateIsKnownToTheAnalyses` is what keeps it
+from happening again.
+
+Three of the eleven were structural rather than another template:
+
+  * **Tail calls** are an exit rather than a helper, because a helper runs with
+    the compiled frame still on the Go stack and that is exactly what a proper
+    tail call promises not to do. The trampoline in `jitRunAt` takes over the
+    frame at the current depth, so a chain occupies one frame however long it
+    runs — checked at 100,000 deep, which is test262's own bar.
+
+  * **The operand window.** Nine registers was the whole stack a function could
+    have. It is now the top nine of an array, with slot `i` in register
+    `i mod 9`, so a push past nine evicts the slot exactly nine below into the
+    register the new one wants. Both edges are emitted from `jitStackEffect` at
+    the top and bottom of the dispatch loop rather than in each template — which
+    also means the emitter now checks its own depth against the analyses after
+    every instruction rather than only at labels.
+
+  * **try/catch** is a compile-time answer. Which handler is in force propagates
+    along the same block edges as everything else, and each call out records
+    where a throw from it lands, keyed by the address it would have resumed at.
+    Pairing TRY_PUSH with TRY_POP by counting would have been simpler and wrong:
+    `break` out of a try body emits its own TRY_POP, so a scan stops early and
+    leaves the rest of the body looking unprotected.
+
+Ten functions are left and none of them is worth a template for its own sake —
+every one is a top-level wrapper or a one-shot initialiser:
+
+| reason | functions | what it would take |
+|---|---|---|
+| `op:TRY_PUSH_FINALLY` | 5 | completion records: a `return` or `break` crossing a finally has to become a recorded completion and a jump, and FINALLY_RET has to dispatch back to a bytecode ip |
+| `op:WITH_GET_VAR` | 4 | a per-frame scope-object chain, plus three name-resolution opcodes whose flag byte selects between five fallbacks |
+| `op:EVAL` | 1 | a dynamic variable store, which the engine does not have on any tier |
+
+So 100% is not reachable: the last function is a direct eval, and sloppy `var`
+inside eval writes into the enclosing function's variable environment, which a
+flat locals slice cannot represent. The other nine are reachable and cost more
+than they are worth — none of them runs more than once.
+
+Two things nearly went in unnoticed along the way, and both are worth naming
+because everything passed while they were true. Sizing a per-compile array from
+the depth *bound* rather than from the function took the test suite from 38
+seconds to seven minutes. And giving every frame a heap-allocated operand array
+— to serve nineteen cold functions — cost between three and eleven percent
+across Octane, in a pointer load per spill and a slice header per call out.
+Neither shows up in a conformance suite or a coverage count.
