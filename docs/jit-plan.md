@@ -999,6 +999,33 @@ because only 50.9% of its frame entries are compiled and the interpreted half is
 what sets the score. Removing work from the compiled half of a half-compiled
 program is invisible.
 
+### Sixteen ways: one winner, six losers
+
+`icWays` 8 -> 16 was tried before, measured at DeltaBlue +8% and EarleyBoyer
+-5%, and left in the notes as "the fix that takes both is a scan bounded by
+`propIC.n`". Re-taken now that the exit table exists, and both halves of that
+note turn out to be wrong.
+
+| | | | |
+| --- | --- | --- | --- |
+| DeltaBlue **+11.0%** | Richards +0.4% | NavierStokes -0.2% | Splay -0.5% |
+| RegExp -1.9% | Crypto -2.5% | RayTrace -3.0% | EarleyBoyer -4.0% |
+
+**geomean -0.2%.** One benchmark gains a great deal and six lose a little, which
+is what a change that helps one access pattern and costs every program memory
+looks like.
+
+The bound-the-scan theory was checkable and false. `propIC.lookup` already scans
+`ic.n` rather than the array, so the interpreter never walked empty ways; and
+promoting a hit one place toward the front — so a hot shape reaches way 0 and
+stays there — moved EarleyBoyer from -5.0% to only -4.0%. What is left is
+footprint: an `icWay` is 40 bytes, so sixteen of them make a site 640 and a
+function's cache array twice what it was. EarleyBoyer has far more sites than
+DeltaBlue and gets nothing back for the extra cache pressure.
+
+Reverted, including the promotion, which had no measurable benefit at eight ways
+and is a write on the hottest read path in the engine.
+
 ### The measurement that inverted, again
 
 Before the singleton templates, 59.5% of Richards' compiled frames left for a
