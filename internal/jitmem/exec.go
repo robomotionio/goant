@@ -80,6 +80,16 @@ type ExecContext struct {
 	// The array holds Go pointers and this does not root them; the closure does,
 	// and the frame publishes the closure for as long as it runs.
 	Upvals uintptr
+	// FnVal is the running function's own Value, for the self-reference a named
+	// function expression binds: `(function f(){ return f; })` resolves `f` to
+	// the function itself, and it is not in the locals or anywhere else compiled
+	// code can reach.
+	//
+	// A Value, so the collector traces it beside This — the closure is reachable
+	// from the caller too, but not on every path a compiled frame can be entered
+	// by, and a root that is usually redundant is cheaper than one that is
+	// usually absent.
+	FnVal uint64
 }
 
 // SpillSlots bounds the operand stack a compiled function may hold across a
@@ -99,7 +109,8 @@ const (
 	CtxOffHost   = 80 + 8*SpillSlots
 	CtxOffThis   = 88 + 8*SpillSlots
 	CtxOffUpvals = 96 + 8*SpillSlots
-	CtxSize      = 104 + 8*SpillSlots
+	CtxOffFnVal  = 104 + 8*SpillSlots
+	CtxSize      = 112 + 8*SpillSlots
 )
 
 // Which fields hold a Value, and so must be traced by the runtime's collector
@@ -109,6 +120,7 @@ const (
 //	Ret      the operand it produced
 //	Spill[0:SpillN]
 //	This     the frame's receiver
+//	FnVal    the running function itself
 //
 // Args[0] and Args[1] are a pointer and a counter, and Args[3] is an immediate.
 // Tracing either as a Value would be worse than missing one.

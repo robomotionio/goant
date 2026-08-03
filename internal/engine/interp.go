@@ -151,7 +151,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	// A compiled frame needs almost none of what the interpreter's frame entry
 	// builds, so it gets its own way in. See runCompiledFrame.
 	if jitEnabled && fn.jit.code != nil {
-		if v, e, ok := rt.runCompiledFrame(fn, cl, thisVal, args); ok {
+		if v, e, ok := rt.runCompiledFrame(fn, cl, fnVal, thisVal, args); ok {
 			return v, e
 		}
 	}
@@ -273,7 +273,7 @@ func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *
 	}
 	f.locals = locals
 
-	v, e, ok := fn.jit.code.jitRun(rt, fn, cl, locals, thisVal)
+	v, e, ok := fn.jit.code.jitRun(rt, fn, cl, fnVal, locals, thisVal)
 
 	// The collector walks every frame rather than the live prefix, so a frame
 	// left behind holding the caller's spill window would still be scanned after
@@ -321,7 +321,7 @@ func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *
 // environment, no dynamic variable object. The one exception is pendingModule,
 // which is keyed on the *hoisting* function rather than on the body, so it is
 // checked here rather than assumed away.
-func (rt *Runtime) runCompiledFrame(fn *svFunc, cl *closure, thisVal Value, args []Value) (Value, *ThrowError, bool) {
+func (rt *Runtime) runCompiledFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args []Value) (Value, *ThrowError, bool) {
 	if rt.pendingModule != nil {
 		return mkundef(), nil, false
 	}
@@ -348,7 +348,7 @@ func (rt *Runtime) runCompiledFrame(fn *svFunc, cl *closure, thisVal Value, args
 	// the slabs.
 	rt.frames[rt.frameDepth].locals = locals
 
-	v, e, ok := jitTry(rt, fn, cl, locals, thisVal)
+	v, e, ok := jitTry(rt, fn, cl, fnVal, locals, thisVal)
 	if !ok {
 		rt.pendingNewTarget = pendingNT
 	}
@@ -604,7 +604,7 @@ restart:
 	// it produced the answer; anything else falls through to the interpreter
 	// below, which is what makes declining free.
 	if jitEnabled {
-		if v, e, ok := jitTry(rt, fn, cl, locals, thisVal); ok {
+		if v, e, ok := jitTry(rt, fn, cl, fnVal, locals, thisVal); ok {
 			return v, e
 		}
 	}
@@ -2001,7 +2001,7 @@ restart:
 				// would have to be carried across.
 				if jitEnabled && sp == 0 {
 					syncFrame()
-					if v, e, ok := jitTryLoop(rt, fn, cl, locals, thisVal, t); ok {
+					if v, e, ok := jitTryLoop(rt, fn, cl, fnVal, locals, thisVal, t); ok {
 						return v, e
 					}
 				}

@@ -181,7 +181,7 @@ func TestJITGenericUnaryOperatorsAgreeWithTheInterpreter(t *testing.T) {
 				want, wantErr := rt.callValue(fnVal, mkundef(), []Value{recv})
 				locals := make([]Value, fn.maxLocals)
 				locals[0] = recv
-				got, gotErr, ok := c.jitRun(rt, fn, nil, locals, mkundef())
+				got, gotErr, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef())
 				if !ok {
 					t.Fatalf("%s%s: declined", expr, jitShow(rt, x.v))
 				}
@@ -211,7 +211,7 @@ func TestJITGenericOperatorsAgreeWithTheInterpreter(t *testing.T) {
 
 					locals := make([]Value, fn.maxLocals)
 					locals[0] = o
-					got, gotErr, ok := c.jitRun(rt, fn, nil, locals, mkundef())
+					got, gotErr, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef())
 					if !ok {
 						t.Fatalf("%s %s %s: compiled code declined a receiver", x.name, expr, y.name)
 					}
@@ -268,7 +268,7 @@ func TestJITGenericComparisonsBranchLikeTheInterpreter(t *testing.T) {
 				o := jitPair(rt, x.v, y.v)
 				locals := make([]Value, cl.fn.maxLocals)
 				locals[0] = o
-				got, gotErr, ok := c.jitRun(rt, cl.fn, nil, locals, mkundef())
+				got, gotErr, ok := c.jitRun(rt, cl.fn, nil, 0, locals, mkundef())
 				if !ok {
 					t.Fatalf("%s: compiled code declined a receiver", body)
 				}
@@ -353,7 +353,7 @@ func TestJITStringConstantSurvivesCollection(t *testing.T) {
 	defer c.free()
 
 	locals := make([]Value, fn.maxLocals)
-	first, _, ok := c.jitRun(rt, fn, nil, locals, mkundef())
+	first, _, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef())
 	if !ok {
 		t.Fatal("compiled code declined")
 	}
@@ -361,7 +361,7 @@ func TestJITStringConstantSurvivesCollection(t *testing.T) {
 		t.Fatalf("got %q before collecting", s)
 	}
 	rt.Collect()
-	second, _, ok := c.jitRun(rt, fn, nil, locals, mkundef())
+	second, _, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef())
 	if !ok {
 		t.Fatal("compiled code declined after a collection")
 	}
@@ -394,7 +394,7 @@ func TestJITGenericOperandsSurviveACollection(t *testing.T) {
 	o := jitPair(rt, rt.newString("head-"), trigger)
 	locals := make([]Value, fn.maxLocals)
 	locals[0] = o
-	got, e, ok := c.jitRun(rt, fn, nil, locals, mkundef())
+	got, e, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef())
 	if !ok || e != nil {
 		t.Fatal("compiled code did not produce a value")
 	}
@@ -419,7 +419,7 @@ func BenchmarkJITGenericAdd(b *testing.B) {
 		locals[0] = o
 		b.Run(tc.name, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				if _, _, ok := c.jitRun(rt, fn, nil, locals, mkundef()); !ok {
+				if _, _, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef()); !ok {
 					b.Fatal("declined")
 				}
 			}
@@ -463,7 +463,7 @@ func TestJITGenericOperatorsInALongLoop(t *testing.T) {
 			o := jitPair(rt, a, b)
 			locals := make([]Value, cl.fn.maxLocals)
 			locals[0], locals[1] = o, tov(float64(tc.n))
-			got, e, ok := c.jitRun(rt, cl.fn, nil, locals, mkundef())
+			got, e, ok := c.jitRun(rt, cl.fn, nil, 0, locals, mkundef())
 			if !ok || e != nil {
 				t.Fatal("compiled code did not produce a value")
 			}
@@ -500,7 +500,7 @@ func TestJITGenericOperatorsActuallyRun(t *testing.T) {
 		locals[0] = o
 		before, beforeSlow := jitStats.genFast, jitStats.genSlow
 		for i := 0; i < n; i++ {
-			if _, _, ok := c.jitRun(rt, fn, nil, locals, mkundef()); !ok {
+			if _, _, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef()); !ok {
 				t.Fatal("compiled code declined")
 			}
 		}

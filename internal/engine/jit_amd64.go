@@ -577,6 +577,32 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp--
 			ip++
 
+		case OpSpecialObj:
+			// Five different things share this opcode, and only one of them is a
+			// value compiled code already has. Kind 1 is the self-reference a
+			// named function expression binds — `(function f(){ return f; })` —
+			// and it is the frame's own function, carried in the context beside
+			// the receiver for exactly this.
+			//
+			// It is also, by a distance, the one that matters: of the 832
+			// functions in the Octane corpus that contain SPECIAL_OBJ, **618 use
+			// only this kind** and 207 only `arguments`. Nothing in that corpus
+			// uses new.target, import.meta or a private-name binding through it.
+			//
+			// The rest are refused by name rather than as "op:SPECIAL_OBJ", so
+			// the diagnostic says which one is missing instead of pointing at an
+			// opcode that is already half implemented.
+			if code[ip+1] != 1 {
+				return refuse(why, "special-obj/"+jitSpecialObjKind(code[ip+1]))
+			}
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp], jitasm.RegCtx, jitmem.CtxOffFnVal)
+			kind[sp] = false
+			sp++
+			ip += 2
+
 		case OpDefineField:
 			// obj val -> obj. The receiver is left in place because the literal is
 			// still being built on top of it.
@@ -1485,7 +1511,7 @@ func jitHasTemplate(op Opcode) bool {
 		OpCall, OpCallMethod, OpNew, OpReturn, OpReturnUndef, OpThis,
 		OpInstanceof, OpMod, OpTypeof, OpIsUndefOrNull, OpIn, OpDelete,
 		OpObject, OpRegexp, OpGetGlobalUndef, OpThrow, OpArray,
-		OpDefineField, OpJmpNotNullish:
+		OpDefineField, OpJmpNotNullish, OpSpecialObj:
 		return true
 	}
 	return false
@@ -1735,8 +1761,8 @@ func jitCanonicalizeNaN(a *jitasm.Asm, r jitasm.Reg) {
 // A throw is not a decline. It comes from a helper, by which point the frame has
 // run, and this tier has no exception handlers of its own — TRY_PUSH is refused
 // — so the only thing left to do is what the interpreter would: leave.
-func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, cl *closure, locals []Value, this Value) (Value, *ThrowError, bool) {
-	return c.jitRunAt(rt, fn, cl, locals, this, c.entry)
+func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, locals []Value, this Value) (Value, *ThrowError, bool) {
+	return c.jitRunAt(rt, fn, cl, fnVal, locals, this, c.entry)
 }
 
 // jitRunOSR enters at the stub for a loop header, if there is one.
@@ -1744,15 +1770,15 @@ func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, cl *closure, locals []Value, t
 // Reports false when there is not, or when the stub's guards decline the locals
 // the interpreter has produced — in which case nothing has happened and the
 // interpreter carries on from where it was.
-func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, cl *closure, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
+func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
 	pc, ok := c.osr[header]
 	if !ok {
 		return mkundef(), nil, false
 	}
-	return c.jitRunAt(rt, fn, cl, locals, this, pc)
+	return c.jitRunAt(rt, fn, cl, fnVal, locals, this, pc)
 }
 
-func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, locals []Value, this Value, entry uintptr) (Value, *ThrowError, bool) {
+func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, locals []Value, this Value, entry uintptr) (Value, *ThrowError, bool) {
 	if len(locals) == 0 {
 		return mkundef(), nil, false
 	}
@@ -1811,6 +1837,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, locals []Value,
 	// entered through a closure that has the array the index was compiled
 	// against.
 	ctx.Upvals = 0
+	ctx.FnVal = uint64(fnVal)
 	if cl != nil && len(cl.upvalues) > 0 {
 		ctx.Upvals = uintptr(unsafe.Pointer(&cl.upvalues[0]))
 	}
@@ -2429,4 +2456,22 @@ func (c *jitCode) free() {
 		c.block.Free()
 		c.block = nil
 	}
+}
+
+// jitSpecialObjKind names what a SPECIAL_OBJ was asking for, so a refusal says
+// which of the five is missing rather than naming the opcode they share.
+func jitSpecialObjKind(k byte) string {
+	switch k {
+	case 0:
+		return "arguments"
+	case 1:
+		return "self"
+	case 2:
+		return "new.target"
+	case 3:
+		return "import.meta"
+	case 4, 5:
+		return "private-name"
+	}
+	return "unknown"
 }

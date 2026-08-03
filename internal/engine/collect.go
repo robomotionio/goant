@@ -653,6 +653,9 @@ func (rt *Runtime) markRoots() {
 			// otherwise reachable only from the interpreter frame that entered
 			// it — a frame this walk does not descend into.
 			rt.markValue(Value(ctx.This))
+			// The running function itself, for the self-reference a named
+			// function expression binds.
+			rt.markValue(Value(ctx.FnVal))
 			for i := uint64(0); i < ctx.SpillN && i < jitmem.SpillSlots; i++ {
 				rt.markValue(Value(ctx.Spill[i]))
 			}

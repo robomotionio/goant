@@ -185,7 +185,7 @@ func TestJITFrameEntryDoesNotAllocate(t *testing.T) {
 		t.Fatal("threw")
 	}
 	if n := testing.AllocsPerRun(200, func() {
-		if _, _, ok := c.jitRun(rt, fn, nil, locals, mkundef()); !ok {
+		if _, _, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef()); !ok {
 			t.Fatal("declined")
 		}
 	}); n != 0 {

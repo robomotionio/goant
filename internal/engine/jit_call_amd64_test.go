@@ -319,17 +319,27 @@ func TestJITConstructAgreesWithTheInterpreter(t *testing.T) {
 // cannot observe the array it was handed, so handing it the caller's spill area
 // is indistinguishable from handing it a copy.
 //
-// The fact is that a mapped `arguments` object is the only thing that writes
-// through to that array, it needs SPECIAL_OBJ, and SPECIAL_OBJ has no template —
-// so a function containing one never compiles, and jitCallCompiled runs only
-// what compiled. This asserts the link rather than the conclusion: if SPECIAL_OBJ
-// ever gets a template, this fails, and jitSpillArgs has to be revisited before
-// it passes again.
+// The fact is that a mapped `arguments` object writes through to that array, and
+// a function that builds one never compiles. That used to be checkable as
+// "SPECIAL_OBJ has no template", and is not any more: the opcode carries five
+// unrelated things and the self-reference among them is now emitted, while
+// `arguments` is refused by kind. So this asks the question directly — compile a
+// function that builds one and require a refusal — which is the property
+// jitSpillArgs actually depends on rather than a proxy for it.
 func TestCompiledCalleeCannotSeeArguments(t *testing.T) {
-	if jitHasTemplate(OpSpecialObj) {
-		t.Fatal("SPECIAL_OBJ has a template, so a compiled callee can now build a " +
-			"mapped `arguments` — jitSpillArgs hands it the caller's spill area, " +
-			"which it must never be able to write through")
+	for _, src := range []string{
+		"function f(a){ return arguments.length; }",
+		"function f(a){ arguments[0] = 1; return a; }",
+		"function f(a){ var x = arguments; return x[0]; }",
+		"function f(a){ return (function(){ return arguments; })(a); }",
+	} {
+		var why string
+		if c := jitCompile(jitFn(t, src), &why); c != nil {
+			c.free()
+			t.Errorf("compiled %q, which builds `arguments` — jitSpillArgs hands a "+
+				"compiled callee the caller's spill area, and a mapped `arguments` "+
+				"writes through to the array it is given", src)
+		}
 	}
 }
 

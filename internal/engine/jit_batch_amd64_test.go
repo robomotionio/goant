@@ -201,3 +201,64 @@ func TestBatchedTemplatesUnderGCPressure(t *testing.T) {
 	`
 	jitBothWays(t, fmt.Sprintf("gc/%d", 0), src)
 }
+
+// The self-reference a named function expression binds. It is a value compiled
+// code reads out of its context rather than a call-out, so what has to hold is
+// that the context carries the right function and that the collector can see it.
+func TestNamedFunctionExpressionSelfReference(t *testing.T) {
+	for _, c := range []struct{ name, src string }{
+		{"identity", `var f = function me(n){ return me === f ? 1 : 0; };
+			var s=0; for (var i=0;i<3000;i++) s += f(i); s;`},
+		{"recursion", `var fact = function me(n){ return n <= 1 ? 1 : n * me(n-1); };
+			var s=0; for (var i=0;i<3000;i++) s += fact(5); s;`},
+		{"shadowed-by-arg", `var f = function me(me){ return typeof me; };
+			var out=""; for (var i=0;i<3000;i++) out = f(1); out;`},
+		{"reassignment-ignored", `var f = function me(n){ me = 7; return typeof me; };
+			var out=""; for (var i=0;i<3000;i++) out = f(i); out;`},
+		{"nested", `var outer = function a(n){
+				var inner = function b(m){ return b === inner ? m : -1; };
+				return inner(n) + (a === outer ? 1 : 0);
+			};
+			var s=0; for (var i=0;i<3000;i++) s += outer(i); s;`},
+		{"as-property", `var o = { f: function me(n){ return me.length + n; } };
+			var s=0; for (var i=0;i<3000;i++) s += o.f(i); s;`},
+	} {
+		jitBothWays(t, "self/"+c.name, c.src)
+	}
+}
+
+// The context's FnVal is a root: a compiled frame suspended in a helper may be
+// the only thing referring to its own function, and a helper that allocates can
+// collect while it is.
+func TestSelfReferenceSurvivesACollection(t *testing.T) {
+	src := `
+		var f = function me(n){
+			var junk = [{a: n}, {b: n}];
+			return (me === f ? 1 : 0) + junk.length;
+		};
+		var s = 0;
+		for (var i = 0; i < 30000; i++) s += f(i);
+		s;
+	`
+	jitBothWays(t, "self/gc", src)
+}
+
+// The four kinds that are not the self-reference must still be refused, and
+// refused under a name that says which one — `arguments` in particular, because
+// a compiled callee being unable to build one is what makes jitSpillArgs sound.
+func TestOtherSpecialObjKindsAreStillRefused(t *testing.T) {
+	if jitSpecialObjKind(0) != "arguments" {
+		t.Fatal("kind 0 is no longer arguments")
+	}
+	var why string
+	c := jitCompile(jitFn(t, "function f(a){ return arguments.length; }"), &why)
+	if c != nil {
+		c.free()
+		t.Fatal("compiled a function that builds `arguments`; jitSpillArgs hands a " +
+			"compiled callee the caller's spill area, which a mapped `arguments` " +
+			"would write through")
+	}
+	if why != "special-obj/arguments" {
+		t.Errorf("refused as %q, which does not say which kind is missing", why)
+	}
+}

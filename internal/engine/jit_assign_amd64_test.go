@@ -140,7 +140,7 @@ func TestJITReadsTheReceiver(t *testing.T) {
 		rt.objPtr(recv).defineOwn("x", tov(99), attrDefault)
 		locals := make([]Value, fn.maxLocals)
 		locals[0] = tov(1)
-		got, e, ok := c.jitRun(rt, fn, nil, locals, recv)
+		got, e, ok := c.jitRun(rt, fn, nil, 0, locals, recv)
 		if !ok || e != nil {
 			t.Errorf("%q declined (%v) or threw (%v)", src, !ok, e != nil)
 		} else if got != tov(99) {
@@ -179,7 +179,7 @@ func TestJITReceiverSurvivesACollection(t *testing.T) {
 
 	locals := make([]Value, fn.maxLocals)
 	locals[0] = tov(1)
-	got, e, ok := c.jitRun(rt, fn, nil, locals, recv)
+	got, e, ok := c.jitRun(rt, fn, nil, 0, locals, recv)
 	if !ok || e != nil {
 		t.Fatalf("declined (%v) or threw (%v)", !ok, e != nil)
 	}

@@ -17,11 +17,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	return nil
 }
 
-func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, cl *closure, locals []Value, this Value) (Value, *ThrowError, bool) {
+func (c *jitCode) jitRun(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, locals []Value, this Value) (Value, *ThrowError, bool) {
 	return mkundef(), nil, false
 }
 
-func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, cl *closure, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
+func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, locals []Value, this Value, header int) (Value, *ThrowError, bool) {
 	return mkundef(), nil, false
 }
 

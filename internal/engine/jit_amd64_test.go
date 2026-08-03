@@ -12,7 +12,7 @@ import (
 // only the opcodes calling into the runtime can use.
 func jitRunT(t testing.TB, rt *Runtime, c *jitCode, fn *svFunc, locals []Value) (Value, bool) {
 	t.Helper()
-	v, e, ok := c.jitRun(rt, fn, nil, locals, mkundef())
+	v, e, ok := c.jitRun(rt, fn, nil, 0, locals, mkundef())
 	if e != nil {
 		t.Fatalf("compiled code threw")
 	}
@@ -470,7 +470,7 @@ func TestJITEntersARunningLoop(t *testing.T) {
 		}
 		sSlot, iSlot := jitVarSlots(fn)
 		locals[sSlot], locals[iSlot] = tov(s), tov(start)
-		got, _, ok := c.jitRunOSR(New(), fn, nil, locals, mkundef(), header)
+		got, _, ok := c.jitRunOSR(New(), fn, nil, 0, locals, mkundef(), header)
 		if !ok {
 			t.Fatalf("start=%v: the entry stub declined Numbers", start)
 		}
@@ -505,7 +505,7 @@ func TestJITLoopEntryDeclinesNonNumbers(t *testing.T) {
 		locals[0] = tov(10)
 		sSlot, iSlot := jitVarSlots(fn)
 		locals[sSlot], locals[iSlot] = bad, tov(0)
-		if _, _, ok := c.jitRunOSR(New(), fn, nil, locals, mkundef(), header); ok {
+		if _, _, ok := c.jitRunOSR(New(), fn, nil, 0, locals, mkundef(), header); ok {
 			t.Errorf("entered a running loop with a %v accumulator", bad.Type())
 		}
 	}

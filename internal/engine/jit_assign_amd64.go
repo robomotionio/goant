@@ -389,7 +389,7 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					}
 					push(noOrigin)
 				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpThis,
-					OpGetGlobal, OpGetUpval, OpObject, OpGetGlobalUndef:
+					OpGetGlobal, OpGetUpval, OpObject, OpGetGlobalUndef, OpSpecialObj:
 					push(noOrigin)
 				case OpArray:
 					for i := int(readU16(code, ip+1)); i > 0; i-- {
@@ -832,7 +832,7 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 						return nil, false
 					}
 					push(false)
-				case OpObject, OpGetGlobalUndef:
+				case OpObject, OpGetGlobalUndef, OpSpecialObj:
 					push(false)
 				case OpGetGlobal, OpGetUpval:
 					// A global or a captured binding holds anything at all.
