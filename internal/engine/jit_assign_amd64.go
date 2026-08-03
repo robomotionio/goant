@@ -2,6 +2,8 @@
 
 package engine
 
+import "sort"
+
 // Definite assignment.
 //
 // The tier's invariant is that every local it reads holds a Number: either a
@@ -98,7 +100,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 			return nil, false
 		}
 		switch op {
-		case OpJmp, OpJmpFalse, OpJmpTrue, OpJmpNotNullish,
+		case OpJmp, OpJmpFalse, OpJmpTrue, OpJmpNotNullish, OpTryPush,
 			OpReturn, OpReturnUndef, OpThrow, OpThrowError, OpTailCall, OpTailCallMethod:
 			if ip+size < len(code) {
 				leaders[ip+size] = true
@@ -138,6 +140,12 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 		case OpJmp:
 			cur.succ = []int{int(readU32(code, ip+1))}
 		case OpJmpFalse, OpJmpTrue, OpJmpNotNullish:
+			cur.succ = []int{int(readU32(code, ip+1)), ip + size}
+		case OpTryPush:
+			// Not a branch the machine takes, but an edge control really has:
+			// every instruction in the body can reach the catch. Modelling it from
+			// the TRY_PUSH rather than from each of them is also what gives the
+			// catch block the depth it resumes at, which is this one.
 			cur.succ = []int{int(readU32(code, ip+1)), ip + size}
 		case OpReturn, OpReturnUndef, OpThrow, OpThrowError, OpTailCall, OpTailCallMethod:
 			cur.succ = []int{} // nothing follows
@@ -496,6 +504,11 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					}
 				case OpThrowError:
 					// Consumes nothing and never returns.
+				case OpTryPush, OpTryPop:
+					// The handler stack, which is not the operand stack.
+				case OpCatch:
+					// The thrown value, which came from outside this frame.
+					push(noOrigin)
 				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey, OpForIn, OpGetLength:
 					// One operand consumed and demanded of nothing. `typeof`
 					// takes any value, and the nullish test is a tag comparison
@@ -933,6 +946,10 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 					}
 				case OpThrowError:
 					// Consumes nothing and never returns.
+				case OpTryPush, OpTryPop:
+					// The handler stack, which is not the operand stack.
+				case OpCatch:
+					push(false)
 				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey, OpForIn, OpGetLength:
 					// Consumes one and produces a value this tier does not model
 					// as a Number — even UPLUS, whose result is one, because it
@@ -1023,4 +1040,134 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 		}
 	}
 	return numeric, true
+}
+
+// A live exception handler, as the emitter sees it.
+//
+// catchIP is where the interpreter would land, which is always a CATCH; depth
+// is the operand stack the handler was installed at, and the depth the catch
+// resumes with.
+type jitHandler struct {
+	catchIP int
+	depth   int
+}
+
+// jitHandlerStacks reports the handler stack in force at the start of each
+// block, or false when the function's handlers are not something this tier can
+// model.
+//
+// The interpreter keeps this stack at runtime, pushing at TRY_PUSH and popping
+// at TRY_POP, and a throw walks it. A template compiler has to know the answer
+// at compile time instead, and it is knowable: the handler stack is a property
+// of where control is, so it propagates along the same edges as everything else
+// the block graph carries.
+//
+// Matching each TRY_PUSH to a TRY_POP by counting would be wrong, and quietly:
+// `break` out of a try body emits its own TRY_POP before the jump, so a scan
+// that stops at the first one leaves the rest of the body looking unprotected —
+// a throw there would escape a catch that should have taken it. The dataflow
+// has no such gap, and where predecessors disagree it refuses rather than
+// picking one.
+//
+// The catch block is not reachable through any ordinary edge; jitAnalyze makes
+// TRY_PUSH a branch to it, which is also what gives it the right entry depth,
+// since a catch resumes at the depth its TRY_PUSH was installed at.
+func jitHandlerStacks(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, start int) (map[int][]jitHandler, bool) {
+	code := fn.code
+	in := map[int][]jitHandler{start: nil}
+
+	same := func(a, b []jitHandler) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Blocks in ip order, so one pass settles a body with no back edge over a
+	// try and the loop below rarely runs twice.
+	order := make([]int, 0, len(blocks))
+	for ip := range blocks {
+		order = append(order, ip)
+	}
+	sort.Ints(order)
+
+	for changed := true; changed; {
+		changed = false
+		for _, bs := range order {
+			b := blocks[bs]
+			if !b.reachable {
+				continue
+			}
+			cur, seen := in[bs]
+			if !seen {
+				continue // not reached yet on this pass
+			}
+			stack := append([]jitHandler(nil), cur...)
+			// The catches this block installs. jitAnalyze gives TRY_PUSH an edge
+			// to its catch so that the catch block inherits the depth it resumes
+			// at, but that edge carries the wrong handler stack — a throw inside
+			// a catch belongs to the next handler out, not to the one the catch
+			// belongs to. So the edge is seeded here and skipped below.
+			seeded := map[int]bool{}
+			d := depths[bs]
+			for ip := b.start; ip < b.end; {
+				op := Opcode(code[ip])
+				switch op {
+				case OpTryPush:
+					// The catch lands at the depth the try was entered with, and
+					// anything else would need the operands the throw destroyed.
+					// A try is a statement, so this is zero in practice.
+					if d != 0 {
+						return nil, false
+					}
+					// The catch runs with this handler already popped: a throw
+					// inside it belongs to the next one out. That is the stack
+					// as it stands here, before the push below.
+					outer := append([]jitHandler(nil), stack...)
+					stack = append(stack, jitHandler{catchIP: int(readU32(code, ip+1)), depth: d})
+					catchIP := int(readU32(code, ip+1))
+					seeded[catchIP] = true
+					if prev, ok := in[catchIP]; ok {
+						if !same(prev, outer) {
+							return nil, false
+						}
+					} else {
+						in[catchIP] = outer
+						changed = true
+					}
+				case OpTryPop:
+					if len(stack) == 0 {
+						return nil, false
+					}
+					stack = stack[:len(stack)-1]
+				}
+				pop, push, ok := jitStackEffect(fn, ip)
+				if !ok {
+					return nil, false
+				}
+				d = d - pop + push
+				ip += int(opTable[op].Size)
+			}
+			for _, s := range b.succ {
+				sb, ok := blocks[s]
+				if !ok || !sb.reachable || seeded[s] {
+					continue
+				}
+				if prev, ok := in[s]; ok {
+					if !same(prev, stack) {
+						return nil, false
+					}
+					continue
+				}
+				in[s] = append([]jitHandler(nil), stack...)
+				changed = true
+			}
+		}
+	}
+	return in, true
 }

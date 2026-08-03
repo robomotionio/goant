@@ -154,6 +154,28 @@ type jitCode struct {
 	block *jitmem.Block
 	entry uintptr
 	osr   map[int]uintptr
+	// catchAt maps a call site's resume address to where a throw from it is
+	// caught. Keyed that way because a resume address is the only thing jitRunAt
+	// holds when a helper hands back an error, and nil for a function with no
+	// try in it — which is nearly all of them.
+	catchAt map[uintptr]uintptr
+}
+
+// jitHasHandlers reports whether the body installs an exception handler.
+func jitHasHandlers(fn *svFunc, start int) bool {
+	code := fn.code
+	for ip := start; ip < len(code); {
+		op := Opcode(code[ip])
+		size := int(opTable[op].Size)
+		if size <= 0 || ip+size > len(code) {
+			return false
+		}
+		if op == OpTryPush {
+			return true
+		}
+		ip += size
+	}
+	return false
 }
 
 // jitResumeFixup records a resume address that could not be written until the
@@ -161,6 +183,10 @@ type jitCode struct {
 type jitResumeFixup struct {
 	immOff int
 	label  *jitasm.Label
+	// catch is where a throw from this call site is caught, when the site is
+	// inside a try. Recorded here because the resume address is what jitRunAt
+	// has when a helper returns an error, and this is where it is minted.
+	catch *jitasm.Label
 }
 
 // jitCompile compiles fn, or reports that it will not.
@@ -213,6 +239,15 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	depths, ok := jitBlockDepths(fn, start, blocks)
 	if !ok {
 		return refuse(why, "stack-across-blocks/depths")
+	}
+	// Which exception handler is in force where. Only computed for a function
+	// that has one, so nothing else pays for the walk.
+	var handlers map[int][]jitHandler
+	if jitHasHandlers(fn, start) {
+		handlers, ok = jitHandlerStacks(fn, blocks, depths, start)
+		if !ok {
+			return refuse(why, "handlers-across-blocks")
+		}
 	}
 	demand, ok := jitNumberDemand(fn, blocks, depths)
 	if !ok {
@@ -267,6 +302,21 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	kind := make([]bool, jitMaxDepth+jitStackWindow+1)
 	// The previous instruction, maintained across the loop below.
 	prevOp, prevIP := Opcode(0), -1
+	// The handlers in force here, seeded from the block's entry set the same way
+	// cur is. What it is for is the fixups: a helper that throws has to resume
+	// at the innermost catch rather than leave the frame.
+	var live []jitHandler
+	if handlers != nil {
+		live = handlers[start]
+	}
+	// One entry stub per catch that something can actually throw into. Landing
+	// there comes from Go rather than from a branch, and the entry trampoline
+	// sets the context register and nothing else — so the two registers the body
+	// keeps pinned have to be re-established first, exactly as a helper's resume
+	// point does. Jumping straight at the catch instead left the locals pointer
+	// holding whatever the machine had, which reads as a frame of nonsense
+	// rather than as a crash.
+	catchStubs := map[int]*jitasm.Label{}
 	// The locals whose Number-ness the body relies on, and the loop headers it
 	// could be entered at. Both are only known once the body has been walked,
 	// which is why the entry stubs are emitted after it.
@@ -276,6 +326,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	for ip < len(code) {
 		if b, isLeader := blocks[ip]; isLeader {
 			copy(cur, b.in)
+			if handlers != nil {
+				live = handlers[ip]
+			}
 		}
 		if l, isTarget := labels[ip]; isTarget {
 			// A branch target may be reached with operands still live — `a && b`
@@ -327,6 +380,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		// answer the analyses were built on, so this is also where the emitter
 		// and those analyses are checked against each other — once per
 		// instruction rather than once per label.
+		fixupsBefore := len(fixups)
 		effPop, effPush, effOK := jitStackEffect(fn, ip)
 		if !effOK {
 			return refuse(why, "undecodable")
@@ -694,6 +748,36 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			a.MovRegMem(jitSlot(sp-1), jitasm.RegCtx, jitmem.CtxOffRet)
 			kind[sp-1] = false
 			ip++
+
+		case OpTryPush:
+			// Installing a handler, which for compiled code has already
+			// happened: which catch a throw belongs to is decided at compile
+			// time, and what carries it is the fixup for each call out inside
+			// the body. Nothing is emitted.
+			if _, known := labels[int(readU32(code, ip+1))]; !known {
+				return refuse(why, "catch-target")
+			}
+			live = append(live, jitHandler{catchIP: int(readU32(code, ip+1)), depth: sp})
+			ip += 5
+
+		case OpTryPop:
+			if len(live) == 0 {
+				return refuse(why, "handler-underflow")
+			}
+			live = live[:len(live)-1]
+			ip++
+
+		case OpCatch:
+			// Entering a catch. jitRunAt has put the thrown value in Ret, which
+			// is where every other call out leaves its result, so the collector
+			// already traces it and nothing new has to be rooted.
+			if sp >= jitMaxDepth {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp] = false
+			sp++
+			ip += 5
 
 		case OpToPropkey:
 			// ToPropertyKey, which template substitution emits so `${obj}` takes
@@ -1733,6 +1817,25 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				jitRefillSlots(a, spBefore, spAfter, effPush)
 			}
 		}
+		// Every call out this instruction emitted belongs to the handler that
+		// was in force when it ran. Stamped here rather than passed down through
+		// sixty-five templates, none of which has any other reason to know.
+		if len(live) > 0 && len(fixups) > fixupsBefore {
+			h := live[len(live)-1]
+			if _, known := labels[h.catchIP]; !known {
+				return refuse(why, "catch-target")
+			}
+			stub, ok := catchStubs[h.catchIP]
+			if !ok {
+				stub = a.NewLabel()
+				catchStubs[h.catchIP] = stub
+			}
+			for i := fixupsBefore; i < len(fixups); i++ {
+				if fixups[i].catch == nil {
+					fixups[i].catch = stub
+				}
+			}
+		}
 		prevOp, prevIP = thisOp, thisIP
 	}
 	if !returned {
@@ -1809,6 +1912,17 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		osrLabels[h] = stub
 	}
 
+	for h, stub := range catchStubs {
+		l, known := labels[h]
+		if !known {
+			return refuse(why, "catch-target")
+		}
+		a.Bind(stub)
+		a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
+		a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
+		a.Jmp(l)
+	}
+
 	// Emission stops at the first unreachable trailer, so a branch target beyond
 	// it never got bound. That is a function this tier does not understand the
 	// shape of rather than an error, and declining is the answer — jitasm would
@@ -1841,6 +1955,15 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		*why = ""
 	}
 	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset())}
+	for _, f := range fixups {
+		if f.catch == nil {
+			continue
+		}
+		if c.catchAt == nil {
+			c.catchAt = map[uintptr]uintptr{}
+		}
+		c.catchAt[block.AddrAt(f.label.Offset())] = block.AddrAt(f.catch.Offset())
+	}
 	if len(osrLabels) > 0 {
 		c.osr = make(map[int]uintptr, len(osrLabels))
 		for h, l := range osrLabels {
@@ -1872,7 +1995,7 @@ func jitHasTemplate(op Opcode) bool {
 		OpClosure, OpPutUpval, OpSetUpval, OpThrowError, OpUplus,
 		OpToPropkey, OpGlobal, OpDeleteVar, OpDefineMethod, OpPutConst,
 		OpSetHomeObj, OpForIn, OpHasPrivate, OpGetLength,
-		OpTailCall, OpTailCallMethod:
+		OpTailCall, OpTailCallMethod, OpTryPush, OpTryPop, OpCatch:
 		return true
 	}
 	return false
@@ -1938,7 +2061,9 @@ func jitScanTargets(fn *svFunc, start int) (map[int]bool, bool) {
 			return nil, false
 		}
 		switch op {
-		case OpJmp, OpJmpFalse, OpJmpTrue, OpJmpNotNullish:
+		case OpJmp, OpJmpFalse, OpJmpTrue, OpJmpNotNullish, OpTryPush:
+			// TRY_PUSH's operand is where a throw lands, which is a target the
+			// machine never jumps to and control reaches all the same.
 			targets[int(readU32(code, ip+1))] = true
 		}
 		ip += size
@@ -2078,6 +2203,13 @@ const jitICGlobalSpareRegs = 4
 // Reports false when the stack is deeper than the context can hold, which is a
 // refusal rather than an error.
 func jitCallHelper(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFixup) bool {
+	return jitCallHelperIn(a, sp, helper, fixups, nil)
+}
+
+// jitCallHelperIn is jitCallHelper with the handler a throw from here belongs
+// to. Every template calls the wrapper above; the emitter substitutes the live
+// handler by rewriting the fixup after the fact, which is why this exists.
+func jitCallHelperIn(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFixup, catch *jitasm.Label) bool {
 	if sp > jitMaxDepth {
 		return false
 	}
@@ -2096,7 +2228,7 @@ func jitCallHelper(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFixu
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffHelper, helper)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitHelper))
 	immOff := a.MovRegImm64At(jitasm.RAX, 0)
-	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume})
+	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume, catch: catch})
 	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitasm.RAX)
 	a.MovRegImm64(jitasm.RAX, jitmem.ExitHelper)
 	a.Ret()
@@ -2278,6 +2410,31 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 				pc = ctx.Resume
 			case jitmem.ExitHelper:
 				if e := jitHelper(rt, fn, cl, args, locals, ctx); e != nil {
+					// A throw from inside a try lands in its catch rather than
+					// leaving the frame. Which catch is a compile-time answer:
+					// c.catchAt is keyed by the address this call site would
+					// have resumed at, which is the only thing identifying it
+					// that survives the trip through machine code.
+					//
+					// The catch enters with an empty operand stack — the
+					// emitter refuses a handler installed at any other depth,
+					// because the operands the throw destroyed were in
+					// registers — so nothing has to be restored, and the thrown
+					// value travels in Ret, where CATCH reads it and the
+					// collector already traces it.
+					//
+					// A control-flow signal is not a throw: `break`, `continue`
+					// and a return through a finally travel as one, and a catch
+					// must not take them. The interpreter's unwind draws the
+					// same line.
+					if !e.control {
+						if catch, ok := c.catchAt[ctx.Resume]; ok {
+							ctx.Ret = uint64(e.Value)
+							ctx.SpillN = 0
+							pc = catch
+							continue
+						}
+					}
 					rt.jitFrames = rt.jitFrames[:n]
 					if rt.jitOpenUpvals != nil {
 						delete(rt.jitOpenUpvals, rt.frameDepth)
