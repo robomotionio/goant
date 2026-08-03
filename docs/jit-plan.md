@@ -861,21 +861,27 @@ verified to compile nothing:
 
 | | off | on | off | on | |
 | --- | --- | --- | --- | --- | --- |
-| **Richards** | 211 | **446** | 210 | **443** | **+111.2%** |
-| **DeltaBlue** | 239 | **380** | 239 | **382** | **+59.4%** |
-| **Splay** | 1946 | 2268 | 1977 | 2290 | **+16.2%** |
-| **RayTrace** | 383 | 444 | 383 | 441 | **+15.5%** |
-| RegExp | 145 | 155 | 146 | 155 | +6.5% |
-| EarleyBoyer | 608 | 617 | 606 | 622 | +2.1% |
-| Crypto | 236 | 233 | 234 | 232 | −1.1% |
-| NavierStokes | 434 | 423 | 433 | 422 | −2.5% |
-| | | | | | **geomean +21.5%** |
+| **Crypto** | 238 | **1028** | 239 | **1027** | **+330.8%** |
+| **NavierStokes** | 434 | **1829** | 434 | **1834** | **+322.0%** |
+| **Richards** | 215 | **479** | 214 | **477** | **+122.8%** |
+| **DeltaBlue** | 238 | **381** | 238 | **382** | **+60.3%** |
+| **Splay** | 1978 | **2331** | 1979 | **2318** | **+17.5%** |
+| **RayTrace** | 392 | **450** | 391 | **451** | **+15.1%** |
+| **RegExp** | 145 | **156** | 145 | **156** | **+7.6%** |
+| **EarleyBoyer** | 602 | **613** | 601 | **619** | **+2.4%** |
+| | | | | | **geomean +77.1%** |
 
 Both arms are steady to the point, so none of these are drift.
 
-Compiled code holds **100.0%** of DeltaBlue's frame entries and **98.8%** of
-Richards'. Richards more than doubles; its distance from node falls 157x to 74x,
-and DeltaBlue's 375x to 239x.
+All eight positive, and compiled code holds **100.0%** of both Richards' and
+DeltaBlue's frame entries. The distance from node on the benchmarks that moved
+most: NavierStokes **77x to 18x**, Crypto **161x to 37x**, Richards 155x to 69x.
+
+Crypto and NavierStokes were *negative* for this whole document until the last
+change. They are array mathematics, and what they were waiting for was `a[i] = v`
+— the element write, which arrived last because the entry-weighted table never
+ranked it and the instruction-weighted one put it at the top the moment it
+existed.
 
 **Coverage measured by count kept not paying, and then it did.** Four changes in
 a row moved the share of frame entries substantially and the score not at all —
