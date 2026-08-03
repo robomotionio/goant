@@ -199,6 +199,8 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	// what lets undefined, null and the Booleans travel through compiled code
 	// without any of it having to guard.
 	kind := make([]bool, len(jitStackRegs)+1)
+	// The previous instruction, maintained across the loop below.
+	prevOp, prevIP := Opcode(0), -1
 	// The locals whose Number-ness the body relies on, and the loop headers it
 	// could be entered at. Both are only known once the body has been walked,
 	// which is why the entry stubs are emitted after it.
@@ -247,6 +249,12 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			ip += size
 			continue
 		}
+
+		// The instruction before this one, for the templates that can answer
+		// exactly when their operand is a literal — see jitSingletonRHS. Recorded
+		// rather than derived, because the emitter advances ip by each opcode's
+		// own size and there is no walking backwards through that.
+		thisIP, thisOp := ip, Opcode(code[ip])
 
 		switch op := Opcode(code[ip]); op {
 		case OpConstI8:
@@ -701,6 +709,30 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			negate := op == OpNe || op == OpSne
 			l, whenTrue, after, fused := jitFuse(code, labels, ip+1)
 
+			// `x === null`, `x !== false`, `x == null` and the rest: the right
+			// operand is a literal the instruction before pushed, and against one
+			// of those the answer is exact and needs no guard. See
+			// jit_singleton_amd64.go — this is 14.7M helper exits in richards and
+			// 11.6M in earley-boyer, more than any other operator by an order of
+			// magnitude.
+			if k, ok := jitSingletonRHS(labels, prevOp, prevIP, ip); ok && jitSingletonComparable(op, k) {
+				jitEmitSingletonEquals(a, op, k, x, x)
+				if fused {
+					jitBoolBranch(a, whenTrue, x, l)
+					sp -= 2
+					if sp != depths[after] {
+						return refuse(why, "stack-at-target")
+					}
+					ip = after
+				} else {
+					kind[sp-2] = false
+					sp--
+					ip++
+				}
+				prevOp, prevIP = thisOp, thisIP
+				continue
+			}
+
 			var slow, done *jitasm.Label
 			if generic {
 				slow, done = a.NewLabel(), a.NewLabel()
@@ -1131,6 +1163,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			return nil
 		}
+		prevOp, prevIP = thisOp, thisIP
 	}
 	if !returned {
 		// Falling off the end is an implicit `return undefined`, which is not a
