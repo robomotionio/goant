@@ -327,19 +327,52 @@ func TestJITConstructAgreesWithTheInterpreter(t *testing.T) {
 // function that builds one and require a refusal — which is the property
 // jitSpillArgs actually depends on rather than a proxy for it.
 func TestCompiledCalleeCannotSeeArguments(t *testing.T) {
+	// Walks every function in each source, not just the outermost. A nested
+	// function that builds `arguments` is a separate svFunc and is refused
+	// separately — the enclosing one compiling is fine and is what the third
+	// case checks, because the invariant is about the callee that would be
+	// handed the spill area, not about who declared it.
 	for _, src := range []string{
 		"function f(a){ return arguments.length; }",
 		"function f(a){ arguments[0] = 1; return a; }",
 		"function f(a){ var x = arguments; return x[0]; }",
 		"function f(a){ return (function(){ return arguments; })(a); }",
+		"function f(a){ function g(){ return arguments[0]; } return g(a); }",
 	} {
-		var why string
-		if c := jitCompile(jitFn(t, src), &why); c != nil {
-			c.free()
-			t.Errorf("compiled %q, which builds `arguments` — jitSpillArgs hands a "+
-				"compiled callee the caller's spill area, and a mapped `arguments` "+
-				"writes through to the array it is given", src)
+		rt := New()
+		prog, err := Parse("args.js", src)
+		if err != nil {
+			t.Fatalf("%s: %v", src, err)
 		}
+		top, err := rt.Compile(prog, "args.js", src)
+		if err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		walkFuncs(top, func(fn *svFunc) {
+			builds := false
+			code := fn.code
+			for ip := fn.startIP; ip < len(code); {
+				op := Opcode(code[ip])
+				sz := int(opTable[op].Size)
+				if sz <= 0 {
+					break
+				}
+				if op == OpSpecialObj && code[ip+1] == 0 {
+					builds = true
+				}
+				ip += sz
+			}
+			if !builds {
+				return
+			}
+			var why string
+			if c := jitCompile(fn, &why); c != nil {
+				c.free()
+				t.Errorf("in %q, a function that builds `arguments` compiled — "+
+					"jitSpillArgs hands a compiled callee the caller's spill area, "+
+					"and a mapped `arguments` writes through to the array it is given", src)
+			}
+		})
 	}
 }
 

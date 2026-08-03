@@ -185,6 +185,14 @@ type Runtime struct {
 	// See jitResolveCallee.
 	calleeMemo [calleeMemoSize]calleeMemoEntry
 
+	// jitOpenUpvals is the cells a compiled frame has captured, by depth and
+	// then by local slot. Two closures over the same local must share one cell
+	// or a write through either would be invisible to the other, and a compiled
+	// frame has nowhere else to keep that agreement — the interpreter's map
+	// lives in runFrameBody's locals. Allocated only for a frame that actually
+	// captures something, and dropped when it leaves.
+	jitOpenUpvals map[int]map[int]*upvalue
+
 	// agent is shared by every realm built on these pools. A handle means the
 	// same cell in all of them, so a collection driven from any one realm must
 	// trace the roots of all of them or it frees a sibling's heap.

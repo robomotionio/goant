@@ -313,7 +313,7 @@ func TestJITRefusesWhatItCannotModel(t *testing.T) {
 	for _, src := range []string{
 		"function f(a,b){ for (var k in a) { b = k; } return b; }", // for-in
 		"function f(a,b){ try { return a; } catch(e){} }",          // an exception handler
-		"function f(a,b){ return function(){ return a; }; }",       // a closure over a local
+		"function f(a,b){ with (a) { return b; } }",                // a with-chain
 		"function f(a,b){ return arguments.length; }",              // the arguments object
 	} {
 		if c := jitCompile(jitFn(t, src), nil); c != nil {

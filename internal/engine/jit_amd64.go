@@ -577,6 +577,54 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp--
 			ip++
 
+		case OpClosure:
+			// Making a function, which is what 583 of the corpus's remaining
+			// refusals were waiting for — the largest single blocker once the
+			// self-reference was in.
+			//
+			// A child that captures a `with` scope is refused: the chain comes
+			// off the enclosing frame's withStack, and a compiled frame has none.
+			// Refusing by name rather than as "op:CLOSURE" so the diagnostic does
+			// not point at an opcode that is already implemented.
+			idx := readU32(code, ip+1)
+			if int(idx) >= len(fn.childFuncs) {
+				return refuse(why, "closure-index")
+			}
+			if fn.childFuncs[idx].capturesWith {
+				return refuse(why, "closure/captures-with")
+			}
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(idx))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperClosure, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp] = false
+			sp++
+			ip += 5
+
+		case OpPutUpval, OpSetUpval:
+			// Assigning through an upvalue. SET_UPVAL is the expression form and
+			// leaves the value behind; PUT_UPVAL is the statement form.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(readU16(code, ip+1)))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperPutUpval, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			if op == OpSetUpval {
+				a.MovRegMem(jitStackRegs[sp-1], jitasm.RegCtx, jitmem.CtxOffRet)
+				kind[sp-1] = false
+			} else {
+				sp--
+			}
+			ip += 3
+
 		case OpSpecialObj:
 			// Five different things share this opcode, and only one of them is a
 			// value compiled code already has. Kind 1 is the self-reference a
@@ -1511,7 +1559,8 @@ func jitHasTemplate(op Opcode) bool {
 		OpCall, OpCallMethod, OpNew, OpReturn, OpReturnUndef, OpThis,
 		OpInstanceof, OpMod, OpTypeof, OpIsUndefOrNull, OpIn, OpDelete,
 		OpObject, OpRegexp, OpGetGlobalUndef, OpThrow, OpArray,
-		OpDefineField, OpJmpNotNullish, OpSpecialObj:
+		OpDefineField, OpJmpNotNullish, OpSpecialObj,
+		OpClosure, OpPutUpval, OpSetUpval:
 		return true
 	}
 	return false
@@ -1686,6 +1735,8 @@ const (
 	jitHelperRegexp      = 25
 	jitHelperGlobalUndef = 26
 	jitHelperDefineField = 27
+	jitHelperClosure     = 28
+	jitHelperPutUpval    = 29
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1855,6 +1906,12 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, lo
 	// defer here is a call per compiled frame entry, and this function has three
 	// exits and no panic path of its own — a Go panic below is a bug in the
 	// engine, and the process is going down with it either way.
+	// A frame that captured a local owns cells that only it can have created,
+	// and the next frame at this depth must not find them. Cleared on every way
+	// out, and the map itself is only ever allocated by a capture.
+	if rt.jitOpenUpvals != nil {
+		delete(rt.jitOpenUpvals, rt.frameDepth)
+	}
 	pc := entry
 	for {
 		jitmem.Enter(pc, ctx)
@@ -1864,6 +1921,9 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, lo
 		switch ctx.Exit {
 		case jitmem.ExitReturn:
 			rt.jitFrames = rt.jitFrames[:n]
+			if rt.jitOpenUpvals != nil {
+				delete(rt.jitOpenUpvals, rt.frameDepth)
+			}
 			return Value(ctx.Ret), nil, true
 		case jitmem.ExitPreempt:
 			// Being here is the safepoint: this is ordinary Go, so the runtime
@@ -1871,13 +1931,19 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, lo
 			ctx.Args[1] = jitFuel
 			pc = ctx.Resume
 		case jitmem.ExitHelper:
-			if e := jitHelper(rt, fn, cl, ctx); e != nil {
+			if e := jitHelper(rt, fn, cl, locals, ctx); e != nil {
 				rt.jitFrames = rt.jitFrames[:n]
+				if rt.jitOpenUpvals != nil {
+					delete(rt.jitOpenUpvals, rt.frameDepth)
+				}
 				return mkundef(), e, true
 			}
 			pc = ctx.Resume
 		default:
 			rt.jitFrames = rt.jitFrames[:n]
+			if rt.jitOpenUpvals != nil {
+				delete(rt.jitOpenUpvals, rt.frameDepth)
+			}
 			return mkundef(), nil, false
 		}
 	}
@@ -1923,7 +1989,7 @@ func jitCopyArgs(window []Value) []Value {
 }
 
 // jitHelper runs what compiled code asked for.
-func jitHelper(rt *Runtime, fn *svFunc, cl *closure, ctx *jitmem.ExecContext) *ThrowError {
+func jitHelper(rt *Runtime, fn *svFunc, cl *closure, locals []Value, ctx *jitmem.ExecContext) *ThrowError {
 	switch ctx.Helper {
 	case jitHelperGetField:
 		recv := Value(ctx.Args[2])
@@ -2304,6 +2370,88 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, ctx *jitmem.ExecContext) *T
 			o.defineOwn(name, val, attrDefault)
 		}
 		ctx.Ret = uint64(recv)
+		return nil
+	case jitHelperClosure:
+		// Creating a closure, which is the one thing in this tier that lets a
+		// frame's locals outlive the frame.
+		//
+		// An upvalue over a local is a pointer into the locals slice, so the
+		// slice must never be handed to another frame at the same depth again —
+		// dropFrameLocals is how the interpreter says that, and it says it here
+		// for the same reason. The frame is then free to keep writing through
+		// that slice and the closure sees it, which is the whole point.
+		//
+		// The cells are shared per frame: two closures over the same slot must
+		// capture the same upvalue, or assigning through one would be invisible
+		// to the other. rt.jitOpenUpvals is that sharing, keyed by depth and
+		// dropped when the frame leaves.
+		child := fn.childFuncs[uint32(ctx.Args[3])]
+		upvals := make([]*upvalue, len(child.upvalDescs))
+		for i, d := range child.upvalDescs {
+			if !d.isLocal {
+				if cl == nil || d.index >= len(cl.upvalues) {
+					return rt.typeError("JIT upvalue")
+				}
+				upvals[i] = cl.upvalues[d.index]
+				continue
+			}
+			if d.index >= len(locals) {
+				return rt.typeError("JIT upvalue")
+			}
+			open := rt.jitOpenUpvals[rt.frameDepth]
+			if open == nil {
+				open = map[int]*upvalue{}
+				if rt.jitOpenUpvals == nil {
+					rt.jitOpenUpvals = map[int]map[int]*upvalue{}
+				}
+				rt.jitOpenUpvals[rt.frameDepth] = open
+				// The first capture in this frame is what commits it: from here
+				// the locals belong to the closures, not to the depth.
+				rt.dropFrameLocals(rt.frameDepth)
+			}
+			u, ok := open[d.index]
+			if !ok {
+				u = &upvalue{location: &locals[d.index]}
+				open[d.index] = u
+			}
+			upvals[i] = u
+		}
+		fv := rt.newFunction(child, upvals)
+		// An arrow that reads an inherited `super` takes the enclosing method's
+		// [[HomeObject]], and a function created in a class body belongs to that
+		// evaluation's private environment. Both come off the running closure,
+		// exactly as they do in the interpreter. A `with` capture cannot arrive
+		// here at all: the emitter refuses a child that wants one, because a
+		// compiled frame has no with-chain to give it.
+		if cl != nil {
+			if child.capturesHome && cl.home.IsObjectType() {
+				if ncl := rt.closureOf(fv); ncl != nil {
+					ncl.home = cl.home
+				}
+			}
+			if cl.privEnv != nil {
+				if ncl := rt.closureOf(fv); ncl != nil {
+					ncl.privEnv = cl.privEnv
+				}
+			}
+		}
+		ctx.Ret = uint64(fv)
+		return nil
+	case jitHelperPutUpval:
+		// Writing through an upvalue the running closure holds. SET_UPVAL leaves
+		// the value on the stack and PUT_UPVAL does not; the emitter decides
+		// that, so both reach here the same way.
+		n := int(ctx.SpillN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		i := int(uint32(ctx.Args[3]))
+		if cl == nil || i >= len(cl.upvalues) || cl.upvalues[i] == nil {
+			return rt.typeError("JIT upvalue")
+		}
+		v := Value(ctx.Spill[n-1])
+		cl.upvalues[i].set(v)
+		ctx.Ret = uint64(v)
 		return nil
 	case jitHelperTypeof:
 		// `typeof v`. The string is interned, so what lands on the operand stack

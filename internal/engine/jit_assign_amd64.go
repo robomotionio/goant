@@ -389,7 +389,8 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					}
 					push(noOrigin)
 				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpThis,
-					OpGetGlobal, OpGetUpval, OpObject, OpGetGlobalUndef, OpSpecialObj:
+					OpGetGlobal, OpGetUpval, OpObject, OpGetGlobalUndef, OpSpecialObj,
+					OpClosure:
 					push(noOrigin)
 				case OpArray:
 					for i := int(readU16(code, ip+1)); i > 0; i-- {
@@ -398,12 +399,17 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 						}
 					}
 					push(noOrigin)
-				case OpDefineField:
-					// obj val -> obj: the value is consumed and the receiver
-					// keeps whatever origin it had.
+				case OpDefineField, OpPutUpval:
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
+				case OpSetUpval:
+					// The value stays on the stack, and what it is demanded of is
+					// nothing: the write goes through a cell the runtime owns.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(noOrigin)
 				case OpJmpNotNullish:
 					if _, ok := pop(); !ok {
 						return nil, false
@@ -804,10 +810,15 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 						}
 					}
 					push(false)
-				case OpDefineField, OpJmpNotNullish:
+				case OpDefineField, OpJmpNotNullish, OpPutUpval:
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
+				case OpSetUpval:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(false)
 				case OpThrow:
 					if _, ok := pop(); !ok {
 						return nil, false
@@ -832,7 +843,7 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 						return nil, false
 					}
 					push(false)
-				case OpObject, OpGetGlobalUndef, OpSpecialObj:
+				case OpObject, OpGetGlobalUndef, OpSpecialObj, OpClosure:
 					push(false)
 				case OpGetGlobal, OpGetUpval:
 					// A global or a captured binding holds anything at all.

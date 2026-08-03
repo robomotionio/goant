@@ -262,3 +262,121 @@ func TestOtherSpecialObjKindsAreStillRefused(t *testing.T) {
 		t.Errorf("refused as %q, which does not say which kind is missing", why)
 	}
 }
+
+// Closures are the one thing in this tier that lets a frame's locals outlive the
+// frame, so these are the cases where getting it wrong is a wrong answer rather
+// than a refusal: shared cells, writes after capture, capture in a loop, and a
+// collection while the cells are the only reference to the values.
+func TestClosuresAgreeWithTheInterpreter(t *testing.T) {
+	for _, c := range []struct{ name, src string }{
+		{"capture", `function mk(n){ return function(){ return n; }; }
+			var s=0; for (var i=0;i<3000;i++) s += mk(i)(); s;`},
+		{"shared-cell", `function mk(n){
+				var v = n;
+				var get = function(){ return v; };
+				var set = function(x){ v = x; };
+				set(v + 1);
+				return get();
+			}
+			var s=0; for (var i=0;i<3000;i++) s += mk(i); s;`},
+		{"write-after-capture", `function mk(n){
+				var v = n;
+				var get = function(){ return v; };
+				v = v * 2;
+				return get();
+			}
+			var s=0; for (var i=0;i<3000;i++) s += mk(i); s;`},
+		{"counter", `function mkCounter(){
+				var c = 0;
+				return function(){ return ++c; };
+			}
+			var s=0; for (var i=0;i<3000;i++){ var f=mkCounter(); s += f()+f()+f(); } s;`},
+		{"loop-var", `function mk(n){
+				var fns = [];
+				for (var i = 0; i < 3; i++) { fns.push(function(){ return i; }); }
+				return fns[0]() + fns[1]() + fns[2]() + n;
+			}
+			var s=0; for (var i=0;i<3000;i++) s += mk(i); s;`},
+		{"loop-let", `function mk(n){
+				var fns = [];
+				for (let i = 0; i < 3; i++) { fns.push(function(){ return i; }); }
+				return fns[0]() + fns[1]() + fns[2]() + n;
+			}
+			var s=0; for (var i=0;i<3000;i++) s += mk(i); s;`},
+		{"nested-two-deep", `function a(n){
+				var x = n;
+				return function b(){ var y = x + 1; return function c(){ return x + y; }; };
+			}
+			var s=0; for (var i=0;i<3000;i++) s += a(i)()(); s;`},
+		{"upvalue-write-through", `function mk(n){
+				var v = n;
+				var bump = function(){ v++; };
+				bump(); bump();
+				return v;
+			}
+			var s=0; for (var i=0;i<3000;i++) s += mk(i); s;`},
+		{"outlives-frame", `var kept = null;
+			function mk(n){ var v = n; kept = function(){ return v; }; v = v + 100; }
+			var s=0; for (var i=0;i<3000;i++){ mk(i); s += kept(); } s;`},
+		{"recursive-closure", `function mk(n){
+				var f = function(k){ return k <= 0 ? n : f(k-1); };
+				return f(3);
+			}
+			var s=0; for (var i=0;i<3000;i++) s += mk(i); s;`},
+		{"param-captured", `function mk(a,b){ return function(){ return a + b; }; }
+			var s=0; for (var i=0;i<3000;i++) s += mk(i,1)(); s;`},
+		{"method-home", `class B { m(){ return 1; } }
+			class D extends B { m(){ var f = () => super.m(); return f(); } }
+			var d=new D(), s=0; for (var i=0;i<3000;i++) s += d.m(); s;`},
+		{"private-env", `class C { #v; constructor(n){ this.#v = n; }
+				get(){ var f = () => this.#v; return f(); } }
+			var s=0; for (var i=0;i<3000;i++) s += new C(i).get(); s;`},
+	} {
+		jitBothWays(t, "closure/"+c.name, c.src)
+	}
+}
+
+// An upvalue points into the frame's locals slice, so that slice must never be
+// handed to another frame at the same depth again. If dropFrameLocals were
+// missed, a later call at the same depth would overwrite the captured values —
+// and the shape that shows it is recursion, where the same depth is reused
+// immediately.
+func TestCapturedLocalsAreNotReusedByTheNextFrame(t *testing.T) {
+	src := `
+		function mk(n){ var v = n; return function(){ return v; }; }
+		function rec(d){ if (d === 0) return 0; var f = mk(d); var deeper = rec(d-1); return f() + deeper; }
+		var s = 0;
+		for (var i = 0; i < 2000; i++) s += rec(8);
+		s;
+	`
+	jitBothWays(t, "closure/no-reuse", src)
+}
+
+// The cells are the only reference to their values once the frame has gone, and
+// a helper that allocates can collect while a compiled frame is suspended.
+func TestCapturedValuesSurviveACollection(t *testing.T) {
+	src := `
+		var keep = [];
+		function mk(n){ var v = {tag: n}; return function(){ return v.tag; }; }
+		var s = 0;
+		for (var i = 0; i < 20000; i++) {
+			var f = mk(i);
+			if (i % 100 === 0) keep.push(f);
+			s += f();
+		}
+		for (var j = 0; j < keep.length; j++) s += keep[j]();
+		s;
+	`
+	jitBothWays(t, "closure/gc", src)
+}
+
+// A child that captures a `with` scope is refused, because the chain comes off
+// the enclosing frame's withStack and a compiled frame has none.
+func TestClosureCapturingWithIsRefused(t *testing.T) {
+	src := "function f(o){ with (o) { return function(){ return x; }; } }"
+	var why string
+	if c := jitCompile(jitFn(t, src), &why); c != nil {
+		c.free()
+		t.Fatal("compiled a function whose closure captures a with-scope")
+	}
+}
