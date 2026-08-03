@@ -2875,6 +2875,24 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// them anywhere. See jitSpillArgs for why that is sound for a compiled
 		// callee and not in general.
 		window := jitSpillArgs(ctx, base+1, argc)
+		// `f.call(x, …)` is a call to f, and treating it as one is the whole
+		// point of seeing through it here. Compiled as CALL_METHOD on f with the
+		// built-in `call` as the callee, it would otherwise run two general
+		// frames — one for the built-in and one for f — where f alone needs a
+		// compiled one. DeltaBlue reaches its superclass constructors this way
+		// and spent 15% of its run in the pair.
+		//
+		// Identity against the intrinsic, not a name: `f.call` is only this
+		// function if nothing has replaced Function.prototype.call, and a
+		// script that has replaced it must see its own. One level, because a
+		// chain of them (`call.call.call`) is a curiosity rather than a shape
+		// worth unrolling, and the general path still handles it.
+		if ctx.Helper == jitHelperCallMethod && callee == rt.funcProtoCall && rt.funcProtoCall != 0 && rt.isCallable(thisArg) {
+			callee, thisArg = thisArg, mkundef()
+			if len(window) > 0 {
+				thisArg, window = window[0], window[1:]
+			}
+		}
 		var v Value
 		var e *ThrowError
 		switch {

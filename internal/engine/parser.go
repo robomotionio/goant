@@ -2521,14 +2521,12 @@ func (p *parser) parseFunc() *Node {
 			p.errorf("'%s' may not be used as a function name in strict mode", fn.Str)
 		}
 	}
-	if fn.Flags&fnArrow == 0 && (referencesArguments(fn.Body) || paramsReferenceArguments(fn.Args)) {
-		// `arguments` is available in parameter default expressions too (they are
-		// evaluated after the arguments object is instantiated), so a reference
-		// there — `function*(x = arguments[2]){}` — must mark the function.
-		fn.Flags |= fnUsesArgs
-	}
-	if fn.Flags&fnArrow == 0 && referencesNewTarget(fn.Body) {
-		fn.Flags |= fnUsesNewTarget
+	if fn.Flags&fnArrow == 0 {
+		// Asked here rather than left to the compiler so the walk happens while
+		// the tree is warm; both are memoised on the node, so whichever asks
+		// first pays and the other reads a bit.
+		funcUsesArguments(fn)
+		funcUsesNewTarget(fn)
 	}
 	return fn
 }

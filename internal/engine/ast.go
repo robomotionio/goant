@@ -123,7 +123,17 @@ const (
 	fnStrLegacyOctal  = 1 << 24 // a string literal whose raw text contained a LegacyOctalEscapeSequence or NonOctalDecimalEscapeSequence (\1–\9, \0 followed by a digit) — a Syntax Error in strict code
 	nodeDupProto      = 1 << 25 // an object literal with two `__proto__:` data properties — an error only as a literal, allowed once reinterpreted as a destructuring pattern
 	nodeEscapedIdent  = 1 << 26
-	nodeEmptyParens   = 1 << 27 // the `()` of an empty arrow parameter list, parsed as NUndef so it is distinguishable from a parameter actually named `undefined` // an identifier written with a Unicode escape, so it is not the terminal symbol it spells (`\u0061sync` is not `async`)
+	// Memo bits for the three whole-body scans below: set once the answer is
+	// known, so the parser and the compiler — which both ask the same three
+	// questions of the same tree — walk it once between them rather than twice
+	// each. They were 22% of Octane's code-load, which does nothing but parse
+	// and compile.
+	fnArgsScanned   = 1 << 28
+	fnNTScanned     = 1 << 29
+	fnEvalScanned   = 1 << 30
+	fnHasDirectEval = 1 << 31
+
+	nodeEmptyParens = 1 << 27 // the `()` of an empty arrow parameter list, parsed as NUndef so it is distinguishable from a parameter actually named `undefined` // an identifier written with a Unicode escape, so it is not the terminal symbol it spells (`\u0061sync` is not `async`)
 )
 
 // Export flags (ant ast.h EX_*).
@@ -345,6 +355,49 @@ func paramsReferenceArguments(params []*Node) bool {
 		}
 	}
 	return false
+}
+
+// funcUsesArguments reports whether a non-arrow function needs an `arguments`
+// binding: its body reads the name, or a parameter default does — defaults are
+// evaluated after the arguments object exists, so `function (x = arguments[2])`
+// counts. Memoised, because both the parser and the compiler ask.
+func funcUsesArguments(n *Node) bool {
+	if n.Flags&fnArgsScanned == 0 {
+		n.Flags |= fnArgsScanned
+		if referencesArguments(n.Body) || paramsReferenceArguments(n.Args) {
+			n.Flags |= fnUsesArgs
+		}
+	}
+	return n.Flags&fnUsesArgs != 0
+}
+
+// funcUsesNewTarget reports whether the function's body mentions new.target,
+// counting a nested arrow's mention as its own — an arrow has none of its own
+// and captures the enclosing binding.
+func funcUsesNewTarget(n *Node) bool {
+	if n.Flags&fnNTScanned == 0 {
+		n.Flags |= fnNTScanned
+		if referencesNewTarget(n.Body) {
+			n.Flags |= fnUsesNewTarget
+		}
+	}
+	return n.Flags&fnUsesNewTarget != 0
+}
+
+// funcHasDirectEval reports whether the function's own code — its body or its
+// parameter list, not a nested function — contains a direct `eval(…)` call.
+func funcHasDirectEval(n *Node) bool {
+	if n.Flags&fnEvalScanned == 0 {
+		n.Flags |= fnEvalScanned
+		has := nodeHasDirectEval(n.Body)
+		for _, p := range n.Args {
+			has = has || nodeHasDirectEval(p)
+		}
+		if has {
+			n.Flags |= fnHasDirectEval
+		}
+	}
+	return n.Flags&fnHasDirectEval != 0
 }
 
 func paramDefaultRefsArguments(n *Node) bool {

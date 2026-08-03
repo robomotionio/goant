@@ -64,6 +64,10 @@ func (rt *Runtime) initFunctionBuiltin() {
 		}
 		return rt.callValue(this, thisArg, callArgs)
 	})
+	// Remembered so compiled code can see through it — see the call arm of
+	// jitHelper. Read back off the prototype rather than kept from the line
+	// above, because defMethod installs the function and does not return it.
+	rt.funcProtoCall, _ = proto.getOwn("call")
 
 	rt.defMethod(proto, "apply", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if !rt.isCallable(this) {

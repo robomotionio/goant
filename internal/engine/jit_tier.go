@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -234,6 +235,12 @@ func jitEligible(fn *svFunc) bool {
 	// puts it on the same `with` chain the interpreter does. evalVarObj is
 	// still refused: eval CODE adopts its caller's object, which arrives through
 	// a piece of runtime state a compiled frame is not part of.
+	if jitSkipName != "" && strings.Contains(fn.name, jitSkipName) {
+		return false
+	}
+	if jitMask != ^uint64(0) && jitMask&(1<<jitNameBucket(fn.name)) == 0 {
+		return false
+	}
 	return !fn.isAsync && !fn.isGenerator && !fn.isClassCtor &&
 		!fn.evalVarObj &&
 		fn.globalLex == nil && fn.moduleExports == nil
@@ -284,4 +291,35 @@ func jitTry(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals []Va
 		return mkundef(), nil, false
 	}
 	return fn.jit.code.jitRun(rt, fn, cl, fnVal, args, locals, this)
+}
+
+// The knobs for hunting a miscompilation, which is the one bug class this tier
+// can have that nothing else in the engine can: the interpreter is the oracle,
+// so the question is always "which compiled function disagrees with it".
+//
+// GOANT_JIT_SKIP=<substr> refuses any function whose name contains it, and
+// GOANT_JIT_MASK=<u64> refuses every function whose name does not hash into one
+// of the 64 buckets the mask selects. The mask is what makes a bisect possible:
+// compiling a function changes how often the others are entered, so an index
+// over compile order is not stable between runs and a hash of the name is.
+var jitSkipName = os.Getenv("GOANT_JIT_SKIP")
+
+var jitMask = func() uint64 {
+	if s := os.Getenv("GOANT_JIT_MASK"); s != "" {
+		v, err := strconv.ParseUint(s, 0, 64)
+		if err == nil {
+			return v
+		}
+	}
+	return ^uint64(0)
+}()
+
+// jitNameBucket is FNV-1a of the name, folded to one of 64 buckets.
+func jitNameBucket(name string) uint64 {
+	h := uint64(14695981039346656037)
+	for i := 0; i < len(name); i++ {
+		h ^= uint64(name[i])
+		h *= 1099511628211
+	}
+	return h % 64
 }

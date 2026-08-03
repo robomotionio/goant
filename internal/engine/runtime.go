@@ -80,15 +80,19 @@ type Runtime struct {
 	callSiteProto Value
 
 	// Core prototype objects (ant isolate proto fields).
-	objectProto     Value
-	functionProto   Value
-	arrayProto      Value
-	stringProto     Value
-	numberProto     Value
-	bigintProto     Value
-	booleanProto    Value
-	errorProto      Value
-	regexpProto     Value
+	objectProto   Value
+	functionProto Value
+	arrayProto    Value
+	stringProto   Value
+	numberProto   Value
+	bigintProto   Value
+	booleanProto  Value
+	errorProto    Value
+	regexpProto   Value
+	// %Function.prototype.call%, kept so a compiled `f.call(x, …)` can be
+	// recognised and forwarded to f rather than run as a call to it. See the
+	// call arm of jitHelper.
+	funcProtoCall   Value
 	regexpCtor      Value  // %RegExp% constructor (SpeciesConstructor default)
 	regexpProtoExec Value  // %RegExp.prototype.exec% (fast paths check for it)
 	regexpLastMatch string // RegExp.lastMatch (Annex B legacy static)

@@ -710,11 +710,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	// run time, else fall back to the static binding. A STRICT eval has its own
 	// variable environment, so a strict function needs none of this.
 	if !c.fn.isStrict && !c.fn.dynamicVars {
-		has := nodeHasDirectEval(n.Body)
-		for _, p := range n.Args {
-			has = has || nodeHasDirectEval(p)
-		}
-		if has {
+		if funcHasDirectEval(n) {
 			c.fn.dynamicVars = true
 			c.inheritedWith = true
 		}
@@ -883,7 +879,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 		// body or a nested arrow) to avoid the extra slot in the common case.
 		// A derived constructor always binds it: super() needs new.target, and a
 		// super() nested in an arrow reaches it only through this binding.
-		if referencesNewTarget(n.Body) || c.fn.isDerivedCtor {
+		if funcUsesNewTarget(n) || c.fn.isDerivedCtor {
 			ntSlot := c.declareVar("*newtarget*", false)
 			c.emit(OpSpecialObj)
 			c.emitByte(2)
@@ -914,8 +910,7 @@ func (c *compiler) compileFunctionBody(n *Node) {
 	// If a non-arrow function references `arguments` — in its body or a parameter
 	// default (evaluated after the arguments object exists) — bind it at entry,
 	// before the defaults run.
-	if n.Flags&fnArrow == 0 && (referencesArguments(n.Body) || paramsReferenceArguments(n.Args)) &&
-		!paramsBindArguments(n.Args) {
+	if n.Flags&fnArrow == 0 && funcUsesArguments(n) && !paramsBindArguments(n.Args) {
 		slot := c.declareVar("arguments", false)
 		c.emit(OpSpecialObj)
 		c.emitByte(0)
