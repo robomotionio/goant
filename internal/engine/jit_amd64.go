@@ -1535,8 +1535,15 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, locals []Value,
 	// collector reads Ret and the spill slots and the previous call's are stale.
 	n := len(rt.jitFrames)
 	var ctx *jitmem.ExecContext
+	reused := false
 	if n < cap(rt.jitFrames) {
-		ctx = rt.jitFrames[:n+1][n] // popped by an earlier call, still allocated
+		if ctx = rt.jitFrames[:n+1][n]; ctx != nil {
+			// Popped by an earlier call and still in the slot, which is what
+			// lets the push below re-extend the slice without storing a pointer
+			// into it again. That store is a Go write barrier and it showed as
+			// 1.5% of DeltaBlue.
+			reused = true
+		}
 	}
 	if ctx == nil {
 		ctx = new(jitmem.ExecContext)
@@ -1574,14 +1581,20 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, locals []Value,
 	if cl != nil && len(cl.upvalues) > 0 {
 		ctx.Upvals = uintptr(unsafe.Pointer(&cl.upvalues[0]))
 	}
-	if n < cap(rt.jitFrames) {
+	switch {
+	case reused:
+		rt.jitFrames = rt.jitFrames[:n+1] // the slot already holds ctx
+	case n < cap(rt.jitFrames):
 		rt.jitFrames = rt.jitFrames[:n+1]
 		rt.jitFrames[n] = ctx
-	} else {
+	default:
 		rt.jitFrames = append(rt.jitFrames, ctx)
 	}
-	defer func() { rt.jitFrames = rt.jitFrames[:n] }()
 
+	// Popped explicitly on each way out rather than by a deferred closure. A
+	// defer here is a call per compiled frame entry, and this function has three
+	// exits and no panic path of its own — a Go panic below is a bug in the
+	// engine, and the process is going down with it either way.
 	pc := entry
 	for {
 		jitmem.Enter(pc, ctx)
@@ -1590,6 +1603,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, locals []Value,
 		runtime.KeepAlive(locals)
 		switch ctx.Exit {
 		case jitmem.ExitReturn:
+			rt.jitFrames = rt.jitFrames[:n]
 			return Value(ctx.Ret), nil, true
 		case jitmem.ExitPreempt:
 			// Being here is the safepoint: this is ordinary Go, so the runtime
@@ -1598,10 +1612,12 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, locals []Value,
 			pc = ctx.Resume
 		case jitmem.ExitHelper:
 			if e := jitHelper(rt, fn, ctx); e != nil {
+				rt.jitFrames = rt.jitFrames[:n]
 				return mkundef(), e, true
 			}
 			pc = ctx.Resume
 		default:
+			rt.jitFrames = rt.jitFrames[:n]
 			return mkundef(), nil, false
 		}
 	}
