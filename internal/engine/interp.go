@@ -203,8 +203,9 @@ func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *
 	}
 	rt.frameStrict = fn.isStrict
 
-	// The arguments have no other reference: the caller spilled them out of its
-	// operand stack into a slice of their own.
+	// The arguments are the caller's spill area rather than a copy of it — see
+	// jitSpillArgs — so this frame's reference to them is dropped again below,
+	// before the context they point into can be reused.
 	f := rt.publishFrame(rt.frameDepth)
 	f.args, f.thisVal, f.fnVal = args, thisVal, fnVal
 	f.fn, f.cl = fn, cl
@@ -228,6 +229,12 @@ func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *
 
 	v, e, ok := fn.jit.code.jitRun(rt, fn, cl, locals, thisVal)
 
+	// The collector walks every frame rather than the live prefix, so a frame
+	// left behind holding the caller's spill window would still be scanned after
+	// that context had been popped and handed to an unrelated call. The Values in
+	// it would be whatever the next frame wrote — stale handles included, which
+	// is a poison panic rather than a wrong answer.
+	f.args = nil
 	rt.frameDepth--
 	rt.frameStrict, rt.activeNewTarget = savedStrict, savedActiveNT
 	if jitStats.enabled {

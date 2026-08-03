@@ -1623,6 +1623,45 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, locals []Value,
 	}
 }
 
+// jitSpillArgs is the call's arguments where compiled code already left them,
+// as a slice rather than a copy.
+//
+// A call site holds [callee, arg0 .. argN-1] on the operand stack and spilling
+// writes the whole stack to the context, so by the time this runs the arguments
+// are contiguous, in order, and rooted — SpillN covers them for as long as the
+// nested call runs. Copying them into a slice of their own was 9% of DeltaBlue
+// in `makeslice` alone, and every byte of it was already sitting here.
+//
+// It is not sound for an arbitrary callee, which is why jitCallCompiled takes
+// this and callValue does not. A sloppy function's mapped `arguments` object
+// writes *through* to the array it was given, and that array must not be
+// another frame's operand stack. The guarantee that it cannot happen here is
+// structural rather than a check: a mapped `arguments` needs SPECIAL_OBJ, that
+// opcode has no template, so a function containing one never compiles — and
+// jitCallCompiled runs only what compiled. TestCompiledCalleeCannotSeeArguments
+// is what keeps that true if SPECIAL_OBJ ever gets one.
+//
+// The other half of the argument is the collector's. These Values are marked
+// twice while the call runs, once through the caller's spill area and once
+// through the callee's published frame, which is harmless. What would not be
+// harmless is the callee's frame outliving the window, so jitCallCompiled drops
+// its reference on the way out rather than leaving a slice pointing into a
+// context that is about to be reused.
+func jitSpillArgs(ctx *jitmem.ExecContext, base, argc int) []Value {
+	if argc == 0 {
+		return nil
+	}
+	return unsafe.Slice((*Value)(unsafe.Pointer(&ctx.Spill[base])), argc)
+}
+
+// jitCopyArgs is the copy the general path still needs, for a callee that may
+// retain or write through the array it is given.
+func jitCopyArgs(window []Value) []Value {
+	args := make([]Value, len(window))
+	copy(args, window)
+	return args
+}
+
 // jitHelper runs what compiled code asked for.
 func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 	switch ctx.Helper {
@@ -1697,25 +1736,26 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 			base++
 		}
 		callee := Value(ctx.Spill[base])
-		args := make([]Value, argc)
-		for i := 0; i < argc; i++ {
-			args[i] = Value(ctx.Spill[base+1+i])
-		}
+		// The arguments as they already sit in the spill area, without copying
+		// them anywhere. See jitSpillArgs for why that is sound for a compiled
+		// callee and not in general.
+		window := jitSpillArgs(ctx, base+1, argc)
 		var v Value
 		var e *ThrowError
 		switch {
 		case ctx.Helper == jitHelperNew:
-			v, e = rt.construct(callee, args)
+			v, e = rt.construct(callee, jitCopyArgs(window))
 		default:
 			// The call compiled code makes most often is to another compiled
 			// function, and reaching one goes through callValue's dispatch,
 			// runFrame's bookkeeping, runCompiledFrame and jitTry — four
 			// functions and about 28% of DeltaBlue. jitCallCompiled is those
 			// four collapsed for that one case; anything it does not recognise
-			// falls through to the general path unchanged.
+			// falls through to the general path unchanged, with the copy this
+			// path skipped made there instead.
 			var ok bool
-			if v, e, ok = rt.jitCallCompiled(callee, thisArg, args); !ok {
-				v, e = rt.callValue(callee, thisArg, args)
+			if v, e, ok = rt.jitCallCompiled(callee, thisArg, window); !ok {
+				v, e = rt.callValue(callee, thisArg, jitCopyArgs(window))
 			}
 		}
 		if e != nil {

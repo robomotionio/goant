@@ -314,3 +314,37 @@ func TestJITConstructAgreesWithTheInterpreter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
 	}
 }
+
+// The aliasing in jitSpillArgs rests on one structural fact: a compiled callee
+// cannot observe the array it was handed, so handing it the caller's spill area
+// is indistinguishable from handing it a copy.
+//
+// The fact is that a mapped `arguments` object is the only thing that writes
+// through to that array, it needs SPECIAL_OBJ, and SPECIAL_OBJ has no template —
+// so a function containing one never compiles, and jitCallCompiled runs only
+// what compiled. This asserts the link rather than the conclusion: if SPECIAL_OBJ
+// ever gets a template, this fails, and jitSpillArgs has to be revisited before
+// it passes again.
+func TestCompiledCalleeCannotSeeArguments(t *testing.T) {
+	if jitHasTemplate(OpSpecialObj) {
+		t.Fatal("SPECIAL_OBJ has a template, so a compiled callee can now build a " +
+			"mapped `arguments` — jitSpillArgs hands it the caller's spill area, " +
+			"which it must never be able to write through")
+	}
+}
+
+// And the behaviour that depends on it, end to end: a sloppy callee whose mapped
+// `arguments` writes through to its parameters, called from a compiled caller.
+//
+// It takes the general path rather than the aliasing one, which is the point —
+// the answer has to be the interpreter's either way.
+func TestMappedArgumentsThroughACompiledCaller(t *testing.T) {
+	const src = `
+		function callee(a, b) { arguments[0] = 99; return a + b; }
+		function caller(x, y) { return callee(x, y); }
+		var s = 0;
+		for (var i = 0; i < 5000; i++) s += caller(1, 2);
+		s;
+	`
+	jitBothWays(t, "mapped-args.js", src)
+}
