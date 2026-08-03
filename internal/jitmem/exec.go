@@ -98,9 +98,18 @@ type ExecContext struct {
 	FnVal uint64
 }
 
-// SpillSlots bounds the operand stack a compiled function may hold across a
-// call out. It matches the number of registers the emitter has to give it.
-const SpillSlots = 10
+// SpillSlots bounds the operand stack a compiled function may hold.
+//
+// It used to match the register bank, because the whole operand stack was in
+// registers and this was only where they went across a call out. It is now the
+// stack itself: the emitter keeps the top nine slots in registers and the rest
+// here, so this is the depth past which a function is refused.
+//
+// Thirty-two rather than nine covers three quarters of what the old limit
+// refused, and rather than everything because the tail is long — the deepest
+// function in the Octane corpus wants 746 slots, and a context per frame depth
+// is not the place to pay for that.
+const SpillSlots = 32
 
 // Field offsets generated code compiles against.
 const (
