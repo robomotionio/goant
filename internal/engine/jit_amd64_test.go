@@ -311,10 +311,10 @@ func TestJITBailsOnNonNumbers(t *testing.T) {
 // to be refused rather than mis-compiled.
 func TestJITRefusesWhatItCannotModel(t *testing.T) {
 	for _, src := range []string{
-		"function f(a,b){ for (var k in a) { b = k; } return b; }", // for-in
 		"function f(a,b){ try { return a; } catch(e){} }",          // an exception handler
 		"function f(a,b){ with (a) { return b; } }",                // a with-chain
 		"function f(a,b){ return new.target; }",                    // new.target
+		"function f(a,b){ for (var v of a) { b = v; } return b; }", // a live iterator
 	} {
 		if c := jitCompile(jitFn(t, src), nil); c != nil {
 			c.free()

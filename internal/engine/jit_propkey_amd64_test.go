@@ -150,3 +150,67 @@ func TestPropkeyBatchCompiles(t *testing.T) {
 		c.free()
 	}
 }
+
+// The loop heads: FOR_IN, GET_LENGTH and the re-validation check the
+// for-in loop makes before every iteration.
+//
+// What makes these worth a differential test rather than a smoke test is that
+// the enumeration order and the re-validation are both observable. A for-in
+// loop whose body deletes a key it has not reached yet must skip it, and one
+// that adds a key must not see it — the snapshot and the recheck are two
+// separate mechanisms and compiled code has to keep both.
+func TestLoopHeadsAgreeWithTheInterpreter(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"for-in-order", `function f(o){ var s=""; for (var k in o) s += k + ","; return s; }
+			var o = {b:1, a:2, 2:3, 1:4, c:5};
+			var r=""; for (var i=0;i<3000;i++) r = f(o); r;`},
+		{"for-in-inherited", `function f(o){ var s=""; for (var k in o) s += k + ","; return s; }
+			function P(){ this.own = 1; } P.prototype.inherited = 2;
+			var r=""; for (var i=0;i<3000;i++) r = f(new P()); r;`},
+		{"for-in-body-deletes-a-later-key", `function f(o){ var s=""; for (var k in o) { delete o.c; s += k + ","; } return s; }
+			var r=""; for (var i=0;i<3000;i++) r = f({a:1,b:2,c:3}); r;`},
+		{"for-in-body-adds-a-key", `function f(o){ var s=""; for (var k in o) { o.zz = 1; s += k + ","; } return s; }
+			var r=""; for (var i=0;i<3000;i++) r = f({a:1,b:2}); r;`},
+		{"for-in-over-a-primitive", `function f(v){ var s=""; for (var k in v) s += k + ","; return s; }
+			var r=""; for (var i=0;i<3000;i++) r = f("abc") + "|" + f(1) + "|" + f(null) + "|" + f(undefined); r;`},
+		{"for-in-over-a-proxy", `function f(o){ var s=""; for (var k in o) s += k + ","; return s; }
+			var p = new Proxy({a:1,b:2}, {ownKeys: function(t){ return ["b","a"]; }});
+			var r=""; for (var i=0;i<3000;i++) r = f(p); r;`},
+		{"for-in-throws", `function f(o){ var s=""; for (var k in o) s += k; return s; }
+			for (var i=0;i<3000;i++) f({a:1});
+			var p = new Proxy({}, {ownKeys: function(){ throw new RangeError("k"); }});
+			var m=""; try { f(p); } catch(e) { m = e.name; } m;`},
+		{"length-of-anything", `function f(v){ return v.length; }
+			for (var i=0;i<3000;i++) f([1,2,3]);
+			var out=""; var vals=[[1,2,3],"abcd",function(a,b){},{length:9},[]];
+			for (var j=0;j<vals.length;j++) out += f(vals[j]) + ","; out;`},
+		{"length-throws", `function f(v){ return v.length; }
+			for (var i=0;i<3000;i++) f([1]);
+			var m=""; try { f(null); } catch(e) { m = e.name; } m;`},
+		{"length-through-a-getter", `function f(v){ return v.length; }
+			for (var i=0;i<3000;i++) f([1]);
+			var n=0, o = {get length(){ n++; return n; }};
+			f(o) + ":" + f(o) + ":" + n;`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
+	}
+}
+
+func TestLoopHeadsCompile(t *testing.T) {
+	saved := jitEnabled
+	jitEnabled = true
+	defer func() { jitEnabled = saved }()
+
+	for _, src := range []string{
+		"function f(o){ var s=0; for (var k in o) s++; return s; }",
+		"function f(v){ return v.length; }",
+	} {
+		var why string
+		c := jitCompile(jitFn(t, src), &why)
+		if c == nil {
+			t.Errorf("refused %q: %s", src, why)
+			continue
+		}
+		c.free()
+	}
+}

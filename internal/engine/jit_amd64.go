@@ -673,6 +673,50 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp--
 			ip += 5
 
+		case OpGetLength:
+			// `.length` without a name index, which the for-in and for-of loops
+			// emit to size their key array. A plain getField: an array's length
+			// is a real property here rather than a slot the emitter could read
+			// out of the object header.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperGetLength, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-1], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-1] = false
+			ip++
+
+		case OpForIn:
+			// The head of a for-in loop: the source is replaced by the keys to
+			// walk. A call, because a proxy's ownKeys trap runs here.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperForIn, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-1], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-1] = false
+			ip++
+
+		case OpHasPrivate:
+			// The for-in re-validation check rather than `#x in o`, which is
+			// what IN compiles: [key, obj] -> whether the property is still
+			// there and still enumerable. The loop re-asks before every
+			// iteration, because the body is free to delete what it is walking.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperStillEnum, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-2], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-2] = false
+			sp--
+			ip++
+
 		case OpSetHomeObj:
 			// [obj, method] unchanged: the method's [[HomeObject]] becomes obj,
 			// so a `super` reference inside it resolves against obj's prototype.
@@ -1691,7 +1735,7 @@ func jitHasTemplate(op Opcode) bool {
 		OpDefineField, OpJmpNotNullish, OpSpecialObj,
 		OpClosure, OpPutUpval, OpSetUpval, OpThrowError, OpUplus,
 		OpToPropkey, OpGlobal, OpDeleteVar, OpDefineMethod, OpPutConst,
-		OpSetHomeObj:
+		OpSetHomeObj, OpForIn, OpHasPrivate, OpGetLength:
 		return true
 	}
 	return false
@@ -1877,6 +1921,9 @@ const (
 	jitHelperDefineMethod = 36
 	jitHelperPutConst     = 37
 	jitHelperSetHomeObj   = 38
+	jitHelperForIn        = 39
+	jitHelperStillEnum    = 41
+	jitHelperGetLength    = 42
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -2687,6 +2734,37 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// sloppy code and the strict-mode reference check before an assignment.
 		nm := fn.constNames[uint32(ctx.Args[3])]
 		ctx.Ret = uint64(mkbool(rt.lookupGlobalLex(nm) != nil || rt.hasProp(rt.global, nm)))
+		return nil
+	case jitHelperGetLength:
+		n := int(ctx.SpillN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		v, e := rt.getField(Value(ctx.Spill[n-1]), "length")
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperForIn:
+		// The keys a for-in walks, snapshotted the way the interpreter takes
+		// them: a proxy's ownKeys trap runs here.
+		n := int(ctx.SpillN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		keys, e := rt.forInKeys(Value(ctx.Spill[n-1]))
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(keys)
+		return nil
+	case jitHelperStillEnum:
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		ctx.Ret = uint64(mkbool(rt.forInStillEnumerable(Value(ctx.Spill[n-1]), Value(ctx.Spill[n-2]))))
 		return nil
 	case jitHelperSetHomeObj:
 		n := int(ctx.SpillN)

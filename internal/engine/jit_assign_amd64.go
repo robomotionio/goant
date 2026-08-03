@@ -483,7 +483,7 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					}
 				case OpThrowError:
 					// Consumes nothing and never returns.
-				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey:
+				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey, OpForIn, OpGetLength:
 					// One operand consumed and demanded of nothing. `typeof`
 					// takes any value, and the nullish test is a tag comparison
 					// that a Number simply fails.
@@ -491,7 +491,7 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 						return nil, false
 					}
 					push(noOrigin)
-				case OpMod, OpIn, OpDelete, OpInstanceof, OpRegexp:
+				case OpMod, OpIn, OpDelete, OpInstanceof, OpRegexp, OpHasPrivate:
 					// Two consumed, one produced, and none of the four demands a
 					// Number of its operands: every one is emitted as a call to
 					// the same runtime the interpreter uses. `%` in particular is
@@ -901,7 +901,7 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 					}
 				case OpThrowError:
 					// Consumes nothing and never returns.
-				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey:
+				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey, OpForIn, OpGetLength:
 					// Consumes one and produces a value this tier does not model
 					// as a Number — even UPLUS, whose result is one, because it
 					// arrives through a helper that can hand back anything
@@ -910,7 +910,7 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 						return nil, false
 					}
 					push(false)
-				case OpMod, OpIn, OpDelete, OpInstanceof, OpRegexp:
+				case OpMod, OpIn, OpDelete, OpInstanceof, OpRegexp, OpHasPrivate:
 					// Two consumed, one produced. MOD does produce a Number, but
 					// saying so would let the arithmetic after it skip a guard on
 					// a value this tier fetches through a helper — and jsArith is
