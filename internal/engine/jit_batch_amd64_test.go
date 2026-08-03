@@ -377,12 +377,25 @@ func TestCapturedValuesSurviveACollection(t *testing.T) {
 // A child that captures a `with` scope is refused, because the chain comes off
 // the enclosing frame's withStack and a compiled frame has none.
 func TestClosureCapturingWithIsRefused(t *testing.T) {
-	src := "function f(o){ with (o) { return function(){ return x; }; } }"
+	// A child that captures a `with` chain is compilable now, but only from a
+	// parent that HAS one to give it: the chain lives on the frame, and a
+	// compiled frame builds one only if its own body does.
+	//
+	// The shape that still has nothing to hand over is a child capturing a
+	// chain the parent inherited rather than built — an arrow inside a function
+	// that was itself compiled inside a `with`.
+	compiles := "function f(o){ with (o) { return function(){ return x; }; } }"
 	var why string
-	if c := jitCompile(jitFn(t, src), &why); c != nil {
-		c.free()
-		t.Fatal("compiled a function whose closure captures a with-scope")
+	c := jitCompile(jitFn(t, compiles), &why)
+	if c == nil {
+		t.Fatalf("refused %q: %s", compiles, why)
 	}
+	c.free()
+
+	// And the chain really does reach the child.
+	jitBothWays(t, "closure-over-a-with.js", `
+		function f(o){ with (o) { return function(){ return x; }; } }
+		var s = 0; for (var i = 0; i < 3000; i++) s = f({x: i})(); s;`)
 }
 
 // The `arguments` object, in both its forms. Mapped writes through to the

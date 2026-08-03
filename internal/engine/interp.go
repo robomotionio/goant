@@ -749,284 +749,48 @@ restart:
 			withStack = withStack[:len(withStack)-1]
 			ip++
 		case OpWithGetVar:
+			// Reading a free name inside a `with` (or inside a function holding a
+			// direct eval, which is on the same chain). See withresolve.go: the
+			// walk, the traps and the compiler's baked-in lexical fallback are
+			// shared with the compiled tier rather than written twice.
 			name := fn.constNames[readU32(code, ip+1)]
-			// Reference mode (high bit of the fallback-kind byte): also push the
-			// resolved base beneath the value, so a paired OpWithPutVar can write
-			// back to the same base (compound assignment; see emitWithVarRef).
-			refMode := code[ip+7]&0x80 != 0
-			// 0x40: a `typeof` read, whose global fallback yields undefined instead
-			// of throwing for an unresolvable reference.
-			lenient := code[ip+7]&0x40 != 0
-			// 0x20 (reference mode only): resolve the base and push nothing else —
-			// a plain assignment creates its Reference without reading through it.
-			baseOnly := refMode && code[ip+7]&0x20 != 0
-			// 0x10 (reference mode only): the base is a call's `this`, so an absent
-			// one is undefined rather than the write-back marker.
-			thisMode := refMode && code[ip+7]&0x10 != 0
-			fbKind := code[ip+7] & 0x0f
-			found := false
-			for k := len(withStack) - 1; k >= 0; k-- {
-				has, e := rt.hasPropE(withStack[k], name)
-				if e != nil {
-					thrown = e
-					goto unwind
-				}
-				// @@unscopables is consulted only once the object actually has the
-				// name (Object Environment Record HasBinding step 2 returns before the
-				// @@unscopables Get when HasProperty is false).
-				unscoped := false
-				if has {
-					u, ue := rt.isUnscopable(withStack[k], name)
-					if ue != nil {
-						thrown = ue
-						goto unwind
-					}
-					unscoped = u
-				}
-				if has && !unscoped {
-					if baseOnly {
-						push(withStack[k])
-						found = true
-						break
-					}
-					// GetBindingValue performs its OWN HasProperty (step 2) before the
-					// Get (step 4) — a second observable trap on a Proxy binding object,
-					// distinct from the one HasBinding just did. If the binding is gone
-					// by then (an @@unscopables getter deleted it), strict code throws a
-					// ReferenceError and sloppy code reads undefined.
-					still, e := rt.hasPropE(withStack[k], name)
-					if e != nil {
-						thrown = e
-						goto unwind
-					}
-					if !still {
-						if fn.isStrict {
-							thrown = rt.referenceError(name + " is not defined")
-							goto unwind
-						}
-						if refMode {
-							push(withStack[k])
-						}
-						push(mkundef())
-						found = true
-						break
-					}
-					v, e := rt.getField(withStack[k], name)
-					if e != nil {
-						thrown = e
-						goto unwind
-					}
-					if refMode {
-						push(withStack[k]) // base
-					}
-					push(v)
-					found = true
-					break
-				}
+			flags := code[ip+7]
+			base, wv, we := rt.withGetVar(fn, cl, locals, withStack, name, flags, int(readU16(code, ip+5)))
+			if we != nil {
+				thrown = we
+				goto unwind
 			}
-			if !found {
-				if refMode {
-					if thisMode {
-						push(mkundef()) // no binding object: `this` is undefined
-					} else {
-						push(tEmpty) // base marker: use the lexical fallback on write
-					}
-				}
-				if baseOnly {
-					ip += 8
-					continue
-				}
-				// No with-object binds the name: fall back to the lexical resolution
-				// the compiler baked into the spare operand bytes (kind@ip+7, index@ip+5).
-				switch fbKind {
-				case 1: // local slot
-					lv := locals[readU16(code, ip+5)]
-					if lv.IsEmpty() {
-						thrown = rt.referenceError("Cannot access a lexical binding before initialization")
-						goto unwind
-					}
-					push(lv)
-				case 2: // upvalue
-					uvv := cl.upvalues[readU16(code, ip+5)].get()
-					if uvv.IsEmpty() {
-						thrown = rt.referenceError("Cannot access a lexical binding before initialization")
-						goto unwind
-					}
-					push(uvv)
-				default: // global
-					// GetValue on an unresolvable reference throws, exactly as a plain
-					// OpGetGlobal would; `typeof` marks itself lenient instead.
-					if !lenient && !rt.hasProp(rt.global, name) {
-						thrown = rt.referenceError(name + " is not defined")
-						goto unwind
-					}
-					v, ge := rt.getField(rt.global, name)
-					if ge != nil {
-						thrown = ge
-						goto unwind
-					}
-					push(v)
-				}
+			if flags&withFlagRef != 0 {
+				push(base) // the base a paired WITH_PUT_VAR writes back through
+			}
+			if flags&withFlagRef == 0 || flags&withFlagBaseOnly == 0 {
+				push(wv)
 			}
 			ip += 8
 		case OpWithPutVar:
 			name := fn.constNames[readU32(code, ip+1)]
-			refMode := code[ip+7]&0x80 != 0
-			fbKind := code[ip+7] & 0x7f
-			val := pop()
-			if refMode {
-				// Reference mode: write to the base captured by the paired
-				// OpWithGetVar (compound assignment). tEmpty means "use the lexical
-				// fallback". The assignment value is left on the stack (it is an
-				// expression).
-				base := pop()
-				if base.IsEmpty() {
-					switch fbKind {
-					case 1:
-						locals[readU16(code, ip+5)] = val
-					case 2:
-						cl.upvalues[readU16(code, ip+5)].set(val)
-					default:
-						// A strict assignment to a name bound by no with-object and no
-						// lexical binding is a ReferenceError (assignment to an undeclared
-						// global), matching OpPutGlobal.
-						if fn.isStrict && !rt.hasProp(rt.global, name) {
-							thrown = rt.referenceError(name + " is not defined")
-							goto unwind
-						}
-						if !rt.setProp(rt.global, name, val) && fn.isStrict {
-							thrown = rt.typeError("Cannot assign to read only property '" + name + "'")
-							goto unwind
-						}
-					}
-				} else {
-					// Object Environment Record SetMutableBinding: if the bound property
-					// was deleted between the reference's read and this write (e.g. a
-					// getter deleted it), a strict assignment is a ReferenceError rather
-					// than re-creating the property.
-					has, he := rt.hasPropE(base, name)
-					if he != nil {
-						thrown = he
-						goto unwind
-					}
-					if !has && fn.isStrict {
-						thrown = rt.referenceError(name + " is not defined")
-						goto unwind
-					}
-					if e := rt.setField(base, name, val); e != nil {
-						thrown = e
-						goto unwind
-					}
-				}
-				push(val)
-				ip += 8
-				continue
+			flags := code[ip+7]
+			wval := pop()
+			wbase := mkundef()
+			if flags&withFlagRef != 0 {
+				wbase = pop()
 			}
-			stored := false
-			for k := len(withStack) - 1; k >= 0; k-- {
-				has, e := rt.hasPropE(withStack[k], name)
-				if e != nil {
-					thrown = e
-					goto unwind
-				}
-				// @@unscopables is consulted only once the object actually has the
-				// name (Object Environment Record HasBinding step 2 returns before the
-				// @@unscopables Get when HasProperty is false).
-				unscoped := false
-				if has {
-					u, ue := rt.isUnscopable(withStack[k], name)
-					if ue != nil {
-						thrown = ue
-						goto unwind
-					}
-					unscoped = u
-				}
-				if has && !unscoped {
-					// SetMutableBinding re-checks HasProperty (step 1) before the Set
-					// (step 3): a second observable trap, and the point at which a
-					// strict write to a binding deleted since HasBinding is caught.
-					stillExists, se := rt.hasPropE(withStack[k], name)
-					if se != nil {
-						thrown = se
-						goto unwind
-					}
-					if !stillExists && fn.isStrict {
-						thrown = rt.referenceError(name + " is not defined")
-						goto unwind
-					}
-					if e := rt.setField(withStack[k], name, val); e != nil {
-						thrown = e
-						goto unwind
-					}
-					stored = true
-					break
-				}
+			if we := rt.withPutVar(fn, cl, locals, withStack, name, flags,
+				int(readU16(code, ip+5)), wbase, wval); we != nil {
+				thrown = we
+				goto unwind
 			}
-			if !stored {
-				// Fall back to the compiler's lexical resolution (see OpWithGetVar).
-				switch fbKind {
-				case 1: // local slot
-					locals[readU16(code, ip+5)] = val
-				case 2: // upvalue
-					cl.upvalues[readU16(code, ip+5)].set(val)
-				default: // global
-					// Strict assignment to an undeclared global is a ReferenceError
-					// (matches OpPutGlobal); this surfaces when a strict function nested
-					// in a `with` writes a name the with-object no longer binds.
-					if fn.isStrict && !rt.hasProp(rt.global, name) {
-						thrown = rt.referenceError(name + " is not defined")
-						goto unwind
-					}
-					if !rt.setProp(rt.global, name, val) && fn.isStrict {
-						thrown = rt.typeError("Cannot assign to read only property '" + name + "'")
-						goto unwind
-					}
-				}
+			if flags&withFlagRef != 0 {
+				push(wval) // reference mode is an expression: the value stays
 			}
 			ip += 8
 		case OpWithDelVar:
-			name := fn.constNames[readU32(code, ip+1)]
-			done := false
-			for k := len(withStack) - 1; k >= 0; k-- {
-				has, e := rt.hasPropE(withStack[k], name)
-				if e != nil {
-					thrown = e
-					goto unwind
-				}
-				// @@unscopables is consulted only once the object actually has the
-				// name (Object Environment Record HasBinding step 2 returns before the
-				// @@unscopables Get when HasProperty is false).
-				unscoped := false
-				if has {
-					u, ue := rt.isUnscopable(withStack[k], name)
-					if ue != nil {
-						thrown = ue
-						goto unwind
-					}
-					unscoped = u
-				}
-				if has && !unscoped {
-					ok, e := rt.deleteElement(withStack[k], rt.internString(name))
-					if e != nil {
-						thrown = e
-						goto unwind
-					}
-					push(mkbool(ok))
-					done = true
-					break
-				}
+			wok, we := rt.withDelVar(withStack, fn.constNames[readU32(code, ip+1)])
+			if we != nil {
+				thrown = we
+				goto unwind
 			}
-			if !done {
-				// Not bound by a with-object: fall back to a global-object delete (a
-				// declared var/function is non-configurable → false, an implicit global
-				// or absent name → true).
-				ok, e := rt.deleteElement(rt.global, rt.internString(name))
-				if e != nil {
-					thrown = e
-					goto unwind
-				}
-				push(mkbool(ok))
-			}
+			push(mkbool(wok))
 			ip += 5
 		case OpSpecialObj:
 			kind := code[ip+1]

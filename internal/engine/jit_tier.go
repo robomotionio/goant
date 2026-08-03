@@ -227,8 +227,15 @@ func jitTryLoop(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals 
 // object. Compiled code writes locals straight into the frame's slice and knows
 // about none of it.
 func jitEligible(fn *svFunc) bool {
+	// dynamicVars is no longer here. A function containing a direct eval carries
+	// a variable object that the eval's `var` declarations land on and that this
+	// function's own free names resolve through — and both of those are now
+	// things a compiled frame can do, because it builds the object on entry and
+	// puts it on the same `with` chain the interpreter does. evalVarObj is
+	// still refused: eval CODE adopts its caller's object, which arrives through
+	// a piece of runtime state a compiled frame is not part of.
 	return !fn.isAsync && !fn.isGenerator && !fn.isClassCtor &&
-		!fn.evalVarObj && !fn.dynamicVars &&
+		!fn.evalVarObj &&
 		fn.globalLex == nil && fn.moduleExports == nil
 }
 

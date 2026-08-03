@@ -833,6 +833,132 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp++
 			ip += 5
 
+		case OpEval:
+			// A direct eval site: [this?, callee, arg0..argN-1] -> the result.
+			// Whether the callee is still the intrinsic %eval% is a run-time
+			// question — the binding can be reassigned — so the helper decides,
+			// exactly as the interpreter's case does.
+			//
+			// A site the compiler marked as being in tail position is refused.
+			// When the callee turns out not to be %eval% the language requires a
+			// PROPER tail call there, and this template cannot make one — it is
+			// a helper, and a helper runs with the compiled frame still on the
+			// Go stack. Compiling it as an ordinary call passes every test that
+			// checks the value and fails the three that recurse 100,000 deep.
+			scopeIdx := int(readU16(code, ip+1))
+			if scopeIdx&evalTailFlag != 0 {
+				return refuse(why, "eval-in-tail-position")
+			}
+			argc := int(readU16(code, ip+3))
+			need := argc + 1
+			if scopeIdx&evalWithThisFlag != 0 {
+				need++
+			}
+			if argc < 0 || sp < need {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(uint32(scopeIdx))|uint64(uint32(argc))<<32)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperEval, &fixups, deepStack) {
+				return refuse(why, "stack-too-deep")
+			}
+			dst := jitSlot(sp - need)
+			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-need] = false
+			sp -= need - 1
+			ip += 5
+
+		case OpEnterWith, OpExitWith:
+			// The `with` chain lives on the published frame, which the collector
+			// already walks — see markFrames. A compiled frame therefore keeps
+			// it exactly where an interpreted one does, and the helpers below
+			// resolve against the same slice.
+			if op == OpEnterWith && sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			h := uint32(jitHelperEnterWith)
+			if op == OpExitWith {
+				h = jitHelperExitWith
+			}
+			if !jitCallHelper(a, sp, h, &fixups, deepStack) {
+				return refuse(why, "stack-too-deep")
+			}
+			if op == OpEnterWith {
+				sp--
+			}
+			ip++
+
+		case OpWithGetVar:
+			// Reading a free name through the chain. How many operands it
+			// produces is in the flags byte rather than in opTable: reference
+			// mode also yields the base a paired write goes back through, and
+			// the base-only form yields that and nothing else.
+			flags := code[ip+7]
+			push := 1
+			if flags&withFlagRef != 0 && flags&withFlagBaseOnly == 0 {
+				push = 2
+			}
+			if sp+push > jitMaxDepth {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1))|uint64(readU16(code, ip+5))<<32|uint64(flags)<<48)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperWithGetVar, &fixups, deepStack) {
+				return refuse(why, "stack-too-deep")
+			}
+			// The base travels in Args[2], which the collector traces, and the
+			// value in Ret — the two slots every other helper already uses.
+			if flags&withFlagRef != 0 {
+				a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffArgs+16)
+				kind[sp] = false
+				sp++
+			}
+			if flags&withFlagRef == 0 || flags&withFlagBaseOnly == 0 {
+				a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffRet)
+				kind[sp] = false
+				sp++
+			}
+			ip += 8
+
+		case OpWithPutVar:
+			flags := code[ip+7]
+			need := 1
+			if flags&withFlagRef != 0 {
+				need = 2
+			}
+			if sp < need {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1))|uint64(readU16(code, ip+5))<<32|uint64(flags)<<48)
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperWithPutVar, &fixups, deepStack) {
+				return refuse(why, "stack-too-deep")
+			}
+			if flags&withFlagRef != 0 {
+				// Reference mode is an expression: the value stays, in the slot
+				// the base occupied.
+				a.MovRegMem(jitSlot(sp-2), jitasm.RegCtx, jitmem.CtxOffRet)
+				kind[sp-2] = false
+				sp--
+			} else {
+				sp--
+			}
+			ip += 8
+
+		case OpWithDelVar:
+			if sp >= jitMaxDepth {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1)))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperWithDelVar, &fixups, deepStack) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp] = false
+			sp++
+			ip += 5
+
 		case OpToPropkey:
 			// ToPropertyKey, which template substitution emits so `${obj}` takes
 			// the string path. It can run a toString, so it is a call.
@@ -977,7 +1103,10 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if int(idx) >= len(fn.childFuncs) {
 				return refuse(why, "closure-index")
 			}
-			if fn.childFuncs[idx].capturesWith {
+			if fn.childFuncs[idx].capturesWith && !jitHasWith(fn) {
+				// The child resolves its free names against a chain it takes from
+				// here. A compiled frame has one only if this function builds it,
+				// so without a `with` of its own there is nothing to hand over.
 				return refuse(why, "closure/captures-with")
 			}
 			if sp >= jitMaxDepth {
@@ -2050,7 +2179,8 @@ func jitHasTemplate(op Opcode) bool {
 		OpClosure, OpPutUpval, OpSetUpval, OpThrowError, OpUplus,
 		OpToPropkey, OpGlobal, OpDeleteVar, OpDefineMethod, OpPutConst,
 		OpSetHomeObj, OpForIn, OpHasPrivate, OpGetLength,
-		OpTailCall, OpTailCallMethod, OpTryPush, OpTryPop, OpCatch:
+		OpTailCall, OpTailCallMethod, OpTryPush, OpTryPop, OpCatch,
+		OpEnterWith, OpExitWith, OpWithGetVar, OpWithPutVar, OpWithDelVar, OpEval:
 		return true
 	}
 	return false
@@ -2237,6 +2367,12 @@ const (
 	jitHelperDeleteVar    = 35
 	jitHelperDefineMethod = 36
 	jitHelperPutConst     = 37
+	jitHelperEnterWith    = 43
+	jitHelperExitWith     = 44
+	jitHelperWithGetVar   = 45
+	jitHelperWithPutVar   = 46
+	jitHelperWithDelVar   = 47
+	jitHelperEval         = 48
 	jitHelperSetHomeObj   = 38
 	jitHelperForIn        = 39
 	jitHelperStillEnum    = 41
@@ -2360,6 +2496,31 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		return mkundef(), nil, false
 	}
 	pc := entry
+	// A function containing a direct eval carries a variable object: the eval's
+	// `var` declarations that name nothing this function declared are created on
+	// it, and this function's free names — compiled as with-routed accesses —
+	// find them there. Innermost of the chain, outside this frame's locals, and
+	// null-prototyped so nothing from Object.prototype can shadow an outer name.
+	//
+	// A function compiled lexically inside a `with` resolves its free names
+	// against the chain it captured, so a frame running one starts with that
+	// chain rather than an empty one — the same line runFrameBody opens with.
+	//
+	// Only on a normal entry. An OSR entry takes over a frame that is already
+	// running, whose chain is whatever it has entered since, and syncFrame has
+	// already published it.
+	if entry == c.entry && (fn.dynamicVars || (cl != nil && len(cl.capturedWith) > 0)) {
+		if f := rt.jitFrame(); f != nil {
+			f.withStack = f.withStack[:0]
+			if cl != nil {
+				f.withStack = append(f.withStack, cl.capturedWith...)
+			}
+			if fn.dynamicVars {
+				f.varObj = rt.newObject(mknull())
+				f.withStack = append(f.withStack, f.varObj)
+			}
+		}
+	}
 	for {
 		// The context is rooted for as long as compiled code can be suspended in a
 		// helper holding values nothing else refers to — see markRoots — and that
@@ -3065,6 +3226,17 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			upvals[i] = u
 		}
 		fv := rt.newFunction(child, upvals)
+		if child.capturesWith {
+			// The child's free names resolve against the objects on this frame's
+			// chain when it is later invoked, so it takes a copy — exactly as the
+			// interpreter's CLOSURE does, and for the same reason: the chain
+			// belongs to this frame and the child outlives it.
+			if f := rt.jitFrame(); f != nil && len(f.withStack) > 0 {
+				if ncl := rt.closureOf(fv); ncl != nil {
+					ncl.capturedWith = append([]Value(nil), f.withStack...)
+				}
+			}
+		}
 		// An arrow that reads an inherited `super` takes the enclosing method's
 		// [[HomeObject]], and a function created in a class body belongs to that
 		// evaluation's private environment. Both come off the running closure,
@@ -3233,6 +3405,138 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			return rt.typeError("JIT operand stack")
 		}
 		rt.setMethodHome(Value(jitSlotAt(ctx, n-1)), Value(jitSlotAt(ctx, n-2)))
+		return nil
+	case jitHelperEval:
+		// A direct eval. The frame hands the eval its dynamic scope — the
+		// with-objects its free names must resolve against and the variable
+		// object its own `var` declarations create bindings on — and takes it
+		// back afterwards, so a nested eval or a call made from the body cannot
+		// see a stale chain.
+		scopeIdx := int(uint32(ctx.Args[3]))
+		argc := int(uint32(ctx.Args[3] >> 32))
+		withThis := scopeIdx&evalWithThisFlag != 0
+		scopeIdx &^= evalTailFlag | evalWithThisFlag
+		depth := argc + 1
+		if withThis {
+			depth++
+		}
+		n := int(ctx.StackN)
+		if argc < 0 || n < depth {
+			return rt.typeError("JIT operand stack")
+		}
+		base := n - depth
+		evalThis := mkundef()
+		if withThis {
+			evalThis = jitSlotAt(ctx, base)
+			base++
+		}
+		callee := jitSlotAt(ctx, base)
+		evalArgs := jitCopyArgs(jitSpillArgs(ctx, base+1, argc))
+		f := rt.jitFrame()
+		if f == nil {
+			return rt.typeError("JIT frame")
+		}
+		switch {
+		case rt.evalFn == 0 || callee != rt.evalFn:
+			// The binding was reassigned: an ordinary call after all.
+			v, e := rt.callValue(callee, evalThis, evalArgs)
+			if e != nil {
+				return e
+			}
+			ctx.Ret = uint64(v)
+		case argc == 0:
+			ctx.Ret = uint64(mkundef())
+		case !evalArgs[0].IsString():
+			ctx.Ret = uint64(evalArgs[0])
+		default:
+			var sc *evalScope
+			if scopeIdx < len(fn.evalScopes) {
+				sc = fn.evalScopes[scopeIdx]
+			}
+			var privEnv *privScope
+			if cl != nil {
+				privEnv = cl.privEnv
+			}
+			savedVarObj, savedWithStack := rt.callerVarObj, rt.callerWithStack
+			savedPrivEnv := rt.callerPrivEnv
+			rt.callerVarObj, rt.callerWithStack, rt.callerPrivEnv = f.varObj, f.withStack, privEnv
+			v, e := rt.performDirectEval(rt.strGo(evalArgs[0]), sc, cl,
+				Value(ctx.This), mkundef(), jitCaptureUpvalue(rt, locals))
+			rt.callerVarObj, rt.callerWithStack, rt.callerPrivEnv = savedVarObj, savedWithStack, savedPrivEnv
+			if e != nil {
+				return e
+			}
+			ctx.Ret = uint64(v)
+		}
+		return nil
+	case jitHelperEnterWith:
+		// `with (o)`: ToObject, then onto this frame's chain. A primitive is
+		// wrapped so that property lookups resolve on the wrapper.
+		n := int(ctx.StackN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		obj, e := rt.toObjectValue(jitSlotAt(ctx, n-1))
+		if e != nil {
+			return e
+		}
+		f := rt.jitFrame()
+		if f == nil {
+			return rt.typeError("JIT frame")
+		}
+		f.withStack = append(f.withStack, obj)
+		return nil
+	case jitHelperExitWith:
+		f := rt.jitFrame()
+		if f == nil || len(f.withStack) == 0 {
+			return rt.typeError("JIT with-chain")
+		}
+		f.withStack = f.withStack[:len(f.withStack)-1]
+		return nil
+	case jitHelperWithGetVar, jitHelperWithPutVar:
+		// The name index, the lexical fallback's index and the flags byte, in
+		// the one immediate the exit protocol carries.
+		name := fn.constNames[uint32(ctx.Args[3])]
+		fbIndex := int(uint16(ctx.Args[3] >> 32))
+		flags := byte(ctx.Args[3] >> 48)
+		f := rt.jitFrame()
+		if f == nil {
+			return rt.typeError("JIT frame")
+		}
+		if ctx.Helper == jitHelperWithGetVar {
+			base, v, e := rt.withGetVar(fn, cl, locals, f.withStack, name, flags, fbIndex)
+			if e != nil {
+				return e
+			}
+			ctx.Args[2], ctx.Ret = uint64(base), uint64(v)
+			return nil
+		}
+		n := int(ctx.StackN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		val, base := jitSlotAt(ctx, n-1), mkundef()
+		if flags&withFlagRef != 0 {
+			if n < 2 {
+				return rt.typeError("JIT operand stack")
+			}
+			base = jitSlotAt(ctx, n-2)
+		}
+		if e := rt.withPutVar(fn, cl, locals, f.withStack, name, flags, fbIndex, base, val); e != nil {
+			return e
+		}
+		ctx.Ret = uint64(val)
+		return nil
+	case jitHelperWithDelVar:
+		f := rt.jitFrame()
+		if f == nil {
+			return rt.typeError("JIT frame")
+		}
+		ok, e := rt.withDelVar(f.withStack, fn.constNames[uint32(ctx.Args[3])])
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(mkbool(ok))
 		return nil
 	case jitHelperPutConst:
 		// The write half of a strict assignment to an unqualified name. The

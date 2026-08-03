@@ -506,9 +506,41 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					// Consumes nothing and never returns.
 				case OpTryPush, OpTryPop:
 					// The handler stack, which is not the operand stack.
-				case OpCatch:
-					// The thrown value, which came from outside this frame.
+				case OpExitWith:
+					// The with-chain, which is not the operand stack either.
+				case OpEnterWith:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+				case OpCatch, OpWithDelVar:
+					// A value from outside this frame's arithmetic.
 					push(noOrigin)
+				case OpEval:
+					n := int(readU16(code, ip+3)) + 1
+					if int(readU16(code, ip+1))&evalWithThisFlag != 0 {
+						n++
+					}
+					for ; n > 0; n-- {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+					}
+					push(noOrigin)
+				case OpWithGetVar:
+					push(noOrigin)
+					if code[ip+7]&withFlagRef != 0 && code[ip+7]&withFlagBaseOnly == 0 {
+						push(noOrigin)
+					}
+				case OpWithPutVar:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if code[ip+7]&withFlagRef != 0 {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+						push(noOrigin)
+					}
 				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey, OpForIn, OpGetLength:
 					// One operand consumed and demanded of nothing. `typeof`
 					// takes any value, and the nullish test is a tag comparison
@@ -585,6 +617,32 @@ func jitStackEffect(fn *svFunc, ip int) (pop, push int, ok bool) {
 		// Nothing after it runs, so what it leaves is not a depth the analysis
 		// should propagate. One popped and none pushed is the honest local
 		// answer; jitBlockDepths stops at the branch this ends the block with.
+		return 1, 0, true
+	case OpEval:
+		// The operand is how many arguments follow, plus the callee, plus a
+		// receiver when the callee came through a `with` chain. opTable cannot
+		// say any of that.
+		n := int(readU16(code, ip+3)) + 1
+		if int(readU16(code, ip+1))&evalWithThisFlag != 0 {
+			n++
+		}
+		return n, 1, true
+	case OpWithGetVar:
+		// opTable records one pushed, and reference mode pushes two — the base a
+		// paired write goes back through, beneath the value — while the
+		// base-only form pushes just the base. The flags byte is the operand
+		// that decides, exactly as the count is for CALL.
+		flags := code[ip+7]
+		if flags&withFlagRef == 0 || flags&withFlagBaseOnly != 0 {
+			return 0, 1, true
+		}
+		return 0, 2, true
+	case OpWithPutVar:
+		// One consumed and none produced in the plain form; in reference mode
+		// two consumed and the assigned value produced, which is net one off.
+		if code[ip+7]&withFlagRef != 0 {
+			return 2, 1, true
+		}
 		return 1, 0, true
 	case OpTailCall, OpTailCallMethod:
 		// Also a terminator, and opTable's fixed counts do not describe it: the
@@ -948,8 +1006,39 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 					// Consumes nothing and never returns.
 				case OpTryPush, OpTryPop:
 					// The handler stack, which is not the operand stack.
-				case OpCatch:
+				case OpExitWith:
+				case OpEnterWith:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+				case OpCatch, OpWithDelVar:
 					push(false)
+				case OpEval:
+					n := int(readU16(code, ip+3)) + 1
+					if int(readU16(code, ip+1))&evalWithThisFlag != 0 {
+						n++
+					}
+					for ; n > 0; n-- {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+					}
+					push(false)
+				case OpWithGetVar:
+					push(false)
+					if code[ip+7]&withFlagRef != 0 && code[ip+7]&withFlagBaseOnly == 0 {
+						push(false)
+					}
+				case OpWithPutVar:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if code[ip+7]&withFlagRef != 0 {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+						push(false)
+					}
 				case OpUplus, OpTypeof, OpIsUndefOrNull, OpToPropkey, OpForIn, OpGetLength:
 					// Consumes one and produces a value this tier does not model
 					// as a Number — even UPLUS, whose result is one, because it
