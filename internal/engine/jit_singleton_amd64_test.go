@@ -189,3 +189,65 @@ func TestSingletonOperandsCoverTheInterestingCases(t *testing.T) {
 		}
 	}
 }
+
+// `instanceof` is a call-out, so what has to be checked is that the compiled
+// path and the interpreted one give the same answer everywhere it gets
+// interesting: a bound function, a @@hasInstance of the user's own, a proxy, a
+// non-callable right operand (a TypeError), and a prototype chain worth walking.
+func TestInstanceofAgreesWithTheInterpreter(t *testing.T) {
+	cases := []struct{ name, src string }{
+		{"plain", `function A(){}; function B(){}; B.prototype = new A();
+			function f(v){ return (v instanceof A) ? 1 : 0; }
+			var b = new B(), s = 0;
+			for (var i = 0; i < 500; i++) s += f(i % 2 ? b : {});
+			s;`},
+		{"chain", `function A(){}; function B(){}; B.prototype = Object.create(A.prototype);
+			function C(){}; C.prototype = Object.create(B.prototype);
+			function f(v){ return (v instanceof A) ? 1 : 0; }
+			var c = new C(), s = 0;
+			for (var i = 0; i < 500; i++) s += f(c);
+			s;`},
+		{"primitive-left", `function A(){};
+			function f(v){ return (v instanceof A) ? 1 : 0; }
+			var s = 0;
+			for (var i = 0; i < 500; i++) s += f(i);
+			s;`},
+		{"not-callable", `function f(v, c){ return (v instanceof c) ? 1 : 0; }
+			var s = 0, thrown = 0;
+			function A(){}
+			for (var i = 0; i < 500; i++) s += f(new A(), A);
+			try { f({}, {}); } catch (e) { thrown = e instanceof TypeError ? 1 : 2; }
+			"" + s + ":" + thrown;`},
+		{"has-instance", `var C = {}; C[Symbol.hasInstance] = function (v) { return v === 3; };
+			function f(v){ return (v instanceof C) ? 1 : 0; }
+			var s = 0;
+			for (var i = 0; i < 500; i++) s += f(i % 3);
+			s;`},
+		{"has-instance-throws", `var C = {}; C[Symbol.hasInstance] = function () { throw new RangeError("no"); };
+			function f(v){ return (v instanceof C) ? 1 : 0; }
+			var thrown = "";
+			function A(){}
+			var s = 0;
+			for (var i = 0; i < 500; i++) s += (i instanceof A) ? 1 : 0;
+			try { f(1); } catch (e) { thrown = e.name; }
+			"" + s + ":" + thrown;`},
+		{"bound", `function A(){}; var Bound = A.bind(null);
+			function f(v){ return (v instanceof Bound) ? 1 : 0; }
+			var a = new A(), s = 0;
+			for (var i = 0; i < 500; i++) s += f(i % 2 ? a : {});
+			s;`},
+		{"proxy", `function A(){}; var P = new Proxy(A, {});
+			function f(v){ return (v instanceof P) ? 1 : 0; }
+			var a = new A(), s = 0;
+			for (var i = 0; i < 500; i++) s += f(i % 2 ? a : {});
+			s;`},
+		{"branched", `function A(){};
+			function f(v){ if (v instanceof A) { return 7; } return 9; }
+			var a = new A(), s = 0;
+			for (var i = 0; i < 500; i++) s += f(i % 2 ? a : {});
+			s;`},
+	}
+	for _, c := range cases {
+		jitBothWays(t, "instanceof/"+c.name, c.src)
+	}
+}

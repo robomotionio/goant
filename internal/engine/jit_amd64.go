@@ -577,6 +577,27 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp--
 			ip++
 
+		case OpInstanceof:
+			// `x instanceof C`, which is a call-out and nothing else: there is no
+			// fast path worth emitting, because even the simplest case walks a
+			// prototype chain, and C may carry a @@hasInstance that is arbitrary
+			// user code. What the template buys is the rest of the function.
+			//
+			// It buys a great deal. EarleyBoyer refuses 25 functions for this one
+			// opcode and runs **547 million interpreted instructions** in them —
+			// more than every other refusal in that benchmark put together, and
+			// 12.0 million frame entries that this alone unblocks.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperInstanceof, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-2], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-2] = false
+			sp--
+			ip += 3
+
 		case OpBnot:
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
@@ -1295,7 +1316,8 @@ func jitHasTemplate(op Opcode) bool {
 		OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
 		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpGetField2, OpPutField,
 		OpGetGlobal, OpPutGlobal, OpGetUpval, OpGetElem, OpPutElem, OpInsert3,
-		OpCall, OpCallMethod, OpNew, OpReturn, OpReturnUndef, OpThis:
+		OpCall, OpCallMethod, OpNew, OpReturn, OpReturnUndef, OpThis,
+		OpInstanceof:
 		return true
 	}
 	return false
@@ -1460,6 +1482,7 @@ const (
 	jitHelperNew        = 15
 	jitHelperPutElem    = 16
 	jitHelperPutGlobal  = 17
+	jitHelperInstanceof = 18
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -2021,6 +2044,21 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 			return e
 		}
 		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperInstanceof:
+		// The interpreter's OpInstanceof, over the two spilled operands. Both
+		// arms are rt.jsInstanceof's, so a compiled `instanceof` and an
+		// interpreted one cannot disagree about a bound function, a @@hasInstance
+		// or a proxy.
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		r, e := rt.jsInstanceof(Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1]))
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(mkbool(r))
 		return nil
 	case jitHelperRelational:
 		op, x, y, ok := jitBinaryOperands(ctx)
