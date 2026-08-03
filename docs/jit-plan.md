@@ -861,21 +861,21 @@ verified to compile nothing:
 
 | | off | on | off | on | |
 | --- | --- | --- | --- | --- | --- |
-| **Richards** | 213 | **451** | 211 | **451** | **+112.7%** |
-| **DeltaBlue** | 239 | **364** | 238 | **368** | **+53.5%** |
-| RegExp | 145 | 154 | 144 | 155 | +6.9% |
-| RayTrace | 393 | 416 | 392 | 414 | +5.7% |
-| EarleyBoyer | 601 | 609 | 603 | 612 | +1.4% |
-| Splay | 1900 | 1932 | 1906 | 1920 | +1.2% |
-| Crypto | 237 | 233 | 237 | 233 | −1.7% |
-| NavierStokes | 433 | 422 | 433 | 422 | −2.5% |
-| | | | | | **geomean +17.5%** |
+| **Richards** | 211 | **446** | 210 | **443** | **+111.2%** |
+| **DeltaBlue** | 239 | **380** | 239 | **382** | **+59.4%** |
+| **Splay** | 1946 | 2268 | 1977 | 2290 | **+16.2%** |
+| **RayTrace** | 383 | 444 | 383 | 441 | **+15.5%** |
+| RegExp | 145 | 155 | 146 | 155 | +6.5% |
+| EarleyBoyer | 608 | 617 | 606 | 622 | +2.1% |
+| Crypto | 236 | 233 | 234 | 232 | −1.1% |
+| NavierStokes | 434 | 423 | 433 | 422 | −2.5% |
+| | | | | | **geomean +21.5%** |
 
 Both arms are steady to the point, so none of these are drift.
 
-Compiled code holds **98.8%** of Richards' frame entries and **98.5%** of
-DeltaBlue's. Richards more than doubles and its distance from node falls from
-157x to 74x.
+Compiled code holds **100.0%** of DeltaBlue's frame entries and **98.8%** of
+Richards'. Richards more than doubles; its distance from node falls 157x to 74x,
+and DeltaBlue's 375x to 239x.
 
 **Coverage measured by count kept not paying, and then it did.** Four changes in
 a row moved the share of frame entries substantially and the score not at all —
