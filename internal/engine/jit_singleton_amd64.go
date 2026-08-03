@@ -114,10 +114,7 @@ func jitEmitSingletonEquals(a *jitasm.Asm, op Opcode, k Value, x, dst jitasm.Reg
 		// TUndef is 7 and TNull is 8, so the two are one unsigned range. The
 		// subtract also disposes of Numbers: an untagged Value shifts to
 		// something below the prefix and wraps to a very large number.
-		a.MovRegReg(jitRegScratch, x)
-		a.ShrRegImm(jitRegScratch, nanboxTypeShift)
-		a.SubRegImm32(jitRegScratch, uint32(nanboxPrefix>>nanboxTypeShift)+uint32(TUndef))
-		a.CmpRegImm32(jitRegScratch, 1)
+		jitEmitNullishFlags(a, x)
 		c = jitasm.CondBE
 		if negate {
 			c = jitasm.CondA
@@ -128,6 +125,29 @@ func jitEmitSingletonEquals(a *jitasm.Asm, op Opcode, k Value, x, dst jitasm.Reg
 	// pattern with the payload or-ed in, which is the same construction
 	// jitEqualsValue uses for the Number case.
 	a.SetccReg(c, dst)
+	a.MovzxRegReg8(dst, dst)
+	a.MovRegImm64(jitRegScratch, uint64(mkfalse()))
+	a.OrRegReg(dst, jitRegScratch)
+}
+
+// jitEmitNullishFlags sets the flags so that CondBE means "x is null or
+// undefined". jitRegScratch is clobbered; x is not.
+//
+// TUndef is 7 and TNull is 8, so the two are one unsigned range. The subtract
+// disposes of Numbers as a side effect: an untagged Value shifts to something
+// below the prefix and wraps to a very large number.
+func jitEmitNullishFlags(a *jitasm.Asm, x jitasm.Reg) {
+	a.MovRegReg(jitRegScratch, x)
+	a.ShrRegImm(jitRegScratch, nanboxTypeShift)
+	a.SubRegImm32(jitRegScratch, uint32(nanboxPrefix>>nanboxTypeShift)+uint32(TUndef))
+	a.CmpRegImm32(jitRegScratch, 1)
+}
+
+// jitEmitNullishTest leaves `x is null or undefined` in dst as a Boolean, which
+// is the whole of IS_UNDEF_OR_NULL. dst may be x.
+func jitEmitNullishTest(a *jitasm.Asm, x, dst jitasm.Reg) {
+	jitEmitNullishFlags(a, x)
+	a.SetccReg(jitasm.CondBE, dst)
 	a.MovzxRegReg8(dst, dst)
 	a.MovRegImm64(jitRegScratch, uint64(mkfalse()))
 	a.OrRegReg(dst, jitRegScratch)

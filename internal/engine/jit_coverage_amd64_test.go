@@ -9,26 +9,15 @@ import (
 	"testing"
 )
 
-// jitSupported is what the emitter has a template for. Kept here rather than
-// derived from the emitter so that a diagnostic cannot silently agree with a
-// bug in the thing it is measuring.
-var jitSupported = map[Opcode]bool{
-	OpThis: true, OpPutLocal: true, OpSetLocal: true, OpGetLocal: true,
-	OpConst: true, OpConstI8: true, OpPop: true, OpDup: true, OpInsert2: true,
-	OpUndef: true, OpNull: true, OpTrue: true, OpFalse: true,
-	OpAdd: true, OpSub: true, OpMul: true, OpDiv: true,
-	OpBand: true, OpBor: true, OpBxor: true, OpBnot: true,
-	OpShl: true, OpShr: true, OpUshr: true,
-	OpNeg: true, OpInc: true, OpDec: true, OpNot: true,
-	OpLt: true, OpLe: true, OpGt: true, OpGe: true,
-	OpEq: true, OpNe: true, OpSeq: true, OpSne: true,
-	OpJmp: true, OpJmpFalse: true, OpJmpTrue: true,
-	OpGetField: true, OpGetField2: true, OpPutField: true,
-	OpGetGlobal: true, OpGetUpval: true, OpGetElem: true,
-	OpCall: true, OpCallMethod: true, OpNew: true,
-	OpPutGlobal: true, OpPutElem: true, OpInsert3: true,
-	OpReturn: true, OpReturnUndef: true,
-}
+// jitSupported is what the emitter has a template for.
+//
+// Derived from jitHasTemplate rather than restated. It was a hand-kept list, on
+// the reasoning that a diagnostic should not agree with a bug in the thing it
+// measures — and the two drifted the first time a template was added: this table
+// went on reporting INSTANCEOF as a blocker for 63 functions after it had been
+// compiled, which is a diagnostic lying in the more dangerous direction, since
+// it points at work already done.
+func jitSupported(op Opcode) bool { return jitHasTemplate(op) }
 
 // jitUnsupportedOps lists the distinct opcodes in fn that the tier has no
 // template for, in no particular order.
@@ -41,7 +30,7 @@ func jitUnsupportedOps(fn *svFunc) []string {
 		if size <= 0 || ip+size > len(code) {
 			return []string{"undecodable"}
 		}
-		if !jitSupported[op] {
+		if !jitSupported(op) {
 			seen[opTable[op].Name] = true
 		}
 		ip += size
@@ -180,7 +169,7 @@ func TestJITCoverage(t *testing.T) {
 
 	t.Logf("compiled %d of %d functions (%.1f%%)", compiled, total, 100*float64(compiled)/float64(total))
 	for i, r := range rows {
-		if i >= 20 {
+		if i >= 40 {
 			t.Logf("  ... and %d more reasons", len(rows)-i)
 			break
 		}

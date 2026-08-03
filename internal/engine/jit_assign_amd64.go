@@ -53,7 +53,8 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 			return nil, false
 		}
 		switch op {
-		case OpJmp, OpJmpFalse, OpJmpTrue, OpReturn, OpReturnUndef:
+		case OpJmp, OpJmpFalse, OpJmpTrue, OpJmpNotNullish,
+			OpReturn, OpReturnUndef, OpThrow:
 			if ip+size < len(code) {
 				leaders[ip+size] = true
 			}
@@ -87,9 +88,9 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 			cur.gen[i] = true
 		case OpJmp:
 			cur.succ = []int{int(readU32(code, ip+1))}
-		case OpJmpFalse, OpJmpTrue:
+		case OpJmpFalse, OpJmpTrue, OpJmpNotNullish:
 			cur.succ = []int{int(readU32(code, ip+1)), ip + size}
-		case OpReturn, OpReturnUndef:
+		case OpReturn, OpReturnUndef, OpThrow:
 			cur.succ = []int{} // nothing follows
 		}
 		ip += size
@@ -388,7 +389,50 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					}
 					push(noOrigin)
 				case OpConst, OpConstI8, OpUndef, OpNull, OpTrue, OpFalse, OpThis,
-					OpGetGlobal, OpGetUpval:
+					OpGetGlobal, OpGetUpval, OpObject, OpGetGlobalUndef:
+					push(noOrigin)
+				case OpArray:
+					for i := int(readU16(code, ip+1)); i > 0; i-- {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+					}
+					push(noOrigin)
+				case OpDefineField:
+					// obj val -> obj: the value is consumed and the receiver
+					// keeps whatever origin it had.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+				case OpJmpNotNullish:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+				case OpThrow:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+				case OpTypeof, OpIsUndefOrNull:
+					// One operand consumed and demanded of nothing. `typeof`
+					// takes any value, and the nullish test is a tag comparison
+					// that a Number simply fails.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(noOrigin)
+				case OpMod, OpIn, OpDelete, OpInstanceof, OpRegexp:
+					// Two consumed, one produced, and none of the four demands a
+					// Number of its operands: every one is emitted as a call to
+					// the same runtime the interpreter uses. `%` in particular is
+					// deliberately not with the arithmetic above — there is no SSE
+					// instruction for it, so nothing is gained by requiring the
+					// prologue to have checked the operands.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
 					push(noOrigin)
 				case OpPop, OpJmpFalse, OpJmpTrue, OpReturn:
 					if _, ok := pop(); !ok {
@@ -432,6 +476,26 @@ func jitStackEffect(fn *svFunc, ip int) (pop, push int, ok bool) {
 		return int(readU16(code, ip+1)) + 1, 1, true
 	case OpCallMethod:
 		return int(readU16(code, ip+1)) + 2, 1, true
+	case OpArray:
+		// Same shape: the operand is how many elements the literal takes off the
+		// stack, and opTable records a fixed zero because the count is in the
+		// instruction. Left unwritten, this made the depth analysis disagree with
+		// the emitter at every label after an array literal — 355 more functions
+		// refused as `stack-across-blocks` the moment the template existed, which
+		// is what a wrong prediction looks like when it is not a miscompilation.
+		return int(readU16(code, ip+1)), 1, true
+	case OpThrow:
+		// Nothing after it runs, so what it leaves is not a depth the analysis
+		// should propagate. One popped and none pushed is the honest local
+		// answer; jitBlockDepths stops at the branch this ends the block with.
+		return 1, 0, true
+	case OpJmpNotNullish:
+		// opTable records one popped and one pushed; the interpreter pops and
+		// pushes nothing. Both are right about their own question — `a ?? b`
+		// emits DUP before the branch, so the value the taken path keeps is the
+		// duplicate and the table describes the pair. This function answers for
+		// the single instruction, which is net one off the stack.
+		return 1, 0, true
 	}
 	info := opTable[op]
 	return int(info.NPop), int(info.NPush), true
@@ -732,6 +796,43 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 					if _, ok := pop(); !ok {
 						return nil, false
 					}
+					push(false)
+				case OpArray:
+					for i := int(readU16(code, ip+1)); i > 0; i-- {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+					}
+					push(false)
+				case OpDefineField, OpJmpNotNullish:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+				case OpThrow:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+				case OpTypeof, OpIsUndefOrNull:
+					// Consumes one and produces a value that is not a Number: a
+					// string for typeof, a Boolean for the nullish test.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(false)
+				case OpMod, OpIn, OpDelete, OpInstanceof, OpRegexp:
+					// Two consumed, one produced. MOD does produce a Number, but
+					// saying so would let the arithmetic after it skip a guard on
+					// a value this tier fetches through a helper — and jsArith is
+					// free to answer with a BigInt. Not a Number is the sound
+					// answer for all five.
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
+					push(false)
+				case OpObject, OpGetGlobalUndef:
 					push(false)
 				case OpGetGlobal, OpGetUpval:
 					// A global or a captured binding holds anything at all.

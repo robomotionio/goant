@@ -150,11 +150,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	// perfectly and cannot follow — a different piece of work.
 	depths, ok := jitBlockDepths(fn, start, blocks)
 	if !ok {
-		return refuse(why, "stack-across-blocks")
+		return refuse(why, "stack-across-blocks/depths")
 	}
 	demand, ok := jitNumberDemand(fn, blocks, depths)
 	if !ok {
-		return refuse(why, "stack-across-blocks")
+		return refuse(why, "stack-across-blocks/demand")
 	}
 	if fn.jit.unchecked {
 		// This function has turned its arguments away often enough to stop
@@ -167,7 +167,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	}
 	numeric, ok := jitNumericLocals(fn, blocks, depths, demand)
 	if !ok {
-		return refuse(why, "stack-across-blocks")
+		return refuse(why, "stack-across-blocks/numeric")
 	}
 	// The cache array has to exist before anything is emitted, because a
 	// compiled property read addresses its site by absolute address. It is
@@ -576,6 +576,172 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			kind[sp-2] = true
 			sp--
 			ip++
+
+		case OpDefineField:
+			// obj val -> obj. The receiver is left in place because the literal is
+			// still being built on top of it.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1)))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperDefineField, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-2], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-2] = false
+			sp--
+			ip += 5
+
+		case OpJmpNotNullish:
+			// What `a ?? b` compiles to: consume the value and branch when it is
+			// neither null nor undefined. The same range test as everything else
+			// in jit_singleton_amd64.go, straight into a Jcc rather than through
+			// a Boolean.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			target := int(readU32(code, ip+1))
+			l, known := labels[target]
+			if !known {
+				return refuse(why, "branch-target")
+			}
+			jitEmitNullishFlags(a, jitStackRegs[sp-1])
+			a.Jcc(jitasm.CondA, l)
+			sp--
+			if d, ok := depths[ip+5]; !ok || sp != d {
+				return refuse(why, "stack-at-target")
+			}
+			ip += 5
+
+		case OpThrow:
+			// The helper never returns normally, so nothing after this runs. The
+			// emitter still has to stop believing it can fall through, which is
+			// what `returned` marks — and jitAnalyze ends the block here for the
+			// same reason, so the depth analysis does not carry a stack past it.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperThrow, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			sp = 0
+			returned = true
+			ip++
+
+		case OpArray:
+			// An array literal of n elements, which the helper takes off the top
+			// of the spill area. The count is passed as an immediate rather than
+			// inferred from the depth, because a literal can be built with
+			// operands of the surrounding expression still beneath it.
+			n := int(readU16(code, ip+1))
+			if n < 0 || sp < n {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(uint32(n)))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperArray, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-n], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-n] = false
+			sp = sp - n + 1
+			ip += 3
+
+		case OpMod:
+			// `%` has no SSE instruction and no fast path worth emitting, so it is
+			// the generic arithmetic call with a different opcode. jsArith is what
+			// the interpreter runs, so a BigInt modulus and an object coercing
+			// through valueOf behave identically on both tiers.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallBinary(a, sp, op, jitHelperArith, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-2], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-2] = false
+			sp--
+			ip++
+
+		case OpIsUndefOrNull:
+			// `v ?? x` and `v?.p` test this, and it is the same range check the
+			// `x == null` template uses: TUndef is 7, TNull is 8, and an untagged
+			// Number wraps past both. Emitted rather than called, because there is
+			// nothing here a helper could do better.
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			jitEmitNullishTest(a, jitStackRegs[sp-1], jitStackRegs[sp-1])
+			kind[sp-1] = false
+			ip++
+
+		case OpTypeof:
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperTypeof, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-1], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-1] = false
+			ip++
+
+		case OpIn, OpDelete:
+			// Two operands consumed, a Boolean produced. `in` needs the closure's
+			// private environment, which is why its helper takes one.
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			h := uint32(jitHelperIn)
+			if op == OpDelete {
+				h = jitHelperDelete
+			}
+			if !jitCallHelper(a, sp, h, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-2], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-2] = false
+			sp--
+			ip++
+
+		case OpObject:
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			if !jitCallHelper(a, sp, jitHelperObject, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp] = false
+			sp++
+			ip++
+
+		case OpRegexp:
+			if sp < 2 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperRegexp, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp-2], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp-2] = false
+			sp--
+			ip++
+
+		case OpGetGlobalUndef:
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1)))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperGlobalUndef, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			a.MovRegMem(jitStackRegs[sp], jitasm.RegCtx, jitmem.CtxOffRet)
+			kind[sp] = false
+			sp++
+			ip += 7
 
 		case OpInstanceof:
 			// `x instanceof C`, which is a call-out and nothing else: there is no
@@ -1317,7 +1483,9 @@ func jitHasTemplate(op Opcode) bool {
 		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpGetField2, OpPutField,
 		OpGetGlobal, OpPutGlobal, OpGetUpval, OpGetElem, OpPutElem, OpInsert3,
 		OpCall, OpCallMethod, OpNew, OpReturn, OpReturnUndef, OpThis,
-		OpInstanceof:
+		OpInstanceof, OpMod, OpTypeof, OpIsUndefOrNull, OpIn, OpDelete,
+		OpObject, OpRegexp, OpGetGlobalUndef, OpThrow, OpArray,
+		OpDefineField, OpJmpNotNullish:
 		return true
 	}
 	return false
@@ -1383,7 +1551,7 @@ func jitScanTargets(fn *svFunc, start int) (map[int]bool, bool) {
 			return nil, false
 		}
 		switch op {
-		case OpJmp, OpJmpFalse, OpJmpTrue:
+		case OpJmp, OpJmpFalse, OpJmpTrue, OpJmpNotNullish:
 			targets[int(readU32(code, ip+1))] = true
 		}
 		ip += size
@@ -1465,24 +1633,33 @@ func jitBackEdge(a *jitasm.Asm, top *jitasm.Label, fixups *[]jitResumeFixup) {
 // Helper identifiers. Compiled code cannot call a Go function, so it records
 // which one it wants and returns; jitHelper runs it and execution resumes.
 const (
-	jitHelperGetField   = 1
-	jitHelperToInt32    = 2
-	jitHelperArith      = 3
-	jitHelperRelational = 4
-	jitHelperEquals     = 5
-	jitHelperPutField   = 6
-	jitHelperGetGlobal  = 7
-	jitHelperDeadZone   = 8
-	jitHelperCall       = 9
-	jitHelperCallMethod = 10
-	jitHelperGetElem    = 11
-	jitHelperBitwise    = 12
-	jitHelperToBoolean  = 13
-	jitHelperUnary      = 14
-	jitHelperNew        = 15
-	jitHelperPutElem    = 16
-	jitHelperPutGlobal  = 17
-	jitHelperInstanceof = 18
+	jitHelperGetField    = 1
+	jitHelperToInt32     = 2
+	jitHelperArith       = 3
+	jitHelperRelational  = 4
+	jitHelperEquals      = 5
+	jitHelperPutField    = 6
+	jitHelperGetGlobal   = 7
+	jitHelperDeadZone    = 8
+	jitHelperCall        = 9
+	jitHelperCallMethod  = 10
+	jitHelperGetElem     = 11
+	jitHelperBitwise     = 12
+	jitHelperToBoolean   = 13
+	jitHelperUnary       = 14
+	jitHelperNew         = 15
+	jitHelperPutElem     = 16
+	jitHelperPutGlobal   = 17
+	jitHelperInstanceof  = 18
+	jitHelperTypeof      = 19
+	jitHelperIn          = 20
+	jitHelperDelete      = 21
+	jitHelperThrow       = 22
+	jitHelperObject      = 23
+	jitHelperArray       = 24
+	jitHelperRegexp      = 25
+	jitHelperGlobalUndef = 26
+	jitHelperDefineField = 27
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1667,7 +1844,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, locals []Value,
 			ctx.Args[1] = jitFuel
 			pc = ctx.Resume
 		case jitmem.ExitHelper:
-			if e := jitHelper(rt, fn, ctx); e != nil {
+			if e := jitHelper(rt, fn, cl, ctx); e != nil {
 				rt.jitFrames = rt.jitFrames[:n]
 				return mkundef(), e, true
 			}
@@ -1719,7 +1896,7 @@ func jitCopyArgs(window []Value) []Value {
 }
 
 // jitHelper runs what compiled code asked for.
-func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
+func jitHelper(rt *Runtime, fn *svFunc, cl *closure, ctx *jitmem.ExecContext) *ThrowError {
 	switch ctx.Helper {
 	case jitHelperGetField:
 		recv := Value(ctx.Args[2])
@@ -2059,6 +2236,153 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 			return e
 		}
 		ctx.Ret = uint64(mkbool(r))
+		return nil
+	case jitHelperDefineField:
+		// `{ v: expr }` and a class field initialiser. The receiver stays on the
+		// stack — the literal is still being built — so only the value is
+		// consumed here and the emitter leaves the object where it was.
+		//
+		// The whole of the interpreter's arm, private names included, which is
+		// the other reason this helper takes the closure: a private field
+		// resolves against the class environment and its double-install and
+		// non-extensible cases are TypeErrors that must not go missing.
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		recv, val := Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1])
+		name := fn.constNames[uint32(ctx.Args[3])]
+		o := rt.objPtr(recv)
+		if o == nil {
+			ctx.Ret = uint64(recv)
+			return nil
+		}
+		var privEnv *privScope
+		if cl != nil {
+			privEnv = cl.privEnv
+		}
+		switch {
+		case isPrivateKey(name):
+			if !o.flags.extensible {
+				return rt.typeError("Cannot add private member " + privDisplay(name) + " to a non-extensible object")
+			}
+			if !o.definePrivateField(name, privEnv, val) {
+				return rt.typeError("Cannot initialize private field " + privDisplay(name) + " twice on the same object")
+			}
+		case o.proxy != nil || !o.flags.extensible:
+			if e := rt.createDataProperty(recv, rt.internString(name), val); e != nil {
+				return e
+			}
+		default:
+			o.defineOwn(name, val, attrDefault)
+		}
+		ctx.Ret = uint64(recv)
+		return nil
+	case jitHelperTypeof:
+		// `typeof v`. The string is interned, so what lands on the operand stack
+		// is a handle into the runtime's own table rather than a fresh string.
+		n := int(ctx.SpillN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		ctx.Ret = uint64(rt.internString(rt.typeofString(Value(ctx.Spill[n-1]))))
+		return nil
+	case jitHelperIn:
+		// `key in obj`, which is why this helper takes the closure: `#x in obj`
+		// resolves the private name against the class environment the closure
+		// carries, and passing nil there would answer the wrong question rather
+		// than fail.
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		var privEnv *privScope
+		if cl != nil {
+			privEnv = cl.privEnv
+		}
+		r, e := rt.jsIn(Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1]), privEnv)
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(mkbool(r))
+		return nil
+	case jitHelperDelete:
+		// `delete o[k]`. The strict-mode arm is the interpreter's: a failed
+		// delete is a TypeError there and silently false in sloppy code.
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		ok, e := rt.deleteElement(Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1]))
+		if e != nil {
+			return e
+		}
+		if !ok && fn.isStrict {
+			return rt.typeError("Cannot delete property of a non-configurable object")
+		}
+		ctx.Ret = uint64(mkbool(ok))
+		return nil
+	case jitHelperThrow:
+		// `throw v`. This tier has no handlers of its own — TRY_PUSH is still
+		// refused — so the throw leaves the frame, which is what returning an
+		// error from here does.
+		n := int(ctx.SpillN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		return &ThrowError{Value: Value(ctx.Spill[n-1]), rt: rt}
+	case jitHelperObject:
+		ctx.Ret = uint64(rt.newPlainObject())
+		return nil
+	case jitHelperArray:
+		// An array literal, built from the top `n` spilled slots. The count is an
+		// immediate rather than the spill depth, because a literal can appear
+		// with operands of the surrounding expression beneath it.
+		want := int(uint32(ctx.Args[3]))
+		n := int(ctx.SpillN)
+		if want < 0 || n < want {
+			return rt.typeError("JIT operand stack")
+		}
+		arrv := rt.newArray()
+		ao := rt.objPtr(arrv)
+		ao.arr = make([]Value, want)
+		ao.arrLen = uint32(want)
+		for i := 0; i < want; i++ {
+			ao.arr[i] = Value(ctx.Spill[n-want+i])
+		}
+		ctx.Ret = uint64(arrv)
+		return nil
+	case jitHelperRegexp:
+		n := int(ctx.SpillN)
+		if n < 2 {
+			return rt.typeError("JIT operand stack")
+		}
+		v, e := rt.newRegExp(rt.strGo(Value(ctx.Spill[n-2])), rt.strGo(Value(ctx.Spill[n-1])))
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperGlobalUndef:
+		// The lenient global read `typeof maybeUndeclared` compiles to. An absent
+		// name needs no test of its own: a plain [[Get]] on the global answers
+		// undefined for one, and the ReferenceError the strict read raises is
+		// raised by that read rather than by getField. A global lexical binding
+		// is not absent, so its dead zone still throws.
+		name := fn.constNames[uint32(ctx.Args[3])]
+		if b := rt.lookupGlobalLex(name); b != nil {
+			v, e := rt.globalLexRead(b, name)
+			if e != nil {
+				return e
+			}
+			ctx.Ret = uint64(v)
+			return nil
+		}
+		v, e := rt.getField(rt.global, name)
+		if e != nil {
+			return e
+		}
+		ctx.Ret = uint64(v)
 		return nil
 	case jitHelperRelational:
 		op, x, y, ok := jitBinaryOperands(ctx)

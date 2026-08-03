@@ -28,11 +28,11 @@ func TestJITRefusalWeightsChargeTheHotFunction(t *testing.T) {
 
 	const hot, cold = 2000, 20
 	_, err := New().RunString("weights.js", `
-		function warm(a) { return typeof a; }        // op:TYPEOF
-		function chilly(a) { return a instanceof Object; }
+		function warm(a) { return function () { return a; }; }   // op:CLOSURE
+		function chilly(a) { try { return a; } catch (e) { return 0; } }
 		var s = 0;
-		for (var i = 0; i < `+itoa(hot)+`; i++) s += warm(i).length;
-		for (var i = 0; i < `+itoa(cold)+`; i++) s += chilly(i) ? 1 : 0;
+		for (var i = 0; i < `+itoa(hot)+`; i++) s += warm(i)();
+		for (var i = 0; i < `+itoa(cold)+`; i++) s += chilly(i);
 		s;`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -45,9 +45,9 @@ func TestJITRefusalWeightsChargeTheHotFunction(t *testing.T) {
 	var warm, chilly uint64
 	for _, r := range w {
 		switch r.Reason {
-		case "op:TYPEOF":
+		case "op:CLOSURE":
 			warm = r.Insns
-		case "op:INSTANCEOF":
+		case "op:TRY_PUSH":
 			chilly = r.Insns
 		}
 	}
