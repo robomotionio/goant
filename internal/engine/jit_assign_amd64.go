@@ -1171,3 +1171,38 @@ func jitHandlerStacks(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 	}
 	return in, true
 }
+
+// jitMaxOperandDepth reports how deep the operand stack gets, which is what the
+// frame's operand array is sized to and what decides whether that array fits in
+// the context.
+//
+// Computed before a byte is emitted, from the same per-instruction effect the
+// emitter uses — and the emitter checks it, refusing when its own depth after
+// an instruction is not what this predicted. So a wrong answer here costs a
+// refusal and never a store past the end of the array.
+func jitMaxOperandDepth(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (int, bool) {
+	code := fn.code
+	max := 0
+	for bs, b := range blocks {
+		if !b.reachable {
+			continue
+		}
+		d := depths[bs]
+		for ip := b.start; ip < b.end; {
+			pop, push, ok := jitStackEffect(fn, ip)
+			if !ok {
+				return 0, false
+			}
+			d = d - pop + push
+			if d > max {
+				max = d
+			}
+			size := int(opTable[Opcode(code[ip])].Size)
+			if size <= 0 {
+				return 0, false
+			}
+			ip += size
+		}
+	}
+	return max, true
+}

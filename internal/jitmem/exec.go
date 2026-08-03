@@ -35,28 +35,40 @@ type ExecContext struct {
 	Args   [4]uint64
 	Ret    uint64
 	Resume uintptr
-	// Stack is the frame's operand stack: the address of an array of Values,
-	// one per slot, indexed by depth.
+	// Spill is the frame's operand stack, for the functions it is big enough
+	// for — which is all but nineteen of the Octane corpus.
 	//
-	// Generated code keeps the top of it in registers, because that is what
-	// makes arithmetic worth compiling, and returning to Go loses every one of
-	// them. A compiler that knows its depth at each point — which a template
+	// Generated code keeps the top of the stack in registers, because that is
+	// what makes arithmetic worth compiling, and returning to Go loses every one
+	// of them. A compiler that knows its depth at each point — which a template
 	// compiler does, because it assigns the stack positionally — writes exactly
 	// the live slots here and reads them back on the way in. That, rather than
 	// anything about deoptimisation, is what a compiled function needs before it
 	// can call out mid-expression.
-	//
-	// A pointer rather than an array in this struct because the depth a function
-	// needs is a property of the function. Most want two or three; a source file
-	// that is one enormous array literal wants seventeen thousand, and sizing
-	// every frame for that — or refusing the ones that ask — are both worse than
-	// one load.
-	Stack uintptr
+	Spill [InlineSlots]uint64
 	// StackN is how many slots are live, written by compiled code before it
 	// leaves. The runtime's collector has no other way to know: a slot holds a
 	// Value, and a stale one from an earlier call holds a handle to a cell that
 	// may since have been freed.
 	StackN uint64
+	// Stack is where the operand stack lives instead, for a function that wants
+	// more slots than Spill has. Zero otherwise.
+	//
+	// The depth a function needs is a property of the function: most want two or
+	// three, and a source file that is one enormous array literal wants
+	// seventeen thousand. Sizing every frame for the second is absurd and
+	// refusing it is arbitrary, so such a function gets an array of its own and
+	// generated code addresses it through this pointer.
+	//
+	// Which of the two a function uses is decided once, before a byte is
+	// emitted, and never mixed, so no site tests anything at run time.
+	//
+	// An unsafe.Pointer rather than a uintptr, unlike every other address here.
+	// This one can point into a heap array that nothing else refers to, so it
+	// has to be a pointer Go's collector understands; and the runtime reads
+	// operands through it on every call out, which a uintptr would make either
+	// unsound or a conversion per access.
+	Stack unsafe.Pointer
 	// Pool is the address of the runtime's object pool, which compiled code
 	// needs to turn a Value's handle into an object.
 	//
@@ -107,6 +119,8 @@ type ExecContext struct {
 	// keeps it alive for as long as the context can be entered, and unexported
 	// so that it sits past every offset generated code compiles against.
 	stack []uint64
+	// deep says which of the two the running function is using.
+	deep bool
 }
 
 // EnsureStack gives the context room for n operand slots and points Stack at
@@ -117,14 +131,22 @@ type ExecContext struct {
 // reused at its own depth, so a function that once needed a large stack leaves
 // one behind for the next frame at that depth rather than allocating again.
 func (ctx *ExecContext) EnsureStack(n int) {
-	if n < 8 {
-		n = 8
+	ctx.StackN = 0
+	if n <= InlineSlots {
+		// The usual case, and it writes nothing unless the previous frame at
+		// this depth was a deep one: a pointer store into the context is a Go
+		// write barrier, and this runs on every compiled call.
+		if ctx.deep || ctx.Stack == nil {
+			ctx.Stack = unsafe.Pointer(&ctx.Spill[0])
+			ctx.deep = false
+		}
+		return
 	}
 	if len(ctx.stack) < n {
 		ctx.stack = make([]uint64, n)
 	}
-	ctx.Stack = uintptr(unsafe.Pointer(&ctx.stack[0]))
-	ctx.StackN = 0
+	ctx.Stack = unsafe.Pointer(&ctx.stack[0])
+	ctx.deep = true
 }
 
 // Slots is the live part of the operand stack.
@@ -134,12 +156,31 @@ func (ctx *ExecContext) EnsureStack(n int) {
 // through Stack, because it indexes by a compile-time offset and cannot follow
 // a slice header. They are the same array.
 func (ctx *ExecContext) Slots() []uint64 {
-	n := int(ctx.StackN)
-	if n > len(ctx.stack) {
-		n = len(ctx.stack)
+	n, max := int(ctx.StackN), len(ctx.Spill)
+	if ctx.deep {
+		max = len(ctx.stack)
 	}
-	return ctx.stack[:n]
+	if n > max {
+		n = max
+	}
+	if ctx.deep {
+		return ctx.stack[:n]
+	}
+	return ctx.Spill[:n]
 }
+
+// SlotPtr is the address of operand slot i, for the runtime's hot path.
+//
+// The alternative is building a slice per call out, and a call out is about
+// five nanoseconds all in — the slice header was measurable across Octane.
+func (ctx *ExecContext) SlotPtr(i int) unsafe.Pointer {
+	return unsafe.Add(ctx.Stack, 8*i)
+}
+
+// InlineSlots is how many operand slots Spill holds. Thirty-two covers every
+// function in the Octane corpus but nineteen, and all nineteen are a source
+// file that is mostly one array literal.
+const InlineSlots = 32
 
 // Field offsets generated code compiles against.
 const (
@@ -148,14 +189,15 @@ const (
 	CtxOffArgs   = 16
 	CtxOffRet    = 48
 	CtxOffResume = 56
-	CtxOffStack  = 64
-	CtxOffStackN = 72
-	CtxOffPool   = 80
-	CtxOffHost   = 88
-	CtxOffThis   = 96
-	CtxOffUpvals = 104
-	CtxOffFnVal  = 112
-	CtxSize      = 120
+	CtxOffSpill  = 64
+	CtxOffStackN = 64 + 8*InlineSlots
+	CtxOffStack  = 72 + 8*InlineSlots
+	CtxOffPool   = 80 + 8*InlineSlots
+	CtxOffHost   = 88 + 8*InlineSlots
+	CtxOffThis   = 96 + 8*InlineSlots
+	CtxOffUpvals = 104 + 8*InlineSlots
+	CtxOffFnVal  = 112 + 8*InlineSlots
+	CtxSize      = 120 + 8*InlineSlots
 )
 
 // Which fields hold a Value, and so must be traced by the runtime's collector

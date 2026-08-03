@@ -99,14 +99,33 @@ func jitWindowBase(sp int) int {
 // jitEvictSlots writes out the slots that leave the register window when the
 // depth goes from sp to after. It has to run before the template that pushes
 // them: the register a new slot wants is the one the slot nine below it is in.
-func jitEvictSlots(a *jitasm.Asm, sp, after int) {
+func jitEvictSlots(a *jitasm.Asm, sp, after int, deep bool) {
 	if jitWindowBase(after) <= jitWindowBase(sp) {
 		return
 	}
-	a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
+	base, off := jitStackBase(a, deep)
 	for k := jitWindowBase(sp); k < jitWindowBase(after); k++ {
-		a.MovMemReg(jitRegScratch, int32(8*k), jitSlot(k))
+		a.MovMemReg(base, off+int32(8*k), jitSlot(k))
 	}
+}
+
+// jitStackBase is where the operand array is, as a register and an offset.
+//
+// A function whose stack fits in the context addresses it straight off the
+// context register, which is what every function did when that was the only
+// kind of stack there was. A deeper one loads the pointer into the scratch
+// register first.
+//
+// Which of the two a function uses is decided before a byte is emitted and
+// never changes, so no site tests anything at run time. Making every function
+// pay the load instead cost between three and eleven percent across Octane —
+// not a trade worth making for nineteen functions that each run once.
+func jitStackBase(a *jitasm.Asm, deep bool) (jitasm.Reg, int32) {
+	if !deep {
+		return jitasm.RegCtx, jitmem.CtxOffSpill
+	}
+	a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
+	return jitRegScratch, 0
 }
 
 // jitRefillSlots reads back the slots that re-enter the window when the depth
@@ -118,7 +137,7 @@ func jitEvictSlots(a *jitasm.Asm, sp, after int) {
 // template produced: a call that takes the stack from ten to one leaves its
 // result in slot zero, and slot zero is also the slot re-entering the window —
 // reading it back from the context would replace the answer with the callee.
-func jitRefillSlots(a *jitasm.Asm, sp, after, push int) {
+func jitRefillSlots(a *jitasm.Asm, sp, after, push int, deep bool) {
 	end := jitWindowBase(sp)
 	if after-push < end {
 		end = after - push
@@ -126,9 +145,9 @@ func jitRefillSlots(a *jitasm.Asm, sp, after, push int) {
 	if end <= jitWindowBase(after) {
 		return
 	}
-	a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
+	base, off := jitStackBase(a, deep)
 	for k := jitWindowBase(after); k < end; k++ {
-		a.MovRegMem(jitSlot(k), jitRegScratch, int32(8*k))
+		a.MovRegMem(jitSlot(k), base, off+int32(8*k))
 	}
 }
 
@@ -258,6 +277,18 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if !ok {
 		return refuse(why, "stack-across-blocks/depths")
 	}
+	// How deep the operand stack gets, and so which of the two kinds of stack
+	// this function uses. Decided here, before anything is emitted, because
+	// every site that touches a slot compiles the choice in.
+	maxDepth, ok := jitMaxOperandDepth(fn, blocks, depths)
+	if !ok {
+		return refuse(why, "stack-across-blocks/depth")
+	}
+	if maxDepth > jitMaxDepth {
+		return refuse(why, "stack-too-deep")
+	}
+	deepStack := maxDepth > jitmem.InlineSlots
+
 	// Which exception handler is in force where. Only computed for a function
 	// that has one, so nothing else pays for the walk.
 	var handlers map[int][]jitHandler
@@ -323,9 +354,6 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	// a budget — allocating a megabyte per compile made the test suite eight
 	// times slower.
 	kind := make([]bool, len(code)+jitStackWindow+1)
-	// The deepest the operand stack gets, which is how much of one the frame is
-	// given.
-	maxSp := 0
 	// The previous instruction, maintained across the loop below.
 	prevOp, prevIP := Opcode(0), -1
 	// The handlers in force here, seeded from the block's entry set the same way
@@ -413,14 +441,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		}
 		spBefore := sp
 		spAfter := sp - effPop + effPush
-		if spAfter > jitMaxDepth {
-			return refuse(why, "stack-too-deep")
-		}
-		if spAfter > maxSp {
-			maxSp = spAfter
+		if spAfter > maxDepth {
+			return refuse(why, "stack-deeper-than-predicted")
 		}
 		if spAfter > spBefore {
-			jitEvictSlots(a, spBefore, spAfter)
+			jitEvictSlots(a, spBefore, spAfter, deepStack)
 		}
 
 		switch op := Opcode(code[ip]); op {
@@ -500,7 +525,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				a.MovRegImm64(jitRegScratch, uint64(tEmpty))
 				a.CmpRegReg(jitSlot(sp), jitRegScratch)
 				a.Jcc(jitasm.CondNE, ok)
-				if !jitCallHelper(a, sp, jitHelperDeadZone, &fixups) {
+				if !jitCallHelper(a, sp, jitHelperDeadZone, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.Bind(ok)
@@ -572,7 +597,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if generic {
 				a.Jmp(done)
 				a.Bind(slow)
-				if !jitCallBinary(a, sp, op, jitHelperArith, &fixups) {
+				if !jitCallBinary(a, sp, op, jitHelperArith, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.MovRegMem(x, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -611,7 +636,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if generic {
 				a.Jmp(done)
 				a.Bind(slow)
-				if !jitCallBinary(a, sp, op, jitHelperRelational, &fixups) {
+				if !jitCallBinary(a, sp, op, jitHelperRelational, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.MovRegMem(x, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -681,7 +706,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				return refuse(why, "stack-at-target")
 			}
 			back := target <= ip
-			if !jitEmitTruthyBranch(a, jitSlot(sp-1), op == OpJmpTrue, back, l, sp, &fixups) {
+			if !jitEmitTruthyBranch(a, jitSlot(sp-1), op == OpJmpTrue, back, l, sp, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			if back {
@@ -737,13 +762,13 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				slow, done = a.NewLabel(), a.NewLabel()
 				jitEmitNumberPair(a, x, y, slow)
 			}
-			if !jitBitwise(a, op, x, y, sp, &fixups) {
+			if !jitBitwise(a, op, x, y, sp, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			if generic {
 				a.Jmp(done)
 				a.Bind(slow)
-				if !jitCallBinary(a, sp, op, jitHelperBitwise, &fixups) {
+				if !jitCallBinary(a, sp, op, jitHelperBitwise, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.MovRegMem(x, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -760,7 +785,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			// together in the one immediate the exit protocol carries.
 			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1))|uint64(code[ip+5])<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperThrowError, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperThrowError, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			sp = 0
@@ -771,7 +796,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperUplus, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperUplus, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-1), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -814,7 +839,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperToPropkey, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperToPropkey, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-1), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -828,7 +853,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp >= jitMaxDepth {
 				return refuse(why, "stack-too-deep")
 			}
-			if !jitCallHelper(a, sp, jitHelperGlobal, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperGlobal, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -844,7 +869,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1)))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperDeleteVar, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperDeleteVar, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -861,7 +886,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1)))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperPutConst, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperPutConst, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-2), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -877,7 +902,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperGetLength, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperGetLength, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-1), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -890,7 +915,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperForIn, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperForIn, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-1), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -905,7 +930,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 2 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperStillEnum, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperStillEnum, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-2), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -920,7 +945,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 2 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperSetHomeObj, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperSetHomeObj, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			ip++
@@ -933,7 +958,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1))|uint64(code[ip+5])<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperDefineMethod, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperDefineMethod, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			sp--
@@ -960,7 +985,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(idx))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperClosure, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperClosure, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -976,7 +1001,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(readU16(code, ip+1)))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperPutUpval, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperPutUpval, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			if op == OpSetUpval {
@@ -1011,7 +1036,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if code[ip+1] == 1 {
 				a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffFnVal)
 			} else {
-				if !jitCallHelper(a, sp, jitHelperArguments, &fixups) {
+				if !jitCallHelper(a, sp, jitHelperArguments, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1028,7 +1053,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1)))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperDefineField, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperDefineField, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-2), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1065,7 +1090,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperThrow, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperThrow, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			sp = 0
@@ -1083,7 +1108,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(uint32(n)))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperArray, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperArray, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-n), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1099,7 +1124,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 2 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallBinary(a, sp, op, jitHelperArith, &fixups) {
+			if !jitCallBinary(a, sp, op, jitHelperArith, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-2), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1123,7 +1148,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 1 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperTypeof, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperTypeof, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-1), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1140,7 +1165,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if op == OpDelete {
 				h = jitHelperDelete
 			}
-			if !jitCallHelper(a, sp, h, &fixups) {
+			if !jitCallHelper(a, sp, h, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-2), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1152,7 +1177,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp >= jitMaxDepth {
 				return refuse(why, "stack-too-deep")
 			}
-			if !jitCallHelper(a, sp, jitHelperObject, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperObject, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1164,7 +1189,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 2 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperRegexp, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperRegexp, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-2), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1178,7 +1203,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(readU32(code, ip+1)))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperGlobalUndef, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperGlobalUndef, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1199,7 +1224,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 2 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperInstanceof, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperInstanceof, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(jitSlot(sp-2), jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1217,7 +1242,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				slow, done = a.NewLabel(), a.NewLabel()
 				jitEmitNumber(a, r, slow)
 			}
-			if !jitToInt32(a, r, r, sp, &fixups) {
+			if !jitToInt32(a, r, r, sp, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.Not32Reg(r)
@@ -1225,7 +1250,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if !kind[sp-1] {
 				a.Jmp(done)
 				a.Bind(slow)
-				if !jitCallUnary(a, sp, op, &fixups) {
+				if !jitCallUnary(a, sp, op, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.MovRegMem(r, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1254,7 +1279,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if generic {
 				a.Jmp(done)
 				a.Bind(slow)
-				if !jitCallUnary(a, sp, op, &fixups) {
+				if !jitCallUnary(a, sp, op, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.MovRegMem(r, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1290,7 +1315,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if generic {
 				a.Jmp(done)
 				a.Bind(slow)
-				if !jitCallUnary(a, sp, op, &fixups) {
+				if !jitCallUnary(a, sp, op, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.MovRegMem(r, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1318,7 +1343,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				// string is false and every object is true — and the same one the
 				// truthy branch answers, so it answers this too and materialises
 				// the Boolean rather than branching on it.
-				if !jitCallUnary(a, sp, op, &fixups) {
+				if !jitCallUnary(a, sp, op, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.MovRegMem(r, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1381,7 +1406,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if generic {
 				a.Jmp(done)
 				a.Bind(slow)
-				if !jitCallBinary(a, sp, op, jitHelperEquals, &fixups) {
+				if !jitCallBinary(a, sp, op, jitHelperEquals, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.MovRegMem(x, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1435,7 +1460,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			// into the one argument slot the helper protocol leaves untraced.
 			a.MovRegImm64(jitRegScratch, uint64(idx)|uint64(uint32(icx))<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperGetField, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperGetField, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(recv, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1481,7 +1506,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+16, dst)
 			a.MovRegImm64(jitRegScratch, uint64(idx)|uint64(uint32(icx))<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperGetField, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperGetField, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1498,7 +1523,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(uint32(argc)))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperCallMethod, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperCallMethod, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			dst := jitSlot(sp - argc - 2)
@@ -1530,9 +1555,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp > jitMaxDepth {
 				return refuse(why, "stack-too-deep")
 			}
-			a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
+			tb, to := jitStackBase(a, deepStack)
 			for i := jitWindowBase(sp); i < sp; i++ {
-				a.MovMemReg(jitRegScratch, int32(8*i), jitSlot(i))
+				a.MovMemReg(tb, to+int32(8*i), jitSlot(i))
 			}
 			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffStackN, uint32(sp))
 			// The count, and whether a receiver sits below the callee, in the
@@ -1582,7 +1607,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp < 3 {
 				return refuse(why, "stack-underflow")
 			}
-			if !jitCallHelper(a, sp, jitHelperPutElem, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperPutElem, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			sp -= 3
@@ -1598,7 +1623,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(idx))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperPutGlobal, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperPutGlobal, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			sp--
@@ -1615,7 +1640,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(uint32(argc)))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperNew, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperNew, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			dst := jitSlot(sp - argc - 1)
@@ -1642,7 +1667,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitRegScratch, uint64(uint32(argc)))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperCall, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperCall, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			// The result replaces the callee, which is the deepest of the slots
@@ -1667,7 +1692,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				jitEmitGetElem(a, recv, key, jitSlot(sp), jitSlot(sp+1), slow, done)
 			}
 			a.Bind(slow)
-			if !jitCallHelper(a, sp, jitHelperGetElem, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperGetElem, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(recv, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1705,7 +1730,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			a.MovRegImm64(jitRegScratch, uint64(tEmpty))
 			a.CmpRegReg(dst, jitRegScratch)
 			a.Jcc(jitasm.CondNE, ok)
-			if !jitCallHelper(a, sp, jitHelperDeadZone, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperDeadZone, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.Bind(ok)
@@ -1758,7 +1783,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			a.Bind(slow)
 			a.MovRegImm64(jitRegScratch, uint64(idx)|uint64(uint32(icx))<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperGetGlobal, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperGetGlobal, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -1795,7 +1820,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			// whole operand stack, and these are the top two of it.
 			a.MovRegImm64(jitRegScratch, uint64(idx)|uint64(uint32(icx))<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperPutField, &fixups) {
+			if !jitCallHelper(a, sp, jitHelperPutField, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.Bind(done)
@@ -1844,7 +1869,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				return refuse(why, "stack-effect-disagrees")
 			}
 			if spAfter < spBefore {
-				jitRefillSlots(a, spBefore, spAfter, effPush)
+				jitRefillSlots(a, spBefore, spAfter, effPush, deepStack)
 			}
 		}
 		// Every call out this instruction emitted belongs to the handler that
@@ -1984,7 +2009,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if why != nil {
 		*why = ""
 	}
-	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset()), slots: maxSp}
+	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset()), slots: maxDepth}
 	for _, f := range fixups {
 		if f.catch == nil {
 			continue
@@ -2232,14 +2257,7 @@ const jitICGlobalSpareRegs = 4
 //
 // Reports false when the stack is deeper than the context can hold, which is a
 // refusal rather than an error.
-func jitCallHelper(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFixup) bool {
-	return jitCallHelperIn(a, sp, helper, fixups, nil)
-}
-
-// jitCallHelperIn is jitCallHelper with the handler a throw from here belongs
-// to. Every template calls the wrapper above; the emitter substitutes the live
-// handler by rewriting the fixup after the fact, which is why this exists.
-func jitCallHelperIn(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFixup, catch *jitasm.Label) bool {
+func jitCallHelper(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFixup, deep bool) bool {
 	if sp > jitMaxDepth {
 		return false
 	}
@@ -2247,9 +2265,9 @@ func jitCallHelperIn(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFi
 
 	// Only the window: everything below it is already in these slots, which is
 	// where it lives between instructions rather than only across a call.
-	a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
+	spillBase, spillOff := jitStackBase(a, deep)
 	for i := jitWindowBase(sp); i < sp; i++ {
-		a.MovMemReg(jitRegScratch, int32(8*i), jitSlot(i))
+		a.MovMemReg(spillBase, spillOff+int32(8*i), jitSlot(i))
 	}
 	// SpillN is what tells the collector how much of Spill to trace. Writing it
 	// before the exit rather than after is the whole point: between the RET
@@ -2259,7 +2277,7 @@ func jitCallHelperIn(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFi
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffHelper, helper)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitHelper))
 	immOff := a.MovRegImm64At(jitasm.RAX, 0)
-	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume, catch: catch})
+	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume})
 	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitasm.RAX)
 	a.MovRegImm64(jitasm.RAX, jitmem.ExitHelper)
 	a.Ret()
@@ -2267,9 +2285,9 @@ func jitCallHelperIn(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFi
 	a.Bind(resume)
 	a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
 	a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
-	a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffStack)
+	fillBase, fillOff := jitStackBase(a, deep)
 	for i := jitWindowBase(sp); i < sp; i++ {
-		a.MovRegMem(jitSlot(i), jitRegScratch, int32(8*i))
+		a.MovRegMem(jitSlot(i), fillBase, fillOff+int32(8*i))
 	}
 	// Back to zero, and the slots below the window keep holding operands with
 	// nothing pointing at them. Sound because the only places compiled code can
@@ -2504,14 +2522,13 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 			}
 			return mkundef(), rt.typeError("JIT operand stack"), true
 		}
-		stack := jitFrameStack(ctx)
 		base := sn - need
 		tailThis := mkundef()
 		if ctx.Args[3]>>32 != 0 {
-			tailThis = Value(stack[base])
+			tailThis = jitSlotAt(ctx, base)
 			base++
 		}
-		callee := Value(stack[base])
+		callee := jitSlotAt(ctx, base)
 		// Copied rather than borrowed. Everywhere else a callee reads its arguments
 		// out of the caller's spill area while the caller waits; here the caller is
 		// finished and its context goes back on the free list on the next line.
@@ -2621,9 +2638,6 @@ func jitCopyArgs(window []Value) []Value {
 
 // jitHelper runs what compiled code asked for.
 func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *jitmem.ExecContext) *ThrowError {
-	// The frame's operand stack, as the slice it already is. Compiled code left
-	// the live slots there before it returned, and StackN is how many.
-	stack := jitFrameStack(ctx)
 	switch ctx.Helper {
 	case jitHelperGetField:
 		recv := Value(ctx.Args[2])
@@ -2692,10 +2706,10 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		base := n - depth
 		thisArg := mkundef()
 		if ctx.Helper == jitHelperCallMethod {
-			thisArg = Value(stack[base])
+			thisArg = Value(jitSlotAt(ctx, base))
 			base++
 		}
-		callee := Value(stack[base])
+		callee := jitSlotAt(ctx, base)
 		// The arguments as they already sit in the spill area, without copying
 		// them anywhere. See jitSpillArgs for why that is sound for a compiled
 		// callee and not in general.
@@ -2730,7 +2744,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		v, e := rt.getElement(Value(stack[n-2]), Value(stack[n-1]))
+		v, e := rt.getElement(Value(jitSlotAt(ctx, n-2)), Value(jitSlotAt(ctx, n-1)))
 		if e != nil {
 			return e
 		}
@@ -2790,7 +2804,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		obj, val := Value(stack[n-2]), Value(stack[n-1])
+		obj, val := Value(jitSlotAt(ctx, n-2)), Value(jitSlotAt(ctx, n-1))
 		// The cache first, because the emitted probe serves strictly less than
 		// the cache does. It declines the store that *creates* a property, and
 		// that is what building an object is made of: EarleyBoyer makes 18.75
@@ -2878,7 +2892,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 3 {
 			return rt.typeError("JIT operand stack")
 		}
-		ok, e := rt.setElementR(Value(stack[n-3]), Value(stack[n-2]), Value(stack[n-1]))
+		ok, e := rt.setElementR(Value(jitSlotAt(ctx, n-3)), Value(jitSlotAt(ctx, n-2)), Value(jitSlotAt(ctx, n-1)))
 		if e != nil {
 			return e
 		}
@@ -2894,7 +2908,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		val := Value(stack[n-1])
+		val := Value(jitSlotAt(ctx, n-1))
 		name := fn.constNames[uint32(ctx.Args[3])]
 		if b := rt.lookupGlobalLex(name); b != nil {
 			return rt.globalLexWrite(b, name, val)
@@ -2914,7 +2928,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		v, e := rt.jsUnary(Opcode(uint32(ctx.Args[3])), Value(stack[n-1]))
+		v, e := rt.jsUnary(Opcode(uint32(ctx.Args[3])), Value(jitSlotAt(ctx, n-1)))
 		if e != nil {
 			return e
 		}
@@ -2931,7 +2945,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			return rt.typeError("JIT operand stack")
 		}
 		ctx.Ret = 0
-		if rt.toBoolean(Value(stack[n-1])) {
+		if rt.toBoolean(Value(jitSlotAt(ctx, n-1))) {
 			ctx.Ret = 1
 		}
 		return nil
@@ -2958,7 +2972,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		r, e := rt.jsInstanceof(Value(stack[n-2]), Value(stack[n-1]))
+		r, e := rt.jsInstanceof(Value(jitSlotAt(ctx, n-2)), Value(jitSlotAt(ctx, n-1)))
 		if e != nil {
 			return e
 		}
@@ -2977,7 +2991,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		recv, val := Value(stack[n-2]), Value(stack[n-1])
+		recv, val := Value(jitSlotAt(ctx, n-2)), Value(jitSlotAt(ctx, n-1))
 		name := fn.constNames[uint32(ctx.Args[3])]
 		o := rt.objPtr(recv)
 		if o == nil {
@@ -3083,7 +3097,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if cl == nil || i >= len(cl.upvalues) || cl.upvalues[i] == nil {
 			return rt.typeError("JIT upvalue")
 		}
-		v := Value(stack[n-1])
+		v := Value(jitSlotAt(ctx, n-1))
 		cl.upvalues[i].set(v)
 		ctx.Ret = uint64(v)
 		return nil
@@ -3154,7 +3168,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		v, e := rt.toNumber(Value(stack[n-1]))
+		v, e := rt.toNumber(Value(jitSlotAt(ctx, n-1)))
 		if e != nil {
 			return e
 		}
@@ -3167,7 +3181,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		pk, e := rt.toPropertyKey(Value(stack[n-1]))
+		pk, e := rt.toPropertyKey(Value(jitSlotAt(ctx, n-1)))
 		if e != nil {
 			return e
 		}
@@ -3187,7 +3201,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		v, e := rt.getField(Value(stack[n-1]), "length")
+		v, e := rt.getField(Value(jitSlotAt(ctx, n-1)), "length")
 		if e != nil {
 			return e
 		}
@@ -3200,7 +3214,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		keys, e := rt.forInKeys(Value(stack[n-1]))
+		keys, e := rt.forInKeys(Value(jitSlotAt(ctx, n-1)))
 		if e != nil {
 			return e
 		}
@@ -3211,14 +3225,14 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		ctx.Ret = uint64(mkbool(rt.forInStillEnumerable(Value(stack[n-1]), Value(stack[n-2]))))
+		ctx.Ret = uint64(mkbool(rt.forInStillEnumerable(Value(jitSlotAt(ctx, n-1)), Value(jitSlotAt(ctx, n-2)))))
 		return nil
 	case jitHelperSetHomeObj:
 		n := int(ctx.StackN)
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		rt.setMethodHome(Value(stack[n-1]), Value(stack[n-2]))
+		rt.setMethodHome(Value(jitSlotAt(ctx, n-1)), Value(jitSlotAt(ctx, n-2)))
 		return nil
 	case jitHelperPutConst:
 		// The write half of a strict assignment to an unqualified name. The
@@ -3229,9 +3243,9 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		val := Value(stack[n-1])
+		val := Value(jitSlotAt(ctx, n-1))
 		name := fn.constNames[uint32(ctx.Args[3])]
-		if !rt.toBoolean(Value(stack[n-2])) {
+		if !rt.toBoolean(Value(jitSlotAt(ctx, n-2))) {
 			return rt.referenceError(name + " is not defined")
 		}
 		if b := rt.lookupGlobalLex(name); b != nil {
@@ -3257,7 +3271,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			privEnv = cl.privEnv
 		}
 		name := fn.constNames[uint32(ctx.Args[3])]
-		return rt.defineMethod(name, byte(ctx.Args[3]>>32), Value(stack[n-1]), Value(stack[n-2]), privEnv)
+		return rt.defineMethod(name, byte(ctx.Args[3]>>32), Value(jitSlotAt(ctx, n-1)), Value(jitSlotAt(ctx, n-2)), privEnv)
 	case jitHelperTypeof:
 		// `typeof v`. The string is interned, so what lands on the operand stack
 		// is a handle into the runtime's own table rather than a fresh string.
@@ -3265,7 +3279,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		ctx.Ret = uint64(rt.internString(rt.typeofString(Value(stack[n-1]))))
+		ctx.Ret = uint64(rt.internString(rt.typeofString(Value(jitSlotAt(ctx, n-1)))))
 		return nil
 	case jitHelperIn:
 		// `key in obj`, which is why this helper takes the closure: `#x in obj`
@@ -3280,7 +3294,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if cl != nil {
 			privEnv = cl.privEnv
 		}
-		r, e := rt.jsIn(Value(stack[n-2]), Value(stack[n-1]), privEnv)
+		r, e := rt.jsIn(Value(jitSlotAt(ctx, n-2)), Value(jitSlotAt(ctx, n-1)), privEnv)
 		if e != nil {
 			return e
 		}
@@ -3293,7 +3307,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		ok, e := rt.deleteElement(Value(stack[n-2]), Value(stack[n-1]))
+		ok, e := rt.deleteElement(Value(jitSlotAt(ctx, n-2)), Value(jitSlotAt(ctx, n-1)))
 		if e != nil {
 			return e
 		}
@@ -3310,7 +3324,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 1 {
 			return rt.typeError("JIT operand stack")
 		}
-		return &ThrowError{Value: Value(stack[n-1]), rt: rt}
+		return &ThrowError{Value: Value(jitSlotAt(ctx, n-1)), rt: rt}
 	case jitHelperObject:
 		ctx.Ret = uint64(rt.newPlainObject())
 		return nil
@@ -3328,7 +3342,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		ao.arr = make([]Value, want)
 		ao.arrLen = uint32(want)
 		for i := 0; i < want; i++ {
-			ao.arr[i] = Value(stack[n-want+i])
+			ao.arr[i] = Value(jitSlotAt(ctx, n-want+i))
 		}
 		ctx.Ret = uint64(arrv)
 		return nil
@@ -3337,7 +3351,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		if n < 2 {
 			return rt.typeError("JIT operand stack")
 		}
-		v, e := rt.newRegExp(rt.strGo(Value(stack[n-2])), rt.strGo(Value(stack[n-1])))
+		v, e := rt.newRegExp(rt.strGo(Value(jitSlotAt(ctx, n-2))), rt.strGo(Value(jitSlotAt(ctx, n-1))))
 		if e != nil {
 			return e
 		}

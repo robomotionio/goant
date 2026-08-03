@@ -75,22 +75,22 @@ func jitEmitNumber(a *jitasm.Asm, x jitasm.Reg, slow *jitasm.Label) {
 
 // jitCallUnary is jitCallBinary for one operand: the opcode goes in the
 // untraced argument slot and the operand comes off the top of the spill area.
-func jitCallUnary(a *jitasm.Asm, sp int, op Opcode, fixups *[]jitResumeFixup) bool {
+func jitCallUnary(a *jitasm.Asm, sp int, op Opcode, fixups *[]jitResumeFixup, deep bool) bool {
 	if sp < 1 || sp > jitMaxDepth {
 		return false
 	}
 	a.MovRegImm64(jitRegScratch, uint64(op))
 	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-	return jitCallHelper(a, sp, jitHelperUnary, fixups)
+	return jitCallHelper(a, sp, jitHelperUnary, fixups, deep)
 }
 
-func jitCallBinary(a *jitasm.Asm, sp int, op Opcode, helper uint32, fixups *[]jitResumeFixup) bool {
+func jitCallBinary(a *jitasm.Asm, sp int, op Opcode, helper uint32, fixups *[]jitResumeFixup, deep bool) bool {
 	if sp < 2 || sp > jitMaxDepth {
 		return false
 	}
 	a.MovRegImm64(jitRegScratch, uint64(op)|uint64(uint32(sp))<<32)
 	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-	return jitCallHelper(a, sp, helper, fixups)
+	return jitCallHelper(a, sp, helper, fixups, deep)
 }
 
 // jitBinaryOperands recovers a generic binary operator's operands from the

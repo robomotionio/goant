@@ -33,7 +33,7 @@ import (
 // spills; jitRegScratch is clobbered. back says the target is a loop header, so
 // the branch to it has to carry the fuel check.
 func jitEmitTruthyBranch(a *jitasm.Asm, v jitasm.Reg, whenTrue, back bool, target *jitasm.Label,
-	sp int, fixups *[]jitResumeFixup) bool {
+	sp int, fixups *[]jitResumeFixup, deep bool) bool {
 	scratch := jitRegScratch
 	tagged := a.NewLabel()
 	truthy := a.NewLabel()
@@ -81,7 +81,7 @@ func jitEmitTruthyBranch(a *jitasm.Asm, v jitasm.Reg, whenTrue, back bool, targe
 
 	// A String or a BigInt: the answer is in what the Value points at rather
 	// than in the Value, so the runtime answers it.
-	if !jitCallHelper(a, sp, jitHelperToBoolean, fixups) {
+	if !jitCallHelper(a, sp, jitHelperToBoolean, fixups, deep) {
 		return false
 	}
 	a.MovRegMem(scratch, jitasm.RegCtx, jitmem.CtxOffRet)

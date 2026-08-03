@@ -36,7 +36,7 @@ import (
 //
 // Reports false if the operand stack is deeper than a helper call can spill,
 // which is a refusal rather than an error.
-func jitToInt32(a *jitasm.Asm, dst, src jitasm.Reg, sp int, fixups *[]jitResumeFixup) bool {
+func jitToInt32(a *jitasm.Asm, dst, src jitasm.Reg, sp int, fixups *[]jitResumeFixup, deep bool) bool {
 	if sp > jitMaxDepth {
 		return false
 	}
@@ -56,7 +56,7 @@ func jitToInt32(a *jitasm.Asm, dst, src jitasm.Reg, sp int, fixups *[]jitResumeF
 	a.Jmp(done)
 
 	a.Bind(slow)
-	if !jitCallHelper(a, sp, jitHelperToInt32, fixups) {
+	if !jitCallHelper(a, sp, jitHelperToInt32, fixups, deep) {
 		return false
 	}
 	a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -80,15 +80,15 @@ func jitFromInt32(a *jitasm.Asm, r jitasm.Reg, signed bool) {
 }
 
 // jitBitwise emits one of the six binary bitwise operators over two Numbers.
-func jitBitwise(a *jitasm.Asm, op Opcode, x, y jitasm.Reg, sp int, fixups *[]jitResumeFixup) bool {
+func jitBitwise(a *jitasm.Asm, op Opcode, x, y jitasm.Reg, sp int, fixups *[]jitResumeFixup, deep bool) bool {
 	// The right operand is converted first so that the left is still boxed, and
 	// so recognisable to the collector, for as long as possible. Order is
 	// otherwise unobservable here: both operands are already Numbers, so neither
 	// conversion can run a valueOf or throw.
-	if !jitToInt32(a, y, y, sp, fixups) {
+	if !jitToInt32(a, y, y, sp, fixups, deep) {
 		return false
 	}
-	if !jitToInt32(a, x, x, sp, fixups) {
+	if !jitToInt32(a, x, x, sp, fixups, deep) {
 		return false
 	}
 
