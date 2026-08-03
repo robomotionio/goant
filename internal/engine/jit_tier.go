@@ -40,7 +40,22 @@ func envOn(name string) bool {
 // Low, because compiling is cheap here: two dataflow passes and straight-line
 // templates, with no register allocation to speak of. The cost of trying and
 // failing is lower still, and it is paid once — a refusal is remembered.
-const jitThreshold = 8
+// Tunable through GOANT_JIT_THRESHOLD, and that is a test hook rather than a
+// knob for tuning: at 8, most of test262 never compiles anything, because most
+// of its tests call a function once. Setting it to 1 turns the suite into a
+// test of the compiled tier — which is the only tier whose bugs the
+// interpreter cannot find, since the interpreter is the oracle.
+var jitThreshold = int32(envInt("GOANT_JIT_THRESHOLD", 8))
+
+// envInt reads an integer environment variable, falling back to def.
+func envInt(name string, def int) int {
+	if s := os.Getenv(name); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			return v
+		}
+	}
+	return def
+}
 
 // jitStats counts frame entries by where they ran, for GOANT_JIT_STATS=1.
 //
@@ -125,7 +140,7 @@ func JITOperatorStats() (fast, slow uint64) { return jitStats.genFast, jitStats.
 // to tier. The count is higher than the call threshold because a back edge is a
 // far cheaper event than a frame entry, so the same absolute work takes more of
 // them to be worth compiling for.
-const jitOSRThreshold = 2000
+var jitOSRThreshold = int32(envInt("GOANT_JIT_OSR_THRESHOLD", 2000))
 
 // jitAttempt is svFunc's tiering state, in one place so the interpreter's hot
 // path touches one field.
@@ -235,8 +250,10 @@ func jitEligible(fn *svFunc) bool {
 	// puts it on the same `with` chain the interpreter does. evalVarObj is
 	// still refused: eval CODE adopts its caller's object, which arrives through
 	// a piece of runtime state a compiled frame is not part of.
-	if jitSkipName != "" && strings.Contains(fn.name, jitSkipName) {
-		return false
+	for _, skip := range jitSkipNames {
+		if skip != "" && strings.Contains(fn.name, skip) {
+			return false
+		}
 	}
 	if jitMask != ^uint64(0) && jitMask&(1<<jitNameBucket(fn.name)) == 0 {
 		return false
@@ -297,12 +314,13 @@ func jitTry(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals []Va
 // can have that nothing else in the engine can: the interpreter is the oracle,
 // so the question is always "which compiled function disagrees with it".
 //
-// GOANT_JIT_SKIP=<substr> refuses any function whose name contains it, and
+// GOANT_JIT_SKIP=<substr>[,<substr>…] refuses any function whose name contains
+// one of them, and
 // GOANT_JIT_MASK=<u64> refuses every function whose name does not hash into one
 // of the 64 buckets the mask selects. The mask is what makes a bisect possible:
 // compiling a function changes how often the others are entered, so an index
 // over compile order is not stable between runs and a hash of the name is.
-var jitSkipName = os.Getenv("GOANT_JIT_SKIP")
+var jitSkipNames = strings.Split(os.Getenv("GOANT_JIT_SKIP"), ",")
 
 var jitMask = func() uint64 {
 	if s := os.Getenv("GOANT_JIT_MASK"); s != "" {

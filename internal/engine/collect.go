@@ -693,18 +693,34 @@ func (rt *Runtime) traceAny(rv reflect.Value) {
 	if !canHoldValue(rv.Type()) {
 		return
 	}
+	rt.traceHolder(rv)
+}
+
+// traceHolder is traceAny for a value whose type has already been found to hold
+// Values. The split exists for the slice case: asking the question per element
+// meant asking it thousands of times about one type, and it was 5% of
+// earley-boyer — a lookup in the type cache on every element of every slab.
+func (rt *Runtime) traceHolder(rv reflect.Value) {
 	switch rv.Kind() {
 	case reflect.Uint64:
 		if rv.Type() == valueType {
 			rt.markValue(Value(rv.Uint()))
 		}
 	case reflect.Struct:
+		// Per field, because each has its own type and most of them stop here.
 		for i := 0; i < rv.NumField(); i++ {
 			rt.traceAny(rv.Field(i))
 		}
 	case reflect.Array, reflect.Slice:
-		for i := 0; i < rv.Len(); i++ {
-			rt.traceAny(rv.Index(i))
+		// The element type is the same for every element, so it is asked about
+		// once. An element's own kind may still be a pointer or an interface,
+		// whose dynamic type is not known from the static one — those go back
+		// through traceAny below.
+		if !canHoldValue(rv.Type().Elem()) {
+			return
+		}
+		for i, n := 0, rv.Len(); i < n; i++ {
+			rt.traceHolder(rv.Index(i))
 		}
 	case reflect.Pointer:
 		if rv.IsNil() {

@@ -888,20 +888,28 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 					}
 					push(x && y)
 				case OpBand, OpBor, OpBxor, OpShl, OpShr, OpUshr:
-					// Still refused unless both operands are Numbers, so the
-					// 32-bit result always is one.
-					if _, ok := pop(); !ok {
+					// A Number either side of the guard, but only if both
+					// operands were Numbers to begin with: these are compiled
+					// with a runtime arm now, and `1n & 3n` is a BigInt.
+					y, ok := pop()
+					if !ok {
 						return nil, false
 					}
-					if _, ok := pop(); !ok {
+					x, ok := pop()
+					if !ok {
 						return nil, false
 					}
-					push(true)
+					push(x && y)
 				case OpNeg, OpBnot, OpInc, OpDec:
-					if _, ok := pop(); !ok {
+					// Likewise: ToNumeric leaves a BigInt a BigInt, so each of
+					// these answers whatever its operand was. The emitter
+					// already says so — this is the same rule, stated for the
+					// locals rather than for the operand stack.
+					k, ok := pop()
+					if !ok {
 						return nil, false
 					}
-					push(true)
+					push(k)
 				case OpNot:
 					if _, ok := pop(); !ok {
 						return nil, false

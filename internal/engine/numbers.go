@@ -19,6 +19,24 @@ func numberToString(d float64) string {
 		return "NaN"
 	case d == 0:
 		return "0" // covers both +0 and -0
+	}
+
+	// An integer, which is most of what a program ever turns into a string. The
+	// general path below spends a FormatFloat and four string operations to
+	// reproduce what FormatInt produces directly, and it was 18% of Octane's
+	// raytrace. The answers agree by construction: an integer this size has at
+	// most sixteen digits, so k <= n <= 21 and the spec's first case applies,
+	// which is the digits with no point and no exponent.
+	//
+	// The range test is what keeps ±Infinity out — it is not tested until below
+	// — as well as any value int64 could not hold.
+	if d > -(1<<53) && d < 1<<53 {
+		if i := int64(d); float64(i) == d {
+			return strconv.FormatInt(i, 10)
+		}
+	}
+
+	switch {
 	case d < 0:
 		return "-" + numberToString(-d)
 	case math.IsInf(d, 1):

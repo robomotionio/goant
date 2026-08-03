@@ -253,7 +253,7 @@ func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *
 	// The arguments are the caller's spill area rather than a copy of it — see
 	// jitSpillArgs — so this frame's reference to them is dropped again below,
 	// before the context they point into can be reused.
-	f := rt.publishFrame(rt.frameDepth)
+	f := rt.publishCompiledFrame(rt.frameDepth)
 	f.args, f.thisVal, f.fnVal = args, thisVal, fnVal
 	f.fn, f.cl = fn, cl
 	rt.maybeCollect()
@@ -267,6 +267,15 @@ func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *
 	}
 	pendingNT := rt.pendingNewTarget
 	rt.pendingNewTarget = mkundef()
+	// Published because a direct eval in the body can ask for new.target even
+	// though the body never names it — new.target itself compiles to
+	// SPECIAL_OBJ, which has no template, so a function that names it is never
+	// compiled at all. `eval('new.target')` in a constructor answered undefined
+	// until this line existed. Unconditional, and worth the one store: the
+	// condition would have to be "contains a direct eval", which is a different
+	// flag in strict code than in sloppy, and getting it wrong reads back a zero
+	// Value rather than anything that looks wrong.
+	f.newTarget = pendingNT
 
 	locals := rt.frameLocals(rt.frameDepth, fn.maxLocals)
 	for i := 0; i < fn.paramCount && i < fn.maxLocals && i < len(args); i++ {
@@ -339,6 +348,9 @@ func (rt *Runtime) runCompiledFrame(fn *svFunc, cl *closure, fnVal, thisVal Valu
 	// because the interpreted path is going to consume it itself.
 	pendingNT := rt.pendingNewTarget
 	rt.pendingNewTarget = mkundef()
+	// Published for the same reason as in jitCallCompiled: a direct eval in the
+	// body can ask for new.target even though the body never names it.
+	rt.frames[rt.frameDepth].newTarget = pendingNT
 
 	locals := rt.frameLocals(rt.frameDepth, fn.maxLocals)
 	for i := 0; i < fn.paramCount && i < fn.maxLocals && i < len(args); i++ {
@@ -354,6 +366,24 @@ func (rt *Runtime) runCompiledFrame(fn *svFunc, cl *closure, fnVal, thisVal Valu
 		rt.pendingNewTarget = pendingNT
 	}
 	return v, e, ok
+}
+
+// publishCompiledFrame is publishFrame for a caller that writes six of the
+// fields itself.
+//
+// Clearing the whole struct and then overwriting a third of it is measurable
+// where every compiled call goes through it. The six below are the ones a
+// compiled frame never sets, and so the ones a previous frame at this depth
+// could otherwise leave behind for the collector to read.
+func (rt *Runtime) publishCompiledFrame(depth int) *vmFrame {
+	if depth >= len(rt.frames) {
+		return rt.publishFrame(depth)
+	}
+	f := &rt.frames[depth]
+	f.stack, f.withStack = nil, nil
+	f.varObj, f.newTarget = 0, 0
+	f.pending, f.completed = 0, 0
+	return f
 }
 
 // publishFrame returns the slot this depth publishes its live values in,

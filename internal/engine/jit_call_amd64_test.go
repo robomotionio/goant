@@ -31,7 +31,7 @@ func BenchmarkCallIntoATinyFunction(b *testing.B) {
 		// Warm past the tier's threshold so the measured calls are the steady
 		// state rather than the compile.
 		args := []Value{tov(1)}
-		for i := 0; i < 4*jitThreshold; i++ {
+		for i := int32(0); i < 4*jitThreshold; i++ {
 			if _, e := rt.callValue(fnVal, mkundef(), args); e != nil {
 				b.Fatal("threw")
 			}
@@ -249,7 +249,7 @@ func BenchmarkCallIntoALoop(b *testing.B) {
 			b.Fatal(err)
 		}
 		args := []Value{tov(50)}
-		for i := 0; i < 4*jitThreshold; i++ {
+		for i := int32(0); i < 4*jitThreshold; i++ {
 			if _, e := rt.callValue(fnVal, mkundef(), args); e != nil {
 				b.Fatal("threw")
 			}

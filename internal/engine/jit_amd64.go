@@ -109,6 +109,23 @@ func jitEvictSlots(a *jitasm.Asm, sp, after int, deep bool) {
 	}
 }
 
+// jitWindowShifts reports whether the window moves between two depths, which is
+// what makes a branch across it unemittable.
+//
+// The refill that brings a slot back into a register is emitted after the
+// template, so on a conditional branch it sits on the fall-through path alone —
+// the taken edge would leave the window claiming a slot is in a register while
+// the register holds the condition that was just tested. It cannot simply be
+// hoisted above the branch either: the slot re-entering the window is the same
+// register the condition is in, so refilling first would destroy the thing being
+// branched on. So the shape is refused instead. It needs ten live operands
+// around a branch to arise at all — an array literal with a conditional element
+// past the ninth, which is where it was found — and the interpreter runs those
+// perfectly well.
+func jitWindowShifts(before, after int) bool {
+	return jitWindowBase(before) != jitWindowBase(after)
+}
+
 // jitStackBase is where the operand array is, as a register and an offset.
 //
 // A function whose stack fits in the context addresses it straight off the
@@ -619,6 +636,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			// the Boolean at all, which is both faster and how this tier managed
 			// before it could represent one.
 			l, whenTrue, after, fused := jitFuse(code, labels, ip+1)
+			if fused && jitWindowShifts(sp, sp-2) {
+				return refuse(why, "branch-across-window")
+			}
 
 			var slow, done *jitasm.Label
 			if generic {
@@ -705,6 +725,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp-1 != depths[target] {
 				return refuse(why, "stack-at-target")
 			}
+			if jitWindowShifts(sp, sp-1) {
+				return refuse(why, "branch-across-window")
+			}
 			back := target <= ip
 			if !jitEmitTruthyBranch(a, jitSlot(sp-1), op == OpJmpTrue, back, l, sp, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
@@ -774,9 +797,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				a.MovRegMem(x, jitasm.RegCtx, jitmem.CtxOffRet)
 				a.Bind(done)
 			}
-			// A bitwise operator produces an integer either way, so the result is
-			// a Number whichever side of the guard it came from.
-			kind[sp-2] = true
+			// An integer on the fast side, and whatever the runtime returned on
+			// the other — which for two BigInt operands is a BigInt, since these
+			// operators apply to those as well. So the result is a Number
+			// exactly when the operands were known to be.
+			kind[sp-2] = !generic
 			sp--
 			ip++
 
@@ -1203,6 +1228,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if !known {
 				return refuse(why, "branch-target")
 			}
+			if jitWindowShifts(sp, sp-1) {
+				return refuse(why, "branch-across-window")
+			}
 			jitEmitNullishFlags(a, jitSlot(sp-1))
 			a.Jcc(jitasm.CondA, l)
 			sp--
@@ -1366,8 +1394,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				return refuse(why, "stack-underflow")
 			}
 			r := jitSlot(sp - 1)
+			generic := !kind[sp-1]
 			var slow, done *jitasm.Label
-			if !kind[sp-1] {
+			if generic {
 				slow, done = a.NewLabel(), a.NewLabel()
 				jitEmitNumber(a, r, slow)
 			}
@@ -1376,7 +1405,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.Not32Reg(r)
 			jitFromInt32(a, r, true)
-			if !kind[sp-1] {
+			if generic {
 				a.Jmp(done)
 				a.Bind(slow)
 				if !jitCallUnary(a, sp, op, &fixups, deepStack) {
@@ -1385,7 +1414,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				a.MovRegMem(r, jitasm.RegCtx, jitmem.CtxOffRet)
 				a.Bind(done)
 			}
-			kind[sp-1] = true
+			// An int32 on the fast side; on the other, whatever the runtime
+			// returned — and `~` of a BigInt is a BigInt. Saying "a Number
+			// either way" here is what made `~~1n` answer -1: the second `~`
+			// took the unguarded path over a value that was not one.
+			kind[sp-1] = !generic
 			ip++
 
 		case OpNeg:
@@ -1492,6 +1525,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			generic := !kind[sp-1] || !kind[sp-2]
 			negate := op == OpNe || op == OpSne
 			l, whenTrue, after, fused := jitFuse(code, labels, ip+1)
+			if fused && jitWindowShifts(sp, sp-2) {
+				return refuse(why, "branch-across-window")
+			}
 
 			// `x === null`, `x !== false`, `x == null` and the rest: the right
 			// operand is a literal the instruction before pushed, and against one
@@ -2521,6 +2557,9 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 			}
 		}
 	}
+	// Whether a tail call has already been taken in this frame, which changes
+	// what a decline downstream is allowed to mean. See the default arm below.
+	tailed := false
 	for {
 		// The context is rooted for as long as compiled code can be suspended in a
 		// helper holding values nothing else refers to — see markRoots — and that
@@ -2601,9 +2640,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		// A frame that captured a local owns cells that only it can have created,
 		// and the next frame at this depth must not find them. Cleared on every way
 		// out, and the map itself is only ever allocated by a capture.
-		if rt.jitOpenUpvals != nil {
-			delete(rt.jitOpenUpvals, rt.frameDepth)
-		}
+		rt.dropOpenUpvals(rt.frameDepth)
 		tail := false
 		for !tail {
 			jitmem.Enter(pc, ctx)
@@ -2613,9 +2650,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 			switch ctx.Exit {
 			case jitmem.ExitReturn:
 				rt.jitFrames = rt.jitFrames[:n]
-				if rt.jitOpenUpvals != nil {
-					delete(rt.jitOpenUpvals, rt.frameDepth)
-				}
+				rt.dropOpenUpvals(rt.frameDepth)
 				return Value(ctx.Ret), nil, true
 			case jitmem.ExitPreempt:
 				// Being here is the safepoint: this is ordinary Go, so the runtime
@@ -2650,9 +2685,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 						}
 					}
 					rt.jitFrames = rt.jitFrames[:n]
-					if rt.jitOpenUpvals != nil {
-						delete(rt.jitOpenUpvals, rt.frameDepth)
-					}
+					rt.dropOpenUpvals(rt.frameDepth)
 					return mkundef(), e, true
 				}
 				pc = ctx.Resume
@@ -2660,8 +2693,24 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 				tail = true
 			default:
 				rt.jitFrames = rt.jitFrames[:n]
-				if rt.jitOpenUpvals != nil {
-					delete(rt.jitOpenUpvals, rt.frameDepth)
+				rt.dropOpenUpvals(rt.frameDepth)
+				// Declined its arguments at the entry guard, which is safe to
+				// report as "nothing has happened, run me in the interpreter
+				// instead" only while nothing has. After a tail call something
+				// has: this frame belongs to the callee, and the caller it took
+				// over from has already run to its return. Reporting a decline
+				// then makes the caller's caller run the ORIGINAL function a
+				// second time — Octane's pdfjs read the same stream twice and
+				// called the document malformed.
+				//
+				// So the callee is run here instead, through the general path a
+				// decline is asking for. One Go frame deeper than a proper tail
+				// call, which is the guarantee this gives up in exchange for
+				// being right, and only when a compiled callee refuses the
+				// arguments a tail call brought it.
+				if tailed {
+					v, e := rt.callValue(fnVal, this, args)
+					return v, e, true
 				}
 				return mkundef(), nil, false
 			}
@@ -2678,9 +2727,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		sn := int(ctx.StackN)
 		if argc < 0 || sn < need {
 			rt.jitFrames = rt.jitFrames[:n]
-			if rt.jitOpenUpvals != nil {
-				delete(rt.jitOpenUpvals, rt.frameDepth)
-			}
+			rt.dropOpenUpvals(rt.frameDepth)
 			return mkundef(), rt.typeError("JIT operand stack"), true
 		}
 		base := sn - need
@@ -2696,9 +2743,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		callArgs := jitCopyArgs(jitSpillArgs(ctx, base+1, argc))
 
 		rt.jitFrames = rt.jitFrames[:n]
-		if rt.jitOpenUpvals != nil {
-			delete(rt.jitOpenUpvals, rt.frameDepth)
-		}
+		rt.dropOpenUpvals(rt.frameDepth)
 
 		// The callee this can take over the frame for: an ordinary JS function with
 		// compiled code of its own. That covers a function tail-calling itself,
@@ -2755,6 +2800,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		fn, cl, fnVal, this, args = next, nextCl, callee, tailThis, callArgs
 		c = next.jit.code
 		pc = c.entry
+		tailed = true
 	}
 }
 
@@ -3225,13 +3271,10 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			if d.index >= len(locals) {
 				return rt.typeError("JIT upvalue")
 			}
-			open := rt.jitOpenUpvals[rt.frameDepth]
+			open := rt.openUpvalsAt(rt.frameDepth)
 			if open == nil {
 				open = map[int]*upvalue{}
-				if rt.jitOpenUpvals == nil {
-					rt.jitOpenUpvals = map[int]map[int]*upvalue{}
-				}
-				rt.jitOpenUpvals[rt.frameDepth] = open
+				rt.setOpenUpvals(rt.frameDepth, open)
 				// The first capture in this frame is what commits it: from here
 				// the locals belong to the closures, not to the depth.
 				rt.dropFrameLocals(rt.frameDepth)
@@ -3479,7 +3522,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			savedPrivEnv := rt.callerPrivEnv
 			rt.callerVarObj, rt.callerWithStack, rt.callerPrivEnv = f.varObj, f.withStack, privEnv
 			v, e := rt.performDirectEval(rt.strGo(evalArgs[0]), sc, cl,
-				Value(ctx.This), mkundef(), jitCaptureUpvalue(rt, locals))
+				Value(ctx.This), f.newTarget, jitCaptureUpvalue(rt, locals))
 			rt.callerVarObj, rt.callerWithStack, rt.callerPrivEnv = savedVarObj, savedWithStack, savedPrivEnv
 			if e != nil {
 				return e

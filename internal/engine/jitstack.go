@@ -82,13 +82,10 @@ func jitCaptureUpvalue(rt *Runtime, locals []Value) func(int) *upvalue {
 		if slot < 0 || slot >= len(locals) {
 			return &upvalue{location: new(Value)}
 		}
-		open := rt.jitOpenUpvals[rt.frameDepth]
+		open := rt.openUpvalsAt(rt.frameDepth)
 		if open == nil {
 			open = map[int]*upvalue{}
-			if rt.jitOpenUpvals == nil {
-				rt.jitOpenUpvals = map[int]map[int]*upvalue{}
-			}
-			rt.jitOpenUpvals[rt.frameDepth] = open
+			rt.setOpenUpvals(rt.frameDepth, open)
 			rt.dropFrameLocals(rt.frameDepth)
 		}
 		if u, ok := open[slot]; ok {
@@ -97,5 +94,38 @@ func jitCaptureUpvalue(rt *Runtime, locals []Value) func(int) *upvalue {
 		u := &upvalue{location: &locals[slot]}
 		open[slot] = u
 		return u
+	}
+}
+
+// openUpvalsAt returns the cells the frame at depth has captured, or nil.
+func (rt *Runtime) openUpvalsAt(depth int) map[int]*upvalue {
+	if depth < 0 || depth >= len(rt.jitOpenUpvals) {
+		return nil
+	}
+	return rt.jitOpenUpvals[depth]
+}
+
+// setOpenUpvals records the map for depth, growing the index as needed.
+func (rt *Runtime) setOpenUpvals(depth int, open map[int]*upvalue) {
+	if depth < 0 {
+		return
+	}
+	if depth >= len(rt.jitOpenUpvals) {
+		// In one step: a capture at depth ten thousand would otherwise append
+		// ten thousand times.
+		grown := make([]map[int]*upvalue, depth+16)
+		copy(grown, rt.jitOpenUpvals)
+		rt.jitOpenUpvals = grown
+	}
+	rt.jitOpenUpvals[depth] = open
+}
+
+// dropOpenUpvals forgets what the frame at depth captured. Called on every
+// frame entry and every way out of one, so it must stay this cheap: the cells
+// belong to that frame alone, and the next frame at this depth must not find
+// them.
+func (rt *Runtime) dropOpenUpvals(depth int) {
+	if depth >= 0 && depth < len(rt.jitOpenUpvals) {
+		rt.jitOpenUpvals[depth] = nil
 	}
 }

@@ -25,6 +25,15 @@ import (
 // gives the wrong answer: the handle is the low bits of the payload, so a double
 // interpreted as an object would index the chunk vector with its own mantissa.
 // The guard is what makes every later step's bounds safe rather than lucky.
+// MEASURED AND REJECTED: widening this to the whole object family (obj, array,
+// function, promise, generator — the set icReceiver accepts) takes raytrace's
+// property-cache hit rate from 82.6% to 92.5% and removes 5.1 million helper
+// round trips, and it does not show up in the score. The family is not
+// contiguous — TStr and TCFunc sit inside the range — so it costs two extra
+// compares on every property read to save a round trip on one in ten, and the
+// A/B on the benchmark VM came back flat to slightly negative. The 5.1 million
+// is real and is nearly all this one tag test; whatever takes it has to be
+// cheaper than three compares.
 func jitEmitTagCheck(a *jitasm.Asm, r jitasm.Reg, want Type, notObject *jitasm.Label) {
 	// A tagged Value is prefix | type<<shift | payload, so shifting the type
 	// field down and comparing is one test for "tagged, and this type" — an
