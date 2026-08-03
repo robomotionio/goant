@@ -999,6 +999,37 @@ because only 50.9% of its frame entries are compiled and the interpreted half is
 what sets the score. Removing work from the compiled half of a half-compiled
 program is invisible.
 
+### Seven attempts on the Go side of a call, and what they establish
+
+The exit-and-re-enter protocol costs about 30 ns a call, split between
+`jitHelper`'s dispatch, `jitCallCompiled`'s frame work, `jitRunAt`'s context
+setup and the two trampoline transitions. Seven changes have now tried to shave
+it, and three of them worked:
+
+| | |
+| --- | --- |
+| the arguments read out of the spill area, not copied | **+3.5% geomean** |
+| what a callee Value resolved to, remembered | **DeltaBlue +4.5%** |
+| `new` reaching a compiled constructor | +0.5%, inside drift |
+| remember the compiled code too | DeltaBlue +0.9%, Richards **−1.1%** |
+| …retired only by a collection | EarleyBoyer **−4.3%** |
+| each locals slot written exactly once | EarleyBoyer **−1.5%** |
+| `runtime.KeepAlive` hoisted out of the loop | no change |
+| **a dedicated `ExitCall`, so calls skip the helper switch** | **no change** |
+
+The last is the one that settles it. Calls are 96% of what Richards asks the
+runtime for, so a separate exit code that lets the re-entry loop serve them
+without the prologue, the jump table and the generic operand decode should have
+been worth several nanoseconds a call by the line profile. Across four
+interleaved pairs on four benchmarks it moved nothing: Richards +0.3%, DeltaBlue
+−0.3%, EarleyBoyer −0.2%, Splay +0.5%. Reverted.
+
+**What seven attempts establish is that the cost is not in the layers.** It is
+the round trip itself — leaving generated code, running any Go at all, and
+coming back. Nothing that keeps that shape removes it, which is the whole
+argument for the item at the top of the list below, and now a measured one
+rather than an extrapolated one.
+
 ### Sixteen ways: one winner, six losers
 
 `icWays` 8 -> 16 was tried before, measured at DeltaBlue +8% and EarleyBoyer
