@@ -845,6 +845,60 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			sp -= argc + 1
 			ip += 3
 
+		case OpInsert3:
+			// obj prop a -> a obj prop a. A stack shuffle and nothing else, which
+			// in a positional register assignment is three moves — and it is all
+			// Richards has left, 13.6 million interpreted instructions, because
+			// it is what `a[i] = v` used as an expression begins with.
+			if sp < 3 {
+				return refuse(why, "stack-underflow")
+			}
+			if sp >= len(jitStackRegs) {
+				return refuse(why, "stack-too-deep")
+			}
+			obj, prop, val := jitStackRegs[sp-3], jitStackRegs[sp-2], jitStackRegs[sp-1]
+			a.MovRegReg(jitStackRegs[sp], val)
+			a.MovRegReg(val, prop)
+			a.MovRegReg(prop, obj)
+			a.MovRegReg(obj, jitStackRegs[sp])
+			kind[sp] = kind[sp-1]
+			kind[sp-1] = kind[sp-2]
+			kind[sp-2] = kind[sp-3]
+			kind[sp-3] = kind[sp]
+			sp++
+			ip++
+
+		case OpPutElem:
+			// `a[i] = v`. Everything the read's guard chain establishes has to
+			// hold for a write too, and one thing more — the slot has to be
+			// writable and the array extensible — so this goes to the runtime
+			// rather than being emitted. What it buys is the rest of the
+			// function, which is the whole of Richards' remainder.
+			if sp < 3 {
+				return refuse(why, "stack-underflow")
+			}
+			if !jitCallHelper(a, sp, jitHelperPutElem, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			sp -= 3
+			ip++
+
+		case OpPutGlobal:
+			idx := readU32(code, ip+1)
+			if int(idx) >= len(fn.constNames) || idx > 0x7FFFFFFF {
+				return refuse(why, "shape")
+			}
+			if sp < 1 {
+				return refuse(why, "stack-underflow")
+			}
+			a.MovRegImm64(jitRegScratch, uint64(idx))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
+			if !jitCallHelper(a, sp, jitHelperPutGlobal, &fixups) {
+				return refuse(why, "stack-too-deep")
+			}
+			sp--
+			ip += 5
+
 		case OpNew:
 			// `new F(...)`, which is CALL with a different runtime entry point:
 			// the object, its prototype and what a constructor returning an
@@ -1207,8 +1261,8 @@ func jitHasTemplate(op Opcode) bool {
 		OpNeg, OpInc, OpDec, OpNot,
 		OpLt, OpLe, OpGt, OpGe, OpEq, OpNe, OpSeq, OpSne,
 		OpJmp, OpJmpFalse, OpJmpTrue, OpGetField, OpGetField2, OpPutField,
-		OpGetGlobal, OpGetUpval, OpGetElem, OpCall, OpCallMethod, OpNew,
-		OpReturn, OpReturnUndef, OpThis:
+		OpGetGlobal, OpPutGlobal, OpGetUpval, OpGetElem, OpPutElem, OpInsert3,
+		OpCall, OpCallMethod, OpNew, OpReturn, OpReturnUndef, OpThis:
 		return true
 	}
 	return false
@@ -1371,6 +1425,8 @@ const (
 	jitHelperToBoolean  = 13
 	jitHelperUnary      = 14
 	jitHelperNew        = 15
+	jitHelperPutElem    = 16
+	jitHelperPutGlobal  = 17
 )
 
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
@@ -1783,6 +1839,41 @@ func jitHelper(rt *Runtime, fn *svFunc, ctx *jitmem.ExecContext) *ThrowError {
 			return e
 		}
 		ctx.Ret = uint64(v)
+		return nil
+	case jitHelperPutElem:
+		// The interpreter's PUT_ELEM, including the strict-mode report of a
+		// store that did not happen.
+		n := int(ctx.SpillN)
+		if n < 3 {
+			return rt.typeError("JIT operand stack")
+		}
+		ok, e := rt.setElementR(Value(ctx.Spill[n-3]), Value(ctx.Spill[n-2]), Value(ctx.Spill[n-1]))
+		if e != nil {
+			return e
+		}
+		if !ok && fn.isStrict {
+			return rt.typeError("Cannot assign to read only property")
+		}
+		return nil
+	case jitHelperPutGlobal:
+		// The interpreter's PUT_GLOBAL: the declarative record first, because a
+		// Script-level let shadows a property of the same name, then the strict
+		// requirement that the binding already exist.
+		n := int(ctx.SpillN)
+		if n < 1 {
+			return rt.typeError("JIT operand stack")
+		}
+		val := Value(ctx.Spill[n-1])
+		name := fn.constNames[uint32(ctx.Args[3])]
+		if b := rt.lookupGlobalLex(name); b != nil {
+			return rt.globalLexWrite(b, name, val)
+		}
+		if fn.isStrict && !rt.hasProp(rt.global, name) {
+			return rt.referenceError(name + " is not defined")
+		}
+		if !rt.setProp(rt.global, name, val) && fn.isStrict {
+			return rt.typeError("Cannot assign to read only property '" + name + "'")
+		}
 		return nil
 	case jitHelperUnary:
 		// The operand this tier could not prove was a Number. jsUnary is what the

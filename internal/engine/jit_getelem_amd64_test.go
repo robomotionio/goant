@@ -215,3 +215,56 @@ func TestJITElementSeesAMutatedArray(t *testing.T) {
 	rt.setField(arr, "length", tov(9))
 	check("after the length was extended past the storage")
 }
+
+// TestJITElementWriteAgreesWithTheInterpreter covers `a[i] = v` and the stack
+// shuffle in front of it.
+//
+// The write goes to the runtime rather than being emitted — everything the
+// read's guard chain establishes has to hold, plus writability and
+// extensibility — so what is being checked here is the operand plumbing:
+// INSERT3 rotates four registers, and getting that wrong stores the index into
+// the array or the array into the slot.
+func TestJITElementWriteAgreesWithTheInterpreter(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"in-range-and-past-the-end", `
+			function f(a, i, v) { a[i] = v; return a[i]; }
+			var out = "";
+			for (var k = 0; k < 200; k++) {
+				var arr = [1, 2, 3];
+				out = "" + f(arr, 0, 9) + f(arr, 2, 8) + f(arr, 7, 7) + arr.length;
+			}
+			out;`},
+		{"used-as-an-expression", `
+			function f(a, i) { var t = (a[i] = i * 2); return t + a[i]; }
+			var s = 0, arr = [0, 0, 0, 0];
+			for (var k = 0; k < 200; k++) s = f(arr, k % 4);
+			s;`},
+		{"a-frozen-array-in-sloppy-mode", `
+			function f(a, i, v) { a[i] = v; return a[i]; }
+			var out = "";
+			for (var k = 0; k < 200; k++) { var arr = Object.freeze([1, 2]); out = "" + f(arr, 0, 9); }
+			out;`},
+		{"a-frozen-array-in-strict-mode", `
+			function f(a, i, v) { "use strict"; a[i] = v; return a[i]; }
+			var c = 0;
+			for (var k = 0; k < 200; k++) {
+				var arr = Object.freeze([1, 2]);
+				try { f(arr, 0, 9); } catch (e) { c++; }
+			}
+			c;`},
+		{"a-plain-object-and-a-string-key", `
+			function f(o, k, v) { o[k] = v; return o[k]; }
+			var out = "";
+			for (var k = 0; k < 200; k++) { var o = {}; out = "" + f(o, "x", 1) + f(o, 2, 3) + o.x; }
+			out;`},
+		{"a-global-assignment", `
+			var g = 0;
+			function f(v) { g = v; return g; }
+			var s = 0; for (var k = 0; k < 200; k++) s += f(k); s;`},
+		{"a-strict-global-that-does-not-exist", `
+			function f(v) { "use strict"; nope = v; return 1; }
+			var c = 0; for (var k = 0; k < 200; k++) { try { f(k); } catch (e) { c++; } } c;`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
+	}
+}

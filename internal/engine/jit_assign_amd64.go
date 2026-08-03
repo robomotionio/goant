@@ -308,6 +308,34 @@ func jitNumberDemand(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int) (
 					push(av)
 					push(obj)
 					push(av)
+				case OpInsert3:
+					// obj prop a -> a obj prop a
+					av, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					pr, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					ob, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					push(av)
+					push(ob)
+					push(pr)
+					push(av)
+				case OpPutElem:
+					for i := 0; i < 3; i++ {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+					}
+				case OpPutGlobal:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
 				case OpGetField:
 					// The receiver is demanded of nothing: the template reads a
 					// field of whatever it is handed, or asks the runtime to.
@@ -670,6 +698,34 @@ func jitNumericLocals(fn *svFunc, blocks map[int]*jitBlock, depths map[int]int, 
 					push(av)
 					push(obj)
 					push(av)
+				case OpInsert3:
+					// obj prop a -> a obj prop a
+					av, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					pr, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					ob, ok := pop()
+					if !ok {
+						return nil, false
+					}
+					push(av)
+					push(ob)
+					push(pr)
+					push(av)
+				case OpPutElem:
+					for i := 0; i < 3; i++ {
+						if _, ok := pop(); !ok {
+							return nil, false
+						}
+					}
+				case OpPutGlobal:
+					if _, ok := pop(); !ok {
+						return nil, false
+					}
 				case OpGetField:
 					// The object goes in and whatever it held comes out, which
 					// is not a Number as far as this tier can tell.
