@@ -1460,13 +1460,38 @@ Four things a shared template genuinely cannot say in one way:
   gives zero — which is already what `ToInt32` says a NaN is, so the arm64 guard
   is shorter than the amd64 one and needs no slow path for it.
 
-The verification loop needs no hardware. `GOARCH=arm64 go test -exec
-qemu-aarch64` runs the encoder's tests, which execute every instruction they
-encode; the engine's own tests; and, through a two-line wrapper as the runner,
-test262. Octane runs there too and verifies its own answers. The emulator decodes
-the architecture rather than the encoder's opinion of it, which is the whole
-point — it caught a push whose pre-index displacement was four bits short and
-would have assembled cleanly.
+### The emulator, and what it could not tell us
+
+`GOARCH=arm64 go test -exec qemu-aarch64` runs everything without hardware, and
+it earned its place twice: it caught a push whose pre-index displacement was four
+bits short and would have assembled cleanly, and `!(a - b)` answering false for a
+NaN — the amd64 template rests on UCOMISD setting the zero flag for unordered as
+well as equal, and FCMP does not.
+
+It is also 113 times slower. The engine's test suite is 5.7 seconds on an Apple
+Silicon Mac and 650 under qemu; test262 core is three minutes against an hour and
+a half. And three of the things that mattered it could not have told us at all:
+
+- **`MRS CTR_EL0` is illegal on macOS.** The instruction-cache flush read the
+  real line size, which is the careful thing to do and which Apple does not
+  permit from userspace. It was the first instruction of the function and the
+  process died on the first compiled function. The stride is the architecture's
+  minimum now — sixteen bytes, which repeats a maintenance operation rather than
+  skipping a line, and is always right.
+- **`day * msPerDay + t` fuses on arm64.** Go permits contracting a multiply and
+  an add where the architecture has the instruction, and MakeDate is specified
+  with the product rounded first. One test262 test separates the two
+  architectures on it, and an explicit conversion is how the language says round
+  here.
+- **A branch further than its instruction can reach.** arm64's conditional branch
+  covers a megabyte and amd64's rel32 covers two gigabytes, so a function large
+  enough to overflow the first exists and the second has never seen one. It is a
+  refusal now rather than a panic.
+
+darwin/arm64 matches amd64 exactly: test262 core 42739/42740, the same with the
+tier forced on at threshold 1, and `language` under `GOANT_GC_POISON` at
+23173/23173. On that machine the tier is worth 5.4x on Richards and 3.5x on
+DeltaBlue over the interpreter; on a Raspberry Pi, 3.6x on Richards.
 
 ## Still to do
 
@@ -1483,12 +1508,7 @@ is the corpus flattering the tier rather than the tier being complete.
 No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
-1. **arm64 on hardware.** The backend is built and works under emulation; what
-   it has never run on is a real Apple or Ampere core. Emulation is not nothing —
-   qemu decodes the architecture rather than the encoder's opinion of it — but it
-   does not have the memory model, and the instruction-cache flush in `jitmem` is
-   exactly the kind of thing an emulator is entitled to make unnecessary.
-2. **The 1.56 million reads the emitted probe declines that the cache answers
+1. **The 1.56 million reads the emitted probe declines that the cache answers
    anyway** — `JITNarrowStats()` counts them, and the guard chain in machine
    code is narrower than `icWay.hit` for a receiver that is not a plain object.
    Widening the tag check to the object family is not free: the tags are not
@@ -1496,24 +1516,24 @@ what would gain rather than by what is bleeding.
    million reads against the round trips it saves. It has to keep the `TObj`
    path at its current cost, and it has to be measured rather than reasoned
    about.
-3. **A scan bounded by `propIC.n`.** Ways fill densely from zero and the
+2. **A scan bounded by `propIC.n`.** Ways fill densely from zero and the
    unrolled probe walks all eight regardless. This is what would let `icWays`
    rise to 16, which measured DeltaBlue +8% and EarleyBoyer −5% — the −5% being
    entirely the cost of scanning sixteen ways to miss.
-4. **The store that creates a property, emitted rather than helped.** The helper
+3. **The store that creates a property, emitted rather than helped.** The helper
    reaches it, which recovered EarleyBoyer's 18%, but each one still costs an
    exit and a re-entry where the interpreter pays neither. Installing a shape
    would be the first *Go pointer* this tier stores from machine code, so it is
    the first that needs an argument about write barriers rather than the
    standing one that a Value is an integer.
-5. **`op:SPECIAL_OBJ`** — 469 functions in the corpus have it as their only
+4. **`op:SPECIAL_OBJ`** — 469 functions in the corpus have it as their only
    missing opcode and 832 meet it first, both the largest by some way. It is
    `arguments`, and the two halves are not the same problem: unmapped (strict)
    is a plain array-like, while a sloppy mapped one writes through to the
    frame's argument array — which is exactly the invariant that lets a compiled
    callee be handed the caller's spill area. Building one closes the door on the
    other.
-6. **`op:CLOSURE`** — 307 alone, 378 first. The allocation is a helper call; the
+5. **`op:CLOSURE`** — 307 alone, 378 first. The allocation is a helper call; the
    problem underneath is that a captured local has to outlive the frame, and
    compiled code addresses locals as a raw pointer into a slice. Boxed locals is
    a frame-model change, and `SET_UPVAL`/`PUT_UPVAL` are the same problem.
