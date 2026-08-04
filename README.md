@@ -32,7 +32,7 @@ The three ways to run JavaScript from Go, and what each one costs:
 | Language level         | **99.998% of Test262 core** ([what that excludes](#conformance)) | 77.9%                   | current                             |
 | Out of memory          | **an error you can catch** | takes the process down  | takes the process down              |
 | Per-run isolation      | **a fresh global, 111 ns** | a fresh Runtime         | a fresh context                     |
-| JIT                    | in progress                | none                    | yes                                 |
+| JIT                    | baseline (amd64, arm64)    | none                    | optimising                          |
 | Binary cost            | **6.4 MB**                 | 13.3 MB                 | ~90 MB linked                       |
 
 goant is for a Go program that has to run JavaScript it did not write, on
@@ -784,9 +784,12 @@ can move in one commit and modernise afterwards.
 
 Working, and in production for Function-node scripts. What is not there yet:
 
-- **JIT.** Ported (`internal/gomir`, `internal/jitmem`) but not the default
-  tier. Compute-bound JavaScript runs on the interpreter today, which is the
-  23–430× in the [Octane table](#octane-20).
+- **JIT.** There is a compiled tier, on amd64 and arm64, and it is not on by
+  default: `GOANT_JIT=1` turns it on. It is a baseline compiler — one template
+  per bytecode, inline caches, no type feedback and no inlining — and on Octane
+  it is worth between nothing and a factor of two depending on the workload.
+  What it does not have is the optimising tier the JIT engines in the
+  [Octane table](#octane-20) are, which is most of the distance to them.
 - **Per-function `[[Realm]]`.** The one remaining Test262 core failure: a
   revoked Proxy must report the TypeError of the realm its function came from,
   and goant has a single realm's worth of intrinsics to reach for.
@@ -841,7 +844,7 @@ checkable rather than something you have to take on trust.
 | `v8go/` | drop-in v8go-compatible binding |
 | `internal/engine` | the engine: values, object model, compiler, interpreter, GC, built-ins |
 | `internal/regexpjs`, `internal/regexp2` | JS regex translation over a vendored regexp2 |
-| `internal/gomir`, `internal/jitmem` | MIR ported to Go; JIT executable memory |
+| `internal/jitasm`, `internal/jitmem` | the JIT: instruction encoders and executable memory |
 | `cmd/goant` | CLI (`goant file.js`, `-e`, `--parse`, `--disasm`) |
 | `cmd/goant-conf`, `cmd/goant-t262`, `cmd/goant-mjsunit` | conformance harnesses |
 | `tools/` | generators (opcodes, Unicode tables, Intl data, corpus) |

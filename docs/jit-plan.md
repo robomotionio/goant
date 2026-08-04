@@ -1427,9 +1427,48 @@ frames lie between the throw and the last frame the runtime entered. Nothing in
 the language depends on it and nothing in test262 tests it, but it is a real
 difference and not a subtle one.
 
+## The second backend
+
+The tier emits machine code on arm64 as well, from one copy of the templates.
+
+Almost all of the work was naming. The emitter reached for a dozen register
+constants directly, so those became roles — `jitStackRegs`, `jitRegLocals`,
+`jitRegGuard`, `jitRegScratch`, `jitRegReturn`, `jitRegExit`, `jitRegF0`,
+`jitRegF1` — defined per architecture. After that the whole engine compiled for
+arm64 with one error, which says more about how narrow a template compiler's
+instruction vocabulary is than about the port.
+
+Four things a shared template genuinely cannot say in one way:
+
+- **A patched constant.** A resume address is written into code already emitted,
+  and on amd64 that is eight bytes inside a `movabs` while on arm64 it is four
+  instructions carrying sixteen bits each. The encoder patches it now, rather
+  than the emitter reaching into the buffer.
+- **The return address.** `BLR` puts it in a register and `RET` jumps to it, so a
+  nested call destroys its caller's way back into Go. `SaveLink`/`RestoreLink`
+  bracket the compiled call and are nothing at all on amd64.
+- **Flags as a side effect.** amd64's `AND` and `OR` set them and arm64's do
+  not, and two templates branched on flags they never asked for. Both property
+  probes test a shape transition and a proxy pointer for nil *as one value*,
+  which is where the first arm64 miscompilation was — Richards read
+  `this.scheduler` as undefined, three property reads away from the cause.
+- **An unconvertible double.** `CVTTSD2SI` reports failure by returning
+  `INT64_MIN` for everything, including a NaN. `FCVTZS` saturates and does not
+  report: too large gives `INT64_MAX`, too small gives `INT64_MIN`, and a NaN
+  gives zero — which is already what `ToInt32` says a NaN is, so the arm64 guard
+  is shorter than the amd64 one and needs no slow path for it.
+
+The verification loop needs no hardware. `GOARCH=arm64 go test -exec
+qemu-aarch64` runs the encoder's tests, which execute every instruction they
+encode; the engine's own tests; and, through a two-line wrapper as the runner,
+test262. Octane runs there too and verifies its own answers. The emulator decodes
+the architecture rather than the encoder's opinion of it, which is the whole
+point — it caught a push whose pre-index displacement was four bits short and
+would have assembled cleanly.
+
 ## Still to do
 
-Rewritten 4 August, after the compiled call.
+Rewritten 4 August, after the compiled call and the second backend.
 
 **This list is ordered by measurement rather than by corpus count.** The static
 histogram is still worth reading — 4,971 of 6,976 functions now compile, 71.3% —
@@ -1448,17 +1487,11 @@ what would gain rather than by what is bleeding.
    them. The obstacle is the fixup table: a resume address is assigned its catch
    handler by the loop that emits the instruction, and a deferred block appends
    its fixup after that loop has moved on.
-2. **An arm64 emitter.** `jitmem` is already in place and tested for it, the
-   entry trampoline exists, and the amd64 shape has now stopped moving — the
-   compiled call was the last piece that could have changed the frame model.
-   What is missing is the emitter: `jitasm` now speaks arm64 and every
-   encoding in it is checked by executing it under `go test -exec qemu-aarch64`,
-   which is also how `jitmem`'s trampoline and instruction-cache flush are
-   already covered. `jit_amd64.go` and its five companions are what remain, and
-   they are written against amd64's register names and flag model. It is not speed on any machine that has the amd64 backend; it is
-   that darwin/arm64 is most developer machines and currently gets the
-   interpreter, which is the difference between having a JIT and having one
-   where people run it.
+2. **arm64 on hardware.** The backend is built and works under emulation; what
+   it has never run on is a real Apple or Ampere core. Emulation is not nothing —
+   qemu decodes the architecture rather than the encoder's opinion of it — but it
+   does not have the memory model, and the instruction-cache flush in `jitmem` is
+   exactly the kind of thing an emulator is entitled to make unnecessary.
 3. **The 1.56 million reads the emitted probe declines that the cache answers
    anyway** — `JITNarrowStats()` counts them, and the guard chain in machine
    code is narrower than `icWay.hit` for a receiver that is not a plain object.
