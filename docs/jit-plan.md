@@ -1598,45 +1598,25 @@ is the corpus flattering the tier rather than the tier being complete.
 No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
-1. **The site that gives up.** `icWays` from 8 to 16 is one character and it is
-   the largest thing on this list by some way:
+1. **The site that gives up, and the half of it that is still on the table.**
+   Half of this item has been built — `icMissLimit`, see below — and what remains
+   is the width.
 
-   | | 8 ways | 16 ways | |
-   |---|---|---|---|
-   | box2d | 1626 | **2006** | +23.4% |
-   | deltablue | 890 | **1015** | +14.0% |
-   | richards | 1365 | 1380 | +1.1% |
-   | navier-stokes | 3396 | 3428 | +0.9% |
-   | raytrace | 661 | 643 | −2.7% |
-   | earley-boyer | 978 | **914** | −6.5% |
+   `icWays` from 8 to 16 is one character and it is the largest single number on
+   this list: **+23.4% on box2d** and **+14.0% on DeltaBlue**, +1.4% geomean. It
+   is also the only thing measured this session that makes a benchmark
+   materially worse, taking 6.5% off EarleyBoyer and 2.7% off TypeScript, and the
+   reason is not the scan — a bounded scan leaves EarleyBoyer at exactly the same
+   914 — but the memory: every site doubles from 320 bytes to 640, and the
+   workloads that lose are the ones that touch the most sites.
 
-   About +2% geomean, and the shape of it is two large winners against one real
-   loser rather than a wash. What decides it is not width but *retirement*.
-   A site that fills its ways and then meets another shape counts a miss, and at
-   `icMissLimit` it stops caching for good — the comment on that constant already
-   says a site seeing nine or ten shapes "is not megamorphic, it is merely wider
-   than the cache", and then it dies at 32 misses anyway. Counting how often a
-   retired site is consulted:
-
-   | | consulted after giving up | full, evicting its oldest way | 16 ways |
-   |---|---|---|---|
-   | box2d | 16.9M | 14,011 | +23.4% |
-   | deltablue | 1.68M | 195 | +14.0% |
-   | earley-boyer | 0 | 0 | −6.5% |
-   | raytrace | 0 | 0 | −2.7% |
-
-   Exactly the two workloads that retire sites are the two that gain, and exactly
-   the two that never retire one pay the memory for ways they never fill. So the
-   first thing to try is not a wider cache at all: it is eight ways that stop
-   dying — `icMissLimit` raised, or a miss counted only for a shape the site has
-   never seen. If that captures box2d and DeltaBlue it is strictly better than
-   widening, because it costs nothing per site.
-
-   What is *not* the answer is a spill slice, and the reason is worth keeping:
-   the win needs the extra ways reachable **from machine code**. The emitted
-   probe reads its ways at a constant address, so anything behind a slice header
-   is a helper round trip — which is what the experiment below measured, from the
-   other direction.
+   So it wants a width per site rather than a width per build, and the constraint
+   that makes that hard is worth stating: the win needs the extra ways reachable
+   **from machine code**, and the emitted probe reads its ways at a constant
+   address. Anything behind a slice header is a helper round trip, which is the
+   same thing the bounded-scan experiment measured from the other direction. Two
+   pools of sites — narrow and wide, each with its own emitted probe — is the
+   shape that could work.
 2. **The 1.56 million reads the emitted probe declines that the cache answers
    anyway** — `JITNarrowStats()` counts them, and the guard chain in machine
    code is narrower than `icWay.hit` for a receiver that is not a plain object.
@@ -1672,6 +1652,34 @@ what would gain rather than by what is bleeding.
    problem underneath is that a captured local has to outlive the frame, and
    compiled code addresses locals as a raw pointer into a slice. Boxed locals is
    a frame-model change, and `SET_UPVAL`/`PUT_UPVAL` are the same problem.
+
+**The site that stops caching while it is still hitting** has come off this list
+by being fixed, and it is the one thing this session changed that made anything
+faster. A site with eight ways and ten shapes misses on about one access in five
+however well it does on the other four, so it reaches any fixed miss count
+eventually and then gives up *at an 80% hit rate*. The count was 32, and the
+comment above it already contained the argument against itself: a site seeing
+nine or ten shapes "is not megamorphic, it is merely wider than the cache".
+
+Two Octane workloads reach that state and they are the only two — a retired site
+is consulted 16.9 million times in box2d and 1.68 million in DeltaBlue, and never
+in EarleyBoyer or RayTrace. Raising the count to 250 (the counter is a byte) is
+**+9.9% on box2d**, +1.7% on DeltaBlue, +0.9% geomean, and costs nothing at all:
+no memory, nothing on the hit path, and not one workload out of fifteen worse
+than noise.
+
+| | 8 ways, limit 32 | 16 ways, limit 32 | 8 ways, limit 250 |
+|---|---|---|---|
+| box2d | 1626 | 2006 | **1787** |
+| deltablue | 890 | 1015 | 905 |
+| earley-boyer | 978 | 914 | 976 |
+| typescript | 4788 | 4657 | 4794 |
+| geomean | — | +1.42% | **+0.92%** |
+
+The count should be a *rate*. Nothing here can tell a site that hits four times
+in five from one that never hits, and that is the whole defect; 250 is a longer
+leash on the wrong measurement, chosen because it is measured and free rather
+than because it is right.
 
 The bounded scan has come off this list by being built and measured, and it took
 three findings with it — none of which was the one it was built for.

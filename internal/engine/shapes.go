@@ -133,11 +133,34 @@ type propIC struct {
 // attempt costs a probe on top of the lookup that already happened. Giving up
 // makes such a site cost what it did before the cache existed.
 //
-// Thirty-two, not the eight that suited a four-way cache: with eight ways, a
-// site that sees nine or ten shapes is not megamorphic, it is merely wider than
-// the cache, and replacing the oldest way still hits most of the time. Giving up
-// on those cost DeltaBlue 5%, Splay 9%.
-const icMissLimit = 32
+// It was thirty-two, and the comment here said why that was more than the eight
+// which suited a four-way cache: with eight ways, a site that sees nine or ten
+// shapes is not megamorphic, it is merely wider than the cache, and replacing
+// the oldest way still hits most of the time. That argument was right and the
+// number was still far too small, because the counter measures the wrong thing.
+// A site cycling through ten shapes misses on about one access in five however
+// well it is doing on the other four, so it reaches any fixed count eventually
+// and then stops caching *while it was hitting 80% of the time*.
+//
+// Two Octane workloads reach that state, and they are the only two: a retired
+// site is consulted 16.9 million times in box2d and 1.68 million in DeltaBlue,
+// and never at all in EarleyBoyer or RayTrace. Raising this to 250 is worth
+// **+9.9% on box2d** and +1.7% on DeltaBlue, +0.9% geomean over the suite, and
+// costs nothing anywhere — no memory, and nothing on the hit path.
+//
+// Widening `icWays` to 16 instead reaches further into the same problem, +23.4%
+// on box2d and +14.0% on DeltaBlue, and takes 6.5% off EarleyBoyer and 2.7% off
+// TypeScript for ways they never fill: every site doubles from 320 bytes to 640.
+// That is a trade; this is not, which is why this is what is here.
+//
+// What should eventually replace the count is a rate. A site that hits four
+// times out of five is not megamorphic at any number of misses, and nothing here
+// can tell the two apart.
+//
+// 250 and not more because propIC.misses is a byte, and a limit above 255 would
+// not be a longer leash — it would be a counter that wraps and a site that never
+// retires at all.
+const icMissLimit = 250
 
 // icMissSlot marks a shape this site has already tried and cannot cache — most
 // often because the property lives on the prototype, which is every method call.
