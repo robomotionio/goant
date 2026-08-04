@@ -80,6 +80,28 @@ const (
 	CondO Cond = 0x0 // overflow
 )
 
+// FCond is a condition on the flags a double comparison leaves.
+//
+// The same encodings as the unsigned integer conditions, because that is what
+// UCOMISD sets — and a separate type all the same, because arm64's FCMP does
+// not. There the condition that reads "above" for integers is also true when an
+// operand is NaN, so the two families have to be told apart at the call site
+// rather than at the encoder. See the arm64 file.
+type FCond uint8
+
+const (
+	FCondE  FCond = 0x4 // ZF: equal, or unordered — test parity separately
+	FCondNE FCond = 0x5
+	FCondB  FCond = 0x2 // CF: below and ordered
+	FCondBE FCond = 0x6
+	FCondA  FCond = 0x7
+	FCondAE FCond = 0x3
+	// Set by UCOMISD when either operand is NaN. Every JavaScript comparison
+	// has to route unordered to false, so this is not an edge case.
+	FCondUnordered FCond = 0xA // PF
+	FCondOrdered   FCond = 0xB
+)
+
 // Label is a branch target. A label may be jumped to before it is bound; Code
 // resolves the displacements.
 type Label struct {
@@ -609,6 +631,13 @@ func (a *Asm) Jmp(l *Label) {
 }
 
 func (a *Asm) Jcc(c Cond, l *Label) {
+	a.emit(0x0F, 0x80|byte(c))
+	l.uses = append(l.uses, len(a.buf))
+	a.emit32(0)
+}
+
+// Jfcc branches on the flags a double comparison left. See FCond.
+func (a *Asm) Jfcc(c FCond, l *Label) {
 	a.emit(0x0F, 0x80|byte(c))
 	l.uses = append(l.uses, len(a.buf))
 	a.emit32(0)

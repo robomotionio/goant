@@ -1301,9 +1301,106 @@ Where the tier is complete it already performs like one. A numeric loop runs
 workloads, so not a head-to-head, but it says the gap to ant is coverage — 24
 opcodes against 135 — and not speed per opcode.
 
+## The call, emitted
+
+The prediction above was right, and it was the largest single thing in this
+document: a compiled function now enters a compiled function with a `CALL`.
+
+DeltaBlue's profile said what it would be worth before it was built. 29% of the
+run was generated code and 50% was the round trip around it — `jitRunAt`'s
+context setup, `jitHelper`'s dispatch, `jitCallCompiled`'s frame work, and the
+two transitions through the trampoline, each an indirect branch to an address
+that changes every time.
+
+| | before | after |
+| --- | --- | --- |
+| richards | 845 | **1402** |
+| deltablue | 572 | **884** |
+| earley-boyer | 937 | 949 |
+| raytrace | 635 | 653 |
+| typescript | 4490 | 4694 |
+
+The share of calls a call site makes itself: DeltaBlue 94%, Richards 91%,
+EarleyBoyer 91%, RayTrace 48% — and RayTrace's other half is calls into natives,
+which have no compiled form to enter and never will.
+
+### What had to be built, and what it is not allowed to do
+
+The constraint that shaped all of it: **Go must never run with a compiled frame
+on the goroutine stack.** Generated code is entered from a NOSPLIT trampoline, so
+a stack growth while one is live would send morestack walking frames the runtime
+has no map for. That rules out the obvious design — a nested frame returning to
+Go for a helper the way an outermost one does — and forces the one that works: a
+compiled frame that needs the runtime returns to *its caller*, which saves its
+own operands and its resume address and returns in turn, all the way out. The
+chain unwinds, Go runs on a stack it understands, and the frames reconstitute as
+new calls are made.
+
+Three other things had to exist first.
+
+**The contexts became a chain.** They were allocated per entry and stacked in a
+slice; now there is one per depth, linked, built ahead of the deepest frame that
+has run. A call site finds the callee's frame with one load, and `markRoots`
+walks the live prefix exactly as it walked the slice. Building ahead is not an
+optimisation: a call site finds the next context through the caller's, so a chain
+that only grew where the runtime had already entered a frame would let the first
+compiled call at a depth happen and never the second.
+
+**The callee's locals live in its context.** That is the frame it publishes for
+the collector — there is no vmFrame, no entry in the locals slab, no depth of its
+own in the runtime's frame counter, because publishing any of those means writing
+a Go pointer from machine code. It is only sound for a function that cannot let
+its locals outlive it, which is what the predicate refuses: a closure over a
+local, an `arguments` object, a direct eval, a `with`, a tail call, more locals
+than a context holds, or an arity the site does not match exactly.
+
+**The frame's identity is a record, not the site.** See below.
+
+### Two things that cost a day between them
+
+**The chain walk was 38% of EarleyBoyer.** A frame published its identity as an
+index into the code that called it, so nothing but integers travelled through
+machine code — and recovering it meant walking down from the frame the runtime
+entered, sixteen levels of pointer-chasing through contexts nowhere near the
+cache, on the path taken every time a compiled frame reaches the runtime for
+anything at all. EarleyBoyer went from 937 to 715 and the profile named the
+function outright. It is one load now: the context holds the address, and the
+note on `ExecContext.Site` is the argument for why the one pointer generated code
+writes needs no write barrier.
+
+**A refill reassigned the identity of a live frame.** TypeScript compiled to a
+helper indexing an empty constant pool, at a call depth of three and only after
+two million calls had gone right. A frame publishes what it is running because a
+helper serving it has to be handed that function's constant pool and inline
+caches — but a site is a *cache*: refilled after a collection retires it, and
+whenever it is reached with a callee it does not hold. And a site is reachable
+from inside the frames it opens. `f(g)` where `g` calls `f` again is enough.
+
+So a fill allocates a record and never writes to it again; the site points at the
+current one and a frame at the one it was entered through. The fill also had to
+become atomic — a site holding one function's entry address beside another's
+guard sends a call into the wrong function altogether — so everything that can
+decline now happens before the first store.
+
+Neither bug was found by a test. The first was a profile; the second was Octane's
+largest workload failing while `test262 -core` stayed at 42739/42740 with the
+tier forced on at threshold 1. What found *it* was the same knob that has found
+every miscompilation in this tier: halve the callees a site may enter,
+`GOANT_JIT_CALLMASK`, and see which half fails.
+
+### What it gives up
+
+A frame entered this way is not in `rt.frames`, so it does not appear in
+`Error.stack`. The trace walks the runtime's own frame array, and putting a
+compiled frame there means writing a `*svFunc` and a slice header from machine
+code. A trace taken under a compiled call chain is short by however many of these
+frames lie between the throw and the last frame the runtime entered. Nothing in
+the language depends on it and nothing in test262 tests it, but it is a real
+difference and not a subtle one.
+
 ## Still to do
 
-Rewritten 3 August, after the call path.
+Rewritten 4 August, after the compiled call.
 
 **This list is ordered by measurement rather than by corpus count.** The static
 histogram is still worth reading — 4,971 of 6,976 functions now compile, 71.3% —
@@ -1316,23 +1413,14 @@ is the corpus flattering the tier rather than the tier being complete.
 No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
-1. **Calls, compiled to compiled.** Now the only item on this list with a
-   number large enough to matter, and worth more than it was an hour before it
-   was written down: with equality no longer exiting, **96% of Richards' exits
-   are `CallMethod`** and 89% of DeltaBlue's are calls of some kind. The Go side
-   of one has been squeezed to the noise floor and the detour costs 4.69 ns
-   against 1.15 for a direct one. The argument compounds — a frame whose only
-   exit is a call becomes helper-free the moment that call is direct, and so
-   does its caller. Six things have to be
-   emitted rather than called — a per-site guard on the callee, a locals arena,
-   the frame publication the collector needs *without* storing a Go pointer from
-   machine code, a nested context, the depth and interrupt checks, and a way to
-   propagate a callee that exits to a helper. The last is the one that decides
-   the design: the caller can check the nested `Exit` and hand a non-Return back
-   to Go, which costs a round trip only when the callee needed one anyway.
-
-   The constraint from the frame-entry attempt still holds: the saving has to be
-   taken **without adding a branch to `runFrameBody` or `runFrame`**.
+1. **An arm64 emitter.** `jitmem` is already in place and tested for it, the
+   entry trampoline exists, and the amd64 shape has now stopped moving — the
+   compiled call was the last piece that could have changed the frame model.
+   What is missing is `jitasm` for the architecture, which is mechanical and
+   bounded. It is not speed on any machine that has the amd64 backend; it is
+   that darwin/arm64 is most developer machines and currently gets the
+   interpreter, which is the difference between having a JIT and having one
+   where people run it.
 2. **The 1.56 million reads the emitted probe declines that the cache answers
    anyway** — `JITNarrowStats()` counts them, and the guard chain in machine
    code is narrower than `icWay.hit` for a receiver that is not a plain object.
@@ -1362,9 +1450,12 @@ what would gain rather than by what is bleeding.
    problem underneath is that a captured local has to outlive the frame, and
    compiled code addresses locals as a raw pointer into a slice. Boxed locals is
    a frame-model change, and `SET_UPVAL`/`PUT_UPVAL` are the same problem.
-7. **An arm64 emitter.** `jitmem` is already in place and tested for it; the
-   emitter is mechanical once the amd64 shape has stopped moving. Not speed —
-   darwin/arm64 is most developer machines and currently gets the interpreter.
+
+The compiled call has come off this list by being built, and it is the one item
+that was worth what the profile said it was worth. Everything else on this list
+has been smaller than it looked; that one was not, because what it removed was
+not a layer but a boundary. It also produced the two hardest bugs in the tier's
+history — see above — and neither was the kind a conformance suite finds.
 
 Coverage led this list for three sessions and is no longer at the top of it.
 Twice in one session, compiling more code made a benchmark *slower* — the method
