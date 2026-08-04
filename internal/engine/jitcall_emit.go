@@ -417,11 +417,25 @@ func (rt *Runtime) jitFillSite(site *jitCallSite, callerStrict bool, callee Valu
 	// every site at once, and most of them fill again with what they had.
 	bind := site.bind
 	if bind == nil || bind.fn != fn || bind.cl != cl || bind.code != c {
-		if site.rebinds >= jitSiteRebindLimit {
-			return
-		}
-		if site.bind != nil {
-			site.rebinds++
+		// A callee that was rebuilt is the same callee. The record has to be
+		// fresh — the block it names is a different one — but it is not the site
+		// changing its mind, and charging it to the rebind limit lets a function
+		// that recompiles itself talk its own callers out of the machine path
+		// for good.
+		//
+		// That is not hypothetical. Rebuilding functions to widen their cache
+		// probes took DeltaBlue from 92.2% of calls made in machine code to
+		// 82.5% and cost it 12%, with the probes themselves serving the same
+		// share of reads either way. The limit is there for a site that really
+		// sees many callees; a block replaced under it is not one of them.
+		rebuilt := bind != nil && bind.fn == fn && bind.cl == cl
+		if !rebuilt {
+			if site.rebinds >= jitSiteRebindLimit {
+				return
+			}
+			if site.bind != nil {
+				site.rebinds++
+			}
 		}
 		bind = &jitCallee{fn: fn, cl: cl, code: c, site: site}
 	}

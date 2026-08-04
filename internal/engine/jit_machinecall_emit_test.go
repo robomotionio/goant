@@ -296,3 +296,90 @@ func TestARefillDoesNotReassignALiveFrame(t *testing.T) {
 		t.Errorf("the site did not refill")
 	}
 }
+
+// A callee that is rebuilt is still the same callee.
+//
+// A call site tolerates a bounded number of different callees before it gives
+// the machine path up, which is right for a site that really is polymorphic and
+// wrong for one whose callee simply recompiled itself. The two were
+// indistinguishable, because the record a site holds names the block: a rebuild
+// changes it, and eight rebuilds retired the site for good.
+//
+// The tier rebuilds a function whenever a bet it compiled in has been lost —
+// the parameter check today, and anything the feedback says tomorrow. So a
+// function that recompiles itself could talk every one of its callers out of
+// calling it in machine code, which is worth 12% of DeltaBlue.
+func TestARebuiltCalleeDoesNotRetireItsCallSites(t *testing.T) {
+	saved := jitEnabled
+	jitEnabled = true
+	defer func() { jitEnabled = saved }()
+
+	rt := New()
+	if _, err := rt.RunString("rebuild.js", `
+		function callee(a) { return a + 1; }
+		var s = 0;
+		for (var i = 0; i < 400; i++) s += callee(i);
+		s;`); err != nil {
+		t.Fatal(err)
+	}
+	v, err := rt.RunString("pick.js", "callee")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn, cl := rt.jitResolveCallee(v)
+	if fn == nil || fn.jit.code == nil || fn.jit.code.mentry == 0 {
+		t.Fatal("callee did not compile into something a call site may enter")
+	}
+
+	site := &jitCallSite{argc: 1}
+	rt.jitFillSite(site, fn.isStrict, v, fn, cl)
+	if site.entry == 0 {
+		t.Fatal("the site did not fill at all")
+	}
+
+	// Rebuild it well past the limit, refilling each time — which is what the
+	// runtime does when the callee's block is replaced under a live site.
+	for i := 0; i < jitSiteRebindLimit*3; i++ {
+		c := jitCompile(fn, nil)
+		if c == nil {
+			t.Fatalf("rebuild %d: refused to compile", i)
+		}
+		fn.jit.retired = append(fn.jit.retired, fn.jit.code)
+		fn.jit.code = c
+		site.callee = 0 // a retired site, as an epoch bump would leave it
+		rt.jitFillSite(site, fn.isStrict, v, fn, cl)
+		if site.entry != c.mentry {
+			t.Fatalf("rebuild %d: the site points at %#x, want the new block's %#x",
+				i, site.entry, c.mentry)
+		}
+		if site.callee != v {
+			t.Fatalf("rebuild %d: the site stopped describing its callee", i)
+		}
+	}
+	if site.rebinds != 0 {
+		t.Errorf("%d rebuilds of one callee counted as %d changes of mind",
+			jitSiteRebindLimit*3, site.rebinds)
+	}
+
+	// And a site that really does see different callees is still stopped.
+	if _, err := rt.RunString("other.js", `
+		function other(a) { return a + 2; }
+		for (var i = 0; i < 400; i++) other(i);`); err != nil {
+		t.Fatal(err)
+	}
+	ov, err := rt.RunString("pick2.js", "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ofn, ocl := rt.jitResolveCallee(ov)
+	for i := 0; i <= jitSiteRebindLimit; i++ {
+		if i%2 == 0 {
+			rt.jitFillSite(site, ofn.isStrict, ov, ofn, ocl)
+		} else {
+			rt.jitFillSite(site, fn.isStrict, v, fn, cl)
+		}
+	}
+	if site.rebinds < jitSiteRebindLimit {
+		t.Errorf("a site alternating between two callees counted %d changes of mind", site.rebinds)
+	}
+}
