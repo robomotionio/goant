@@ -36,6 +36,13 @@ type compiler struct {
 	curStack   int
 	err        error
 
+	// Index of this function's constant pool, so adding a constant is a lookup
+	// rather than a scan — see constant. Strings are keyed by their text because
+	// the same text reaches here as more than one handle; everything else by its
+	// raw bits.
+	strConsts map[string]int
+	rawConsts map[Value]int
+
 	// isScript marks the top-level script compilation: top-level `var` and
 	// function declarations bind on the global object rather than as locals.
 	isScript bool

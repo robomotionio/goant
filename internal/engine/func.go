@@ -245,23 +245,37 @@ func (c *compiler) patchJump(operandPos int) {
 
 // constant interns a value into the constant pool with dedup for
 // numbers/strings, returning its index.
+// constant interns v in this function's constant pool and returns its index.
+//
+// Dedup by raw bits for non-strings; by content for strings, because the same
+// text arrives here as more than one handle. Both go through an index rather
+// than a scan of the pool: the scan was quadratic in the pool's size, and its
+// string case dereferenced two handles per entry it passed over to compare
+// them. That was eight percent of Octane's code-load, which does nothing but
+// parse and compile.
 func (c *compiler) constant(v Value) int {
-	// Dedup by raw bits for non-strings; by content for strings.
-	for i, e := range c.fn.constants {
-		if e == v {
-			return i
-		}
-		if v.IsString() && e.IsString() &&
-			string(c.rt.strBytes(e)) == string(c.rt.strBytes(v)) {
-			return i
-		}
-	}
-	c.fn.constants = append(c.fn.constants, v)
-	text := ""
 	if v.IsString() {
-		text = c.rt.strGo(v)
+		text := c.rt.strGo(v)
+		if i, ok := c.strConsts[text]; ok {
+			return i
+		}
+		if c.strConsts == nil {
+			c.strConsts = make(map[string]int, 8)
+		}
+		c.strConsts[text] = len(c.fn.constants)
+		c.fn.constants = append(c.fn.constants, v)
+		c.fn.constNames = append(c.fn.constNames, text)
+		return len(c.fn.constants) - 1
 	}
-	c.fn.constNames = append(c.fn.constNames, text)
+	if i, ok := c.rawConsts[v]; ok {
+		return i
+	}
+	if c.rawConsts == nil {
+		c.rawConsts = make(map[Value]int, 8)
+	}
+	c.rawConsts[v] = len(c.fn.constants)
+	c.fn.constants = append(c.fn.constants, v)
+	c.fn.constNames = append(c.fn.constNames, "")
 	return len(c.fn.constants) - 1
 }
 

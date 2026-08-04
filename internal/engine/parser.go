@@ -28,6 +28,8 @@ type parser struct {
 	noIn     bool
 	err      error
 	filename string
+	// slab is the unhanded-out tail of the current node block — see slabNode.
+	slab []Node
 	// inAsync is true inside an async function body (so `await` is the operator,
 	// not an identifier). pendingAsync is set by a caller right before parseFunc
 	// to mark the function it is about to parse as async.
@@ -170,10 +172,41 @@ func (p *parser) expect(t Token) {
 	p.errorf("Unexpected token")
 }
 
-func (p *parser) mkPlain(kind NodeKind) *Node { return &Node{Kind: kind} }
+// slabNodes is how many nodes the parser cuts from one allocation. A Node is
+// 168 bytes, so a slab is about twenty kilobytes.
+const slabNodes = 128
+
+// slabNode hands out the next node of the current slab.
+//
+// A tree of a hundred thousand nodes is a hundred thousand allocations
+// otherwise, and Octane's code-load — which does nothing but parse and compile —
+// spent a sixth of its time inside mallocgc. Cutting them from a block makes it
+// one allocation per slab, and leaves the collector one object to find and scan
+// instead of a hundred and twenty-eight.
+//
+// Safe because the tree lives and dies as a unit: the bytecode is what survives
+// compilation, nothing outside the compiler keeps a *Node, so no straggler ever
+// holds a slab alive for the sake of one node.
+func (p *parser) slabNode() *Node {
+	if len(p.slab) == 0 {
+		p.slab = make([]Node, slabNodes)
+	}
+	n := &p.slab[0]
+	p.slab = p.slab[1:]
+	return n
+}
+
+func (p *parser) mkPlain(kind NodeKind) *Node {
+	n := p.slabNode()
+	n.Kind = kind
+	return n
+}
 
 func (p *parser) mk(kind NodeKind) *Node {
-	return &Node{Kind: kind, SrcOff: uint32(p.toff())}
+	n := p.slabNode()
+	n.Kind = kind
+	n.SrcOff = uint32(p.toff())
+	return n
 }
 
 func (p *parser) errorf(format string, args ...any) {
@@ -662,6 +695,13 @@ func pushArrowParamsFromExpr(fn, expr *Node) {
 // appears in an expression outside of any nested non-arrow function (which
 // would bind its own `arguments`). Used for the class-field-initializer early
 // error (a field initializer may not contain `arguments`).
+//
+// Not scanCode(n, scanArguments), close as the two look. This is the spec's
+// ContainsArguments, which returns false at a non-arrow function without
+// looking any further; scanCode still reads that function's parameter defaults,
+// because a spurious `arguments` object costs an allocation while a spurious
+// SyntaxError rejects `class C { x = function (a = arguments) {} }`, which is
+// legal.
 func nodeContainsArguments(n *Node) bool {
 	if n == nil {
 		return false
@@ -680,38 +720,6 @@ func nodeContainsArguments(n *Node) bool {
 	}
 	for _, c := range n.Args {
 		if nodeContainsArguments(c) {
-			return true
-		}
-	}
-	return false
-}
-
-// nodeHasDirectEval reports whether a subtree contains a syntactic `eval(…)`
-// call in the SAME variable environment. Every function form — including an
-// arrow and a class field initializer — establishes its own variable
-// environment, so the walk stops at one: a direct eval nested there declares its
-// vars in that function's environment, not this one's.
-//
-// The test is deliberately syntactic and over-approximate (a local binding named
-// `eval` makes the call non-direct); a false positive only costs one object
-// allocation per call to a function that never uses it.
-func nodeHasDirectEval(n *Node) bool {
-	if n == nil {
-		return false
-	}
-	if n.Kind == NFunc || n.Kind == NClass {
-		return false
-	}
-	if n.Kind == NCall && n.Left != nil && n.Left.Kind == NIdent && n.Left.Str == "eval" {
-		return true
-	}
-	for _, c := range []*Node{n.Left, n.Right, n.Cond, n.Body, n.Init, n.Update, n.CatchParam, n.CatchBody, n.FinallyBody} {
-		if nodeHasDirectEval(c) {
-			return true
-		}
-	}
-	for _, c := range n.Args {
-		if nodeHasDirectEval(c) {
 			return true
 		}
 	}
@@ -2522,11 +2530,10 @@ func (p *parser) parseFunc() *Node {
 		}
 	}
 	if fn.Flags&fnArrow == 0 {
-		// Asked here rather than left to the compiler so the walk happens while
-		// the tree is warm; both are memoised on the node, so whichever asks
-		// first pays and the other reads a bit.
-		funcUsesArguments(fn)
-		funcUsesNewTarget(fn)
+		// Scanned here rather than left to the compiler so the walk happens while
+		// the tree is warm; the answers are memoised on the node, so whichever of
+		// the two asks first pays and the other reads a bit.
+		scanFunc(fn)
 	}
 	return fn
 }

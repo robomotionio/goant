@@ -123,14 +123,12 @@ const (
 	fnStrLegacyOctal  = 1 << 24 // a string literal whose raw text contained a LegacyOctalEscapeSequence or NonOctalDecimalEscapeSequence (\1–\9, \0 followed by a digit) — a Syntax Error in strict code
 	nodeDupProto      = 1 << 25 // an object literal with two `__proto__:` data properties — an error only as a literal, allowed once reinterpreted as a destructuring pattern
 	nodeEscapedIdent  = 1 << 26
-	// Memo bits for the three whole-body scans below: set once the answer is
-	// known, so the parser and the compiler — which both ask the same three
-	// questions of the same tree — walk it once between them rather than twice
-	// each. They were 22% of Octane's code-load, which does nothing but parse
-	// and compile.
-	fnArgsScanned   = 1 << 28
-	fnNTScanned     = 1 << 29
-	fnEvalScanned   = 1 << 30
+	// Memo bit for the whole-body scan below: set once scanFunc has answered all
+	// three of its questions, so the parser and the compiler — which ask the
+	// same questions of the same tree — walk it once between them rather than
+	// twice each. The scans were 22% of Octane's code-load, which does nothing
+	// but parse and compile.
+	fnCodeScanned   = 1 << 28
 	fnHasDirectEval = 1 << 31
 
 	nodeEmptyParens = 1 << 27 // the `()` of an empty arrow parameter list, parsed as NUndef so it is distinguishable from a parameter actually named `undefined` // an identifier written with a Unicode escape, so it is not the terminal symbol it spells (`\u0061sync` is not `async`)
@@ -344,29 +342,127 @@ func paramsReferenceName(params []*Node, name string) bool {
 	return false
 }
 
-// paramsReferenceArguments reports whether any parameter's default initializer
-// (including a nested destructuring default) reads `arguments`. Binding-name
-// positions are ignored — a parameter merely *named* `arguments` shadows the
-// arguments object rather than referencing it.
-func paramsReferenceArguments(params []*Node) bool {
-	for _, p := range params {
-		if paramDefaultRefsArguments(p) {
-			return true
+// What scanCode looks for. Three questions about a function's own code that the
+// parser and the compiler both ask of every function they see.
+const (
+	scanArguments  = 1 << iota // an `arguments` reference
+	scanNewTarget              // a new.target reference
+	scanDirectEval             // a syntactic `eval(…)` call
+
+	scanAll = scanArguments | scanNewTarget | scanDirectEval
+)
+
+// scanCode walks a subtree once and reports which of the three it contains.
+//
+// One walk, not three. Each question used to have its own recursive pass over
+// the same nodes, and on a workload that is nothing but parse and compile —
+// Octane's code-load — the three passes together were nine percent of the run.
+// They differ only in where they stop, so the stopping rule rides along as a
+// mask that narrows on the way down:
+//
+//	arguments   a non-arrow function binds its own, so its body is out of scope;
+//	            its parameter defaults are not (ant ast_references_arguments).
+//	new.target  a non-arrow function has its own — nothing inside it counts.
+//	eval        every function form and every class body is its own variable
+//	            environment, so an eval nested in one is not this one's.
+//
+// want is what the caller still cares about; the result is a subset of it, and
+// the walk stops as soon as it has found all of it.
+func scanCode(n *Node, want int) int {
+	if n == nil || want == 0 {
+		return 0
+	}
+	found := 0
+	switch n.Kind {
+	case NIdent:
+		if n.Str == "arguments" {
+			found = want & scanArguments
+		}
+	case NNewTarget:
+		found = want & scanNewTarget
+	case NCall:
+		// Deliberately syntactic and over-approximate: a local binding named
+		// `eval` makes this call indirect, and a false positive costs one
+		// object allocation per call to a function that never uses it.
+		if l := n.Left; l != nil && l.Kind == NIdent && l.Str == "eval" {
+			found = want & scanDirectEval
+		}
+	case NFunc:
+		if n.Flags&fnArrow == 0 {
+			if want &= scanArguments; want == 0 {
+				return 0
+			}
+			for _, a := range n.Args {
+				if scanCode(a, want) != 0 {
+					return scanArguments
+				}
+			}
+			return 0
+		}
+		want &^= scanDirectEval
+	case NClass:
+		want &^= scanDirectEval
+	}
+	if want &^= found; want == 0 {
+		return found
+	}
+	for _, c := range []*Node{n.Left, n.Right, n.Cond, n.Body,
+		n.Init, n.Update, n.CatchParam, n.CatchBody, n.FinallyBody} {
+		if f := scanCode(c, want); f != 0 {
+			found |= f
+			if want &^= f; want == 0 {
+				return found
+			}
 		}
 	}
-	return false
+	for _, a := range n.Args {
+		if f := scanCode(a, want); f != 0 {
+			found |= f
+			if want &^= f; want == 0 {
+				return found
+			}
+		}
+	}
+	return found
+}
+
+// scanFunc answers all three questions about one function and records them on
+// the node. Called once per function, by whichever of the parser and the
+// compiler asks first.
+func scanFunc(n *Node) {
+	n.Flags |= fnCodeScanned
+	found := scanCode(n.Body, scanAll)
+	for _, p := range n.Args {
+		want := scanAll &^ found
+		if want&(scanArguments|scanDirectEval) == 0 {
+			break
+		}
+		// A parameter default is evaluated after the arguments object exists, so
+		// `function (x = arguments[2])` needs one. A bare identifier parameter is
+		// a binding name rather than a reference — a parameter merely *named*
+		// `arguments` shadows the object instead of using it.
+		w := want & scanDirectEval
+		if p != nil && p.Kind != NIdent {
+			w |= want & scanArguments
+		}
+		found |= scanCode(p, w)
+	}
+	if found&scanArguments != 0 {
+		n.Flags |= fnUsesArgs
+	}
+	if found&scanNewTarget != 0 {
+		n.Flags |= fnUsesNewTarget
+	}
+	if found&scanDirectEval != 0 {
+		n.Flags |= fnHasDirectEval
+	}
 }
 
 // funcUsesArguments reports whether a non-arrow function needs an `arguments`
-// binding: its body reads the name, or a parameter default does — defaults are
-// evaluated after the arguments object exists, so `function (x = arguments[2])`
-// counts. Memoised, because both the parser and the compiler ask.
+// binding: its body reads the name, or a parameter default does.
 func funcUsesArguments(n *Node) bool {
-	if n.Flags&fnArgsScanned == 0 {
-		n.Flags |= fnArgsScanned
-		if referencesArguments(n.Body) || paramsReferenceArguments(n.Args) {
-			n.Flags |= fnUsesArgs
-		}
+	if n.Flags&fnCodeScanned == 0 {
+		scanFunc(n)
 	}
 	return n.Flags&fnUsesArgs != 0
 }
@@ -375,11 +471,8 @@ func funcUsesArguments(n *Node) bool {
 // counting a nested arrow's mention as its own — an arrow has none of its own
 // and captures the enclosing binding.
 func funcUsesNewTarget(n *Node) bool {
-	if n.Flags&fnNTScanned == 0 {
-		n.Flags |= fnNTScanned
-		if referencesNewTarget(n.Body) {
-			n.Flags |= fnUsesNewTarget
-		}
+	if n.Flags&fnCodeScanned == 0 {
+		scanFunc(n)
 	}
 	return n.Flags&fnUsesNewTarget != 0
 }
@@ -387,86 +480,10 @@ func funcUsesNewTarget(n *Node) bool {
 // funcHasDirectEval reports whether the function's own code — its body or its
 // parameter list, not a nested function — contains a direct `eval(…)` call.
 func funcHasDirectEval(n *Node) bool {
-	if n.Flags&fnEvalScanned == 0 {
-		n.Flags |= fnEvalScanned
-		has := nodeHasDirectEval(n.Body)
-		for _, p := range n.Args {
-			has = has || nodeHasDirectEval(p)
-		}
-		if has {
-			n.Flags |= fnHasDirectEval
-		}
+	if n.Flags&fnCodeScanned == 0 {
+		scanFunc(n)
 	}
 	return n.Flags&fnHasDirectEval != 0
-}
-
-func paramDefaultRefsArguments(n *Node) bool {
-	// A bare identifier parameter is a binding name, not a reference; anything
-	// else (a default, rest, or destructuring pattern) may read arguments in a
-	// value position.
-	if n == nil || n.Kind == NIdent {
-		return false
-	}
-	return referencesArguments(n)
-}
-
-// referencesArguments reports whether the subtree reads `arguments`, not
-// crossing into nested non-arrow functions (ant ast_references_arguments).
-func referencesArguments(n *Node) bool {
-	if n == nil {
-		return false
-	}
-	if n.Kind == NIdent && n.Str == "arguments" {
-		return true
-	}
-	if n.Kind == NFunc && n.Flags&fnArrow == 0 {
-		for _, a := range n.Args {
-			if referencesArguments(a) {
-				return true
-			}
-		}
-		return false
-	}
-	if referencesArguments(n.Left) || referencesArguments(n.Right) ||
-		referencesArguments(n.Cond) || referencesArguments(n.Body) ||
-		referencesArguments(n.CatchBody) || referencesArguments(n.FinallyBody) ||
-		referencesArguments(n.CatchParam) || referencesArguments(n.Init) ||
-		referencesArguments(n.Update) {
-		return true
-	}
-	for _, a := range n.Args {
-		if referencesArguments(a) {
-			return true
-		}
-	}
-	return false
-}
-
-// referencesNewTarget reports whether the subtree reads new.target, not
-// crossing into nested non-arrow functions (ant ast_references_new_target).
-func referencesNewTarget(n *Node) bool {
-	if n == nil {
-		return false
-	}
-	if n.Kind == NNewTarget {
-		return true
-	}
-	if n.Kind == NFunc && n.Flags&fnArrow == 0 {
-		return false
-	}
-	if referencesNewTarget(n.Left) || referencesNewTarget(n.Right) ||
-		referencesNewTarget(n.Cond) || referencesNewTarget(n.Body) ||
-		referencesNewTarget(n.CatchBody) || referencesNewTarget(n.FinallyBody) ||
-		referencesNewTarget(n.CatchParam) || referencesNewTarget(n.Init) ||
-		referencesNewTarget(n.Update) {
-		return true
-	}
-	for _, a := range n.Args {
-		if referencesNewTarget(a) {
-			return true
-		}
-	}
-	return false
 }
 
 // programIsStrict reports whether the program's directive prologue contains a
