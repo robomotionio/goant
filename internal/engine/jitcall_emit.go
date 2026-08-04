@@ -34,13 +34,9 @@ const jitCallSpareRegs = 2
 // whatever the callee wanted; the caller records it in the fixup table, because
 // like every other resume address it is not known until the code has somewhere
 // to live.
-func jitEmitMachineCall(a *jitasm.Asm, sp, argc int, method bool, site uintptr, fixups *[]jitResumeFixup, slow, done *jitasm.Label) {
+func jitEmitMachineCall(a *jitasm.Asm, sp, argc int, method bool, site uintptr, fixups *[]jitResumeFixup, slow, done, body *jitasm.Label) {
 	base := sp - argc - 1
 	callee := jitSlot(base)
-	dst := callee
-	if method {
-		dst = jitSlot(base - 1)
-	}
 	// Two registers past the live depth, which the window has because a site
 	// deeper than this is not emitted. keep also survives the refill below, so
 	// it is where the callee's result waits.
@@ -77,6 +73,30 @@ func jitEmitMachineCall(a *jitasm.Asm, sp, argc int, method bool, site uintptr, 
 	a.MovRegMem(jitRegScratch, tmp2, jitmem.CtxOffDeep)
 	a.TestRegReg(jitRegScratch, jitRegScratch)
 	a.Jcc(jitasm.CondNE, slow)
+	a.Jmp(body)
+}
+
+// jitEmitMachineCallBody is the rest of it, emitted with the entry stubs rather
+// than here.
+//
+// Fifty instructions of setup, call and unwind sitting inline is fifty
+// instructions of dead weight in the instruction stream of every site that never
+// arms — and a site whose callee is a native never will. NavierStokes lost 5.5%
+// to it with the sites present and every one of them declining. What stays at
+// the site is the guard; what a site that arms pays for the move is one
+// unconditional jump each way.
+//
+// keep and tmp2 arrive holding what the guard left in them, which is what makes
+// this a continuation of the guard rather than a function of its own.
+func jitEmitMachineCallBody(a *jitasm.Asm, sp, argc int, method bool, site uintptr, fixups *[]jitResumeFixup, catch, done, body *jitasm.Label) {
+	base := sp - argc - 1
+	callee := jitSlot(base)
+	dst := callee
+	if method {
+		dst = jitSlot(base - 1)
+	}
+	keep, tmp2 := jitSlot(sp), jitSlot(sp+1)
+	a.Bind(body)
 
 	// Everything live goes to the spill area and is declared there, exactly as a
 	// helper call does it. The arguments are among it, which is what the callee
@@ -169,7 +189,9 @@ func jitEmitMachineCall(a *jitasm.Asm, sp, argc int, method bool, site uintptr, 
 	resume := a.NewLabel()
 	a.Bind(cascade)
 	immOff := a.MovRegImm64At(jitRegExit, 0)
-	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume})
+	// The catch is passed in rather than assigned by the emitter's loop over the
+	// instruction's fixups: that loop has moved on by the time this is emitted.
+	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume, catch: catch})
 	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitRegExit)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitCallout))
 	a.MovRegImm64(jitRegExit, jitmem.ExitCallout)
@@ -189,13 +211,17 @@ func jitEmitMachineCall(a *jitasm.Asm, sp, argc int, method bool, site uintptr, 
 // was. Two reasons: a function whose operand stack is not the context's inline
 // one, which is nineteen in the Octane corpus and none of them hot, and a call
 // made deeper than the register window can spare two slots for.
-func jitBeginCall(a *jitasm.Asm, sites []jitCallSite, i, sp, argc int, method bool, fixups *[]jitResumeFixup, deep bool) *jitasm.Label {
+func jitBeginCall(a *jitasm.Asm, sites []jitCallSite, i, sp, argc int, method bool, fixups *[]jitResumeFixup, deep bool, catch *jitasm.Label, defer_ *[]func()) *jitasm.Label {
 	if deep || sp+jitCallSpareRegs > jitStackWindow {
 		return nil
 	}
-	slow, done := a.NewLabel(), a.NewLabel()
-	jitEmitMachineCall(a, sp, argc, method, jitSiteAddr(sites, i), fixups, slow, done)
+	slow, done, body := a.NewLabel(), a.NewLabel(), a.NewLabel()
+	site := jitSiteAddr(sites, i)
+	jitEmitMachineCall(a, sp, argc, method, site, fixups, slow, done, body)
 	a.Bind(slow)
+	*defer_ = append(*defer_, func() {
+		jitEmitMachineCallBody(a, sp, argc, method, site, fixups, catch, done, body)
+	})
 	return done
 }
 

@@ -381,6 +381,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if handlers != nil {
 		live = handlers[start]
 	}
+	// The blocks a call site defers: the body of a compiled call, emitted with
+	// the entry stubs rather than inline. See jitEmitMachineCallBody.
+	var deferred []func()
 	// One entry stub per catch that something can actually throw into. Landing
 	// there comes from Go rather than from a branch, and the entry trampoline
 	// sets the context register and nothing else — so the two registers the body
@@ -1690,7 +1693,8 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			site := nextSite
 			nextSite++
 			sites[site].argc, sites[site].method = uint16(argc), true
-			done := jitBeginCall(a, sites, site, sp, argc, true, &fixups, deepStack)
+			done := jitBeginCall(a, sites, site, sp, argc, true, &fixups, deepStack,
+				jitCatchStub(a, live, catchStubs), &deferred)
 			a.MovRegImm64(jitRegScratch, uint64(uint32(argc))|uint64(site+1)<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
 			if !jitCallHelper(a, sp, jitHelperCallMethod, &fixups, deepStack) {
@@ -1839,7 +1843,8 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			site := nextSite
 			nextSite++
 			sites[site].argc = uint16(argc)
-			done := jitBeginCall(a, sites, site, sp, argc, false, &fixups, deepStack)
+			done := jitBeginCall(a, sites, site, sp, argc, false, &fixups, deepStack,
+				jitCatchStub(a, live, catchStubs), &deferred)
 			a.MovRegImm64(jitRegScratch, uint64(uint32(argc))|uint64(site+1)<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
 			if !jitCallHelper(a, sp, jitHelperCall, &fixups, deepStack) {
@@ -2162,6 +2167,12 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		a.Jmp(l)
 	}
 
+	// The call bodies, out of the instruction stream and next to everything else
+	// that is reached by a jump rather than by falling into it.
+	for _, emit := range deferred {
+		emit()
+	}
+
 	// The entry a compiled call site uses, which does for itself what jitRunAt
 	// does for a frame the runtime enters. Emitted only for a function that can
 	// live in a context alone — see jitMachineCallable — and for one whose
@@ -2303,6 +2314,26 @@ func jitMissingTemplates(fn *svFunc) []string {
 		ip += size
 	}
 	return out
+}
+
+// jitCatchStub is the entry stub for the handler in force here, created on
+// demand, or nil when nothing would catch.
+//
+// The emitter's own loop assigns this to every fixup an instruction produced,
+// which is the right answer for every instruction that emits all of itself. A
+// compiled call does not: its body is emitted later, and by then the loop has
+// moved on to the next instruction and the next handler.
+func jitCatchStub(a *jitasm.Asm, live []jitHandler, stubs map[int]*jitasm.Label) *jitasm.Label {
+	if len(live) == 0 {
+		return nil
+	}
+	at := live[len(live)-1].catchIP
+	stub := stubs[at]
+	if stub == nil {
+		stub = a.NewLabel()
+		stubs[at] = stub
+	}
+	return stub
 }
 
 // jitScanTargets collects every branch target, which the emitter needs before it
