@@ -533,8 +533,20 @@ func (a *Asm) MovsxdRegReg(dst, src Reg) { a.emitRM(true, []byte{0x63}, uint8(ds
 // AH..BH rather than SPL..DIL, so a byte operation on RSI would silently write
 // to the high half of RBP instead.
 // SetfccReg is SetccReg for the flags a double comparison left. See FCond.
+//
+// Spelled out rather than routed through emitRM, and that is the whole point:
+// emitRM omits a REX prefix it does not need, and this instruction needs one it
+// does not need. The two operand-stack slots that are RSI and RDI encode as 6
+// and 7, which without a REX name DH and BH — so `SETcc SIL` silently became
+// `SETcc DH`, writing a comparison's answer into the high byte of another
+// operand and leaving the slot that should hold it untouched.
+//
+// It cost Octane's TypeScript benchmark, which reported "Parse errors" for a
+// day while test262 and mjsunit stayed green: the corruption only happens at an
+// operand depth of three or four, which small functions never reach.
 func (a *Asm) SetfccReg(c FCond, r Reg) {
-	a.emitRM(false, []byte{0x0F, 0x90 | byte(c)}, 0, uint8(r))
+	a.emit(rex(false, 0, 0, uint8(r)))
+	a.emit(0x0F, 0x90|byte(c), modrm(3, 0, uint8(r)))
 }
 
 func (a *Asm) SetccReg(c Cond, r Reg) {

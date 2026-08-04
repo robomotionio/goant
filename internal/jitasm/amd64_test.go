@@ -616,3 +616,88 @@ func TestUnboundLabelPanics(t *testing.T) {
 	a.Jmp(a.NewLabel())
 	a.Code()
 }
+
+// TestSetccWritesTheRegisterItNames is the one every byte operation on this
+// architecture needs.
+//
+// SETcc names a byte register, and without a REX prefix the encodings 4 to 7
+// mean AH, CH, DH and BH rather than SPL, BPL, SIL and DIL. RSI and RDI are
+// operand-stack slots, so a comparison materialised into either of them wrote
+// its answer into the high byte of RDX or RBX and left the slot holding
+// whatever it held before. Nothing crashes; a boolean is simply wrong, and only
+// at an operand depth small functions never reach.
+//
+// Executed rather than compared against bytes, because the processor is the
+// authority on which register an encoding names.
+func TestSetccWritesTheRegisterItNames(t *testing.T) {
+	for _, r := range allocatable {
+		if r == RAX {
+			continue // the answer comes back in RAX; it cannot also be the target
+		}
+		for _, tc := range []struct {
+			name string
+			set  func(a *Asm)
+		}{
+			{"SetccReg", func(a *Asm) { a.SetccReg(CondE, r) }},
+			{"SetfccReg", func(a *Asm) { a.SetfccReg(FCondE, r) }},
+		} {
+			// Fill every register with a pattern, compare two equal values so
+			// the condition is true, then hand back the target register. A
+			// wrong encoding leaves the pattern in place and writes into
+			// someone else's high byte.
+			a := NewAsm()
+			for _, fill := range allocatable {
+				a.MovRegImm64(fill, 0xEEEEEEEEEEEEEEEE)
+			}
+			a.MovRegImm64(RAX, 7)
+			a.CmpRegReg(RAX, RAX)
+			tc.set(a)
+			a.MovRegReg(RAX, r)
+			a.Ret()
+
+			ctx := jitmem.ExecContext{}
+			got := run(t, a.Code(), &ctx)
+			if got != 0xEEEEEEEEEEEEEE01 {
+				t.Errorf("%s(%v): register holds %#016x, want %#016x",
+					tc.name, r, got, uint64(0xEEEEEEEEEEEEEE01))
+			}
+		}
+	}
+}
+
+// And the invariant the two families are supposed to share on this
+// architecture: UCOMISD sets the unsigned flags, so an FCond encodes exactly as
+// the Cond of the same name. If that ever stops being true the templates have to
+// stop assuming it.
+func TestBothConditionFamiliesEncodeTheSame(t *testing.T) {
+	pairs := []struct {
+		name string
+		i    Cond
+		f    FCond
+	}{
+		{"E", CondE, FCondE}, {"NE", CondNE, FCondNE},
+		{"B", CondB, FCondB}, {"BE", CondBE, FCondBE},
+		{"A", CondA, FCondA}, {"AE", CondAE, FCondAE},
+		{"P/unordered", CondP, FCondUnordered}, {"NP/ordered", CondNP, FCondOrdered},
+	}
+	for _, p := range pairs {
+		for _, r := range allocatable {
+			ai, af := NewAsm(), NewAsm()
+			ai.SetccReg(p.i, r)
+			af.SetfccReg(p.f, r)
+			bi, bf := ai.Code(), af.Code()
+			if string(bi) != string(bf) {
+				t.Errorf("%s on %v: SetccReg emits % x, SetfccReg emits % x", p.name, r, bi, bf)
+			}
+		}
+		ai, af := NewAsm(), NewAsm()
+		li, lf := ai.NewLabel(), af.NewLabel()
+		ai.Jcc(p.i, li)
+		ai.Bind(li)
+		af.Jfcc(p.f, lf)
+		af.Bind(lf)
+		if string(ai.Code()) != string(af.Code()) {
+			t.Errorf("%s: Jcc emits % x, Jfcc emits % x", p.name, ai.Code(), af.Code())
+		}
+	}
+}
