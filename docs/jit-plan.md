@@ -1419,6 +1419,25 @@ tier forced on at threshold 1. What found *it* was the same knob that has found
 every miscompilation in this tier: halve the callees a site may enter,
 `GOANT_JIT_CALLMASK`, and see which half fails.
 
+### A third, found later: a rebuilt callee looked like a different one
+
+A site tolerates a bounded number of different callees before it gives the
+machine path up, which is right for a site that really is polymorphic. The record
+it holds names the compiled *block*, though, so a callee that recompiled itself
+looked exactly like a callee that had been replaced — and eight rebuilds retired
+the site for good.
+
+The tier already rebuilds a function whenever a bet compiled into it has been
+lost. Today that is only the parameter check, which is rare; anything driven by
+feedback would make it common, which is how this was found. Rebuilding functions
+to widen their property probes took DeltaBlue from 92.2% of calls made in machine
+code to 82.5% and cost 12% of the score — while the probes themselves served
+87.6% of reads against 87.4%, so the thing being measured was not the thing doing
+the damage. A rebuild is not a change of callee and no longer counts as one.
+
+It is worth naming as a class: the compiled call binds to a block, and every
+future optimisation that replaces a block has to know that.
+
 ### What it gives up
 
 A frame entered this way is not in `rt.frames`, so it does not appear in
@@ -1459,6 +1478,27 @@ Four things a shared template genuinely cannot say in one way:
   report: too large gives `INT64_MAX`, too small gives `INT64_MIN`, and a NaN
   gives zero — which is already what `ToInt32` says a NaN is, so the arm64 guard
   is shorter than the amd64 one and needs no slow path for it.
+
+### And the one it cost to say them
+
+Separating the two condition families added `SetfccReg`, and it went through the
+encoder's ordinary register-operand helper — which omits a REX prefix it does not
+need. `SETcc` needs one it does not need: without it, the encodings 4 to 7 name
+AH, CH, DH and BH rather than SPL, BPL, SIL and DIL. Two operand-stack slots are
+RSI and RDI, so a comparison materialised into either wrote its answer into the
+high byte of a different operand and left its own slot untouched.
+
+`SetccReg` has emitted the prefix unconditionally since it was written and says
+why in a comment directly above. The new function was a copy of the shape of the
+code around it rather than of the one instruction it replaced.
+
+Nothing crashes, and nothing shallow is wrong — the slots are the fourth and
+fifth, and a small function never reaches them. test262 core was 42739/42740
+with the tier forced on at threshold 1, and mjsunit's 3,149 tests agreed with
+the interpreter exactly, both with this in. What found it was Octane's TypeScript
+benchmark reporting "Parse errors", which is a compiler comparing token positions
+at depth. The differential that pins it now walks every operand depth from 0 to
+8 for all eight comparison operators, and fails at 3 and 4 and nowhere else.
 
 ### The emulator, and what it could not tell us
 
