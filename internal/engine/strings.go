@@ -529,20 +529,36 @@ func concatWTF8(a, b []byte) []byte {
 	return append(append(out, a...), b...)
 }
 
+// strSubstring returns the bytes of the [start,end) code-unit range of a string
+// value.
+//
+// Whether the subject is ASCII is read from the flat string's cache rather than
+// worked out per call, because working it out is a scan of the whole subject —
+// which would make a substring cost the length of the string it came out of
+// instead of its own. Octane's typescript spends its run slicing one
+// half-megabyte source text, and 82% of the benchmark was that scan.
+func (rt *Runtime) strSubstring(sv Value, start, end int) []byte {
+	fs := rt.flatOf(sv)
+	if fs == nil {
+		return substringUnits(rt.strBytes(sv), start, end, false)
+	}
+	return substringUnits(fs.bytes, start, end, flatIsASCII(fs))
+}
+
 // substringUnits returns the bytes of the [start,end) UTF-16 code-unit range of
 // a WTF-8 string. A boundary that falls INSIDE a surrogate pair splits it: the
 // half that stays is emitted as a lone surrogate. That is the case a byte-range
 // slice cannot express, since the pair's 4-byte form has no interior boundary,
 // and it is why `"\u{1F306}".slice(1)` is a string of one code unit rather than
 // the empty string.
-func substringUnits(b []byte, start, end int) []byte {
+func substringUnits(b []byte, start, end int, ascii bool) []byte {
 	if start < 0 {
 		start = 0
 	}
 	if end <= start {
 		return nil
 	}
-	if isASCIIBytes(b) {
+	if ascii {
 		bs, be := min(start, len(b)), min(end, len(b))
 		return b[bs:be]
 	}

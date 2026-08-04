@@ -335,7 +335,7 @@ func (rt *Runtime) initStringBuiltin() {
 	})
 
 	rt.defMethod(proto, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		sv, b, e := rt.thisString(this)
+		sv, _, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -353,10 +353,10 @@ func (rt *Runtime) initStringBuiltin() {
 		if start >= end {
 			return rt.internString(""), nil
 		}
-		return rt.newStringBytes(substringUnits(b, start, end)), nil
+		return rt.newStringBytes(rt.strSubstring(sv, start, end)), nil
 	})
 	rt.defMethod(proto, "substring", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		sv, b, e := rt.thisString(this)
+		sv, _, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -374,7 +374,7 @@ func (rt *Runtime) initStringBuiltin() {
 		if start > end {
 			start, end = end, start
 		}
-		return rt.newStringBytes(substringUnits(b, start, end)), nil
+		return rt.newStringBytes(rt.strSubstring(sv, start, end)), nil
 	})
 	rt.defMethod(proto, "toUpperCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		_, b, e := rt.thisString(this)
@@ -516,7 +516,7 @@ func (rt *Runtime) initStringBuiltin() {
 	})
 
 	rt.defMethod(proto, "substr", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		sv, b, e := rt.thisString(this)
+		sv, _, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -546,7 +546,7 @@ func (rt *Runtime) initStringBuiltin() {
 		if resultLen <= 0 {
 			return rt.internString(""), nil
 		}
-		return rt.newStringBytes(substringUnits(b, start, start+int(resultLen))), nil
+		return rt.newStringBytes(rt.strSubstring(sv, start, start+int(resultLen))), nil
 	})
 	rt.defMethod(proto, "localeCompare", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		_, b, e := rt.thisString(this)
