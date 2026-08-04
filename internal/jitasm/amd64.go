@@ -511,6 +511,11 @@ func (a *Asm) MovsxdRegReg(dst, src Reg) { a.emitRM(true, []byte{0x63}, uint8(ds
 // The REX prefix is emitted unconditionally. Without one, encodings 4 to 7 name
 // AH..BH rather than SPL..DIL, so a byte operation on RSI would silently write
 // to the high half of RBP instead.
+// SetfccReg is SetccReg for the flags a double comparison left. See FCond.
+func (a *Asm) SetfccReg(c FCond, r Reg) {
+	a.emitRM(false, []byte{0x0F, 0x90 | byte(c)}, 0, uint8(r))
+}
+
 func (a *Asm) SetccReg(c Cond, r Reg) {
 	a.emit(rex(false, 0, 0, uint8(r)))
 	a.emit(0x0F, 0x90|byte(c), modrm(3, 0, uint8(r)))

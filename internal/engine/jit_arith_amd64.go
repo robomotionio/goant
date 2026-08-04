@@ -123,6 +123,19 @@ func jitBitwise(a *jitasm.Asm, op Opcode, x, y jitasm.Reg, sp int, fixups *[]jit
 // writes and or-ing in the tag builds either.
 func jitBoolean(a *jitasm.Asm, c jitasm.Cond, r jitasm.Reg) {
 	a.SetccReg(c, r)
+	jitBoolTag(a, r)
+}
+
+// jitFBoolean is jitBoolean for a condition a double comparison left, which is a
+// different family — see jitasm.FCond.
+func jitFBoolean(a *jitasm.Asm, c jitasm.FCond, r jitasm.Reg) {
+	a.SetfccReg(c, r)
+	jitBoolTag(a, r)
+}
+
+// jitBoolTag turns the zero or one a condition materialised into the Value that
+// stands for it.
+func jitBoolTag(a *jitasm.Asm, r jitasm.Reg) {
 	a.MovzxRegReg8(r, r)
 	a.MovRegImm64(jitRegScratch, uint64(mkfalse()))
 	a.OrRegReg(r, jitRegScratch)
@@ -181,16 +194,16 @@ func jitFuse(code []byte, labels map[int]*jitasm.Label, at int) (*jitasm.Label, 
 // The correction has to happen before the tag is or-ed in, because that OR is
 // what destroys the parity flag it depends on.
 func jitEqualsValue(a *jitasm.Asm, negate bool, r jitasm.Reg) {
-	c := jitasm.CondE
+	c := jitasm.FCondE
 	if negate {
-		c = jitasm.CondNE
+		c = jitasm.FCondNE
 	}
 	unordered := a.NewLabel()
 	done := a.NewLabel()
 
-	a.SetccReg(c, r)     // neither SETcc nor MOVZX disturbs the flags, so
+	a.SetfccReg(c, r)    // neither SETcc nor MOVZX disturbs the flags, so
 	a.MovzxRegReg8(r, r) // parity is still the one UCOMISD set
-	a.Jcc(jitasm.CondP, unordered)
+	a.Jfcc(jitasm.FCondUnordered, unordered)
 	a.MovRegImm64(jitRegScratch, uint64(mkfalse()))
 	a.OrRegReg(r, jitRegScratch)
 	a.Jmp(done)
@@ -211,11 +224,11 @@ func jitEqualsValue(a *jitasm.Asm, negate bool, r jitasm.Reg) {
 func jitEqualsBranch(a *jitasm.Asm, negate, whenTrue bool, target *jitasm.Label) {
 	if (!negate) == whenTrue {
 		skip := a.NewLabel()
-		a.Jcc(jitasm.CondP, skip) // unordered is not equal
-		a.Jcc(jitasm.CondE, target)
+		a.Jfcc(jitasm.FCondUnordered, skip) // unordered is not equal
+		a.Jfcc(jitasm.FCondE, target)
 		a.Bind(skip)
 		return
 	}
-	a.Jcc(jitasm.CondP, target) // unordered: not equal, so the branch is taken
-	a.Jcc(jitasm.CondNE, target)
+	a.Jfcc(jitasm.FCondUnordered, target) // unordered: not equal, so taken
+	a.Jfcc(jitasm.FCondNE, target)
 }

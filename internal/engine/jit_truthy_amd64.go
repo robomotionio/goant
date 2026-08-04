@@ -48,8 +48,8 @@ func jitEmitTruthyBranch(a *jitasm.Asm, v jitasm.Reg, whenTrue, back bool, targe
 	a.MovqXReg(jitasm.X0, v)
 	a.XorpdXX(jitasm.X1, jitasm.X1)
 	a.UcomisdXX(jitasm.X0, jitasm.X1)
-	a.Jcc(jitasm.CondP, falsy)
-	a.Jcc(jitasm.CondE, falsy)
+	a.Jfcc(jitasm.FCondUnordered, falsy)
+	a.Jfcc(jitasm.FCondE, falsy)
 	a.Jmp(truthy)
 
 	// The four values that are their own answer.

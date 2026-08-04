@@ -1518,7 +1518,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				a.MovqXReg(jitasm.X1, jitRegScratch)
 				a.MovqXReg(jitasm.X0, r)
 				a.UcomisdXX(jitasm.X0, jitasm.X1)
-				jitBoolean(a, jitasm.CondE, r)
+				jitFBoolean(a, jitasm.FCondE, r)
 			} else {
 				// ToBoolean of anything else is a different question — the empty
 				// string is false and every object is true — and the same one the
@@ -2362,30 +2362,30 @@ func jitScanTargets(fn *svFunc, start int) (map[int]bool, bool) {
 func jitCompareBranch(a *jitasm.Asm, op Opcode, whenTrue bool, target *jitasm.Label) {
 	if whenTrue {
 		skip := a.NewLabel()
-		a.Jcc(jitasm.CondP, skip)
+		a.Jfcc(jitasm.FCondUnordered, skip)
 		switch op {
 		case OpLt:
-			a.Jcc(jitasm.CondB, target)
+			a.Jfcc(jitasm.FCondB, target)
 		case OpLe:
-			a.Jcc(jitasm.CondBE, target)
+			a.Jfcc(jitasm.FCondBE, target)
 		case OpGt:
-			a.Jcc(jitasm.CondA, target)
+			a.Jfcc(jitasm.FCondA, target)
 		case OpGe:
-			a.Jcc(jitasm.CondAE, target)
+			a.Jfcc(jitasm.FCondAE, target)
 		}
 		a.Bind(skip)
 		return
 	}
-	a.Jcc(jitasm.CondP, target) // unordered: the comparison is false
+	a.Jfcc(jitasm.FCondUnordered, target) // unordered: the comparison is false
 	switch op {
 	case OpLt:
-		a.Jcc(jitasm.CondAE, target)
+		a.Jfcc(jitasm.FCondAE, target)
 	case OpLe:
-		a.Jcc(jitasm.CondA, target)
+		a.Jfcc(jitasm.FCondA, target)
 	case OpGt:
-		a.Jcc(jitasm.CondBE, target)
+		a.Jfcc(jitasm.FCondBE, target)
 	case OpGe:
-		a.Jcc(jitasm.CondB, target)
+		a.Jfcc(jitasm.FCondB, target)
 	}
 }
 

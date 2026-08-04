@@ -118,23 +118,23 @@ func jitBinaryOperands(ctx *jitmem.ExecContext) (Opcode, Value, Value, bool) {
 // relational operator is false when either side is a NaN. The correction has to
 // happen before the tag is or-ed in, because that OR destroys the parity flag.
 func jitRelationalValue(a *jitasm.Asm, op Opcode, r jitasm.Reg) {
-	var c jitasm.Cond
+	var c jitasm.FCond
 	switch op {
 	case OpLt:
-		c = jitasm.CondB
+		c = jitasm.FCondB
 	case OpLe:
-		c = jitasm.CondBE
+		c = jitasm.FCondBE
 	case OpGt:
-		c = jitasm.CondA
+		c = jitasm.FCondA
 	default: // OpGe
-		c = jitasm.CondAE
+		c = jitasm.FCondAE
 	}
 	unordered := a.NewLabel()
 	done := a.NewLabel()
 
-	a.SetccReg(c, r)     // neither SETcc nor MOVZX disturbs the flags, so
+	a.SetfccReg(c, r)    // neither SETcc nor MOVZX disturbs the flags, so
 	a.MovzxRegReg8(r, r) // parity is still the one UCOMISD set
-	a.Jcc(jitasm.CondP, unordered)
+	a.Jfcc(jitasm.FCondUnordered, unordered)
 	a.MovRegImm64(jitRegScratch, uint64(mkfalse()))
 	a.OrRegReg(r, jitRegScratch)
 	a.Jmp(done)

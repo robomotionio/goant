@@ -169,7 +169,7 @@ type jitAttempt struct {
 	// can be holding its call caches — see jitCallSite, whose address a
 	// suspended frame publishes as its own identity.
 	retired []*jitCode
-	tried bool
+	tried   bool
 	// declines counts entries the prologue's parameter check turned away, and
 	// unchecked records that it has stopped making that check. Functional, not
 	// diagnostic — see jitNoteDecline.

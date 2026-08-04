@@ -548,8 +548,18 @@ func (a *Asm) Lea32RegMem(dst, base Reg, disp int32) {
 
 // SetccReg materialises a condition as 0 or 1.
 func (a *Asm) SetccReg(c Cond, r Reg) {
-	// CSINC Xd, XZR, XZR, invert(cond)
-	a.word(0x9A800400 | uint32(ZR)<<16 | uint32(c^1)<<12 | uint32(ZR)<<5 | uint32(r))
+	a.cset(uint32(c), r)
+}
+
+// SetfccReg is SetccReg for the flags a double comparison left. See FCond.
+func (a *Asm) SetfccReg(c FCond, r Reg) {
+	a.cset(uint32(c), r)
+}
+
+// cset is CSINC Xd, XZR, XZR, invert(cond) — one where the condition holds and
+// zero where it does not.
+func (a *Asm) cset(c uint32, r Reg) {
+	a.word(0x9A800400 | uint32(ZR)<<16 | (c^1)<<12 | uint32(ZR)<<5 | uint32(r))
 }
 
 // ---- doubles ----
