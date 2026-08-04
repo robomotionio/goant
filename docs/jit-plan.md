@@ -1598,7 +1598,31 @@ is the corpus flattering the tier rather than the tier being complete.
 No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
-1. **The 1.56 million reads the emitted probe declines that the cache answers
+1. **The site that has more shapes than it has ways.** Widening `icWays` from 8
+   to 16 is one character and it is worth **+24% on box2d** — by far the largest
+   single number this tier has produced since the compiled call — while costing
+   EarleyBoyer 6.5% and RayTrace 3.3%. Counting the saturations says exactly why,
+   and there is nothing ambiguous about it:
+
+   | | site full, replacing its oldest way | sites retired past `icMissLimit` | 16 ways |
+   |---|---|---|---|
+   | box2d | **14,011** | 410 | +24% |
+   | deltablue | 195 | 6 | −0.7% |
+   | earley-boyer | 0 | 0 | −6.5% |
+   | raytrace | 0 | 0 | −3.3% |
+
+   box2d is the only Octane workload that overflows eight ways at all, and it
+   does so fourteen thousand times; every one of those is an entry evicted and
+   refilled, which is worse than no cache. Everyone else pays 320 more bytes a
+   site for ways they never fill.
+
+   So the answer is not a bigger fixed number — that is the trade above, and it
+   is a bad one for four workloads out of five. It is a site that *grows*: eight
+   ways inline and a spill for the few hundred that need more. What makes that
+   worth doing rather than merely arguable is that the compiled probe now has to
+   read a bound from somewhere, and the experiment above establishes that reading
+   one costs nothing measurable.
+2. **The 1.56 million reads the emitted probe declines that the cache answers
    anyway** — `JITNarrowStats()` counts them, and the guard chain in machine
    code is narrower than `icWay.hit` for a receiver that is not a plain object.
    Widening the tag check to the object family is not free: the tags are not
@@ -1606,10 +1630,6 @@ what would gain rather than by what is bleeding.
    million reads against the round trips it saves. It has to keep the `TObj`
    path at its current cost, and it has to be measured rather than reasoned
    about.
-2. **A scan bounded by `propIC.n`.** Ways fill densely from zero and the
-   unrolled probe walks all eight regardless. This is what would let `icWays`
-   rise to 16, which measured DeltaBlue +8% and EarleyBoyer −5% — the −5% being
-   entirely the cost of scanning sixteen ways to miss.
 3. **The store that creates a property, emitted rather than helped.** The helper
    reaches it, which recovered EarleyBoyer's 18%, but each one still costs an
    exit and a re-entry where the interpreter pays neither. Installing a shape
@@ -1637,6 +1657,50 @@ what would gain rather than by what is bleeding.
    problem underneath is that a captured local has to outlive the frame, and
    compiled code addresses locals as a raw pointer into a slice. Boxed locals is
    a frame-model change, and `SET_UPVAL`/`PUT_UPVAL` are the same problem.
+
+The bounded scan has come off this list by being built and measured, and it took
+three findings with it — none of which was the one it was built for.
+
+It is the first thing this tier ever compiled from *feedback* rather than from
+the bytecode, which is what made it worth trying. A function reaches the compiler
+only after the interpreter has run it, so its cache sites already record the
+shapes the program really passes through them. Reading that count and emitting
+exactly that many comparisons makes most sites emit one: EarleyBoyer's are 99%
+single-shape and NavierStokes's 100%, box2d's 53%, DeltaBlue's 47%, Richards's
+36%. The rest of an eight-way probe was five comparisons proving that five empty
+ways are still empty.
+
+| | 8 ways, unbounded | 8 ways, bounded | 16 ways, bounded |
+|---|---|---|---|
+| richards | 1365 | 1398 | 1402 |
+| deltablue | 890 | 853 | 884 |
+| raytrace | 661 | 654 | 639 |
+| navier-stokes | 3396 | 3307 | 3301 |
+| earley-boyer | 978 | 968 | 914 |
+| box2d | 1626 | 1635 | **2017** |
+
+**The width is not the constraint.** DeltaBlue's probes served 87.6% of reads
+narrow against 87.4% wide. The emitted scan already exits at the first match, so
+narrowing shortens only the *miss* — and a miss is dominated by the round trip
+that follows it, not by three comparisons. This is the fourth time something here
+has been emitted, been correct, served everything that reached it and moved
+nothing.
+
+**Sixteen ways is not what this list said it was.** The item existed because
+`icWays` at 16 had measured DeltaBlue +8% and EarleyBoyer −5%, with the −5%
+attributed to the cost of scanning sixteen ways to miss. A bounded scan removes
+exactly that cost, and EarleyBoyer lost 6.5% anyway while DeltaBlue's +8% did not
+appear at all. The attribution was wrong twice over, and what it was hiding is
+item 1 above.
+
+**And the bet has to be widened, which is where the find was.** A site can grow
+after its width is compiled in, so the miss helper notices and rebuilds the
+function — and rebuilding cost DeltaBlue 12% by a route with nothing to do with
+property caches. That is the rebind bug above. It was worth the whole experiment:
+every optimisation that replaces a block would have met it.
+
+The scan is reverted. What replaced it at the top of the list is what the box2d
+column turned out to mean.
 
 The compiled call has come off this list by being built, and it is the one item
 that was worth what the profile said it was worth. Everything else on this list
