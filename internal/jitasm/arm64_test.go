@@ -515,6 +515,75 @@ func TestBranchDistances(t *testing.T) {
 	}
 }
 
+// Every relational condition answers false for a NaN, which is the reason the
+// two condition families are separate types.
+//
+// amd64's UCOMISD sets the unsigned flags, so an FCond and the Cond of the same
+// name encode identically there and the distinction is documentation. arm64's
+// FCMP sets C and V for unordered, so the integer conditions do not all survive
+// it: HI is C && !Z and HS is C, and an unordered compare sets C — so `a > b`
+// and `a >= b` written with the integer condition both answer *true* for a NaN,
+// which no JavaScript relational operator may do.
+//
+// Checked by executing rather than by comparing encodings, because two of the
+// four coincide legitimately: LS is `!C || Z` and comes out false for unordered
+// on its own. What matters is the answer, not whether the byte differs.
+func TestEveryRelationalConditionIsFalseForANaN(t *testing.T) {
+	nan := math.Float64bits(math.NaN())
+	for _, c := range []struct {
+		name string
+		f    FCond
+	}{
+		{"<", FCondB}, {"<=", FCondBE}, {">", FCondA}, {">=", FCondAE},
+	} {
+		// Both orders, because a NaN on either side is unordered and a condition
+		// can be wrong about only one of them.
+		for _, operands := range [][2]uint64{
+			{nan, math.Float64bits(1)},
+			{math.Float64bits(1), nan},
+			{nan, nan},
+		} {
+			a := NewAsm()
+			a.MovRegImm64(X1, operands[0])
+			a.MovRegImm64(X2, operands[1])
+			a.MovqXReg(D1, X1)
+			a.MovqXReg(D2, X2)
+			a.UcomisdXX(D1, D2)
+			a.SetfccReg(c.f, X0)
+			a.Ret()
+			if got := run(t, a.Code(), &jitmem.ExecContext{}); got != 0 {
+				t.Errorf("%s with a NaN operand answered %d", c.name, got)
+			}
+		}
+	}
+
+	// And the same conditions still answer correctly for ordered operands, so
+	// that "always false" cannot pass this.
+	for _, c := range []struct {
+		name string
+		f    FCond
+		x, y float64
+		want uint64
+	}{
+		{"<", FCondB, 1, 2, 1}, {"<", FCondB, 2, 1, 0},
+		{"<=", FCondBE, 2, 2, 1}, {"<=", FCondBE, 3, 2, 0},
+		{">", FCondA, 2, 1, 1}, {">", FCondA, 1, 2, 0},
+		{">=", FCondAE, 2, 2, 1}, {">=", FCondAE, 1, 2, 0},
+	} {
+		a := NewAsm()
+		a.MovRegImm64(X1, math.Float64bits(c.x))
+		a.MovRegImm64(X2, math.Float64bits(c.y))
+		a.MovqXReg(D1, X1)
+		a.MovqXReg(D2, X2)
+		a.UcomisdXX(D1, D2)
+		a.SetfccReg(c.f, X0)
+		a.Ret()
+		if got := run(t, a.Code(), &jitmem.ExecContext{}); got != c.want {
+			t.Errorf("%v %s %v answered %d, want %d", c.x, c.name, c.y, got, c.want)
+		}
+	}
+}
+
 // uintptrOfSlice is the address of a slice's first element, for the tests that
 // hand generated code a real buffer to work on.
 func uintptrOfSlice(s []uint64) uintptr {
