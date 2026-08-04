@@ -1598,30 +1598,45 @@ is the corpus flattering the tier rather than the tier being complete.
 No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
-1. **The site that has more shapes than it has ways.** Widening `icWays` from 8
-   to 16 is one character and it is worth **+24% on box2d** — by far the largest
-   single number this tier has produced since the compiled call — while costing
-   EarleyBoyer 6.5% and RayTrace 3.3%. Counting the saturations says exactly why,
-   and there is nothing ambiguous about it:
+1. **The site that gives up.** `icWays` from 8 to 16 is one character and it is
+   the largest thing on this list by some way:
 
-   | | site full, replacing its oldest way | sites retired past `icMissLimit` | 16 ways |
+   | | 8 ways | 16 ways | |
    |---|---|---|---|
-   | box2d | **14,011** | 410 | +24% |
-   | deltablue | 195 | 6 | −0.7% |
+   | box2d | 1626 | **2006** | +23.4% |
+   | deltablue | 890 | **1015** | +14.0% |
+   | richards | 1365 | 1380 | +1.1% |
+   | navier-stokes | 3396 | 3428 | +0.9% |
+   | raytrace | 661 | 643 | −2.7% |
+   | earley-boyer | 978 | **914** | −6.5% |
+
+   About +2% geomean, and the shape of it is two large winners against one real
+   loser rather than a wash. What decides it is not width but *retirement*.
+   A site that fills its ways and then meets another shape counts a miss, and at
+   `icMissLimit` it stops caching for good — the comment on that constant already
+   says a site seeing nine or ten shapes "is not megamorphic, it is merely wider
+   than the cache", and then it dies at 32 misses anyway. Counting how often a
+   retired site is consulted:
+
+   | | consulted after giving up | full, evicting its oldest way | 16 ways |
+   |---|---|---|---|
+   | box2d | 16.9M | 14,011 | +23.4% |
+   | deltablue | 1.68M | 195 | +14.0% |
    | earley-boyer | 0 | 0 | −6.5% |
-   | raytrace | 0 | 0 | −3.3% |
+   | raytrace | 0 | 0 | −2.7% |
 
-   box2d is the only Octane workload that overflows eight ways at all, and it
-   does so fourteen thousand times; every one of those is an entry evicted and
-   refilled, which is worse than no cache. Everyone else pays 320 more bytes a
-   site for ways they never fill.
+   Exactly the two workloads that retire sites are the two that gain, and exactly
+   the two that never retire one pay the memory for ways they never fill. So the
+   first thing to try is not a wider cache at all: it is eight ways that stop
+   dying — `icMissLimit` raised, or a miss counted only for a shape the site has
+   never seen. If that captures box2d and DeltaBlue it is strictly better than
+   widening, because it costs nothing per site.
 
-   So the answer is not a bigger fixed number — that is the trade above, and it
-   is a bad one for four workloads out of five. It is a site that *grows*: eight
-   ways inline and a spill for the few hundred that need more. What makes that
-   worth doing rather than merely arguable is that the compiled probe now has to
-   read a bound from somewhere, and the experiment above establishes that reading
-   one costs nothing measurable.
+   What is *not* the answer is a spill slice, and the reason is worth keeping:
+   the win needs the extra ways reachable **from machine code**. The emitted
+   probe reads its ways at a constant address, so anything behind a slice header
+   is a helper round trip — which is what the experiment below measured, from the
+   other direction.
 2. **The 1.56 million reads the emitted probe declines that the cache answers
    anyway** — `JITNarrowStats()` counts them, and the guard chain in machine
    code is narrower than `icWay.hit` for a receiver that is not a plain object.
@@ -1670,28 +1685,33 @@ single-shape and NavierStokes's 100%, box2d's 53%, DeltaBlue's 47%, Richards's
 36%. The rest of an eight-way probe was five comparisons proving that five empty
 ways are still empty.
 
-| | 8 ways, unbounded | 8 ways, bounded | 16 ways, bounded |
-|---|---|---|---|
-| richards | 1365 | 1398 | 1402 |
-| deltablue | 890 | 853 | 884 |
-| raytrace | 661 | 654 | 639 |
-| navier-stokes | 3396 | 3307 | 3301 |
-| earley-boyer | 978 | 968 | 914 |
-| box2d | 1626 | 1635 | **2017** |
+| | 8, unbounded | 8, bounded | 16, bounded | 16, unbounded |
+|---|---|---|---|---|
+| richards | 1365 | 1398 | 1402 | 1380 |
+| deltablue | 890 | 853 | 884 | **1015** |
+| raytrace | 661 | 654 | 639 | 643 |
+| navier-stokes | 3396 | 3307 | 3301 | 3428 |
+| earley-boyer | 978 | 968 | 914 | 914 |
+| box2d | 1626 | 1635 | 2017 | 2006 |
 
-**The width is not the constraint.** DeltaBlue's probes served 87.6% of reads
-narrow against 87.4% wide. The emitted scan already exits at the first match, so
-narrowing shortens only the *miss* — and a miss is dominated by the round trip
-that follows it, not by three comparisons. This is the fourth time something here
-has been emitted, been correct, served everything that reached it and moved
-nothing.
+**At eight ways the width is not the constraint.** DeltaBlue's probes served
+87.6% of reads narrow against 87.4% wide. The emitted scan already exits at the
+first match, so narrowing shortens only the *miss* — and a miss is dominated by
+the round trip after it, not by three comparisons. Fourth time something here has
+been emitted, been correct, served everything that reached it and moved nothing.
 
-**Sixteen ways is not what this list said it was.** The item existed because
-`icWays` at 16 had measured DeltaBlue +8% and EarleyBoyer −5%, with the −5%
-attributed to the cost of scanning sixteen ways to miss. A bounded scan removes
-exactly that cost, and EarleyBoyer lost 6.5% anyway while DeltaBlue's +8% did not
-appear at all. The attribution was wrong twice over, and what it was hiding is
-item 1 above.
+**At sixteen it is actively harmful, and that is the finding.** Compare the last
+two columns: DeltaBlue is 884 bounded and 1015 unbounded, so bounding the scan
+cost it 13% of itself. The bound is read at *compile* time, and a site fills the
+ways it needs afterwards — so the ways that arrive later are unreachable from
+machine code and every access to one declines to a helper. Feedback compiled in
+is feedback frozen, and the widening machinery built to unfreeze it recovers less
+than it costs.
+
+The EarleyBoyer column is the control: 914 either way, so its −6.5% is not scan
+length at all. It is the memory — a site doubles from 320 bytes to 640 — which
+this list's old entry attributed to scanning sixteen ways to miss. Wrong, and it
+was hiding item 1.
 
 **And the bet has to be widened, which is where the find was.** A site can grow
 after its width is compiled in, so the miss helper notices and rebuilds the
@@ -1699,7 +1719,7 @@ function — and rebuilding cost DeltaBlue 12% by a route with nothing to do wit
 property caches. That is the rebind bug above. It was worth the whole experiment:
 every optimisation that replaces a block would have met it.
 
-The scan is reverted. What replaced it at the top of the list is what the box2d
+The scan is reverted. What replaced it at the top of the list is what the last
 column turned out to mean.
 
 The compiled call has come off this list by being built, and it is the one item
