@@ -16,6 +16,12 @@ const (
 	// call is that this frame is gone before the next one starts, and a helper
 	// runs with the compiled frame still on the Go stack.
 	ExitTailCall
+	// ExitCallout says nothing about this frame except that a frame it called in
+	// machine code wants something. See the note on Next: a compiled call is a
+	// real CALL, so when the callee has to reach the runtime every frame between
+	// it and Go has to step out of the way first. Each one saves its operands and
+	// its resume address and returns, and this is the code it returns with.
+	ExitCallout
 )
 
 // ExecContext is the state that generated code and the runtime share.
@@ -115,12 +121,77 @@ type ExecContext struct {
 	// by, and a root that is usually redundant is cheaper than one that is
 	// usually absent.
 	FnVal uint64
+	// Next is the context one frame deeper, and it is what lets compiled code
+	// call compiled code without going through Go at all.
+	//
+	// A call was an exit and a re-entry: the caller returned to the runtime, the
+	// runtime built the callee's frame and entered it, and the answer came back
+	// the same way. Two transitions through Go per call, each an indirect branch
+	// to an address that changes every time. Half of DeltaBlue was that round
+	// trip rather than either function's work.
+	//
+	// Generated code can do the whole of it — set up the callee's context, copy
+	// the arguments and CALL — provided it has somewhere to put the callee's
+	// frame. That is this: the contexts are a chain, one per depth, built by the
+	// runtime and never freed, so the callee's is a load rather than an
+	// allocation and its address is stable for as long as anything can be
+	// suspended in it. Zero ends the chain, and a call site that finds it there
+	// takes the old path.
+	Next uintptr
+	// Site is the call site that entered this frame, or nil when the runtime
+	// did. It is the frame's identity: a suspended frame has to be given back its
+	// function, its closure and its compiled code before a helper can run for it,
+	// and this is where all three are.
+	//
+	// The second field here that is a pointer rather than an address, and the
+	// only one generated code writes. Two things make that sound. Go does not
+	// move what it has allocated, so the address a call site compiled in is the
+	// address it stays at; and the array it points into is reachable from the
+	// compiled code that holds it whether this field names it or not, so the
+	// write barrier generated code cannot perform is one that had nothing to do
+	// — both the value being overwritten and the value replacing it are live for
+	// other reasons. What is not optional is that the field always holds either
+	// nil or one of those addresses, because Go's collector reads it as a
+	// pointer; an eight-byte aligned store is what keeps that true at every
+	// instant rather than merely afterwards.
+	Site unsafe.Pointer
+	// Nest counts the compiled frames between this one and the last entry from
+	// Go, and it is a stack-depth bound rather than a statistic.
+	//
+	// Generated code runs on the goroutine's stack, and it is entered from a
+	// NOSPLIT trampoline: nothing can grow that stack while a compiled frame is
+	// on it, because morestack would have to walk frames the Go runtime has no
+	// map for. Compiled calls nest on the same stack, so how many of them may be
+	// live at once is a fixed budget rather than a question — jitMaxNest — and
+	// past it a call site takes the old path, which starts by unwinding back to
+	// Go and so leaves the stack as Go expects to find it.
+	Nest uint64
+	// NLocals is how many of Locals this frame is using, for the collector, and
+	// zero for a frame the runtime entered — those keep their locals in the
+	// frame slab, where markFrames already finds them.
+	NLocals uint64
+	// Deep says which of the two operand stacks the frame running here is using,
+	// and it is checked by a compiled call site rather than only read by the
+	// runtime. A context is reused at its own depth, so one that once held a
+	// function wanting a large operand stack still points Stack at that array —
+	// and a callee compiled for the inline one would write past it. Such a call
+	// takes the old path, which sizes the stack on the way in.
+	Deep uint64
+	// Locals is the frame's variables, for a frame compiled code entered on its
+	// own.
+	//
+	// The runtime's own frames take theirs from a per-depth slab, which is the
+	// same idea and cannot be used here: handing one out means deciding whether
+	// the last frame at this depth let its locals escape, and that decision is a
+	// Go pointer's worth of bookkeeping. A compiled call is only made to a
+	// function that cannot let them escape — no closure over a local, no
+	// `arguments` — so the context can carry them itself and the whole question
+	// disappears.
+	Locals [InlineLocals]uint64
 	// stack is the array Stack points into. Held here so that Go's collector
 	// keeps it alive for as long as the context can be entered, and unexported
 	// so that it sits past every offset generated code compiles against.
 	stack []uint64
-	// deep says which of the two the running function is using.
-	deep bool
 }
 
 // EnsureStack gives the context room for n operand slots and points Stack at
@@ -136,9 +207,9 @@ func (ctx *ExecContext) EnsureStack(n int) {
 		// The usual case, and it writes nothing unless the previous frame at
 		// this depth was a deep one: a pointer store into the context is a Go
 		// write barrier, and this runs on every compiled call.
-		if ctx.deep || ctx.Stack == nil {
+		if ctx.Deep != 0 || ctx.Stack == nil {
 			ctx.Stack = unsafe.Pointer(&ctx.Spill[0])
-			ctx.deep = false
+			ctx.Deep = 0
 		}
 		return
 	}
@@ -146,7 +217,7 @@ func (ctx *ExecContext) EnsureStack(n int) {
 		ctx.stack = make([]uint64, n)
 	}
 	ctx.Stack = unsafe.Pointer(&ctx.stack[0])
-	ctx.deep = true
+	ctx.Deep = 1
 }
 
 // Slots is the live part of the operand stack.
@@ -157,13 +228,13 @@ func (ctx *ExecContext) EnsureStack(n int) {
 // a slice header. They are the same array.
 func (ctx *ExecContext) Slots() []uint64 {
 	n, max := int(ctx.StackN), len(ctx.Spill)
-	if ctx.deep {
+	if ctx.Deep != 0 {
 		max = len(ctx.stack)
 	}
 	if n > max {
 		n = max
 	}
-	if ctx.deep {
+	if ctx.Deep != 0 {
 		return ctx.stack[:n]
 	}
 	return ctx.Spill[:n]
@@ -182,6 +253,11 @@ func (ctx *ExecContext) SlotPtr(i int) unsafe.Pointer {
 // file that is mostly one array literal.
 const InlineSlots = 32
 
+// InlineLocals is how many variables Locals holds, and so how large a function
+// compiled code will call directly. A function wanting more is called the way
+// every function used to be.
+const InlineLocals = 32
+
 // Field offsets generated code compiles against.
 const (
 	CtxOffExit   = 0
@@ -194,10 +270,16 @@ const (
 	CtxOffStack  = 72 + 8*InlineSlots
 	CtxOffPool   = 80 + 8*InlineSlots
 	CtxOffHost   = 88 + 8*InlineSlots
-	CtxOffThis   = 96 + 8*InlineSlots
-	CtxOffUpvals = 104 + 8*InlineSlots
-	CtxOffFnVal  = 112 + 8*InlineSlots
-	CtxSize      = 120 + 8*InlineSlots
+	CtxOffThis    = 96 + 8*InlineSlots
+	CtxOffUpvals  = 104 + 8*InlineSlots
+	CtxOffFnVal   = 112 + 8*InlineSlots
+	CtxOffNext    = 120 + 8*InlineSlots
+	CtxOffSite    = 128 + 8*InlineSlots
+	CtxOffNest    = 136 + 8*InlineSlots
+	CtxOffNLocals = 144 + 8*InlineSlots
+	CtxOffDeep    = 152 + 8*InlineSlots
+	CtxOffLocals  = 160 + 8*InlineSlots
+	CtxSize       = 160 + 8*InlineSlots + 8*InlineLocals
 )
 
 // Which fields hold a Value, and so must be traced by the runtime's collector
@@ -208,6 +290,7 @@ const (
 //	Stack[0:StackN]
 //	This     the frame's receiver
 //	FnVal    the running function itself
+//	Locals[0:NLocals]
 //
 // Args[0] and Args[1] are a pointer and a counter, and Args[3] is an immediate.
 // Tracing either as a Value would be worse than missing one.

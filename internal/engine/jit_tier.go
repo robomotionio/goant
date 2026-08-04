@@ -92,12 +92,23 @@ var jitStats struct {
 	elemMiss uint64
 	genFast  uint64
 	genSlow  uint64
+	// callFast counts calls a compiled call site made in machine code, against
+	// callSlow for the ones that went round through the runtime. It is the
+	// number that says whether the compiled call is reaching the calls that
+	// matter: a site that never fills looks exactly like one that was never
+	// emitted, and both look like a function that simply calls a lot.
+	callFast uint64
+	callSlow uint64
 }
 
 func init() { jitStats.enabled = envOn("GOANT_JIT_STATS") }
 
 // JITStats reports frame entries served by compiled code, by compiled code that
 // declined its arguments, and by the interpreter for want of any compiled form.
+//
+// Entries the runtime made. A compiled call site entering a compiled function
+// does not pass through here at all, which is the point of it — JITCallStats is
+// where those are counted, and on a call-heavy program they are most of them.
 func JITStats() (compiled, declined, interpreted uint64) {
 	return jitStats.compiled, jitStats.declined, jitStats.interp
 }
@@ -130,6 +141,10 @@ func JITElementStats() (hit, miss uint64) { return jitStats.elemHit, jitStats.el
 // runtime.
 func JITOperatorStats() (fast, slow uint64) { return jitStats.genFast, jitStats.genSlow }
 
+// JITCallStats reports calls made from compiled code, by whether the call site
+// made them itself or went through the runtime.
+func JITCallStats() (fast, slow uint64) { return jitStats.callFast, jitStats.callSlow }
+
 // jitOSRThreshold is how many times a loop may go round in the interpreter
 // before the function it is in gets compiled.
 //
@@ -148,6 +163,12 @@ type jitAttempt struct {
 	count int32
 	loops int32
 	code  *jitCode
+	// retired is every block this function has had before the current one. They
+	// are kept rather than freed because a recursive function can have an outer
+	// frame suspended inside one, and because a call site in another function
+	// can be holding its call caches — see jitCallSite, whose address a
+	// suspended frame publishes as its own identity.
+	retired []*jitCode
 	tried bool
 	// declines counts entries the prologue's parameter check turned away, and
 	// unchecked records that it has stopped making that check. Functional, not
@@ -181,11 +202,13 @@ const jitDeclineLimit = 32
 // enough to stop being an accident.
 //
 // Rebuilding is sound at any moment because a decline happens before compiled
-// code has written anything. The old code is deliberately *not* freed: a
-// recursive function can have an outer frame suspended inside the very block
-// being replaced, and its resume address has to stay mapped. One orphaned block
-// per function that ever recompiles is a bounded cost; an unmapped resume
-// address is not a cost, it is a crash.
+// code has written anything. The old code is deliberately *not* freed, and is
+// kept rather than merely leaked: a recursive function can have an outer frame
+// suspended inside the very block being replaced, and its resume address has to
+// stay mapped — and its call sites have to stay allocated, because a frame that
+// call opened names one of them as its identity. One retired block per function
+// that ever recompiles is a bounded cost; an unmapped resume address is not a
+// cost, it is a crash.
 func jitNoteDecline(fn *svFunc) {
 	if fn.jit.unchecked {
 		return
@@ -196,6 +219,7 @@ func jitNoteDecline(fn *svFunc) {
 	}
 	fn.jit.unchecked = true
 	if c := jitCompile(fn, nil); c != nil {
+		fn.jit.retired = append(fn.jit.retired, fn.jit.code)
 		fn.jit.code = c
 	}
 }

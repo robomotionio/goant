@@ -427,6 +427,15 @@ func (a *Asm) LeaRegMemIndex(dst, base, index Reg, scale uint8, disp int32) {
 	a.emitMemIndex(true, []byte{0x8D}, uint8(dst), uint8(base), uint8(index), scale, disp)
 }
 
+// LeaRegMem is base+disp as a value rather than an address to read, and like
+// LeaRegMemIndex it leaves the flags alone. What wants it is a field that is an
+// array rather than a word: the locals a compiled call writes its arguments
+// into are inside the callee's context, so the callee needs their address and
+// not their contents.
+func (a *Asm) LeaRegMem(dst, base Reg, disp int32) {
+	a.emitMem(true, []byte{0x8D}, uint8(dst), uint8(base), disp)
+}
+
 func (a *Asm) XchgRegReg(x, y Reg) { a.emitRM(true, []byte{0x87}, uint8(x), uint8(y)) }
 
 // ImulRegImm32 multiplies by a sign-extended 32-bit immediate.

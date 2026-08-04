@@ -144,6 +144,11 @@ func dumpJITStats() {
 		fmt.Fprintf(os.Stderr, "jit: %d element reads, %d served by the emitted guard chain (%.1f%%)\n",
 			reads, ehit, 100*float64(ehit)/float64(reads))
 	}
+	cfast, cslow := engine.JITCallStats()
+	if calls := cfast + cslow; calls > 0 {
+		fmt.Fprintf(os.Stderr, "jit: %d calls from compiled code, %d made by the call site itself (%.1f%%)\n",
+			calls, cfast, 100*float64(cfast)/float64(calls))
+	}
 	fast, slow := engine.JITOperatorStats()
 	if ops := fast + slow; ops > 0 {
 		fmt.Fprintf(os.Stderr, "jit: %d untyped operators, %d took the machine instruction (%.1f%%)\n",

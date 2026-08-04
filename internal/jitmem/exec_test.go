@@ -30,7 +30,13 @@ func TestExecContextLayout(t *testing.T) {
 		{"This", unsafe.Offsetof(c.This), CtxOffThis},
 		{"Upvals", unsafe.Offsetof(c.Upvals), CtxOffUpvals},
 		{"FnVal", unsafe.Offsetof(c.FnVal), CtxOffFnVal},
-		{"FnVal end", unsafe.Offsetof(c.FnVal) + 8, CtxSize},
+		{"Next", unsafe.Offsetof(c.Next), CtxOffNext},
+		{"Site", unsafe.Offsetof(c.Site), CtxOffSite},
+		{"Nest", unsafe.Offsetof(c.Nest), CtxOffNest},
+		{"NLocals", unsafe.Offsetof(c.NLocals), CtxOffNLocals},
+		{"Deep", unsafe.Offsetof(c.Deep), CtxOffDeep},
+		{"Locals", unsafe.Offsetof(c.Locals), CtxOffLocals},
+		{"Locals end", unsafe.Offsetof(c.Locals) + 8*InlineLocals, CtxSize},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s at %d, ABI says %d", tc.name, tc.got, tc.want)

@@ -172,6 +172,11 @@ const (
 	jitRegLocals  = jitasm.R12
 	jitRegGuard   = jitasm.R15
 	jitRegScratch = jitasm.RCX
+	// jitRegReturn carries a returning frame's value to the compiled call site
+	// that entered it, beside the exit code in RAX. It is an operand-stack
+	// register like any other — the frame it belongs to is over by the time this
+	// is read, and the caller's copy of it is in the spill area.
+	jitRegReturn = jitasm.RDX
 )
 
 // jitFuel is how many loop iterations compiled code runs before returning to Go.
@@ -213,6 +218,14 @@ type jitCode struct {
 	// holds when a helper hands back an error, and nil for a function with no
 	// try in it — which is nearly all of them.
 	catchAt map[uintptr]uintptr
+	// mentry is the entry a compiled call site enters this function at, and zero
+	// for a function only the runtime may enter. It differs from entry in doing
+	// what jitRunAt would otherwise have done first — see jitEmitMachineEntry.
+	mentry uintptr
+	// sites is this function's call sites, one per CALL in the body. Allocated
+	// before a byte is emitted, because the address of each is compiled into the
+	// code that reads it.
+	sites []jitCallSite
 }
 
 // jitHasHandlers reports whether the body installs an exception handler.
@@ -337,6 +350,12 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	// allocated once per function and never grown, which is what makes that
 	// address a constant.
 	ics := frameICs(fn)
+	// And the same for the call sites, one per CALL in the body. Counted first
+	// rather than appended to as they are emitted, for exactly the same reason:
+	// appending moves the array, and the address of every site already emitted
+	// is baked into the code that reads it.
+	sites := make([]jitCallSite, jitCountCalls(fn, start))
+	nextSite := 0
 
 	a := jitasm.NewAsm()
 	bail := a.NewLabel()
@@ -1686,13 +1705,18 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if argc < 0 || sp < argc+2 {
 				return refuse(why, "stack-underflow")
 			}
-			a.MovRegImm64(jitRegScratch, uint64(uint32(argc)))
+			site := nextSite
+			nextSite++
+			sites[site].argc, sites[site].method = uint16(argc), true
+			done := jitBeginCall(a, sites, site, sp, argc, true, &fixups, deepStack)
+			a.MovRegImm64(jitRegScratch, uint64(uint32(argc))|uint64(site+1)<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
 			if !jitCallHelper(a, sp, jitHelperCallMethod, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			dst := jitSlot(sp - argc - 2)
 			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
+			jitEndCall(a, done)
 			kind[sp-argc-2] = false
 			sp -= argc + 1
 			ip += 3
@@ -1830,7 +1854,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if argc < 0 || sp < argc+1 {
 				return refuse(why, "stack-underflow")
 			}
-			a.MovRegImm64(jitRegScratch, uint64(uint32(argc)))
+			site := nextSite
+			nextSite++
+			sites[site].argc = uint16(argc)
+			done := jitBeginCall(a, sites, site, sp, argc, false, &fixups, deepStack)
+			a.MovRegImm64(jitRegScratch, uint64(uint32(argc))|uint64(site+1)<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
 			if !jitCallHelper(a, sp, jitHelperCall, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
@@ -1839,6 +1867,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			// this consumed.
 			dst := jitSlot(sp - argc - 1)
 			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
+			jitEndCall(a, done)
 			kind[sp-argc-1] = false
 			sp -= argc
 			ip += 3
@@ -1998,6 +2027,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			a.MovRegImm64(jitasm.RAX, uint64(mkundef()))
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffRet, jitasm.RAX)
+			// Also in a register, for the one caller that is not Go. A compiled
+			// call site reads the answer from here rather than from the context,
+			// which is a load it does not make on the path this exists to make
+			// short. Harmless to the runtime, which reads Ret as it always did.
+			a.MovRegReg(jitRegReturn, jitasm.RAX)
 			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitReturn))
 			a.MovRegImm64(jitasm.RAX, jitmem.ExitReturn)
 			a.Ret()
@@ -2013,6 +2047,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				return refuse(why, "stack-underflow")
 			}
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffRet, jitSlot(sp-1))
+			if jitSlot(sp-1) != jitRegReturn {
+				a.MovRegReg(jitRegReturn, jitSlot(sp-1))
+			}
 			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitReturn))
 			a.MovRegImm64(jitasm.RAX, jitmem.ExitReturn)
 			a.Ret()
@@ -2143,6 +2180,22 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		a.Jmp(l)
 	}
 
+	// The entry a compiled call site uses, which does for itself what jitRunAt
+	// does for a frame the runtime enters. Emitted only for a function that can
+	// live in a context alone — see jitMachineCallable — and for one whose
+	// operand stack is the context's, since a call site has nowhere to put
+	// another.
+	var mentry *jitasm.Label
+	if !deepStack && jitMachineCallable(fn) {
+		nargs := fn.paramCount
+		if nargs > fn.maxLocals {
+			nargs = fn.maxLocals
+		}
+		mentry = a.NewLabel()
+		a.Bind(mentry)
+		jitEmitMachineEntry(a, fn, nargs, prologue, bail)
+	}
+
 	// Emission stops at the first unreachable trailer, so a branch target beyond
 	// it never got bound. That is a function this tier does not understand the
 	// shape of rather than an error, and declining is the answer — jitasm would
@@ -2174,7 +2227,10 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if why != nil {
 		*why = ""
 	}
-	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset()), slots: maxDepth}
+	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset()), slots: maxDepth, sites: sites}
+	if mentry != nil {
+		c.mentry = block.AddrAt(mentry.Offset())
+	}
 	for _, f := range fixups {
 		if f.catch == nil {
 			continue
@@ -2560,32 +2616,17 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 	// Whether a tail call has already been taken in this frame, which changes
 	// what a decline downstream is allowed to mean. See the default arm below.
 	tailed := false
+	// This frame's place in the context chain. Deeper entries belong to calls
+	// compiled code made for itself, and this loop drives those too — there is
+	// nowhere else for them to be driven from, because the machine frames they
+	// ran on are gone by the time control is back here.
+	base := rt.jitDepth
 	for {
 		// The context is rooted for as long as compiled code can be suspended in a
-		// helper holding values nothing else refers to — see markRoots — and that
-		// root stack is also where it comes from.
-		//
-		// Building one per entry cost an allocation of 160 bytes per call, which for
-		// a callee small enough to be worth compiling is most of what compiling it
-		// saved. The stack is LIFO and a context is dead the moment it is popped, so
-		// the slice past its length is a free list that needs no bookkeeping: the
-		// only care required is that a reused context starts clear, because the
-		// collector reads Ret and the spill slots and the previous call's are stale.
-		n := len(rt.jitFrames)
-		var ctx *jitmem.ExecContext
-		reused := false
-		if n < cap(rt.jitFrames) {
-			if ctx = rt.jitFrames[:n+1][n]; ctx != nil {
-				// Popped by an earlier call and still in the slot, which is what
-				// lets the push below re-extend the slice without storing a pointer
-				// into it again. That store is a Go write barrier and it showed as
-				// 1.5% of DeltaBlue.
-				reused = true
-			}
-		}
-		if ctx == nil {
-			ctx = new(jitmem.ExecContext)
-		}
+		// helper holding values nothing else refers to — see markRoots — and it
+		// comes from the chain rather than from an allocation, so that a compiled
+		// call site can reach the next one without asking.
+		ctx := rt.jitCtxAt(base)
 		// Written field by field rather than as a struct literal, and this is worth
 		// the ugliness: a literal clears the whole context, and eighty of its bytes
 		// are the spill area. That memset was the largest single item in the profile
@@ -2611,8 +2652,6 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		// across frames at this depth, so a function with a large one leaves it
 		// behind rather than allocating again.
 		ctx.EnsureStack(c.slots)
-		ctx.Pool = jitObjectPoolAddr(rt)
-		ctx.Host = jitRuntimeAddr(rt)
 		ctx.This = uint64(this)
 		// The closure's upvalue array, or zero when there is none. A function with
 		// no GET_UPVAL never reads it, and one with a GET_UPVAL is only ever
@@ -2623,15 +2662,11 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		if cl != nil && len(cl.upvalues) > 0 {
 			ctx.Upvals = uintptr(unsafe.Pointer(&cl.upvalues[0]))
 		}
-		switch {
-		case reused:
-			rt.jitFrames = rt.jitFrames[:n+1] // the slot already holds ctx
-		case n < cap(rt.jitFrames):
-			rt.jitFrames = rt.jitFrames[:n+1]
-			rt.jitFrames[n] = ctx
-		default:
-			rt.jitFrames = append(rt.jitFrames, ctx)
-		}
+		// The runtime entered this one, so its locals are in the frame slab where
+		// markFrames finds them, and it belongs to no call site.
+		ctx.Site = nil
+		ctx.NLocals = 0
+		rt.jitDepth = base + 1
 
 		// Popped explicitly on each way out rather than by a deferred closure. A
 		// defer here is a call per compiled frame entry, and this function has three
@@ -2642,57 +2677,137 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		// out, and the map itself is only ever allocated by a capture.
 		rt.dropOpenUpvals(rt.frameDepth)
 		tail := false
+		// The frame to enter, which is this one until a compiled call site opens
+		// one below it.
+		run, runPC := ctx, pc
 		for !tail {
-			jitmem.Enter(pc, ctx)
+			// A fresh budget of machine frames: whatever nesting was on the
+			// goroutine stack before is gone, because getting back here is what
+			// unwound it.
+			run.Nest = 0
+			jitmem.Enter(runPC, run)
 			// The locals slice reaches compiled code as an integer, so nothing in
 			// the call graph keeps it reachable for the collector.
 			runtime.KeepAlive(locals)
-			switch ctx.Exit {
+
+			// Which frame stopped. A compiled call does not come back through here,
+			// so the innermost live frame can be deeper than the one entered above
+			// — and everything between the two has saved its operands and its
+			// resume address on the way out.
+			d := rt.jitDepth - 1
+			cur := rt.jitFrames[d]
+			curFn, curCl, curCode, curArgs, curLocals := fn, cl, c, args, locals
+			if d > base {
+				// A frame compiled code built. Its identity is the site that
+				// built it, which is what it published — see jitFrameOwner.
+				s := jitCtxSite(cur)
+				if s == nil {
+					rt.jitDepth = base
+					rt.dropOpenUpvals(rt.frameDepth)
+					return mkundef(), rt.typeError("JIT frame chain"), true
+				}
+				curFn, curCl, curCode = s.fn, s.cl, s.code
+				curArgs, curLocals = nil, jitCtxLocals(cur)
+			}
+
+			switch cur.Exit {
 			case jitmem.ExitReturn:
-				rt.jitFrames = rt.jitFrames[:n]
+				if d > base {
+					// Hand the answer to the caller and put it back on the machine.
+					// The depth comes down here rather than in the resume path,
+					// because the caller is entered next and would otherwise be
+					// running one frame above where it thinks it is.
+					rt.jitDepth = d
+					up := rt.jitFrames[d-1]
+					up.Ret = cur.Ret
+					run, runPC = up, up.Resume
+					continue
+				}
+				rt.jitDepth = base
 				rt.dropOpenUpvals(rt.frameDepth)
 				return Value(ctx.Ret), nil, true
 			case jitmem.ExitPreempt:
 				// Being here is the safepoint: this is ordinary Go, so the runtime
 				// can collect and preempt before the loop is re-entered.
-				ctx.Args[1] = jitFuel
-				pc = ctx.Resume
+				cur.Args[1] = jitFuel
+				run, runPC = cur, cur.Resume
 			case jitmem.ExitHelper:
-				if e := jitHelper(rt, fn, cl, args, locals, ctx); e != nil {
-					// A throw from inside a try lands in its catch rather than
-					// leaving the frame. Which catch is a compile-time answer:
-					// c.catchAt is keyed by the address this call site would
-					// have resumed at, which is the only thing identifying it
-					// that survives the trip through machine code.
-					//
-					// The catch enters with an empty operand stack — the
-					// emitter refuses a handler installed at any other depth,
-					// because the operands the throw destroyed were in
-					// registers — so nothing has to be restored, and the thrown
-					// value travels in Ret, where CATCH reads it and the
-					// collector already traces it.
-					//
-					// A control-flow signal is not a throw: `break`, `continue`
-					// and a return through a finally travel as one, and a catch
-					// must not take them. The interpreter's unwind draws the
-					// same line.
-					if !e.control {
-						if catch, ok := c.catchAt[ctx.Resume]; ok {
-							ctx.Ret = uint64(e.Value)
-							ctx.StackN = 0
-							pc = catch
-							continue
-						}
-					}
-					rt.jitFrames = rt.jitFrames[:n]
-					rt.dropOpenUpvals(rt.frameDepth)
-					return mkundef(), e, true
+				e := jitHelper(rt, curFn, curCl, curArgs, curLocals, cur, curCode)
+				if e == nil {
+					run, runPC = cur, cur.Resume
+					break
 				}
-				pc = ctx.Resume
+				// A throw from inside a try lands in its catch rather than
+				// leaving the frame. Which catch is a compile-time answer:
+				// catchAt is keyed by the address the call site would have
+				// resumed at, which is the only thing identifying it that
+				// survives the trip through machine code — and the frames a
+				// compiled call opened are searched the same way, outwards,
+				// because a throw in one of them passes through the sites that
+				// called it.
+				//
+				// The catch enters with an empty operand stack — the emitter
+				// refuses a handler installed at any other depth, because the
+				// operands the throw destroyed were in registers — so nothing
+				// has to be restored, and the thrown value travels in Ret,
+				// where CATCH reads it and the collector already traces it.
+				if at, to, ok := rt.jitCatch(base, d, c, e); ok {
+					run, runPC = at, to
+					break
+				}
+				rt.jitDepth = base
+				rt.dropOpenUpvals(rt.frameDepth)
+				return mkundef(), e, true
 			case jitmem.ExitTailCall:
+				if d > base {
+					// Not reachable: jitMachineCallable refuses a body with a
+					// tail call in it, precisely because a tail call takes over a
+					// frame and a frame built by a call site is not one to take.
+					// Handled rather than asserted, as an ordinary call one level
+					// deeper, so that widening that predicate cannot turn into a
+					// wrong answer.
+					v, e := rt.jitRunTail(cur)
+					if e != nil {
+						if at, to, ok := rt.jitCatch(base, d, c, e); ok {
+							run, runPC = at, to
+							break
+						}
+						rt.jitDepth = base
+						rt.dropOpenUpvals(rt.frameDepth)
+						return mkundef(), e, true
+					}
+					rt.jitDepth = d
+					up := rt.jitFrames[d-1]
+					up.Ret = uint64(v)
+					run, runPC = up, up.Resume
+					continue
+				}
 				tail = true
 			default:
-				rt.jitFrames = rt.jitFrames[:n]
+				if d > base {
+					// The callee declined the arguments the call site handed it,
+					// at its entry guard and so before it had written anything.
+					// The frame is discarded and the call made again the long way,
+					// which is where every shape this path cannot take is handled
+					// — a receiver that has to be boxed, a parameter that is not a
+					// Number after all.
+					v, e := rt.jitRedoCall(d)
+					if e != nil {
+						if at, to, ok := rt.jitCatch(base, d-1, c, e); ok {
+							run, runPC = at, to
+							break
+						}
+						rt.jitDepth = base
+						rt.dropOpenUpvals(rt.frameDepth)
+						return mkundef(), e, true
+					}
+					rt.jitDepth = d
+					up := rt.jitFrames[d-1]
+					up.Ret = uint64(v)
+					run, runPC = up, up.Resume
+					continue
+				}
+				rt.jitDepth = base
 				rt.dropOpenUpvals(rt.frameDepth)
 				// Declined its arguments at the entry guard, which is safe to
 				// report as "nothing has happened, run me in the interpreter
@@ -2726,23 +2841,23 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		}
 		sn := int(ctx.StackN)
 		if argc < 0 || sn < need {
-			rt.jitFrames = rt.jitFrames[:n]
+			rt.jitDepth = base
 			rt.dropOpenUpvals(rt.frameDepth)
 			return mkundef(), rt.typeError("JIT operand stack"), true
 		}
-		base := sn - need
+		cbase := sn - need
 		tailThis := mkundef()
 		if ctx.Args[3]>>32 != 0 {
-			tailThis = jitSlotAt(ctx, base)
-			base++
+			tailThis = jitSlotAt(ctx, cbase)
+			cbase++
 		}
-		callee := jitSlotAt(ctx, base)
+		callee := jitSlotAt(ctx, cbase)
 		// Copied rather than borrowed. Everywhere else a callee reads its arguments
 		// out of the caller's spill area while the caller waits; here the caller is
 		// finished and its context goes back on the free list on the next line.
-		callArgs := jitCopyArgs(jitSpillArgs(ctx, base+1, argc))
+		callArgs := jitCopyArgs(jitSpillArgs(ctx, cbase+1, argc))
 
-		rt.jitFrames = rt.jitFrames[:n]
+		rt.jitDepth = base
 		rt.dropOpenUpvals(rt.frameDepth)
 
 		// The callee this can take over the frame for: an ordinary JS function with
@@ -2804,6 +2919,103 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 	}
 }
 
+// jitCatch is where a throw raised in the frame at depth d is caught, searching
+// outwards through the frames a compiled call site opened and stopping at the
+// one the runtime entered.
+//
+// The frames in between are popped as it goes: each is a call that will not
+// return, and leaving them on the chain would hand the collector operand stacks
+// belonging to frames that no longer exist.
+//
+// A control-flow signal is not a throw: `break`, `continue` and a return through
+// a finally travel as one, and a catch must not take them. The interpreter's
+// unwind draws the same line.
+func (rt *Runtime) jitCatch(base, d int, outer *jitCode, e *ThrowError) (*jitmem.ExecContext, uintptr, bool) {
+	for ; d >= base; d-- {
+		cur := rt.jitFrames[d]
+		code := outer
+		if d > base {
+			code = nil
+			if s := jitCtxSite(cur); s != nil {
+				code = s.code
+			}
+		}
+		if !e.control && code != nil {
+			if catch, ok := code.catchAt[cur.Resume]; ok {
+				rt.jitDepth = d + 1
+				cur.Ret = uint64(e.Value)
+				cur.StackN = 0
+				return cur, catch, true
+			}
+		}
+	}
+	return nil, 0, false
+}
+
+// jitRedoCall makes the call the frame at depth d was entered for again, the
+// long way, because that frame declined the arguments it was given.
+//
+// Sound at any point, because a decline happens at the entry guard: the frame
+// has written nothing, and the arguments are still in the caller's spill area
+// where the call site left them.
+func (rt *Runtime) jitRedoCall(d int) (Value, *ThrowError) {
+	up := rt.jitFrames[d-1]
+	site := jitCtxSite(rt.jitFrames[d])
+	rt.jitDepth = d
+	if site == nil {
+		return mkundef(), rt.typeError("JIT frame chain")
+	}
+	// The site is retired rather than merely missed: whatever the entry stub
+	// could not settle about this call it will not settle next time either,
+	// unless the callee is rebuilt — which is what noting the decline arranges.
+	fn := site.fn
+	jitRetireSite(site)
+	if fn != nil {
+		jitNoteDecline(fn)
+	}
+	argc := int(site.argc)
+	depth := argc + 1
+	if site.method {
+		depth++
+	}
+	n := int(up.StackN)
+	if argc < 0 || n < depth {
+		return mkundef(), rt.typeError("JIT operand stack")
+	}
+	b := n - depth
+	thisArg := mkundef()
+	if site.method {
+		thisArg = jitSlotAt(up, b)
+		b++
+	}
+	callee := jitSlotAt(up, b)
+	return rt.callValue(callee, thisArg, jitCopyArgs(jitSpillArgs(up, b+1, argc)))
+}
+
+// jitRunTail makes a tail call from a frame a compiled call site opened, as an
+// ordinary call. See the ExitTailCall arm: nothing reaches this today, and what
+// it costs if something ever does is the tail-call guarantee rather than an
+// answer.
+func (rt *Runtime) jitRunTail(cur *jitmem.ExecContext) (Value, *ThrowError) {
+	argc := int(uint32(cur.Args[3]))
+	need := argc + 1
+	if cur.Args[3]>>32 != 0 {
+		need++
+	}
+	n := int(cur.StackN)
+	if argc < 0 || n < need {
+		return mkundef(), rt.typeError("JIT operand stack")
+	}
+	b := n - need
+	thisArg := mkundef()
+	if cur.Args[3]>>32 != 0 {
+		thisArg = jitSlotAt(cur, b)
+		b++
+	}
+	callee := jitSlotAt(cur, b)
+	return rt.callValue(callee, thisArg, jitCopyArgs(jitSpillArgs(cur, b+1, argc)))
+}
+
 // jitSpillArgs is the call's arguments where compiled code already left them,
 // as a slice rather than a copy.
 //
@@ -2844,7 +3056,12 @@ func jitCopyArgs(window []Value) []Value {
 }
 
 // jitHelper runs what compiled code asked for.
-func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *jitmem.ExecContext) *ThrowError {
+//
+// code is the block the asking frame is running, which is not always fn's
+// current one — a function rebuilt after too many declines leaves the block a
+// suspended frame is inside still mapped. Only the call arm reads it, to fill
+// the site the call came through.
+func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *jitmem.ExecContext, code *jitCode) *ThrowError {
 	switch ctx.Helper {
 	case jitHelperGetField:
 		recv := Value(ctx.Args[2])
@@ -2901,6 +3118,9 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// object writes through to the array it was given, and that array must
 		// not be this frame's operand stack. The interpreter allocates the same
 		// slice for the same reason, so this is parity rather than a cost.
+		if jitStats.enabled && ctx.Helper != jitHelperNew {
+			jitStats.callSlow++
+		}
 		argc := int(uint32(ctx.Args[3]))
 		depth := argc + 1
 		if ctx.Helper == jitHelperCallMethod {
@@ -2933,11 +3153,13 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// script that has replaced it must see its own. One level, because a
 		// chain of them (`call.call.call`) is a curiosity rather than a shape
 		// worth unrolling, and the general path still handles it.
+		seenThrough := false
 		if ctx.Helper == jitHelperCallMethod && callee == rt.funcProtoCall && rt.funcProtoCall != 0 && rt.isCallable(thisArg) {
 			callee, thisArg = thisArg, mkundef()
 			if len(window) > 0 {
 				thisArg, window = window[0], window[1:]
 			}
+			seenThrough = true
 		}
 		var v Value
 		var e *ThrowError
@@ -2955,6 +3177,15 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			var ok bool
 			if v, e, ok = rt.jitCallCompiled(callee, thisArg, window); !ok {
 				v, e = rt.callValue(callee, thisArg, jitCopyArgs(window))
+			} else if !seenThrough {
+				// It went to a compiled function through the runtime, which is
+				// what this site exists to stop doing. Everything the machine
+				// path needs is resolved right here — see jitFillSite for the
+				// conditions it still has to hold to.
+				if idx := int(ctx.Args[3] >> 32); idx > 0 && code != nil && idx <= len(code.sites) {
+					cfn, ccl := rt.jitResolveCallee(callee)
+					rt.jitFillSite(&code.sites[idx-1], fn.isStrict, callee, cfn, ccl)
+				}
 			}
 		}
 		if e != nil {

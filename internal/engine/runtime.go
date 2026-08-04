@@ -41,7 +41,20 @@ type Runtime struct {
 	// A slice rather than one pointer because a helper can re-enter the engine:
 	// a getter is JavaScript, and the frame that called it is still holding an
 	// operand stack the collector would otherwise never look at.
+	//
+	// It is the whole chain rather than the live part of it, and jitDepth is
+	// where the live part ends. Contexts are linked to one another so that a
+	// compiled call site can find the callee's without asking the runtime for it
+	// — see jitCtxAt — which means they outlive the frames that used them, and a
+	// slice whose length was the depth would have handed the collector addresses
+	// generated code was about to write into.
 	jitFrames []*jitmem.ExecContext
+
+	// jitDepth is how many compiled frames are live, and it is maintained by
+	// generated code as well as by the runtime: a compiled call raises it before
+	// entering the callee and lowers it when the callee returns, which is what
+	// keeps markRoots' view of the chain right at every point Go can run.
+	jitDepth int
 
 	// rootShapes holds this runtime's empty root shape per inobj limit. Every
 	// shape descends from one of them through the transition tree, and adding a

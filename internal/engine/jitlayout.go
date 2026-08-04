@@ -87,6 +87,11 @@ const (
 	// puts the old one back, so a compiled site outlives several of them.
 	jitOffRTGlobal = unsafe.Offsetof(Runtime{}.global)
 
+	// How many compiled frames are live, which a compiled call maintains itself
+	// because the collector reads it and a call that went through the runtime to
+	// say so would be the round trip this exists to remove.
+	jitOffRTJitDepth = unsafe.Offsetof(Runtime{}.jitDepth)
+
 	// One cache site, and one way within it.
 	jitSizeofICWay  = unsafe.Sizeof(icWay{})
 	jitOffICWays    = unsafe.Offsetof(propIC{}.ways)
@@ -116,6 +121,17 @@ func jitObjectPoolAddr(rt *Runtime) uintptr {
 	return uintptr(unsafe.Pointer(rt.objects))
 }
 
+// jitUpvalArrayAddr is the address of a closure's upvalue array, which a
+// compiled call site copies into the frame it builds.
+//
+// Cached against the closure's identity rather than fetched per call, which is
+// what makes it a constant: the guard is that the callee is the same closure,
+// and a closure's upvalue array is allocated once and never grown. It roots
+// nothing — the site holds the closure itself for that.
+func jitUpvalArrayAddr(cl *closure) uintptr {
+	return uintptr(unsafe.Pointer(&cl.upvalues[0]))
+}
+
 // jitEpochAddr is the address of the inline-cache generation counter.
 //
 // Baked into compiled code as an immediate rather than passed in, because
@@ -141,6 +157,10 @@ func jitICGlobalHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.glbH
 
 // jitElemHitAddr is the same for an element read.
 func jitElemHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.elemHit)) }
+
+// jitCallFastAddr is the address of the counter for calls a compiled site made
+// in machine code.
+func jitCallFastAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.callFast)) }
 
 // jitGenericFastAddr is the address of the counter for generic operators whose
 // operands turned out to be Numbers after all.

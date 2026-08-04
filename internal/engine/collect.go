@@ -645,7 +645,10 @@ func (rt *Runtime) markRoots() {
 		// one from an earlier call holds a handle to a cell that may since have
 		// been freed. Args[0] and Args[1] are a pointer and a counter, and
 		// Args[3] is an immediate, so none of the three is a Value.
-		for _, ctx := range r.jitFrames {
+		// The live part of the chain, and only that: contexts are built ahead of
+		// where anything has run and are never freed, so past this depth they
+		// hold whatever the last frame there left behind — see jitCtxAt.
+		for _, ctx := range r.jitFrames[:r.jitDepth] {
 			rt.markValue(Value(ctx.Args[2]))
 			rt.markValue(Value(ctx.Ret))
 			// The receiver, which reaches compiled code as an integer and is
@@ -660,6 +663,13 @@ func (rt *Runtime) markRoots() {
 			// live; past that the slots hold whatever an earlier frame at this
 			// depth wrote, which is exactly what must not be traced.
 			for _, v := range jitFrameStack(ctx) {
+				rt.markValue(v)
+			}
+			// And its variables, for a frame a compiled call site opened. Those
+			// have no vmFrame and no entry in the locals slab — the context is
+			// the whole of what they published — so this is the only place they
+			// are reachable from. NLocals is zero for every other frame.
+			for _, v := range jitCtxLocals(ctx) {
 				rt.markValue(v)
 			}
 		}
