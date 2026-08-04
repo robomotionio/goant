@@ -1,4 +1,4 @@
-//go:build amd64
+//go:build amd64 || arm64
 
 package engine
 
@@ -125,19 +125,24 @@ func jitEmitMachineCall(a *jitasm.Asm, sp, argc int, method bool, site uintptr, 
 		a.AddMemImm32(jitRegScratch, 0, 1)
 	}
 	a.MovRegMem(jitRegScratch, keep, int32(jitOffSiteEntry))
+	// The context register, and on the architectures that keep the return
+	// address in one, that too — the callee's own call would otherwise leave
+	// this frame with no way back to the runtime.
+	a.SaveLink()
 	a.Push(jitasm.RegCtx)
 	a.MovRegReg(jitasm.RegCtx, tmp2)
 	a.CallReg(jitRegScratch)
 	a.Pop(jitasm.RegCtx)
+	a.RestoreLink()
 
 	// Zero is the callee returning; anything else is the callee, or something it
 	// called, wanting the runtime — and this frame is in the way of it.
 	cascade := a.NewLabel()
 	after := a.NewLabel()
-	a.TestRegReg(jitasm.RAX, jitasm.RAX)
+	a.TestRegReg(jitRegExit, jitRegExit)
 	a.Jcc(jitasm.CondNE, cascade)
 
-	a.MovRegReg(keep, jitasm.RDX)
+	a.MovRegReg(keep, jitRegReturn)
 	a.MovRegMem(tmp2, jitasm.RegCtx, jitmem.CtxOffHost)
 	a.AddMemImm32(tmp2, int32(jitOffRTJitDepth), ^uint32(0))
 	a.Bind(after)
@@ -163,11 +168,11 @@ func jitEmitMachineCall(a *jitasm.Asm, sp, argc int, method bool, site uintptr, 
 	// back to.
 	resume := a.NewLabel()
 	a.Bind(cascade)
-	immOff := a.MovRegImm64At(jitasm.RAX, 0)
+	immOff := a.MovRegImm64At(jitRegExit, 0)
 	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume})
-	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitasm.RAX)
+	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitRegExit)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitCallout))
-	a.MovRegImm64(jitasm.RAX, jitmem.ExitCallout)
+	a.MovRegImm64(jitRegExit, jitmem.ExitCallout)
 	a.Ret()
 
 	// Back from the runtime, which has already popped the callee and left its
@@ -245,9 +250,9 @@ func jitEmitMachineEntry(a *jitasm.Asm, fn *svFunc, nargs int, prologue, bail *j
 	a.MovRegMem(jitRegLocals, jitasm.RegCtx, jitmem.CtxOffArgs)
 	a.MovRegImm64(jitRegGuard, uint64(nanboxPrefix))
 	if nargs < fn.maxLocals {
-		a.MovRegImm64(jitasm.RAX, uint64(mkundef()))
+		a.MovRegImm64(jitRegTmp, uint64(mkundef()))
 		for i := nargs; i < fn.maxLocals; i++ {
-			a.MovMemReg(jitRegLocals, int32(8*i), jitasm.RAX)
+			a.MovMemReg(jitRegLocals, int32(8*i), jitRegTmp)
 		}
 	}
 
@@ -259,12 +264,12 @@ func jitEmitMachineEntry(a *jitasm.Asm, fn *svFunc, nargs int, prologue, bail *j
 	if !fn.isStrict {
 		ok := a.NewLabel()
 		global := a.NewLabel()
-		a.MovRegMem(jitasm.RAX, jitasm.RegCtx, jitmem.CtxOffThis)
+		a.MovRegMem(jitRegTmp, jitasm.RegCtx, jitmem.CtxOffThis)
 		// A Number receiver is the wrapper case. Testing taggedness first is
 		// what makes the tag below meaningful at all.
-		a.CmpRegReg(jitasm.RAX, jitRegGuard)
+		a.CmpRegReg(jitRegTmp, jitRegGuard)
 		a.Jcc(jitasm.CondBE, bail)
-		a.MovRegReg(jitRegScratch, jitasm.RAX)
+		a.MovRegReg(jitRegScratch, jitRegTmp)
 		a.ShrRegImm(jitRegScratch, nanboxTypeShift)
 		a.SubRegImm32(jitRegScratch, uint32(nanboxPrefix>>nanboxTypeShift))
 		a.CmpRegImm32(jitRegScratch, uint32(TUndef))
@@ -273,16 +278,16 @@ func jitEmitMachineEntry(a *jitasm.Asm, fn *svFunc, nargs int, prologue, bail *j
 		a.Jcc(jitasm.CondE, global)
 		// One of the tags that is already an object. The shift is by CL, which
 		// is why the tag is in the scratch register rather than anywhere else.
-		a.MovRegImm64(jitasm.RAX, 1)
-		a.Shl32RegCL(jitasm.RAX)
-		a.AndRegImm32(jitasm.RAX, uint32(tObjectMask|1<<TTypedArray))
+		a.MovRegImm64(jitRegTmp, 1)
+		a.Shl32RegCL(jitRegTmp)
+		a.AndsRegImm32(jitRegTmp, uint32(tObjectMask|1<<TTypedArray))
 		a.Jcc(jitasm.CondE, bail)
 		a.Jmp(ok)
 
 		a.Bind(global)
-		a.MovRegMem(jitasm.RAX, jitasm.RegCtx, jitmem.CtxOffHost)
-		a.MovRegMem(jitasm.RAX, jitasm.RAX, int32(jitOffRTGlobal))
-		a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffThis, jitasm.RAX)
+		a.MovRegMem(jitRegTmp, jitasm.RegCtx, jitmem.CtxOffHost)
+		a.MovRegMem(jitRegTmp, jitRegTmp, int32(jitOffRTGlobal))
+		a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffThis, jitRegTmp)
 		a.Bind(ok)
 	}
 	a.Jmp(prologue)

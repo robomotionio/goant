@@ -33,6 +33,11 @@ const (
 	RegCtx = R13
 )
 
+// RegShiftCount is where a variable shift count has to be. The architecture
+// insists on CL here and does not on arm64, so the templates name it rather than
+// writing RCX and being right by accident on one of the two.
+const RegShiftCount = RCX
+
 // XReg is an SSE register. JavaScript numbers are doubles, so these carry the
 // arithmetic and the general-purpose registers carry NaN-boxed values.
 type XReg uint8
@@ -407,6 +412,11 @@ func (a *Asm) AddRegImm32(r Reg, v uint32) {
 }
 
 // AndRegImm32 masks against a sign-extended 32-bit immediate.
+// AndsRegImm32 is AndRegImm32 for the callers that go on to branch on the
+// result. Here they are the same instruction; on arm64 they are not, because
+// the ordinary bitwise operations leave the flags alone.
+func (a *Asm) AndsRegImm32(r Reg, v uint32) { a.AndRegImm32(r, v) }
+
 func (a *Asm) AndRegImm32(r Reg, v uint32) {
 	a.emitRM(true, []byte{0x81}, 4, uint8(r))
 	a.emit32(v)
@@ -430,6 +440,11 @@ func (a *Asm) AddMemImm32(base Reg, disp int32, v uint32) {
 // A guard sequence is a run of compares against fields of structures that are
 // read once and never held, so folding the load into the compare is not a
 // peephole — it is the difference between needing a spare register and not.
+// OrsRegMem is OrRegMem for a caller that branches on the result — testing two
+// pointers for nil at once, which is what both property probes do. Here it is
+// the same instruction; on arm64 the bitwise operations leave the flags alone.
+func (a *Asm) OrsRegMem(dst, base Reg, disp int32) { a.OrRegMem(dst, base, disp) }
+
 func (a *Asm) OrRegMem(dst, base Reg, disp int32) {
 	a.emitMem(true, []byte{0x0B}, uint8(dst), uint8(base), disp)
 }
@@ -650,6 +665,16 @@ func (a *Asm) Jfcc(c FCond, l *Label) {
 
 func (a *Asm) CallReg(r Reg) { a.emitRM(false, []byte{0xFF}, 2, uint8(r)) }
 func (a *Asm) Ret()          { a.emit(0xC3) }
+
+// SaveLink and RestoreLink bracket a call through CallReg, preserving whatever
+// the architecture puts the caller's own return address in.
+//
+// Nothing here: a CALL pushes the return address and the matching RET pops it,
+// so a nested call disturbs nothing the caller was holding. On arm64 the return
+// address is a register and a nested call overwrites it, which is why the pair
+// exists at all.
+func (a *Asm) SaveLink()    {}
+func (a *Asm) RestoreLink() {}
 
 func (a *Asm) Push(r Reg) {
 	if r >= R8 {

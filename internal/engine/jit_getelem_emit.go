@@ -1,4 +1,4 @@
-//go:build amd64
+//go:build amd64 || arm64
 
 package engine
 
@@ -60,10 +60,10 @@ func jitEmitGetElem(a *jitasm.Asm, recv, key, obj, idx jitasm.Reg, slow, done *j
 	// something else entirely — and negative zero, whose bits differ from the
 	// positive zero it converts back to. A negative index fails the unsigned
 	// bound below rather than here.
-	a.MovqXReg(jitasm.X0, key)
-	a.Cvttsd2siRegX(idx, jitasm.X0)
-	a.Cvtsi2sdXReg(jitasm.X1, idx)
-	a.MovqRegX(scratch, jitasm.X1)
+	a.MovqXReg(jitRegF0, key)
+	a.Cvttsd2siRegX(idx, jitRegF0)
+	a.Cvtsi2sdXReg(jitRegF1, idx)
+	a.MovqRegX(scratch, jitRegF1)
 	a.CmpRegReg(scratch, key)
 	a.Jcc(jitasm.CondNE, slow)
 

@@ -1,4 +1,4 @@
-//go:build amd64
+//go:build amd64 || arm64
 
 package engine
 
@@ -45,9 +45,9 @@ func jitEmitTruthyBranch(a *jitasm.Asm, v jitasm.Reg, whenTrue, back bool, targe
 	// branches below are the whole of `d != 0 && !isNaN(d)`.
 	a.CmpRegReg(v, jitRegGuard)
 	a.Jcc(jitasm.CondA, tagged)
-	a.MovqXReg(jitasm.X0, v)
-	a.XorpdXX(jitasm.X1, jitasm.X1)
-	a.UcomisdXX(jitasm.X0, jitasm.X1)
+	a.MovqXReg(jitRegF0, v)
+	a.XorpdXX(jitRegF1, jitRegF1)
+	a.UcomisdXX(jitRegF0, jitRegF1)
 	a.Jfcc(jitasm.FCondUnordered, falsy)
 	a.Jfcc(jitasm.FCondE, falsy)
 	a.Jmp(truthy)

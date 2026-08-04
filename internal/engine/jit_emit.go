@@ -1,9 +1,8 @@
-//go:build amd64
+//go:build amd64 || arm64
 
 package engine
 
 import (
-	"encoding/binary"
 	"runtime"
 	"unsafe"
 
@@ -50,12 +49,6 @@ import (
 // positionally rather than allocating: an expression that nests deeper than this
 // is simply not compiled. Nine slots rather than ten is not a real loss —
 // nothing in a corpus of seven thousand functions is refused for depth.
-var jitStackRegs = []jitasm.Reg{
-	jitasm.RAX, jitasm.RDX, jitasm.RBX,
-	jitasm.RSI, jitasm.RDI, jitasm.R8, jitasm.R9,
-	jitasm.R10, jitasm.R11,
-}
-
 // The operand stack is a window of registers over an array in the context.
 //
 // Nine registers is all the machine has left once the locals pointer, the tag
@@ -167,17 +160,6 @@ func jitRefillSlots(a *jitasm.Asm, sp, after, push int, deep bool) {
 		a.MovRegMem(jitSlot(k), base, off+int32(8*k))
 	}
 }
-
-const (
-	jitRegLocals  = jitasm.R12
-	jitRegGuard   = jitasm.R15
-	jitRegScratch = jitasm.RCX
-	// jitRegReturn carries a returning frame's value to the compiled call site
-	// that entered it, beside the exit code in RAX. It is an operand-stack
-	// register like any other — the frame it belongs to is over by the time this
-	// is read, and the caller's copy of it is in the spill area.
-	jitRegReturn = jitasm.RDX
-)
 
 // jitFuel is how many loop iterations compiled code runs before returning to Go.
 //
@@ -616,19 +598,19 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				slow, done = a.NewLabel(), a.NewLabel()
 				jitEmitNumberPair(a, x, y, slow)
 			}
-			a.MovqXReg(jitasm.X0, x)
-			a.MovqXReg(jitasm.X1, y)
+			a.MovqXReg(jitRegF0, x)
+			a.MovqXReg(jitRegF1, y)
 			switch op {
 			case OpAdd:
-				a.AddsdXX(jitasm.X0, jitasm.X1)
+				a.AddsdXX(jitRegF0, jitRegF1)
 			case OpSub:
-				a.SubsdXX(jitasm.X0, jitasm.X1)
+				a.SubsdXX(jitRegF0, jitRegF1)
 			case OpMul:
-				a.MulsdXX(jitasm.X0, jitasm.X1)
+				a.MulsdXX(jitRegF0, jitRegF1)
 			case OpDiv:
-				a.DivsdXX(jitasm.X0, jitasm.X1)
+				a.DivsdXX(jitRegF0, jitRegF1)
 			}
-			a.MovqRegX(x, jitasm.X0)
+			a.MovqRegX(x, jitRegF0)
 			jitCanonicalizeNaN(a, x)
 			if generic {
 				a.Jmp(done)
@@ -664,9 +646,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				slow, done = a.NewLabel(), a.NewLabel()
 				jitEmitNumberPair(a, x, y, slow)
 			}
-			a.MovqXReg(jitasm.X0, x)
-			a.MovqXReg(jitasm.X1, y)
-			a.UcomisdXX(jitasm.X0, jitasm.X1)
+			a.MovqXReg(jitRegF0, x)
+			a.MovqXReg(jitRegF1, y)
+			a.UcomisdXX(jitRegF0, jitRegF1)
 			if fused {
 				jitCompareBranch(a, op, whenTrue, l)
 			} else {
@@ -1484,14 +1466,14 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				jitEmitNumber(a, r, slow)
 			}
 			a.MovRegImm64(jitRegScratch, uint64(tov(1)))
-			a.MovqXReg(jitasm.X1, jitRegScratch)
-			a.MovqXReg(jitasm.X0, r)
+			a.MovqXReg(jitRegF1, jitRegScratch)
+			a.MovqXReg(jitRegF0, r)
 			if op == OpInc {
-				a.AddsdXX(jitasm.X0, jitasm.X1)
+				a.AddsdXX(jitRegF0, jitRegF1)
 			} else {
-				a.SubsdXX(jitasm.X0, jitasm.X1)
+				a.SubsdXX(jitRegF0, jitRegF1)
 			}
-			a.MovqRegX(r, jitasm.X0)
+			a.MovqRegX(r, jitRegF0)
 			jitCanonicalizeNaN(a, r)
 			if generic {
 				a.Jmp(done)
@@ -1515,9 +1497,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				// the zero flag for both — equal, or unordered. So the flag is
 				// `!x` already, for either signed zero.
 				a.XorRegReg(jitRegScratch, jitRegScratch)
-				a.MovqXReg(jitasm.X1, jitRegScratch)
-				a.MovqXReg(jitasm.X0, r)
-				a.UcomisdXX(jitasm.X0, jitasm.X1)
+				a.MovqXReg(jitRegF1, jitRegScratch)
+				a.MovqXReg(jitRegF0, r)
+				a.UcomisdXX(jitRegF0, jitRegF1)
 				jitFBoolean(a, jitasm.FCondE, r)
 			} else {
 				// ToBoolean of anything else is a different question — the empty
@@ -1577,9 +1559,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				slow, done = a.NewLabel(), a.NewLabel()
 				jitEmitNumberPair(a, x, y, slow)
 			}
-			a.MovqXReg(jitasm.X0, x)
-			a.MovqXReg(jitasm.X1, y)
-			a.UcomisdXX(jitasm.X0, jitasm.X1)
+			a.MovqXReg(jitRegF0, x)
+			a.MovqXReg(jitRegF1, y)
+			a.UcomisdXX(jitRegF0, jitRegF1)
 			if fused {
 				jitEqualsBranch(a, negate, whenTrue, l)
 			} else {
@@ -1758,7 +1740,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			a.MovRegImm64(jitRegScratch, uint64(uint32(argc))|recv<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
 			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitTailCall))
-			a.MovRegImm64(jitasm.RAX, jitmem.ExitTailCall)
+			a.MovRegImm64(jitRegExit, jitmem.ExitTailCall)
 			a.Ret()
 			sp = 0
 			returned = true
@@ -2025,15 +2007,15 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if sp != 0 {
 				return refuse(why, "return-stack")
 			}
-			a.MovRegImm64(jitasm.RAX, uint64(mkundef()))
-			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffRet, jitasm.RAX)
+			a.MovRegImm64(jitRegTmp, uint64(mkundef()))
+			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffRet, jitRegTmp)
 			// Also in a register, for the one caller that is not Go. A compiled
 			// call site reads the answer from here rather than from the context,
 			// which is a load it does not make on the path this exists to make
 			// short. Harmless to the runtime, which reads Ret as it always did.
-			a.MovRegReg(jitRegReturn, jitasm.RAX)
+			a.MovRegReg(jitRegReturn, jitRegTmp)
 			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitReturn))
-			a.MovRegImm64(jitasm.RAX, jitmem.ExitReturn)
+			a.MovRegImm64(jitRegExit, jitmem.ExitReturn)
 			a.Ret()
 			returned = true
 			ip++
@@ -2051,7 +2033,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				a.MovRegReg(jitRegReturn, jitSlot(sp-1))
 			}
 			a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitReturn))
-			a.MovRegImm64(jitasm.RAX, jitmem.ExitReturn)
+			a.MovRegImm64(jitRegExit, jitmem.ExitReturn)
 			a.Ret()
 			sp = 0
 			returned = true
@@ -2103,7 +2085,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 
 	a.Bind(bail)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitDeopt))
-	a.MovRegImm64(jitasm.RAX, jitmem.ExitDeopt)
+	a.MovRegImm64(jitRegExit, jitmem.ExitDeopt)
 	a.Ret()
 
 	// The prologue, emitted after the body because which parameters it has to
@@ -2127,8 +2109,8 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		if !readsNumeric[i] {
 			continue
 		}
-		a.MovRegMem(jitasm.RAX, jitRegLocals, int32(i)*8)
-		a.CmpRegReg(jitasm.RAX, jitRegGuard)
+		a.MovRegMem(jitRegTmp, jitRegLocals, int32(i)*8)
+		a.CmpRegReg(jitRegTmp, jitRegGuard)
 		a.Jcc(jitasm.CondA, bail)
 	}
 	a.Jmp(body)
@@ -2161,8 +2143,8 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			if !readsNumeric[i] || !blocks[h].in[i] {
 				continue
 			}
-			a.MovRegMem(jitasm.RAX, jitRegLocals, int32(i)*8)
-			a.CmpRegReg(jitasm.RAX, jitRegGuard)
+			a.MovRegMem(jitRegTmp, jitRegLocals, int32(i)*8)
+			a.CmpRegReg(jitRegTmp, jitRegGuard)
 			a.Jcc(jitasm.CondA, bail)
 		}
 		a.Jmp(l)
@@ -2210,11 +2192,14 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		return refuse(why, "no-executable-memory")
 	}
 	// Resume addresses are absolute and the code had no address until now.
-	// Patching rather than regenerating is safe because MovRegImm64 always emits
-	// the same ten bytes, so nothing has moved.
+	// Patching rather than regenerating is safe because MovRegImm64At emits the
+	// same instructions whatever the value, so nothing has moved — and it is the
+	// encoder that writes them, because what a constant looks like is the one
+	// thing that differs most between the two architectures: ten bytes with the
+	// value in eight of them, or four instructions carrying sixteen bits each.
 	base := uint64(block.Addr())
 	for _, f := range fixups {
-		binary.LittleEndian.PutUint64(buf[f.immOff:], base+uint64(f.label.Offset()))
+		a.PatchUint64(f.immOff, base+uint64(f.label.Offset()))
 	}
 	if _, err := block.Write(buf); err != nil {
 		block.Free()
@@ -2399,16 +2384,16 @@ func jitBackEdge(a *jitasm.Asm, top *jitasm.Label, fixups *[]jitResumeFixup) {
 	cont := a.NewLabel()
 	resume := a.NewLabel()
 
-	a.MovRegMem(jitasm.RAX, jitasm.RegCtx, jitmem.CtxOffArgs+8)
-	a.SubRegImm32(jitasm.RAX, 1)
-	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+8, jitasm.RAX) // MOV leaves the flags alone
+	a.MovRegMem(jitRegTmp, jitasm.RegCtx, jitmem.CtxOffArgs+8)
+	a.SubRegImm32(jitRegTmp, 1)
+	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+8, jitRegTmp) // MOV leaves the flags alone
 	a.Jcc(jitasm.CondNE, cont)
 
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitPreempt))
-	immOff := a.MovRegImm64At(jitasm.RAX, 0)
+	immOff := a.MovRegImm64At(jitRegExit, 0)
 	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume})
-	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitasm.RAX)
-	a.MovRegImm64(jitasm.RAX, jitmem.ExitPreempt)
+	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitRegExit)
+	a.MovRegImm64(jitRegExit, jitmem.ExitPreempt)
 	a.Ret()
 
 	a.Bind(resume)
@@ -2504,10 +2489,10 @@ func jitCallHelper(a *jitasm.Asm, sp int, helper uint32, fixups *[]jitResumeFixu
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffStackN, uint32(sp))
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffHelper, helper)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitHelper))
-	immOff := a.MovRegImm64At(jitasm.RAX, 0)
+	immOff := a.MovRegImm64At(jitRegExit, 0)
 	*fixups = append(*fixups, jitResumeFixup{immOff: immOff, label: resume})
-	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitasm.RAX)
-	a.MovRegImm64(jitasm.RAX, jitmem.ExitHelper)
+	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffResume, jitRegExit)
+	a.MovRegImm64(jitRegExit, jitmem.ExitHelper)
 	a.Ret()
 
 	a.Bind(resume)

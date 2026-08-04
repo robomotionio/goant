@@ -1,4 +1,4 @@
-//go:build amd64
+//go:build amd64 || arm64
 
 package engine
 
@@ -85,7 +85,7 @@ func jitEmitICPut(a *jitasm.Asm, recv, val, obj, way jitasm.Reg, wayBase, epoch 
 	// trap.
 	a.MovRegMem(scratch, way, int32(jitOffWayHolder))
 	a.OrRegMem(scratch, way, int32(jitOffWayToShape))
-	a.OrRegMem(scratch, obj, int32(jitOffObjProxy))
+	a.OrsRegMem(scratch, obj, int32(jitOffObjProxy))
 	a.Jcc(jitasm.CondNE, slow)
 
 	// Where the slot lives, which also rejects the sentinel a site records for a

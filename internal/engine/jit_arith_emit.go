@@ -1,4 +1,4 @@
-//go:build amd64
+//go:build amd64 || arm64
 
 package engine
 
@@ -46,13 +46,11 @@ func jitToInt32(a *jitasm.Asm, dst, src jitasm.Reg, sp int, fixups *[]jitResumeF
 	// Stashed before the conversion because the conversion may overwrite it:
 	// callers pass dst == src, and the slow path still needs the original.
 	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+16, src)
-	a.MovqXReg(jitasm.X0, src)
-	a.Cvttsd2siRegX(dst, jitasm.X0)
-	// SUB overflows for INT64_MIN and for nothing else. LEA puts the one back
-	// and truncates to 32 bits in the same instruction.
-	a.SubRegImm32(dst, 1)
-	a.Jcc(jitasm.CondO, slow)
-	a.Lea32RegMem(dst, dst, 1)
+	a.MovqXReg(jitRegF0, src)
+	a.Cvttsd2siRegX(dst, jitRegF0)
+	// How an out-of-range double is recognised is the one thing about this that
+	// the two architectures do not share — see jitEmitTruncGuard.
+	jitEmitTruncGuard(a, dst, slow)
 	a.Jmp(done)
 
 	a.Bind(slow)
@@ -74,8 +72,8 @@ func jitFromInt32(a *jitasm.Asm, r jitasm.Reg, signed bool) {
 	if signed {
 		a.MovsxdRegReg(r, r)
 	}
-	a.Cvtsi2sdXReg(jitasm.X0, r)
-	a.MovqRegX(r, jitasm.X0)
+	a.Cvtsi2sdXReg(jitRegF0, r)
+	a.MovqRegX(r, jitRegF0)
 	// No canonicalisation: an integer converted to a double is never a NaN.
 }
 

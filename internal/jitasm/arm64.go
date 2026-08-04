@@ -452,6 +452,14 @@ func (a *Asm) AndRegImm32(r Reg, v uint32) {
 	a.AndRegReg(r, scratch0)
 }
 
+// AndsRegImm32 is AndRegImm32 for a caller that branches on the result. The
+// ordinary bitwise instructions here do not touch the flags, which on amd64 they
+// cannot help doing — so a template that masks and then tests needs to say so.
+func (a *Asm) AndsRegImm32(r Reg, v uint32) {
+	a.MovRegImm64(scratch0, uint64(v))
+	a.dataReg(0xEA000000, r, r, scratch0) // ANDS
+}
+
 // AddRegMem, OrRegMem, CmpRegMem and Cmp32RegMem are the memory-operand forms
 // amd64 has and this architecture does not: the value is loaded first, into the
 // register this package reserves for it.
@@ -463,6 +471,15 @@ func (a *Asm) AddRegMem(dst, base Reg, disp int32) {
 func (a *Asm) OrRegMem(dst, base Reg, disp int32) {
 	a.MovRegMem(scratch0, base, disp)
 	a.OrRegReg(dst, scratch0)
+}
+
+// OrsRegMem is OrRegMem for a caller that branches on the result. ORR leaves the
+// flags alone here and ORs cannot take a memory operand, so the test has to be
+// made rather than inherited.
+func (a *Asm) OrsRegMem(dst, base Reg, disp int32) {
+	a.MovRegMem(scratch0, base, disp)
+	a.OrRegReg(dst, scratch0)
+	a.TestRegReg(dst, dst)
 }
 
 func (a *Asm) CmpRegMem(dst, base Reg, disp int32) {
@@ -521,9 +538,10 @@ func (a *Asm) Shl32RegCL(r Reg) { a.shiftReg(0x1AC02000, r, RegShiftCount) }
 func (a *Asm) Shr32RegCL(r Reg) { a.shiftReg(0x1AC02400, r, RegShiftCount) }
 func (a *Asm) Sar32RegCL(r Reg) { a.shiftReg(0x1AC02800, r, RegShiftCount) }
 
-// RegShiftCount is where a variable shift count lives, so that the templates can
-// keep the one register amd64's shift instructions demand.
-const RegShiftCount = X11
+// RegShiftCount is where a variable shift count lives. Nothing about this
+// architecture requires a particular register; the name exists because amd64
+// requires CL, and one name means the templates do not have to know which.
+const RegShiftCount = X21
 
 func (a *Asm) shiftReg(op uint32, dst, count Reg) {
 	a.word(op | uint32(count)<<16 | uint32(dst)<<5 | uint32(dst))
@@ -635,6 +653,13 @@ func (a *Asm) Jfcc(c FCond, l *Label) {
 
 func (a *Asm) CallReg(r Reg) { a.word(0xD63F0000 | uint32(r)<<5) }
 func (a *Asm) Ret()          { a.word(0xD65F03C0) }
+
+// SaveLink and RestoreLink bracket a call through CallReg. BLR puts the return
+// address in X30 and RET jumps to it, so a nested call destroys the address its
+// caller was going to return by — here that is the way back into Go, and losing
+// it is not a wrong answer but a jump into whatever the callee left behind.
+func (a *Asm) SaveLink()    { a.Push(X30) }
+func (a *Asm) RestoreLink() { a.Pop(X30) }
 
 // Push and Pop keep the stack pointer sixteen-byte aligned, which the
 // architecture requires of every access made through it.

@@ -1,4 +1,4 @@
-//go:build amd64
+//go:build amd64 || arm64
 
 package engine
 
@@ -107,7 +107,7 @@ func jitEmitICGet(a *jitasm.Asm, recv, obj, way, hold jitasm.Reg, wayBase, epoch
 	// store site's transition entry, and a proxy means the receiver's [[Get]] is
 	// a trap rather than a read.
 	a.MovRegMem(scratch, way, int32(jitOffWayToShape))
-	a.OrRegMem(scratch, obj, int32(jitOffObjProxy))
+	a.OrsRegMem(scratch, obj, int32(jitOffObjProxy))
 	a.Jcc(jitasm.CondNE, slow)
 
 	// A holder means the property was found up the prototype chain, and the slot

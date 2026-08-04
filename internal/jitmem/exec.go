@@ -260,16 +260,16 @@ const InlineLocals = 32
 
 // Field offsets generated code compiles against.
 const (
-	CtxOffExit   = 0
-	CtxOffHelper = 8
-	CtxOffArgs   = 16
-	CtxOffRet    = 48
-	CtxOffResume = 56
-	CtxOffSpill  = 64
-	CtxOffStackN = 64 + 8*InlineSlots
-	CtxOffStack  = 72 + 8*InlineSlots
-	CtxOffPool   = 80 + 8*InlineSlots
-	CtxOffHost   = 88 + 8*InlineSlots
+	CtxOffExit    = 0
+	CtxOffHelper  = 8
+	CtxOffArgs    = 16
+	CtxOffRet     = 48
+	CtxOffResume  = 56
+	CtxOffSpill   = 64
+	CtxOffStackN  = 64 + 8*InlineSlots
+	CtxOffStack   = 72 + 8*InlineSlots
+	CtxOffPool    = 80 + 8*InlineSlots
+	CtxOffHost    = 88 + 8*InlineSlots
 	CtxOffThis    = 96 + 8*InlineSlots
 	CtxOffUpvals  = 104 + 8*InlineSlots
 	CtxOffFnVal   = 112 + 8*InlineSlots
