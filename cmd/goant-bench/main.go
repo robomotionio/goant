@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"math"
@@ -20,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // engine is one JavaScript implementation to measure. args are whatever has to
@@ -85,7 +87,10 @@ func main() {
 	runner := flag.String("runner", "./goant", "path to the goant binary")
 	reps := flag.Int("n", 3, "runs per workload; the fastest is kept")
 	only := flag.String("only", "", "run only workloads whose name contains this")
+	limit := flag.Duration("timeout", 10*time.Minute, "give up on one engine's run after this long")
 	flag.Parse()
+
+	runLimit = *limit
 
 	candidates[0].bin = *runner
 
@@ -207,15 +212,32 @@ func workloads(dir, only string) ([]string, error) {
 	return out, nil
 }
 
+// runLimit is how long one engine gets for one run before it is given up on.
+// Without it a single engine that wedges — duktape and ant have both sat on an
+// Octane workload for a quarter of an hour — holds up the whole table, and a
+// table that never finishes says less than one with a cell marked error.
+var runLimit = 10 * time.Minute
+
+// runEngine runs one script under one engine and returns its stdout.
+func runEngine(e engine, script string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), runLimit)
+	defer cancel()
+	args := append(append([]string{}, e.args...), script)
+	cmd := exec.CommandContext(ctx, e.bin, args...)
+	cmd.Stderr = os.Stderr
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("%s: gave up after %s", e.name, runLimit)
+	}
+	return out, err
+}
+
 // timeRun runs script under e reps times and returns the fastest nanoseconds
 // per unit of work, which the script itself reports on its last line of stdout.
 func timeRun(e engine, script string, reps int) (float64, error) {
 	best := math.Inf(1)
 	for i := 0; i < reps; i++ {
-		args := append(append([]string{}, e.args...), script)
-		cmd := exec.Command(e.bin, args...)
-		cmd.Stderr = os.Stderr
-		out, err := cmd.Output()
+		out, err := runEngine(e, script)
 		if err != nil {
 			return 0, err
 		}
@@ -300,6 +322,12 @@ func runOctane(engines []engine, benchDir, only string, reps int) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	// The shell globals Octane expects and not every engine has — see the file.
+	shell, err := os.ReadFile(filepath.Join(benchDir, "suites", "_octane-shell.js"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	tmp, err := os.MkdirTemp("", "goant-octane")
 	if err != nil {
@@ -323,6 +351,7 @@ func runOctane(engines []engine, benchDir, only string, reps int) {
 		// engine to the script goal Octane was written for.
 		joined := filepath.Join(tmp, b.name+".cjs")
 		var buf []byte
+		buf = append(buf, shell...)
 		buf = append(buf, base...)
 		for _, f := range b.files {
 			part, err := os.ReadFile(filepath.Join(src, f))
@@ -372,10 +401,7 @@ func runOctane(engines []engine, benchDir, only string, reps int) {
 func bestScore(e engine, script string, reps int) (float64, error) {
 	best := 0.0
 	for i := 0; i < reps; i++ {
-		args := append(append([]string{}, e.args...), script)
-		cmd := exec.Command(e.bin, args...)
-		cmd.Stderr = os.Stderr
-		out, err := cmd.Output()
+		out, err := runEngine(e, script)
 		if err != nil {
 			return 0, err
 		}
