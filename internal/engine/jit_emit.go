@@ -275,9 +275,9 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if !ok {
 		return refuse(why, "branch-into-instruction")
 	}
-	blocks, ok := jitAnalyze(fn, start, targets)
-	if !ok {
-		return refuse(why, "undecodable")
+	blocks, bad := jitAnalyze(fn, start, targets)
+	if bad != "" {
+		return refuse(why, bad)
 	}
 	// The two analyses below walk the same stack discipline the emitter does,
 	// and the only way either fails once every opcode has a template is that the

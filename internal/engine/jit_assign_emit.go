@@ -73,14 +73,30 @@ func jitTDZStores(fn *svFunc) map[int]bool {
 	return seeds
 }
 
+// jitAnalysisBudget bounds the work the analysis below will do, counted in
+// block-local pairs, which is what its sets cost to allocate and to intersect.
+//
+// It is a budget rather than a limit on anything a programmer would recognise,
+// because the two dimensions multiply: a function with many blocks and few
+// locals is cheap and so is the converse. The largest real function in Octane
+// comes to 8,978 pairs; this is two hundred times that, and about seventeen
+// milliseconds of analysis at the rate measured on the bench VM.
+//
+// What sits above it is generated code — mjsunit has a function that switches on
+// eighty thousand cases, and one that opens eight thousand catch blocks and so
+// declares eight thousand locals. Declining those is the right answer twice
+// over: they cost more to compile than to interpret, and they are cold.
+const jitAnalysisBudget = 1 << 21
+
 // jitAnalyze splits the body into basic blocks and solves definite assignment
-// over them. It returns the entry set for each block, keyed by its start ip.
+// over them. It returns the entry set for each block, keyed by its start ip,
+// and the empty string, or nothing and the reason it declined.
 //
 // Parameters are seeded as assigned because the compiled prologue checks them,
 // and a function is refused outright if the bytecode does not decode cleanly —
 // which cannot happen with goant's compiler, but an analysis that guessed would
 // be worse than one that declined.
-func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock, bool) {
+func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock, string) {
 	code := fn.code
 	nloc := fn.maxLocals
 	tdz := jitTDZStores(fn)
@@ -97,7 +113,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 		op := Opcode(code[ip])
 		size := int(opTable[op].Size)
 		if size <= 0 || ip+size > len(code) {
-			return nil, false
+			return nil, "undecodable"
 		}
 		switch op {
 		case OpJmp, OpJmpFalse, OpJmpTrue, OpJmpNotNullish, OpTryPush,
@@ -107,6 +123,11 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 			}
 		}
 		ip += size
+	}
+	// Checked here, which is after the block count is known and before a single
+	// set has been allocated.
+	if len(leaders)*nloc > jitAnalysisBudget {
+		return nil, "body-too-large"
 	}
 
 	// Walk once more, cutting at leaders and recording what each block assigns
@@ -130,7 +151,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 		case OpPutLocal, OpSetLocal:
 			i := int(readU16(code, ip+1))
 			if i >= nloc {
-				return nil, false
+				return nil, "undecodable"
 			}
 			// Last store in the block wins, which is why this clears the other
 			// set rather than only setting one: a slot seeded and then really
@@ -161,13 +182,15 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 	for _, b := range blocks {
 		for _, s := range b.succ {
 			if _, ok := blocks[s]; !ok {
-				return nil, false // a branch into the middle of an instruction
+				return nil, "branch-into-instruction" // into the middle of one
 			}
 		}
 	}
 
 	// Reachability, so that a block no path arrives at cannot drag the
-	// intersection down to nothing for the blocks that follow it.
+	// intersection down to nothing for the blocks that follow it — and, from the
+	// same walk, a reverse post-order for the fixpoint below to visit them in.
+	var post []int
 	var mark func(int)
 	mark = func(ip int) {
 		b, ok := blocks[ip]
@@ -178,6 +201,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 		for _, s := range b.succ {
 			mark(s)
 		}
+		post = append(post, ip)
 	}
 	mark(start)
 
@@ -209,35 +233,48 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 		}
 	}
 
+	// One buffer, refilled per predecessor, rather than one allocation per
+	// (block, local, predecessor) triple. The set this computes used to be built
+	// inside the innermost loop, so a function with many blocks and many locals
+	// spent nearly all of its compile time allocating the same answer over and
+	// over: 69% of one mjsunit test, which is two thousand evals in a file.
+	scratch := make([]bool, nloc)
 	out := func(b *jitBlock) []bool {
-		o := make([]bool, nloc)
-		for i := range o {
-			o[i] = b.gen[i] || (b.in[i] && !b.kill[i])
+		for i := range scratch {
+			scratch[i] = b.gen[i] || (b.in[i] && !b.kill[i])
 		}
-		return o
+		return scratch
 	}
 
+	// Reverse post-order, and the order is the whole point. The information here
+	// travels forwards — a block loses a bit because a predecessor lost it — so
+	// visiting predecessors first carries a fact the length of a straight run in
+	// a single pass, and the loop below settles in two. Iterating a Go map
+	// instead, which is what this used to do, visits blocks in an order unrelated
+	// to the flow and needs a pass per link of the chain: quadratic, and the
+	// dominant cost of compiling anything with a few thousand blocks in it.
+	for i, j := 0, len(post)-1; i < j; i, j = i+1, j-1 {
+		post[i], post[j] = post[j], post[i]
+	}
 	for changed := true; changed; {
 		changed = false
-		for ip, b := range blocks {
-			if ip == start || !b.reachable {
+		for _, ip := range post {
+			if ip == start {
 				continue
 			}
-			for i := range b.in {
-				if !b.in[i] {
-					continue
-				}
-				for _, p := range preds[ip] {
-					if o := out(blocks[p]); !o[i] {
+			b := blocks[ip]
+			for _, p := range preds[ip] {
+					o := out(blocks[p])
+				for i := range b.in {
+					if b.in[i] && !o[i] {
 						b.in[i] = false
 						changed = true
-						break
 					}
 				}
 			}
 		}
 	}
-	return blocks, true
+	return blocks, ""
 }
 
 // jitNumberDemand reports which locals the body needs to be Numbers.
@@ -685,39 +722,46 @@ func jitStackEffect(fn *svFunc, ip int) (pop, push int, ok bool) {
 // prediction costs a refusal and can never cost a miscompilation.
 func jitBlockDepths(fn *svFunc, start int, blocks map[int]*jitBlock) (map[int]int, bool) {
 	depth := map[int]int{start: 0}
-	// Reverse post-order is not needed: the graph is small and this iterates to
-	// a fixpoint, refusing the moment two predecessors disagree.
-	for changed := true; changed; {
-		changed = false
-		for ip, b := range blocks {
-			if !b.reachable {
+	// A worklist rather than a fixpoint over the whole map, because a block's
+	// depth is decided the first time it is reached: a second predecessor either
+	// agrees, in which case there is nothing to propagate, or disagrees, in which
+	// case the function is refused. So each block is walked exactly once.
+	//
+	// The fixpoint this replaces re-walked every settled block on every pass, and
+	// needed one pass per link of the longest chain because a Go map hands its
+	// keys back in an order unrelated to the flow. That is quadratic, and the
+	// comment here used to say the graph was small. V8's mjsunit has a test that
+	// switches on eighty thousand cases; it took over two hundred seconds to
+	// compile and 267ms to interpret.
+	work := []int{start}
+	for len(work) > 0 {
+		ip := work[len(work)-1]
+		work = work[:len(work)-1]
+		b := blocks[ip]
+		if b == nil || !b.reachable {
+			continue
+		}
+		d := depth[ip]
+		for at := b.start; at < b.end; {
+			pop, push, ok := jitStackEffect(fn, at)
+			if !ok {
+				return nil, false
+			}
+			if d -= pop; d < 0 {
+				return nil, false
+			}
+			d += push
+			at += int(opTable[Opcode(fn.code[at])].Size)
+		}
+		for _, s := range b.succ {
+			if was, ok := depth[s]; ok {
+				if was != d {
+					return nil, false // predecessors disagree
+				}
 				continue
 			}
-			d, seen := depth[ip]
-			if !seen {
-				continue
-			}
-			for at := b.start; at < b.end; {
-				pop, push, ok := jitStackEffect(fn, at)
-				if !ok {
-					return nil, false
-				}
-				if d -= pop; d < 0 {
-					return nil, false
-				}
-				d += push
-				at += int(opTable[Opcode(fn.code[at])].Size)
-			}
-			for _, s := range b.succ {
-				if was, ok := depth[s]; ok {
-					if was != d {
-						return nil, false // predecessors disagree
-					}
-					continue
-				}
-				depth[s] = d
-				changed = true
-			}
+			depth[s] = d
+			work = append(work, s)
 		}
 	}
 	for ip, b := range blocks {

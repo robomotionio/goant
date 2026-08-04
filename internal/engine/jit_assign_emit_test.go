@@ -255,9 +255,9 @@ func TestJITDeadZoneLocalIsNotNumeric(t *testing.T) {
 	if !ok {
 		t.Fatal("could not scan targets")
 	}
-	blocks, ok := jitAnalyze(fn, fn.startIP, targets)
-	if !ok {
-		t.Fatal("could not build blocks")
+	blocks, bad := jitAnalyze(fn, fn.startIP, targets)
+	if bad != "" {
+		t.Fatalf("could not build blocks: %s", bad)
 	}
 	unproven := jitUnprovenLocals(fn, blocks)
 	any := false
@@ -533,9 +533,9 @@ func TestASeedUnassignsAcrossBlocks(t *testing.T) {
 	if !ok {
 		t.Fatal("undecodable")
 	}
-	blocks, ok := jitAnalyze(fn, 0, targets)
-	if !ok {
-		t.Fatal("no blocks")
+	blocks, bad := jitAnalyze(fn, 0, targets)
+	if bad != "" {
+		t.Fatalf("no blocks: %s", bad)
 	}
 
 	// The seeded slots, and the block each seed sits in.

@@ -1493,6 +1493,56 @@ tier forced on at threshold 1, and `language` under `GOANT_GC_POISON` at
 23173/23173. On that machine the tier is worth 5.4x on Richards and 3.5x on
 DeltaBlue over the interpreter; on a Raspberry Pi, 3.6x on Richards.
 
+## What compiles it, and what it costs to compile
+
+The tier had never been asked what it costs to *compile*, only what it saves. A
+conformance suite does not time anything and Octane's functions are small, so
+nothing in the loop measured this. V8's mjsunit does, by accident: it is fifteen
+years of bug reports, and several of them are about pathological source.
+
+Run twice over 3,149 runnable tests — once interpreted, once with the tier forced
+on at threshold 1 — the two arms differed by three tests, all of them timeouts,
+none of them a wrong answer. Three timeouts is the entire quality report on the
+compiled call and the second backend from a corpus neither had seen. The bugs
+behind them were not in what the tier emits. They were in what it costs to decide
+what to emit.
+
+**Two fixpoints, both iterating a Go map.** Definite assignment and the
+operand-depth agreement are both forward dataflow problems, and both were solved
+by looping over `map[int]*jitBlock` until nothing changed. A Go map hands its
+keys back in an order deliberately unrelated to anything, so propagating a fact
+along a chain of n blocks takes n passes over all n blocks. That is quadratic,
+and the comment above one of them said the graph was small.
+
+It is small in Octane. mjsunit has a function that switches on eighty thousand
+cases: 267ms to interpret, over two hundred seconds to compile, which is not a
+slow tier but a hung process. The depth analysis is a worklist now, which visits
+each block once — a block's depth is decided the first time it is reached, since
+a second predecessor either agrees or refuses the function. Definite assignment
+keeps its fixpoint and visits in reverse post-order, which carries a fact the
+length of a straight run in one pass and settles in two. 16,000 cases went from
+9.0 seconds to 65 milliseconds; 80,000 from unbounded to 328.
+
+**An allocation per (block, local, predecessor).** The entry-set intersection
+built its `out` set inside the innermost loop, so a file with a few thousand
+blocks spent 69% of its time allocating the same answer repeatedly. One buffer,
+refilled. A 2,032-line file of fuzzer-generated evals went from 200 seconds to
+0.04.
+
+**And a budget, because the rest is inherent.** Both analyses keep dense sets of
+`maxLocals` bits per block, so their cost is the product — and a function can
+grow both at once. Eight thousand try/catch blocks declare eight thousand catch
+bindings; the product is quadratic in the source and no ordering fixes that. The
+analysis now declines above 2²¹ block-local pairs, checked after the block count
+is known and before the first set is allocated. Octane's largest real function
+comes to 8,978 pairs, so the budget is two hundred times anything real code has
+asked for, and what sits above it is generated, cold, and cheaper to interpret.
+
+With those in, the tier and the interpreter agree on all 3,149 tests: the diff
+between the two arms is empty on amd64 and on arm64. Two tests fail interpreted
+and pass compiled, both about `arguments` — those are interpreter bugs, and they
+are on the list below rather than in this section.
+
 ## Still to do
 
 Rewritten 4 August, after the compiled call and the second backend.
@@ -1533,6 +1583,16 @@ what would gain rather than by what is bleeding.
    frame's argument array — which is exactly the invariant that lets a compiled
    callee be handed the caller's spill area. Building one closes the door on the
    other.
+
+   The interpreter has the same problem one level down, and mjsunit found it:
+   the mapping holds while the frame is live and breaks in both directions once
+   a closure outlives it. `function f(x) { var a = arguments; return function
+   (v) { a[0] = v; return x } }` returns the original argument rather than `v`,
+   and so does the converse. Two mjsunit tests fail interpreted and pass
+   compiled for this reason — the compiled call hands the callee the caller's
+   spill area, so it is accidentally right about the case the interpreter gets
+   wrong. It is the same underlying work as item 5: a parameter that is both
+   mapped and captured has to live in one place, and right now it lives in two.
 5. **`op:CLOSURE`** — 307 alone, 378 first. The allocation is a helper call; the
    problem underneath is that a captured local has to outlive the frame, and
    compiled code addresses locals as a raw pointer into a slice. Boxed locals is
