@@ -88,20 +88,27 @@ func main() {
 	reps := flag.Int("n", 3, "runs per workload; the fastest is kept")
 	only := flag.String("only", "", "run only workloads whose name contains this")
 	limit := flag.Duration("timeout", 10*time.Minute, "give up on one engine's run after this long")
+	which := flag.String("engines", "", "run only these engines (comma-separated); default is every one installed")
+	refresh := flag.Bool("refresh", false, "re-measure the comparison engines instead of reading "+baselineFile)
 	flag.Parse()
 
 	runLimit = *limit
 
 	candidates[0].bin = *runner
+	// goant's own results are cached too, under the binary's hash: a restart
+	// after a dropped connection picks up where it left off, and a rebuild
+	// invalidates the column rather than reusing it.
+	goantBuild = hashBinary(*runner)
 
-	engines := available()
+	engines := pick(available(), *which)
 	if len(engines) == 0 {
 		fmt.Fprintln(os.Stderr, "no JavaScript engine found")
 		os.Exit(1)
 	}
+	bl := loadBaseline(*dir)
 
 	if *suite == "octane" {
-		runOctane(engines, *dir, *only, *reps)
+		runOctane(engines, *dir, *only, *reps, bl, *refresh)
 		return
 	}
 
@@ -142,16 +149,20 @@ func main() {
 		// The harness and the workload are concatenated into one script rather
 		// than imported, so this works identically under an engine that treats a
 		// bare .js file as a module and one that treats it as a script.
+		script := append(append([]byte{}, preludeSrc...), src...)
 		joined := filepath.Join(tmp, name+".js")
-		if err := os.WriteFile(joined, append(append([]byte{}, preludeSrc...), src...), 0o644); err != nil {
+		if err := os.WriteFile(joined, script, 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		c := cell{suite: "micro", workload: name, script: hashBytes(script)}
 
 		fmt.Printf("%-14s", name)
 		times := map[string]float64{}
 		for _, e := range engines {
-			ns, err := timeRun(e, joined, *reps)
+			ns, err := cachedRun(bl, *refresh, e, c, func() (float64, error) {
+				return timeRun(e, joined, *reps)
+			})
 			if err != nil {
 				fmt.Printf("  %12s", "error")
 				continue
@@ -159,6 +170,7 @@ func main() {
 			times[e.name] = ns
 			fmt.Printf("  %12s", fmtNs(ns))
 		}
+		bl.save()
 		if base, ok := fastestOther(engines, times); ok && times["goant"] > 0 && base > 0 {
 			r := times["goant"] / base
 			ratios = append(ratios, r)
@@ -172,6 +184,7 @@ func main() {
 		fmt.Printf("\ngoant vs the fastest other engine: %.0fx median, %.0fx best, %.0fx worst (%d workloads)\n",
 			median(ratios), ratios[0], ratios[len(ratios)-1], len(ratios))
 	}
+	bl.note()
 }
 
 // available returns the candidate engines that are actually runnable here.
@@ -306,7 +319,7 @@ func median(sorted []float64) float64 {
 // runOctane scores each Octane benchmark under every engine. Octane reports a
 // SCORE, where higher is faster — the opposite direction from the
 // microbenchmarks, so the comparison column is the other engine over goant.
-func runOctane(engines []engine, benchDir, only string, reps int) {
+func runOctane(engines []engine, benchDir, only string, reps int, bl *baseline, refresh bool) {
 	src := filepath.Join(benchDir, "suites", "octane")
 	if _, err := os.Stat(filepath.Join(src, "base.js")); err != nil {
 		fmt.Fprintf(os.Stderr, "octane not fetched: run %s\n", filepath.Join(benchDir, "suites", "fetch.sh"))
@@ -368,13 +381,16 @@ func runOctane(engines []engine, benchDir, only string, reps int) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		c := cell{suite: "octane", workload: b.name, script: hashBytes(buf)}
 
 		fmt.Printf("%-14s", b.name)
 		scores := map[string]float64{}
 		for _, e := range engines {
 			// Octane already repeats internally to reach a stable score, so one run
 			// per engine is enough; -n still raises it for a noisy machine.
-			s, err := bestScore(e, joined, reps)
+			s, err := cachedRun(bl, refresh, e, c, func() (float64, error) {
+				return bestScore(e, joined, reps)
+			})
 			if err != nil {
 				fmt.Printf("  %12s", "error")
 				continue
@@ -382,6 +398,7 @@ func runOctane(engines []engine, benchDir, only string, reps int) {
 			scores[e.name] = s
 			fmt.Printf("  %12.0f", s)
 		}
+		bl.save()
 		if best, ok := bestOtherScore(engines, scores); ok && scores["goant"] > 0 && best > 0 {
 			r := best / scores["goant"]
 			ratios = append(ratios, r)
@@ -395,6 +412,7 @@ func runOctane(engines []engine, benchDir, only string, reps int) {
 		fmt.Printf("\ngoant vs the fastest other engine: %.0fx median, %.0fx best, %.0fx worst (%d benchmarks)\n",
 			median(ratios), ratios[0], ratios[len(ratios)-1], len(ratios))
 	}
+	bl.note()
 }
 
 // bestScore runs an Octane benchmark reps times and keeps the highest score.
