@@ -845,11 +845,33 @@ func (rt *Runtime) setLastIndexOrThrow(this Value, n float64) *ThrowError {
 	return nil
 }
 
+// GOANT_REGEXP_VERIFY=1 runs regexp2 alongside every fast-path match and panics
+// on the first disagreement. It is how the translation in internal/regexpjs is
+// held to its claim: test262 under it is a differential test of the two engines
+// over every pattern the suite contains.
+func init() { regexpjs.VerifyFast = envOn("GOANT_REGEXP_VERIFY") }
+
+// reExec runs re against a subject string value from code-unit offset start.
+//
+// An ASCII subject whose pattern has an RE2 translation goes to Go's own regexp
+// (see internal/regexpjs/re2.go), which is about three times faster on the
+// patterns Octane's RegExp benchmark uses and needs no code-unit copy of the
+// subject at all: on ASCII, its byte offsets already are the code-unit offsets
+// ECMAScript indexes by. Everything else goes to regexp2 over the code units.
+func (rt *Runtime) reExec(re *regexpjs.Regexp, s Value, start int) (*regexpjs.Match, error) {
+	if re.HasFast() && rt.strIsASCII(s) {
+		if m, ok := re.ExecASCII(rt.strGo(s), start); ok {
+			return m, nil
+		}
+	}
+	return re.Exec(rt.strUTF16(s), start)
+}
+
 // updateLegacyRegExpState records the Annex B legacy RegExp static state after a
 // successful built-in match: RegExp.input/$_, lastMatch/$&, lastParen/$+,
-// leftContext/$`, rightContext/$', and $1…$9. input is the subject as runes and
-// m the match (rune offsets).
-func (rt *Runtime) updateLegacyRegExpState(input []rune, m *regexpjs.Match) {
+// leftContext/$`, rightContext/$', and $1…$9. s is the subject and m the match
+// (code-unit offsets).
+func (rt *Runtime) updateLegacyRegExpState(s Value, m *regexpjs.Match) {
 	// The subject and the two context strings are kept as the subject plus a
 	// pair of offsets, and built only if something reads them.
 	//
@@ -859,7 +881,16 @@ func (rt *Runtime) updateLegacyRegExpState(input []rune, m *regexpjs.Match) {
 	// hundreds of thousands of times and never reads any of them, that alone
 	// was 31% of the running time. Nothing observes the difference: these are
 	// accessors, so the work happens on the read either way.
-	rt.regexpLegacyInput = input
+	//
+	// An ASCII subject is kept as its bytes, so the three statics come out as
+	// substrings of it rather than fresh decodes; anything else is kept as code
+	// units, which is the only form their offsets index.
+	rt.regexpLegacyASCII, rt.regexpLegacyInput = "", nil
+	if rt.strIsASCII(s) {
+		rt.regexpLegacyASCII = rt.strGo(s)
+	} else {
+		rt.regexpLegacyInput = rt.strUTF16(s)
+	}
 	rt.regexpLegacyStart, rt.regexpLegacyEnd = m.Index, m.Index+m.Groups[0].Length
 	rt.regexpInput, rt.regexpLeftContext, rt.regexpRightContext = "", "", ""
 	rt.regexpLegacyBuilt = false
@@ -887,6 +918,16 @@ func (rt *Runtime) buildLegacyRegExpStrings() {
 		return
 	}
 	rt.regexpLegacyBuilt = true
+	if s := rt.regexpLegacyASCII; s != "" {
+		rt.regexpInput = s
+		if start := rt.regexpLegacyStart; start >= 0 && start <= len(s) {
+			rt.regexpLeftContext = s[:start]
+		}
+		if end := rt.regexpLegacyEnd; end >= 0 && end <= len(s) {
+			rt.regexpRightContext = s[end:]
+		}
+		return
+	}
 	input := rt.regexpLegacyInput
 	if input == nil {
 		return
@@ -909,7 +950,7 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	if e != nil {
 		return mkundef(), e
 	}
-	input := rt.strUTF16(s)
+	slen := rt.strLen16(s)
 	re := o.regex
 
 	// lastIndex = ToLength(Get(R, "lastIndex")) — always read (observable via a
@@ -926,8 +967,8 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	switch {
 	case lif <= 0:
 		lastIndex = 0
-	case lif > float64(len(input)):
-		lastIndex = len(input) + 1 // out of range -> no match
+	case lif > float64(slen):
+		lastIndex = slen + 1 // out of range -> no match
 	default:
 		lastIndex = int(lif)
 	}
@@ -935,7 +976,7 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	if re.Global || re.Sticky {
 		start = lastIndex
 	}
-	if start > len(input) {
+	if start > slen {
 		if re.Global || re.Sticky {
 			if e := rt.setLastIndexOrThrow(this, 0); e != nil {
 				return mkundef(), e
@@ -943,7 +984,7 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 		}
 		return mknull(), nil
 	}
-	m, err := re.Exec(input, start)
+	m, err := rt.reExec(re, s, start)
 	if err != nil {
 		return mkundef(), rt.typeError("regexp exec error: " + err.Error())
 	}
@@ -961,7 +1002,7 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 		}
 	}
 	if len(m.Groups) > 0 {
-		rt.updateLegacyRegExpState(input, m) // RegExp.lastMatch/input/$1…$9 (Annex B)
+		rt.updateLegacyRegExpState(s, m) // RegExp.lastMatch/input/$1…$9 (Annex B)
 	}
 
 	res := rt.newArray()

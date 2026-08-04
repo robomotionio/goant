@@ -105,6 +105,7 @@ type Runtime struct {
 
 	// regexpInput and the two context strings are built on demand from the last
 	// match's subject and offsets; see buildLegacyRegExpStrings.
+	regexpLegacyASCII string
 	regexpLegacyInput []rune
 	regexpLegacyStart int
 	regexpLegacyEnd   int

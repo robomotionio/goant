@@ -7,10 +7,16 @@
 // as UTF-16 code units, the domain ECMAScript indexes strings in. A `u`/`v`
 // pattern matches whole code points, so Exec recodes such a subject and maps the
 // resulting offsets back (see Exec).
+//
+// regexp2 is the reference matcher, but not always the one that runs: re2.go
+// translates the patterns it can into RE2 syntax for Go's own regexp, which is
+// several times faster, and works out a literal run that any match must contain
+// so a long subject without one can be rejected without matching at all.
 package regexpjs
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +50,23 @@ type Regexp struct {
 	// quantParent maps each ECMAScript capture group to a quantified enclosing
 	// capture group (or 0). See quantifiedParents.
 	quantParent []int
+
+	// fast is the pattern translated to RE2 syntax and compiled by Go's own
+	// regexp, used on ASCII subjects; nil when the pattern has no faithful
+	// translation. fastTail is the variant for a search that starts partway into
+	// the subject, and is nil when the pattern reads the text before the match.
+	// See re2.go.
+	fast     *regexp.Regexp
+	fastTail *regexp.Regexp
+
+	// reqLit is a run of characters every match must contain, and reqLitStr the
+	// same run as a string. Looking for it first answers "no match" on a long
+	// subject far faster than either matcher can. See re2.go.
+	reqLit    []rune
+	reqLitStr string
+	// fastBuilt records that the three fields above have been worked out. They
+	// are, on the first match rather than at compile time — see ensureFast.
+	fastBuilt bool
 }
 
 // Group is one capture group in a match (Index is a rune offset; -1 = unmatched).
@@ -840,6 +863,36 @@ func Compile(pattern, flags string) (*Regexp, error) {
 	return r, nil
 }
 
+// ensureFast builds the second, much faster matcher for the patterns that can
+// have one — see re2.go.
+//
+// On first use rather than here in Compile: a regular expression literal is
+// validated when the surrounding code is compiled, whether or not it is ever
+// run, and Octane's code-load is a benchmark that does nothing but compile
+// large scripts. A pattern that is only parsed should pay for one matcher.
+func (r *Regexp) ensureFast() {
+	if r.fastBuilt {
+		return
+	}
+	r.fastBuilt = true
+	// Unicode mode matches code points rather than code units and brings property
+	// escapes with it; multiline mode ends a line at any ECMAScript line
+	// terminator and RE2 only at "\n"; a pattern with named groups reaches regexp2
+	// renumbered, so the two would not agree about which group is which.
+	if r.Unicode || r.Multiline || r.groupPlan != nil {
+		return
+	}
+	fast, tail, ngroup := compileFast(r.Source, r.IgnoreCase, r.DotAll)
+	// The translation counts capture groups by ECMAScript's rule and regexp2 by
+	// its own; a disagreement means one of them read the pattern in a way this
+	// code did not predict, and the fast path is dropped rather than trusted.
+	if fast == nil || ngroup != fast.NumSubexp() || ngroup != r.GroupCount() {
+		return
+	}
+	r.fast, r.fastTail = fast, tail
+	r.reqLit, r.reqLitStr = findRequiredLiteral(fast)
+}
+
 // Exec runs the regex against input — the subject string as UTF-16 code units,
 // one rune per unit — starting at code-unit index start, and returns the first
 // match (or nil if none). Sticky matches must begin exactly at start. All
@@ -938,6 +991,12 @@ func (r *Regexp) exec(input []rune, start int) (*Match, error) {
 	if start < 0 || start > len(input) {
 		return nil, nil
 	}
+	// A pattern with a required literal cannot match where the literal is not,
+	// and looking for a fixed run of characters is far cheaper than trying the
+	// pattern at every position. See re2.go.
+	if r.missingLiteral(input, start) {
+		return nil, nil
+	}
 	m, err := r.re.FindRunesMatchStartingAt(input, start)
 	if err != nil {
 		return nil, err
@@ -969,22 +1028,9 @@ func (r *Regexp) exec(input []rune, start int) (*Match, error) {
 	// A quantifier resets the captures inside its body at the start of each
 	// iteration, so a group whose last capture lies outside its quantified
 	// parent's last capture did not participate in the final one. regexp2 keeps
-	// the earlier capture; drop it.
-	defer func() {
-		for g := 1; g < len(out.Groups) && g < len(r.quantParent); g++ {
-			p := r.quantParent[g]
-			if p == 0 || p >= len(out.Groups) {
-				continue
-			}
-			child, parent := out.Groups[g], out.Groups[p]
-			if child.Index < 0 || parent.Index < 0 {
-				continue
-			}
-			if child.Index < parent.Index || child.Index+child.Length > parent.Index+parent.Length {
-				out.Groups[g] = Group{Index: -1, Name: child.Name}
-			}
-		}
-	}()
+	// the earlier capture; drop it. Deferred because the group-plan path below
+	// rebuilds out.Groups first.
+	defer func() { r.dropStaleCaptures(out) }()
 	// With a plan, the ECMAScript groups are read by name (or by regexp2's
 	// unnamed numbering) rather than by position: regexp2 numbers unnamed groups
 	// first, and several ECMAScript names may share one regexp2 group.
