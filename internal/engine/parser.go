@@ -28,8 +28,10 @@ type parser struct {
 	noIn     bool
 	err      error
 	filename string
-	// slab is the unhanded-out tail of the current node block — see slabNode.
-	slab []Node
+	// slab is the unhanded-out tail of the current node block, slabSize the size
+	// the next block will be — see slabNode.
+	slab     []Node
+	slabSize int
 	// inAsync is true inside an async function body (so `await` is the operator,
 	// not an identifier). pendingAsync is set by a caller right before parseFunc
 	// to mark the function it is about to parse as async.
@@ -189,7 +191,12 @@ const slabNodes = 128
 // holds a slab alive for the sake of one node.
 func (p *parser) slabNode() *Node {
 	if len(p.slab) == 0 {
-		p.slab = make([]Node, slabNodes)
+		// Doubling up to slabNodes rather than starting there: `eval("i + 1")` is
+		// four nodes, and handing it twenty kilobytes to put them in would cost
+		// more than the allocations it saves. A program large enough for the slab
+		// to matter reaches full size within its first few hundred nodes.
+		p.slabSize = min(slabNodes, max(8, p.slabSize*2))
+		p.slab = make([]Node, p.slabSize)
 	}
 	n := &p.slab[0]
 	p.slab = p.slab[1:]
