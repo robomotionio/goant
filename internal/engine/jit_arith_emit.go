@@ -115,17 +115,18 @@ func jitBitwise(a *jitasm.Asm, op Opcode, x, y jitasm.Reg, sp int, fixups *[]jit
 	return true
 }
 
-// jitBoolean materialises the flags as a JavaScript Boolean in r.
+// jitFBoolean materialises the flags a double comparison left as a JavaScript
+// Boolean in r.
 //
 // mkbool differs between true and false in one bit, so widening the byte SETcc
 // writes and or-ing in the tag builds either.
-func jitBoolean(a *jitasm.Asm, c jitasm.Cond, r jitasm.Reg) {
-	a.SetccReg(c, r)
-	jitBoolTag(a, r)
-}
-
-// jitFBoolean is jitBoolean for a condition a double comparison left, which is a
-// different family — see jitasm.FCond.
+//
+// There is no integer-condition twin. There was, and it survived the split
+// between the two condition families with no callers left — every condition this
+// tier materialises comes from a UCOMISD, because the only thing it compares is
+// doubles. A dead emitter is worse than no emitter: it is the one a later
+// template reaches for by name, and it would have reintroduced the SETcc prefix
+// bug from the other side.
 func jitFBoolean(a *jitasm.Asm, c jitasm.FCond, r jitasm.Reg) {
 	a.SetfccReg(c, r)
 	jitBoolTag(a, r)
