@@ -1312,17 +1312,46 @@ context setup, `jitHelper`'s dispatch, `jitCallCompiled`'s frame work, and the
 two transitions through the trampoline, each an indirect branch to an address
 that changes every time.
 
-| | before | after |
-| --- | --- | --- |
-| richards | 845 | **1402** |
-| deltablue | 572 | **884** |
-| earley-boyer | 937 | 949 |
-| raytrace | 635 | 653 |
-| typescript | 4490 | 4694 |
+| | before | after | |
+| --- | --- | --- | --- |
+| richards | 841 | **1400** | +66% |
+| deltablue | 578 | **876** | +51% |
+| typescript | 4502 | 4712 | +5% |
+| raytrace | 637 | 655 | +3% |
+| earley-boyer | 939 | 956 | +2% |
+| box2d | 1555 | 1591 | +2% |
+| regexp | 297 | 301 | +1% |
+| mandreel | 904 | 900 | — |
+| code-load | 11845 | 11764 | −1% |
+| crypto | 1734 | 1694 | −2% |
+| gbemu | 3064 | 3002 | −2% |
+| splay | 2652 | 2513 | −5% |
+| pdfjs | 1809 | 1736 | −4% |
+| navier-stokes | 3533 | 3265 | −8% |
+| zlib | 893 | 820 | −8% |
 
 The share of calls a call site makes itself: DeltaBlue 94%, Richards 91%,
 EarleyBoyer 91%, RayTrace 48% — and RayTrace's other half is calls into natives,
 which have no compiled form to enter and never will.
+
+The right-hand end of that table is the cost, and it is worth being exact about
+where it comes from. NavierStokes lost 8%, and with the sites present but never
+armed — `GOANT_JIT_CALLMASK=0`, so every instruction is emitted and no call is
+made in machine code — it still loses 5.5%. So most of it is not the compiled
+call at all. Two thirds of that is the code a call site now carries whether it
+arms or not, about fifty instructions of setup, call and unwind sitting inline
+between the operands and the runtime path; and the rest is the driver, which now
+asks which frame stopped before it can serve it. NavierStokes leaves compiled
+code for nearly every array store, so it pays that per exit and gains nothing
+back: its calls are `Math.sqrt`.
+
+The obvious answer is layout — emit the guard inline and the body of the call out
+of line with the entry stubs, so a site that never arms costs six instructions
+rather than fifty of dead weight in the instruction stream. It is not done here
+because it moves a fixup past the point where the emitter decides which catch
+each resume address belongs to, and the exchange rate on offer — five percent of
+four workloads against sixty-six percent of one — did not justify doing that
+carefully at the end of a long change.
 
 ### What had to be built, and what it is not allowed to do
 
@@ -1413,15 +1442,24 @@ is the corpus flattering the tier rather than the tier being complete.
 No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
-1. **An arm64 emitter.** `jitmem` is already in place and tested for it, the
+1. **The compiled call, emitted out of line.** Six instructions at the site and
+   the rest with the entry stubs. Measured above at 5.5% of NavierStokes and
+   worth something on every workload whose calls do not arm — which is four of
+   them. The obstacle is the fixup table: a resume address is assigned its catch
+   handler by the loop that emits the instruction, and a deferred block appends
+   its fixup after that loop has moved on.
+2. **An arm64 emitter.** `jitmem` is already in place and tested for it, the
    entry trampoline exists, and the amd64 shape has now stopped moving — the
    compiled call was the last piece that could have changed the frame model.
-   What is missing is `jitasm` for the architecture, which is mechanical and
-   bounded. It is not speed on any machine that has the amd64 backend; it is
+   What is missing is the emitter: `jitasm` now speaks arm64 and every
+   encoding in it is checked by executing it under `go test -exec qemu-aarch64`,
+   which is also how `jitmem`'s trampoline and instruction-cache flush are
+   already covered. `jit_amd64.go` and its five companions are what remain, and
+   they are written against amd64's register names and flag model. It is not speed on any machine that has the amd64 backend; it is
    that darwin/arm64 is most developer machines and currently gets the
    interpreter, which is the difference between having a JIT and having one
    where people run it.
-2. **The 1.56 million reads the emitted probe declines that the cache answers
+3. **The 1.56 million reads the emitted probe declines that the cache answers
    anyway** — `JITNarrowStats()` counts them, and the guard chain in machine
    code is narrower than `icWay.hit` for a receiver that is not a plain object.
    Widening the tag check to the object family is not free: the tags are not
@@ -1429,24 +1467,24 @@ what would gain rather than by what is bleeding.
    million reads against the round trips it saves. It has to keep the `TObj`
    path at its current cost, and it has to be measured rather than reasoned
    about.
-3. **A scan bounded by `propIC.n`.** Ways fill densely from zero and the
+4. **A scan bounded by `propIC.n`.** Ways fill densely from zero and the
    unrolled probe walks all eight regardless. This is what would let `icWays`
    rise to 16, which measured DeltaBlue +8% and EarleyBoyer −5% — the −5% being
    entirely the cost of scanning sixteen ways to miss.
-4. **The store that creates a property, emitted rather than helped.** The helper
+5. **The store that creates a property, emitted rather than helped.** The helper
    reaches it, which recovered EarleyBoyer's 18%, but each one still costs an
    exit and a re-entry where the interpreter pays neither. Installing a shape
    would be the first *Go pointer* this tier stores from machine code, so it is
    the first that needs an argument about write barriers rather than the
    standing one that a Value is an integer.
-5. **`op:SPECIAL_OBJ`** — 469 functions in the corpus have it as their only
+6. **`op:SPECIAL_OBJ`** — 469 functions in the corpus have it as their only
    missing opcode and 832 meet it first, both the largest by some way. It is
    `arguments`, and the two halves are not the same problem: unmapped (strict)
    is a plain array-like, while a sloppy mapped one writes through to the
    frame's argument array — which is exactly the invariant that lets a compiled
    callee be handed the caller's spill area. Building one closes the door on the
    other.
-6. **`op:CLOSURE`** — 307 alone, 378 first. The allocation is a helper call; the
+7. **`op:CLOSURE`** — 307 alone, 378 first. The allocation is a helper call; the
    problem underneath is that a captured local has to outlive the frame, and
    compiled code addresses locals as a raw pointer into a slice. Boxed locals is
    a frame-model change, and `SET_UPVAL`/`PUT_UPVAL` are the same problem.
