@@ -176,9 +176,14 @@ type labelUse struct {
 
 // Asm accumulates encoded instructions.
 type Asm struct {
-	buf    []byte
-	labels []*Label
+	buf      []byte
+	labels   []*Label
+	overflow bool
 }
+
+// Overflowed reports whether any branch was further than its instruction can
+// reach, which makes what Code returned unusable. Meaningful only after Code.
+func (a *Asm) Overflowed() bool { return a.overflow }
 
 // NewAsm returns an assembler with room for a typical compiled function.
 func NewAsm() *Asm { return &Asm{buf: make([]byte, 0, 512)} }
@@ -189,9 +194,12 @@ func (a *Asm) Len() int { return len(a.buf) }
 
 // Code returns the encoded instructions with every branch resolved.
 //
-// Panics on a branch out of range rather than truncating it: a displacement that
-// does not fit is a function too large for this tier to have compiled, and the
-// caller checks Unresolved for the other failure — a label nothing bound.
+// A displacement that does not fit is recorded rather than raised: a conditional
+// branch reaches a megabyte here and an unconditional one a hundred and
+// twenty-eight, so overflowing either means a function larger than this tier
+// should have taken, and refusing it is the answer. The caller asks Overflowed
+// afterwards — the bytes it gets back in that case are not code and are not
+// meant to be run.
 func (a *Asm) Code() []byte {
 	for _, l := range a.labels {
 		if !l.bound {
@@ -202,12 +210,12 @@ func (a *Asm) Code() []byte {
 			w := binary.LittleEndian.Uint32(a.buf[u.off:])
 			if u.wide {
 				if delta < -(1<<25) || delta >= 1<<25 {
-					panic("jitasm: branch out of range")
+					a.overflow = true
 				}
 				w = w&0xFC000000 | uint32(delta)&0x03FFFFFF
 			} else {
 				if delta < -(1<<18) || delta >= 1<<18 {
-					panic("jitasm: conditional branch out of range")
+					a.overflow = true
 				}
 				w = w&0xFF00001F | uint32(delta)&0x7FFFF<<5
 			}

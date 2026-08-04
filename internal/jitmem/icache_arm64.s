@@ -4,10 +4,19 @@
 
 // func flushICacheRange(start, end uintptr)
 //
-// Line sizes come from CTR_EL0 rather than being assumed. Cores disagree —
-// 64 bytes is common, Apple's are not uniformly so — and a stride wider than
-// the real line silently skips lines, which produces a JIT that works until it
-// mysteriously does not.
+// The stride is the architecture's minimum line — sixteen bytes, four words —
+// rather than the real one, and that is not an approximation. A stride *wider*
+// than the line silently skips lines and produces a JIT that works until it
+// mysteriously does not; a narrower one issues the same maintenance operation
+// several times for one line, which is correct and costs a few hundred
+// instructions on a path taken once per compiled function.
+//
+// The real width is in CTR_EL0, and reading it is what this used to do. On
+// Apple Silicon that read is not permitted from userspace: `MRS x2, CTR_EL0`
+// is the first instruction of this function and macOS answers it with SIGILL,
+// which is exactly the finding no emulator produces. Apple's own answer is
+// sys_icache_invalidate, and that is C — so the way to stay free of cgo is not
+// to ask.
 //
 // DC CVAU / IC IVAU are spelled as their SYS encodings because Go's arm64
 // assembler does not accept the mnemonics. DC CVAU, Rt is SYS #3, C7, C11, #1
@@ -19,15 +28,8 @@
 TEXT ·flushICacheRange(SB), NOSPLIT|NOFRAME, $0-16
 	MOVD	start+0(FP), R0
 	MOVD	end+8(FP), R1
-	MRS	CTR_EL0, R2
-
-	// DminLine (bits 19:16) is log2 of the D-cache line size in words.
-	LSR	$16, R2, R3
-	AND	$15, R3, R3
-	MOVD	$4, R4
-	LSL	R3, R4, R4
-	SUB	$1, R4, R5
-	BIC	R5, R0, R6		// round start down to a line boundary
+	MOVD	$16, R4
+	BIC	$15, R0, R6		// round start down to a line boundary
 dcloop:
 	CMP	R1, R6
 	BHS	dcdone
@@ -37,13 +39,7 @@ dcloop:
 dcdone:
 	DSB	$11			// DSB ISH — the cleans must land before the invalidates
 
-	// IminLine (bits 3:0) is log2 of the I-cache line size in words, and is
-	// not required to match DminLine.
-	AND	$15, R2, R3
-	MOVD	$4, R4
-	LSL	R3, R4, R4
-	SUB	$1, R4, R5
-	BIC	R5, R0, R6
+	BIC	$15, R0, R6
 icloop:
 	CMP	R1, R6
 	BHS	icdone

@@ -599,7 +599,14 @@ func makeDate(day, t float64) float64 {
 	if !isFiniteNum(day) || !isFiniteNum(t) {
 		return math.NaN()
 	}
-	tv := day*msPerDay + t
+	// The conversion is not redundant. MakeDate is specified as "day × msPerDay
+	// plus time", with the product rounded to a double before the addition, and
+	// Go permits a compiler to fuse the two into a single multiply-add — which
+	// arm64 has and amd64 does not, so the same source computes two different
+	// numbers on the two. An explicit conversion is how the language says round
+	// here; test/built-ins/Date/UTC/fp-evaluation-order.js is what says it
+	// matters.
+	tv := float64(day*msPerDay) + t
 	if !isFiniteNum(tv) {
 		return math.NaN()
 	}

@@ -149,6 +149,12 @@ func (a *Asm) Code() []byte {
 	return a.buf
 }
 
+// Overflowed reports whether any branch was further than its instruction can
+// reach. Never, here: a rel32 displacement covers two gigabytes and a compiled
+// function is thousands of bytes. It exists because arm64's conditional branch
+// covers one megabyte, which a function can reach.
+func (a *Asm) Overflowed() bool { return false }
+
 // Unresolved reports whether anything branches to a label that was never bound.
 //
 // Code panics on that, because a wild branch is worse than a crash. A compiler

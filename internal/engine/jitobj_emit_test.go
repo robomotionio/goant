@@ -1,4 +1,4 @@
-//go:build amd64
+//go:build amd64 || arm64
 
 package engine
 
@@ -22,9 +22,9 @@ func buildResolver(t testing.TB) (*jitmem.Block, uintptr) {
 	a := jitasm.NewAsm()
 	notObject := a.NewLabel()
 
-	pool := jitasm.RDI
-	val := jitasm.RSI
-	obj := jitasm.RAX
+	pool := jitStackRegs[3]
+	val := jitStackRegs[4]
+	obj := jitRegExit
 
 	a.MovRegMem(pool, jitasm.RegCtx, jitmem.CtxOffArgs)
 	a.MovRegMem(val, jitasm.RegCtx, jitmem.CtxOffArgs+8)
@@ -32,14 +32,14 @@ func buildResolver(t testing.TB) (*jitmem.Block, uintptr) {
 	jitEmitResolve(a, obj, val, pool)
 	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffRet, obj)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitReturn))
-	a.MovRegImm64(jitasm.RAX, jitmem.ExitReturn)
+	a.MovRegImm64(jitRegExit, jitmem.ExitReturn)
 	a.Ret()
 
 	// Anything that is not an object comes back as zero, which no live cell is.
 	a.Bind(notObject)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffRet, 0)
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitReturn))
-	a.MovRegImm64(jitasm.RAX, jitmem.ExitReturn)
+	a.MovRegImm64(jitRegExit, jitmem.ExitReturn)
 	a.Ret()
 
 	buf := a.Code()
@@ -123,15 +123,15 @@ func TestJITObjFieldOffsets(t *testing.T) {
 	load := func(disp uintptr) uint64 {
 		a := jitasm.NewAsm()
 		notObject := a.NewLabel()
-		a.MovRegMem(jitasm.RDI, jitasm.RegCtx, jitmem.CtxOffArgs)
-		a.MovRegMem(jitasm.RSI, jitasm.RegCtx, jitmem.CtxOffArgs+8)
-		jitEmitTagCheck(a, jitasm.RSI, TObj, notObject)
-		jitEmitResolve(a, jitasm.RAX, jitasm.RSI, jitasm.RDI)
-		a.MovRegMem(jitasm.RAX, jitasm.RAX, int32(disp))
+		a.MovRegMem(jitStackRegs[3], jitasm.RegCtx, jitmem.CtxOffArgs)
+		a.MovRegMem(jitStackRegs[4], jitasm.RegCtx, jitmem.CtxOffArgs+8)
+		jitEmitTagCheck(a, jitStackRegs[4], TObj, notObject)
+		jitEmitResolve(a, jitRegExit, jitStackRegs[4], jitStackRegs[3])
+		a.MovRegMem(jitRegExit, jitRegExit, int32(disp))
 		a.Bind(notObject)
-		a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffRet, jitasm.RAX)
+		a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffRet, jitRegExit)
 		a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitReturn))
-		a.MovRegImm64(jitasm.RAX, jitmem.ExitReturn)
+		a.MovRegImm64(jitRegExit, jitmem.ExitReturn)
 		a.Ret()
 
 		buf := a.Code()

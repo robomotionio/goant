@@ -1496,14 +1496,10 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			}
 			r := jitSlot(sp - 1)
 			if kind[sp-1] {
-				// A Number is falsy when it is zero or a NaN, and UCOMISD sets
-				// the zero flag for both — equal, or unordered. So the flag is
-				// `!x` already, for either signed zero.
-				a.XorRegReg(jitRegScratch, jitRegScratch)
-				a.MovqXReg(jitRegF1, jitRegScratch)
-				a.MovqXReg(jitRegF0, r)
-				a.UcomisdXX(jitRegF0, jitRegF1)
-				jitFBoolean(a, jitasm.FCondE, r)
+				// A Number is falsy when it is zero or a NaN, and how cheaply
+				// those two are one question is the architecture's business —
+				// see jitEmitNotNumber.
+				jitEmitNotNumber(a, r)
 			} else {
 				// ToBoolean of anything else is a different question — the empty
 				// string is false and every object is true — and the same one the
@@ -2198,6 +2194,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	}
 
 	buf := a.Code()
+	// A branch further than its instruction can reach, which is a function this
+	// tier should not have taken rather than an error — see jitasm.Overflowed.
+	if a.Overflowed() {
+		return refuse(why, "branch-out-of-range")
+	}
 	block, err := jitmem.Alloc(len(buf))
 	if err != nil {
 		return refuse(why, "no-executable-memory")
