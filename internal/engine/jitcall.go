@@ -71,13 +71,37 @@ const jitMaxNest = 16
 // frame that has run, and so how much memory a deep recursion leaves behind.
 const jitMaxChain = 4096
 
+// jitCallee is what one fill of a call site resolved to, and it is a record of
+// its own rather than fields on the site because a frame the site opened uses it
+// as that frame's identity.
+//
+// A site is a cache and is refilled — after a collection retires it, or when the
+// same site is reached with a different callee. A frame suspended in the callee
+// is not: it is still running the function the call was made to, and a helper
+// serving it has to be handed that function's constant pool and caches. When
+// this was the site itself, a refill silently reassigned the identity of every
+// live frame the site had opened — and a call site is reachable from inside the
+// very frames it opens, so `f(g)` where g calls f again was enough. TypeScript
+// found it as a helper indexing an empty constant pool.
+//
+// So a fill allocates one of these and never writes to it again. The site points
+// at the current one; a frame points at the one it was entered through, which
+// keeps it alive for as long as the frame can run.
+type jitCallee struct {
+	fn   *svFunc
+	cl   *closure
+	code *jitCode
+	// site is where the call was made from, for the two things that need the
+	// call rather than the callee: how many arguments are in the caller's spill
+	// area if this frame declines them, and which cache to retire when it does.
+	site *jitCallSite
+}
+
 // jitCallSite is one compiled call site's memory of what it called.
 //
 // Read by generated code at fixed offsets and filled only by the runtime, which
-// is what lets it hold Go pointers: the fields machine code touches are a Value
-// and three integers, and fn, cl and code are here so that a frame suspended in
-// this callee can be given back its identity — machine code cannot write a Go
-// pointer, so what it writes into the frame's context is this site's address.
+// is what lets it hold Go pointers: the fields machine code touches are a Value,
+// two addresses and a pointer it copies without following.
 //
 // Soundness is the epoch's, exactly as for jitResolveCallee. callee is a
 // handle, and a handle names a cell only until the next collection; entry and
@@ -100,7 +124,14 @@ type jitCallSite struct {
 	// frame was built and thrown away — so a site whose receiver the stub cannot
 	// settle stops paying for the attempt.
 	declines uint8
-	dead     bool
+	// rebinds counts the times this site has been filled with a callee it did
+	// not already hold. Each one allocates, because what it allocates is what
+	// live frames are holding, and a site that alternates between two functions
+	// would allocate on every call it declines to serve. Past the limit it keeps
+	// whichever it last saw and stops rebinding: the calls that match are still
+	// made in machine code and the rest take the path they took before.
+	rebinds uint8
+	dead    bool
 
 	// entry is the callee's machine-call entry: the stub that clears the locals
 	// the arguments did not fill, settles `this`, and checks the parameters.
@@ -109,10 +140,10 @@ type jitCallSite struct {
 	// fetched per call because the site is guarded on the closure's identity,
 	// which is what makes the array's address a constant here.
 	upvals uintptr
-
-	fn   *svFunc
-	cl   *closure
-	code *jitCode
+	// bind is what this fill resolved to, and what a frame entered through it
+	// publishes as its identity. Replaced wholesale by the next fill rather than
+	// written through — see jitCallee.
+	bind *jitCallee
 }
 
 // Where generated code reads a site. Derived rather than written down, for the
@@ -122,6 +153,7 @@ const (
 	jitOffSiteEpoch  = unsafe.Offsetof(jitCallSite{}.epoch)
 	jitOffSiteEntry  = unsafe.Offsetof(jitCallSite{}.entry)
 	jitOffSiteUpvals = unsafe.Offsetof(jitCallSite{}.upvals)
+	jitOffSiteBind   = unsafe.Offsetof(jitCallSite{}.bind)
 )
 
 // jitSiteAddr is the address of one site, baked into the code that reads it.
@@ -189,8 +221,8 @@ func jitCtxLocals(ctx *jitmem.ExecContext) []Value {
 	return unsafe.Slice((*Value)(unsafe.Pointer(&ctx.Locals[0])), n)
 }
 
-// jitCtxSite is the call site that opened this frame, or nil for a frame the
-// runtime entered.
+// jitCtxSite is what the frame in this context is running, or nil for a frame
+// the runtime entered.
 //
 // One load. It was a walk down the chain from the frame the runtime entered,
 // each level naming its site by index into the level above it, so that nothing
@@ -199,6 +231,6 @@ func jitCtxLocals(ctx *jitmem.ExecContext) []Value {
 // run. Sixteen levels of pointer-chasing through contexts that are nowhere near
 // the cache, on a path taken every time a compiled frame reaches the runtime for
 // anything at all.
-func jitCtxSite(ctx *jitmem.ExecContext) *jitCallSite {
-	return (*jitCallSite)(ctx.Site)
+func jitCtxSite(ctx *jitmem.ExecContext) *jitCallee {
+	return (*jitCallee)(ctx.Site)
 }

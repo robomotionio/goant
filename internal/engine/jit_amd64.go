@@ -2695,19 +2695,9 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 			// — and everything between the two has saved its operands and its
 			// resume address on the way out.
 			d := rt.jitDepth - 1
-			cur := rt.jitFrames[d]
-			curFn, curCl, curCode, curArgs, curLocals := fn, cl, c, args, locals
-			if d > base {
-				// A frame compiled code built. Its identity is the site that
-				// built it, which is what it published — see jitFrameOwner.
-				s := jitCtxSite(cur)
-				if s == nil {
-					rt.jitDepth = base
-					rt.dropOpenUpvals(rt.frameDepth)
-					return mkundef(), rt.typeError("JIT frame chain"), true
-				}
-				curFn, curCl, curCode = s.fn, s.cl, s.code
-				curArgs, curLocals = nil, jitCtxLocals(cur)
+			cur := ctx
+			if d != base {
+				cur = rt.jitFrames[d]
 			}
 
 			switch cur.Exit {
@@ -2732,7 +2722,21 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 				cur.Args[1] = jitFuel
 				run, runPC = cur, cur.Resume
 			case jitmem.ExitHelper:
-				e := jitHelper(rt, curFn, curCl, curArgs, curLocals, cur, curCode)
+				// Whose frame this is. A frame compiled code built is identified
+				// by the site that built it, which is what it published; the one
+				// the runtime entered is identified by this call's own arguments.
+				// Read here rather than above because this is the only arm that
+				// needs it, and the arms that do not are the ones taken most.
+				var e *ThrowError
+				if d == base {
+					e = jitHelper(rt, fn, cl, args, locals, cur, c)
+				} else if s := jitCtxSite(cur); s != nil {
+					e = jitHelper(rt, s.fn, s.cl, nil, jitCtxLocals(cur), cur, s.code)
+				} else {
+					rt.jitDepth = base
+					rt.dropOpenUpvals(rt.frameDepth)
+					return mkundef(), rt.typeError("JIT frame chain"), true
+				}
 				if e == nil {
 					run, runPC = cur, cur.Resume
 					break
@@ -2960,18 +2964,18 @@ func (rt *Runtime) jitCatch(base, d int, outer *jitCode, e *ThrowError) (*jitmem
 // where the call site left them.
 func (rt *Runtime) jitRedoCall(d int) (Value, *ThrowError) {
 	up := rt.jitFrames[d-1]
-	site := jitCtxSite(rt.jitFrames[d])
+	bind := jitCtxSite(rt.jitFrames[d])
 	rt.jitDepth = d
-	if site == nil {
+	if bind == nil || bind.site == nil {
 		return mkundef(), rt.typeError("JIT frame chain")
 	}
+	site := bind.site
 	// The site is retired rather than merely missed: whatever the entry stub
 	// could not settle about this call it will not settle next time either,
 	// unless the callee is rebuilt — which is what noting the decline arranges.
-	fn := site.fn
 	jitRetireSite(site)
-	if fn != nil {
-		jitNoteDecline(fn)
+	if bind.fn != nil {
+		jitNoteDecline(bind.fn)
 	}
 	argc := int(site.argc)
 	depth := argc + 1

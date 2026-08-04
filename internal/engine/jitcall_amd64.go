@@ -3,6 +3,9 @@
 package engine
 
 import (
+	"os"
+	"strconv"
+
 	"github.com/robomotionio/goant/internal/jitasm"
 	"github.com/robomotionio/goant/internal/jitmem"
 )
@@ -100,11 +103,12 @@ func jitEmitMachineCall(a *jitasm.Asm, sp, argc int, method bool, site uintptr, 
 	}
 	a.MovRegMem(jitRegScratch, keep, int32(jitOffSiteUpvals))
 	a.MovMemReg(tmp2, jitmem.CtxOffUpvals, jitRegScratch)
-	// Which site entered the frame, so that a helper running for it can be given
-	// back the function, the closure and the code it belongs to. See the note on
-	// ExecContext.Site for what makes this store — the one pointer generated
-	// code writes — sound without a write barrier.
-	a.MovRegImm64(jitRegScratch, uint64(site))
+	// What the frame is running, so that a helper serving it can be given back
+	// the function, the closure and the code it belongs to. Copied from the site
+	// rather than being the site: a site is refilled and a live frame's identity
+	// is not — see jitCallee. The note on ExecContext.Site is what makes this
+	// store, the one pointer generated code writes, sound without a barrier.
+	a.MovRegMem(jitRegScratch, keep, int32(jitOffSiteBind))
 	a.MovMemReg(tmp2, jitmem.CtxOffSite, jitRegScratch)
 	a.MovRegMem(jitRegScratch, jitasm.RegCtx, jitmem.CtxOffNest)
 	a.AddRegImm32(jitRegScratch, 1)
@@ -342,6 +346,14 @@ func (rt *Runtime) jitFillSite(site *jitCallSite, callerStrict bool, callee Valu
 	if site == nil || site.dead || fn == nil || cl == nil {
 		return
 	}
+	// The bisect knob, and it earned its place: with the whole tier on and every
+	// other diagnostic silent, TypeScript failed at a call depth of three after
+	// two million good calls, and halving the callees that may be entered this
+	// way is what turned that into a one-line reproduction. Same hash and same
+	// spelling as GOANT_JIT_MASK, which selects by the caller instead.
+	if jitCallMask != ^uint64(0) && jitCallMask&(1<<jitNameBucket(fn.name)) == 0 {
+		return
+	}
 	// mentry is the answer to jitMachineCallable, decided when the function was
 	// compiled. Asking again here walked the whole body on every call that took
 	// the runtime path, which was 2.2% of RayTrace.
@@ -368,12 +380,29 @@ func (rt *Runtime) jitFillSite(site *jitCallSite, callerStrict bool, callee Valu
 	if int(site.argc) != nargs {
 		return
 	}
+	// A fresh record rather than three stores into the old one: frames opened
+	// through the previous fill are still running it. Reused when it already
+	// describes this callee, which is the common refill — a collection retires
+	// every site at once, and most of them fill again with what they had.
+	bind := site.bind
+	if bind == nil || bind.fn != fn || bind.cl != cl || bind.code != c {
+		if site.rebinds >= jitSiteRebindLimit {
+			return
+		}
+		if site.bind != nil {
+			site.rebinds++
+		}
+		bind = &jitCallee{fn: fn, cl: cl, code: c, site: site}
+	}
+	// Nothing above this line has changed the site, and nothing below it can
+	// decline: what generated code reads has to describe one callee, and a
+	// half-written site would send a call guarded on one function into another.
 	site.upvals = 0
 	if len(cl.upvalues) > 0 {
 		site.upvals = jitUpvalArrayAddr(cl)
 	}
 	site.entry = c.mentry
-	site.fn, site.cl, site.code = fn, cl, c
+	site.bind = bind
 	site.epoch = icEpoch()
 	site.callee = callee
 }
@@ -399,5 +428,20 @@ func jitRetireSite(site *jitCallSite) {
 }
 
 // jitSiteDeclineLimit is how many declined entries a site tolerates before it
-// gives the machine path up for good.
-const jitSiteDeclineLimit = 8
+// gives the machine path up for good, and jitSiteRebindLimit how many different
+// callees it will describe before it stops changing its mind.
+const (
+	jitSiteDeclineLimit = 8
+	jitSiteRebindLimit  = 8
+)
+
+// jitCallMask refuses to arm a call site whose callee's name does not hash into
+// one of the 64 buckets it selects.
+var jitCallMask = func() uint64 {
+	if s := os.Getenv("GOANT_JIT_CALLMASK"); s != "" {
+		if v, err := strconv.ParseUint(s, 0, 64); err == nil {
+			return v
+		}
+	}
+	return ^uint64(0)
+}()

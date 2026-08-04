@@ -129,6 +129,16 @@ func TestMachineCallAgreesWithTheInterpreter(t *testing.T) {
 			var add3 = make(3), add4 = make(4);
 			function f(a) { return add3(a) + add4(a); }
 			var s = 0; for (var k = 0; k < 400; k++) s += f(k); s;`},
+		// A site reached again, with a different callee, from inside a frame it
+		// opened — which is what refills it while that frame is live. See
+		// TestARefillDoesNotReassignALiveFrame for the invariant this rests on.
+		{"the-site-refills-under-a-live-frame", `
+			function down(k) { var r = k <= 0 ? 0 : outer(k - 1); shapes[k % 4].tag = r; return r + 1; }
+			function flat(k) { return k * 2; }
+			function pick(k) { return k % 2 ? down : flat; }
+			function outer(k) { return pick(k)(k); }
+			var shapes = [{tag: 0}, {a: 1, tag: 0}, {b: 1, a: 1, tag: 0}, {c: 1, tag: 0}];
+			var s = 0; for (var k = 0; k < 600; k++) s += outer(k % 9); s;`},
 		// The same site called with two different closures of one function, which
 		// the guard must tell apart because their upvalues differ.
 		{"a-polymorphic-call-site", `
@@ -226,3 +236,63 @@ func TestContextChainIsLinkedAndBounded(t *testing.T) {
 
 // uintptrOf is the address of a context as the chain records it.
 func uintptrOf(ctx *jitmem.ExecContext) uintptr { return ctx.Addr() }
+
+// TestARefillDoesNotReassignALiveFrame is the invariant a frame's identity rests
+// on, and it is not the kind of thing an agreement test finds: a frame carries
+// what the site resolved to when it was entered, and a site is a cache that is
+// refilled — after a collection retires it, and whenever it is reached with a
+// different callee.
+//
+// The two are reachable from one another. `outer` calls whatever `pick` returns,
+// and one of the things it returns calls `outer` again, so the site is refilled
+// from inside a frame it opened. When the frame's identity was the site itself,
+// that reassigned it: the frame went on running one function while every helper
+// serving it was handed another's constant pool and caches. TypeScript found it
+// as an index into an empty pool, at a call depth of three and only after two
+// million calls had gone right.
+func TestARefillDoesNotReassignALiveFrame(t *testing.T) {
+	saved := jitEnabled
+	jitEnabled = true
+	defer func() { jitEnabled = saved }()
+
+	rt := New()
+	if _, err := rt.RunString("refill.js", `
+		function first(a) { return a + 1; }
+		function second(a) { return a + 2; }
+		var s = 0;
+		for (var i = 0; i < 400; i++) { s += first(i); s += second(i); }
+		s;`); err != nil {
+		t.Fatal(err)
+	}
+	fnOf := func(name string) (Value, *svFunc, *closure) {
+		v, err := rt.RunString("pick.js", name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		f, c := rt.jitResolveCallee(v)
+		if f == nil || f.jit.code == nil || f.jit.code.mentry == 0 {
+			t.Fatalf("%s did not compile into something a call site may enter", name)
+		}
+		return v, f, c
+	}
+	aVal, aFn, aCl := fnOf("first")
+	bVal, bFn, bCl := fnOf("second")
+
+	site := &jitCallSite{argc: 1}
+	rt.jitFillSite(site, aFn.isStrict, aVal, aFn, aCl)
+	held := site.bind
+	if held == nil || held.fn != aFn {
+		t.Fatalf("the site did not fill with the function it was given")
+	}
+	rt.jitFillSite(site, bFn.isStrict, bVal, bFn, bCl)
+	if site.bind == held {
+		t.Fatal("a refill wrote through the record a live frame would be holding")
+	}
+	if held.fn != aFn || held.cl != aCl || held.code != aFn.jit.code {
+		t.Errorf("the first record now describes %q rather than the function "+
+			"the frame holding it is running", held.fn.name)
+	}
+	if site.bind.fn != bFn {
+		t.Errorf("the site did not refill")
+	}
+}
