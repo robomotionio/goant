@@ -1638,10 +1638,19 @@ compiled, which turns "does the handover work" into something that can be swept:
 
 - **Per instruction.** Twelve programs, each run once per offset in its body,
   every answer required to be the interpreter's bit for bit. 190 offsets.
-- **Per corpus.** The whole `-core` profile, once per offset from 0 to 23, with
-  the tier forced on at threshold 1. Every function in test262 that compiles at
-  all hands itself back mid-body, and 42,739 of 42,740 still pass — the same one
-  that fails without it.
+- **Per corpus.** The whole `-core` profile, once per offset from 0 to 15, with
+  the tier forced on at threshold 1 — so every function in test262 that compiles
+  at all hands itself back mid-body. All sixteen produce the *same failing set*
+  as the tier arm: one test, `Proxy/revocable/tco-fn-realm`, which is the
+  per-function `[[Realm]]` gap and fails without any of this. Small offsets
+  because that is where the coverage is: every compiled body has an instruction
+  at byte 3, and progressively fewer have one at byte 40.
+
+The corpus arm has to be run **one suite at a time and compared by failing-path
+set**, and that is not fastidiousness. Four concurrent `-core` runs on eight
+vCPUs produced 34 failures at offset 0; the same offset alone produces one. Every
+extra was a timeout on the heavy generated files. A total measured under load is
+not a result, and the same trap had already cost a run on the Mac the same day.
 
 The unit sweep found nothing and the corpus sweep found the ordering bug, which
 is the right way round for a mechanism whose failures are all about state the
