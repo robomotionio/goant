@@ -362,6 +362,34 @@ func (a *Asm) Mov32RegMem(dst, base Reg, disp int32) {
 	a.emitMem(false, []byte{0x8B}, uint8(dst), uint8(base), disp)
 }
 
+// The narrow stores a typed array needs: the low 8, 16 or 32 bits of a register,
+// leaving what surrounds them alone. Storing an integer element IS this
+// truncation — ToInt8 and friends are the value modulo the width, which for an
+// exact integer already in the register is exactly its low bits.
+//
+// No REX.W on any of them: the width is the opcode's, and asking for 64 bits
+// would write over the neighbouring elements. The byte form does take an
+// unconditional REX, for the reason SetccReg documents at length — without one,
+// encodings 4 to 7 name AH..BH rather than SPL..DIL, so storing the low byte of
+// RSI would silently store the high byte of RCX instead.
+
+// MovMem8Reg stores the low byte of src.
+func (a *Asm) MovMem8Reg(base Reg, disp int32, src Reg) {
+	a.emit(rex(false, uint8(src), 0, uint8(base)))
+	a.emitMemNoRex([]byte{0x88}, uint8(src), uint8(base), disp)
+}
+
+// MovMem16Reg stores the low two bytes of src.
+func (a *Asm) MovMem16Reg(base Reg, disp int32, src Reg) {
+	a.emit(0x66)
+	a.emitMem(false, []byte{0x89}, uint8(src), uint8(base), disp)
+}
+
+// MovMem32Reg stores the low four bytes of src.
+func (a *Asm) MovMem32Reg(base Reg, disp int32, src Reg) {
+	a.emitMem(false, []byte{0x89}, uint8(src), uint8(base), disp)
+}
+
 // MovRegMemIndex loads from base+index*scale+disp, which is what reading an
 // element of an array whose index is not known until run time takes.
 func (a *Asm) MovRegMemIndex(dst, base, index Reg, scale uint8, disp int32) {
@@ -379,6 +407,38 @@ func (a *Asm) MovMemIndexReg(base, index Reg, scale uint8, disp int32, src Reg) 
 // shape.
 func (a *Asm) MovzxRegMem8(dst, base Reg, disp int32) {
 	a.emitMem(false, []byte{0x0F, 0xB6}, uint8(dst), uint8(base), disp)
+}
+
+// The narrow loads a typed array needs. An Int8Array element is a signed byte
+// and a Uint16Array element an unsigned halfword, and the difference is the
+// instruction rather than anything after it: sign extension is what makes -1
+// read back as -1 rather than 255, and CVTSI2SD converts whatever the whole
+// register holds.
+//
+// The signed forms take REX.W so the extension fills all 64 bits, because the
+// conversion that follows reads the register as a 64-bit integer. The unsigned
+// forms do not need it: writing the low 32 bits of a register clears the top
+// half, which is the zero extension.
+
+// MovsxRegMem8 loads one byte and sign-extends it.
+func (a *Asm) MovsxRegMem8(dst, base Reg, disp int32) {
+	a.emitMem(true, []byte{0x0F, 0xBE}, uint8(dst), uint8(base), disp)
+}
+
+// MovzxRegMem16 loads two bytes and zero-extends them.
+func (a *Asm) MovzxRegMem16(dst, base Reg, disp int32) {
+	a.emitMem(false, []byte{0x0F, 0xB7}, uint8(dst), uint8(base), disp)
+}
+
+// MovsxRegMem16 loads two bytes and sign-extends them.
+func (a *Asm) MovsxRegMem16(dst, base Reg, disp int32) {
+	a.emitMem(true, []byte{0x0F, 0xBF}, uint8(dst), uint8(base), disp)
+}
+
+// MovsxRegMem32 loads four bytes and sign-extends them, which Mov32RegMem
+// followed by MovsxdRegReg also does in one instruction more.
+func (a *Asm) MovsxRegMem32(dst, base Reg, disp int32) {
+	a.emitMem(true, []byte{0x63}, uint8(dst), uint8(base), disp)
 }
 
 // ---- integer arithmetic ----
@@ -582,6 +642,13 @@ func (a *Asm) emitMemNoRexPrefix(opcode []byte, reg, base uint8, disp int32) {
 	if p := rex(false, reg, 0, base); p != 0x40 {
 		a.emit(p)
 	}
+	a.emitMemNoRex(opcode, reg, base, disp)
+}
+
+// emitMemNoRex is the ModRM, SIB and displacement of a memory operand, for the
+// callers that have already decided what REX prefix they need — the byte store,
+// which needs one the encoder would have judged unnecessary.
+func (a *Asm) emitMemNoRex(opcode []byte, reg, base uint8, disp int32) {
 	a.emit(opcode...)
 	var mod uint8
 	switch {
@@ -610,6 +677,24 @@ func (a *Asm) MovsdXMem(dst XReg, base Reg, disp int32) {
 }
 func (a *Asm) MovsdMemX(base Reg, disp int32, src XReg) {
 	a.emitSSEMem(0xF2, []byte{0x0F, 0x11}, uint8(src), uint8(base), disp)
+}
+
+// Cvtss2sdXMem loads four bytes as a single-precision float and widens them to
+// the double every JavaScript number is. One instruction, because a Float32Array
+// element is never a double in memory and always one in the language.
+func (a *Asm) Cvtss2sdXMem(dst XReg, base Reg, disp int32) {
+	a.emitSSEMem(0xF3, []byte{0x0F, 0x5A}, uint8(dst), uint8(base), disp)
+}
+
+// Cvtsd2ssXX narrows a double to single precision, and MovssMemX stores the
+// four bytes of one. The pair is Cvtss2sdXMem written backwards, for a store
+// into a Float32Array.
+func (a *Asm) Cvtsd2ssXX(dst, src XReg) {
+	a.emitSSE(0xF2, []byte{0x0F, 0x5A}, uint8(dst), uint8(src))
+}
+
+func (a *Asm) MovssMemX(base Reg, disp int32, src XReg) {
+	a.emitSSEMem(0xF3, []byte{0x0F, 0x11}, uint8(src), uint8(base), disp)
 }
 
 // XorpdXX clears a register when both operands are the same one, which is how a

@@ -327,6 +327,51 @@ func (a *Asm) MovzxRegMem8(dst, base Reg, disp int32) {
 	a.loadStore(0x39400000, 0x38400000, 0, dst, base, disp)
 }
 
+// The narrow loads a typed array needs. arm64 spells the choice in the opcode
+// exactly as amd64 does — LDRSB against LDRB, LDRSH against LDRH — and the
+// signed forms named here are the 64-bit-destination ones, so the extension
+// fills the register the conversion afterwards reads.
+
+// MovsxRegMem8 loads one byte and sign-extends.
+func (a *Asm) MovsxRegMem8(dst, base Reg, disp int32) {
+	a.loadStore(0x39800000, 0x38800000, 0, dst, base, disp)
+}
+
+// MovzxRegMem16 loads two bytes and zero-extends.
+func (a *Asm) MovzxRegMem16(dst, base Reg, disp int32) {
+	a.loadStore(0x79400000, 0x78400000, 1, dst, base, disp)
+}
+
+// MovsxRegMem16 loads two bytes and sign-extends.
+func (a *Asm) MovsxRegMem16(dst, base Reg, disp int32) {
+	a.loadStore(0x79800000, 0x78800000, 1, dst, base, disp)
+}
+
+// MovsxRegMem32 loads four bytes and sign-extends.
+func (a *Asm) MovsxRegMem32(dst, base Reg, disp int32) {
+	a.loadStore(0xB9800000, 0xB8800000, 2, dst, base, disp)
+}
+
+// The narrow stores a typed array needs: the low 8, 16 or 32 bits of a
+// register, leaving what surrounds them alone. Storing an integer element IS
+// this truncation — ToInt8 and friends are the value modulo the width, which for
+// an exact integer already in the register is exactly its low bits.
+
+// MovMem8Reg stores the low byte of src.
+func (a *Asm) MovMem8Reg(base Reg, disp int32, src Reg) {
+	a.loadStore(0x39000000, 0x38000000, 0, src, base, disp)
+}
+
+// MovMem16Reg stores the low two bytes of src.
+func (a *Asm) MovMem16Reg(base Reg, disp int32, src Reg) {
+	a.loadStore(0x79000000, 0x78000000, 1, src, base, disp)
+}
+
+// MovMem32Reg stores the low four bytes of src.
+func (a *Asm) MovMem32Reg(base Reg, disp int32, src Reg) {
+	a.loadStore(0xB9000000, 0xB8000000, 2, src, base, disp)
+}
+
 // MovMemImm32 stores a sign-extended 32-bit constant as eight bytes.
 func (a *Asm) MovMemImm32(base Reg, disp int32, v uint32) {
 	a.MovRegImm64(scratch0, uint64(int64(int32(v))))
@@ -618,6 +663,25 @@ func (a *Asm) MovsdXMem(dst XReg, base Reg, disp int32) {
 
 func (a *Asm) MovsdMemX(base Reg, disp int32, src XReg) {
 	a.loadStore(0xFD000000, 0xFC000000, 3, Reg(src), base, disp)
+}
+
+// Cvtss2sdXMem loads four bytes as a single-precision float and widens them to
+// a double. Two instructions here against amd64's one, because arm64 separates
+// the load from the conversion; both halves address the same register file.
+func (a *Asm) Cvtss2sdXMem(dst XReg, base Reg, disp int32) {
+	a.loadStore(0xBD400000, 0xBC400000, 2, Reg(dst), base, disp) // LDR Sd, [base, #disp]
+	a.word(0x1E22C000 | uint32(dst)<<5 | uint32(dst))            // FCVT Dd, Sd
+}
+
+// Cvtsd2ssXX narrows a double to single precision, and MovssMemX stores the
+// four bytes of one. The pair is Cvtss2sdXMem written backwards, for a store
+// into a Float32Array.
+func (a *Asm) Cvtsd2ssXX(dst, src XReg) {
+	a.word(0x1E624000 | uint32(src)<<5 | uint32(dst)) // FCVT Sd, Dn
+}
+
+func (a *Asm) MovssMemX(base Reg, disp int32, src XReg) {
+	a.loadStore(0xBD000000, 0xBC000000, 2, Reg(src), base, disp) // STR Ss, [base, #disp]
 }
 
 // MovqXReg and MovqRegX move the bits of a value between the two register
