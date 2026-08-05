@@ -1741,6 +1741,57 @@ is the corpus flattering the tier rather than the tier being complete.
 No benchmark is now made materially worse by the tier, so the list is ordered by
 what would gain rather than by what is bleeding.
 
+**This list was reordered on 5 August by counting exits rather than opcodes**, and
+the count moved the top of it. `JITHelperStats` reports why compiled code left,
+by helper, and it says the exits are memory accesses — not arithmetic.
+
+`arith` is 0.5% of DeltaBlue's exits, 0.2% of crypto's and 0.0% of mandreel's.
+So type feedback for arithmetic, which is what an optimising tier is usually
+built for and what phase 1 wrote down, would move very nearly nothing here: the
+arithmetic is already emitted. What is not emitted is `a[i]`.
+
+| workload | exits | first | second |
+|---|---|---|---|
+| zlib | 2,889M | getelem 73.7% | putelem 24.4% |
+| mandreel | 312M | getelem 61.8% | putelem 37.0% |
+| typescript | 136M | getfield 53.7% | callmethod 19.1% |
+| earley-boyer | 89M | putfield 22.9% | instanceof 21.1% |
+| crypto | 89M | putelem 81.5% | getfield 6.9% |
+| navier-stokes | 50M | putelem 86.0% | topropkey 9.8% |
+| gbemu | 40M | getelem 37.6% | putelem 33.6% |
+| raytrace | 28M | putfield 31.5% | getfield 27.3% |
+| box2d | 21M | getfield 80.2% | putfield 6.2% |
+| deltablue | 16M | getfield 66.3% | callmethod 15.2% |
+| richards | 3.8M | callmethod 71.2% | putelem 17.7% |
+
+0. **`a[i]` on a typed array, which the emitted guard chain rejects at its first
+   instruction.** The chain serves 100% of crypto's element reads and 98.6% of
+   NavierStokes's, and 6,059 of zlib's 2,128,486,098 — 0.0%. The reason is
+   `jitEmitTagCheck(a, recv, TArr, slow)`: a typed array is not a fast array, so
+   every read of one is a helper round trip. Measured rather than reasoned:
+   **100.0% of the element-read misses in zlib, mandreel and gbemu have a
+   TTypedArray receiver** — 2.33 billion round trips across three workloads,
+   which is the largest number anywhere in this document by two orders of
+   magnitude.
+
+   Two things make it tractable. Every view in the corpus is *fixed* — not one
+   length-tracking view over a resizable buffer, and not one non-zero
+   byteOffset — so the bound is `t.length` and the address is `i*size`. And the
+   guard the read needs beyond a fast array's is small: the view is not
+   detached, and the element kind is the one compiled for.
+
+   That last clause is the whole design question, because no kind dominates:
+   zlib is 53% Int32, mandreel 50% Uint16, gbemu 67% Uint8, with six kinds
+   between them (Int8, Uint8, Int16, Uint16, Int32, Float32). Emitting one kind
+   for every site captures about half. Emitting all six inline is forty
+   instructions on a path that runs two billion times. So it wants a *per-site*
+   record of the kind that site has been seeing — which is the first thing in
+   this tier that would be compiled from type feedback rather than from the
+   bytecode or from a shape cache, and it is what the bail above exists to make
+   safe. Whether a site is monomorphic in its kind is an inference from the
+   workload numbers rather than a measurement; the per-site count is the next
+   thing to take.
+
 1. **The site that gives up, and the half of it that is still on the table.**
    Half of this item has been built — `icMissLimit`, see below — and what remains
    is the width.
