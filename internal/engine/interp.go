@@ -596,6 +596,14 @@ restart:
 		withStack, varObj, newTarget = f.withStack, f.varObj, f.newTarget
 		locals = res.locals
 		openUpvals = res.openUpvals
+		// copy would truncate rather than fail, and a frame resumed with three
+		// of its four operands computes a number rather than crashing. The two
+		// depths come from separate walks of the same bytecode — the emitter's
+		// maxDepth and the compiler's maxStack — so this says they agree rather
+		// than assuming it.
+		if len(res.stack) > len(stack) {
+			return mkundef(), rt.typeError("JIT operand stack")
+		}
 		sp = copy(stack, res.stack)
 		pendingThrow = mkundef()
 		privEnv = nil
