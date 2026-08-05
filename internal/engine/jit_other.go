@@ -2,6 +2,11 @@
 
 package engine
 
+import "strconv"
+
+// jitHelperNameOf has no enum to consult on a platform with no emitter.
+func jitHelperNameOf(id uint64) string { return "helper#" + strconv.FormatUint(id, 10) }
+
 // No emitter for this architecture yet, so the tier is empty and every function
 // interprets. jitmem is already portable to arm64; what is missing is the
 // instruction encoder, which is mechanical once the amd64 shape has settled.

@@ -149,6 +149,24 @@ func dumpJITStats() {
 		fmt.Fprintf(os.Stderr, "jit: %d calls from compiled code, %d made by the call site itself (%.1f%%)\n",
 			calls, cfast, 100*float64(cfast)/float64(calls))
 	}
+	// Why compiled code left, heaviest first. This is the number that says what
+	// is worth speculating on next: a helper is a round trip, and the round trip
+	// is the cost — see the note on JITHelperStats.
+	if h := engine.JITHelperStats(); len(h) > 0 {
+		var total uint64
+		for _, e := range h {
+			total += e.Count
+		}
+		fmt.Fprintf(os.Stderr, "jit: %d calls out of compiled code, by reason:\n", total)
+		for i, e := range h {
+			if i == 12 {
+				fmt.Fprintf(os.Stderr, "jit:   … and %d more reasons\n", len(h)-i)
+				break
+			}
+			fmt.Fprintf(os.Stderr, "jit:   %-14s %12d  %5.1f%%\n",
+				e.Name, e.Count, 100*float64(e.Count)/float64(total))
+		}
+	}
 	fast, slow := engine.JITOperatorStats()
 	if ops := fast + slow; ops > 0 {
 		fmt.Fprintf(os.Stderr, "jit: %d untyped operators, %d took the machine instruction (%.1f%%)\n",

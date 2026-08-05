@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -99,6 +100,11 @@ var jitStats struct {
 	// emitted, and both look like a function that simply calls a lot.
 	callFast uint64
 	callSlow uint64
+	// helper counts calls out of compiled code by which helper was asked for.
+	// Indexed by the helper id, masked to the array, so a renumbering cannot
+	// index out of range — it can only mislabel, which JITHelperStats makes
+	// visible by printing the number beside the name.
+	helper [64]uint64
 	// bails counts frames compiled code handed back partway. Unlike everything
 	// above it this is counted whether or not the diagnostics are on, because it
 	// is not a statistic about a hot path — it is how a test tells a bail that
@@ -154,6 +160,36 @@ func JITCallStats() (fast, slow uint64) { return jitStats.callFast, jitStats.cal
 // JITBailStats reports frames compiled code handed back to the interpreter
 // partway through. See jitbail.go.
 func JITBailStats() uint64 { return jitStats.bails }
+
+// JITHelperCount is one reason compiled code left, and how often it left for it.
+type JITHelperCount struct {
+	Name  string
+	Count uint64
+}
+
+// JITHelperStats reports calls out of compiled code by which helper was wanted,
+// heaviest first.
+//
+// This is the measurement that decides what is worth speculating on, and it is
+// the one the tier has been improved by twice: what a compiled function cannot
+// do itself, it leaves to say so, and the leaving is most of the cost. Emitting
+// `x == null` rather than helping it was 18% of Octane, and nothing but this
+// count says which of sixty helpers is the next one of those.
+//
+// Deliberately not the static histogram of what functions contain. That has
+// pointed at the wrong work every time it has been consulted, because a
+// program's time is not spread evenly over its opcodes.
+func JITHelperStats() []JITHelperCount {
+	out := make([]JITHelperCount, 0, len(jitStats.helper))
+	for id, n := range jitStats.helper {
+		if n == 0 {
+			continue
+		}
+		out = append(out, JITHelperCount{Name: jitHelperNameOf(uint64(id)), Count: n})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	return out
+}
 
 // jitOSRThreshold is how many times a loop may go round in the interpreter
 // before the function it is in gets compiled.

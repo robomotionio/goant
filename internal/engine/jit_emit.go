@@ -4,6 +4,7 @@ package engine
 
 import (
 	"runtime"
+	"strconv"
 	"unsafe"
 
 	"github.com/robomotionio/goant/internal/jitasm"
@@ -2516,6 +2517,45 @@ const (
 	jitHelperGetLength    = 42
 )
 
+// jitHelperNames is the enum above, spelled. Beside it rather than anywhere
+// else so that adding a helper without naming it is a diff away from obvious,
+// and printed with the number so a rename that misses this reads as a number
+// rather than as the wrong name.
+var jitHelperNames = map[uint64]string{
+	jitHelperGetField: "getfield", jitHelperToInt32: "toint32",
+	jitHelperArith: "arith", jitHelperRelational: "relational",
+	jitHelperEquals: "equals", jitHelperPutField: "putfield",
+	jitHelperGetGlobal: "getglobal", jitHelperDeadZone: "deadzone",
+	jitHelperCall: "call", jitHelperCallMethod: "callmethod",
+	jitHelperGetElem: "getelem", jitHelperBitwise: "bitwise",
+	jitHelperToBoolean: "toboolean", jitHelperUnary: "unary",
+	jitHelperNew: "new", jitHelperPutElem: "putelem",
+	jitHelperPutGlobal: "putglobal", jitHelperInstanceof: "instanceof",
+	jitHelperTypeof: "typeof", jitHelperIn: "in",
+	jitHelperDelete: "delete", jitHelperThrow: "throw",
+	jitHelperObject: "object", jitHelperArray: "array",
+	jitHelperRegexp: "regexp", jitHelperGlobalUndef: "globalundef",
+	jitHelperDefineField: "definefield", jitHelperClosure: "closure",
+	jitHelperPutUpval: "putupval", jitHelperThrowError: "throwerror",
+	jitHelperUplus: "uplus", jitHelperArguments: "arguments",
+	jitHelperToPropkey: "topropkey", jitHelperGlobal: "global",
+	jitHelperDeleteVar: "deletevar", jitHelperDefineMethod: "definemethod",
+	jitHelperPutConst: "putconst", jitHelperSetHomeObj: "sethomeobj",
+	jitHelperForIn: "forin", jitHelperStillEnum: "stillenum",
+	jitHelperGetLength: "getlength", jitHelperEnterWith: "enterwith",
+	jitHelperExitWith: "exitwith", jitHelperWithGetVar: "withgetvar",
+	jitHelperWithPutVar: "withputvar", jitHelperWithDelVar: "withdelvar",
+	jitHelperEval: "eval",
+}
+
+// jitHelperNameOf is the name for an id, or the id itself when there is none.
+func jitHelperNameOf(id uint64) string {
+	if n, ok := jitHelperNames[id]; ok {
+		return n
+	}
+	return "helper#" + strconv.FormatUint(id, 10)
+}
+
 // jitICGlobalSpareRegs is how many operand-stack registers a global read needs:
 // one for the value it produces, which starts out holding the global object,
 // and two for the probe.
@@ -3154,6 +3194,20 @@ func jitCopyArgs(window []Value) []Value {
 // suspended frame is inside still mapped. Only the call arm reads it, to fill
 // the site the call came through.
 func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *jitmem.ExecContext, code *jitCode) *ThrowError {
+	// Which helper, counted. This is the diagnostic that decides what to
+	// speculate on: a tier leaves compiled code for a reason, and the reasons
+	// are not evenly weighted — one of them was 18% of Octane once it was
+	// emitted rather than helped. The corpus counts are the only thing that
+	// says which, and the static histogram has pointed at the wrong work every
+	// time it has been consulted.
+	//
+	// Here rather than in the run loop's exit arm, deliberately: that switch is
+	// the hottest Go code in the tier and adding to it is not free — see the
+	// note on the default arm. This function is already a sixty-way branch, so
+	// one counter costs nothing measurable against it.
+	if jitStats.enabled {
+		jitStats.helper[ctx.Helper&uint64(len(jitStats.helper)-1)]++
+	}
 	switch ctx.Helper {
 	case jitHelperGetField:
 		recv := Value(ctx.Args[2])
