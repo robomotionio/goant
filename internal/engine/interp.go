@@ -1230,7 +1230,9 @@ running:
 			ip += 7
 		case OpGetElem:
 			key := pop()
-			v, e := rt.getElement(pop(), key)
+			obj := pop()
+			rt.noteElemKind(fn, ip, obj)
+			v, e := rt.getElement(obj, key)
 			if e != nil {
 				thrown = e
 				goto unwind
@@ -1241,6 +1243,7 @@ running:
 			val := pop()
 			key := pop()
 			obj := pop()
+			rt.noteElemKind(fn, ip, obj)
 			ok, e := rt.setElementR(obj, key, val)
 			if e != nil {
 				thrown = e

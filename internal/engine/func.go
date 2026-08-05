@@ -41,6 +41,11 @@ type svFunc struct {
 	// into it, which nothing here can prove has ended.
 	jit jitAttempt
 
+	// elemKinds is the type feedback for element access, one byte per bytecode
+	// offset, written by the interpreter and read by the emitter. Allocated only
+	// for a function that actually indexes a TypedArray. See elemfeedback.go.
+	elemKinds []uint8
+
 	maxLocals  int
 	maxStack   int
 	paramCount int // positional parameter slots (used by frame init)
