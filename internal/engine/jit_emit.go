@@ -1880,7 +1880,12 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		case OpGetElem:
 			// `a[i]`, with no cache site: an array's elements are a slice of
 			// their own, so what is emitted is a guard chain rather than a probe.
-			// See jit_getelem_amd64.go.
+			// See jit_getelem_emit.go.
+			//
+			// Which chain is the site's own type feedback, and it is one or the
+			// other rather than both: a fast array and a TypedArray share no
+			// guard past the tag, so emitting both would double the site for a
+			// receiver that measurement says never arrives. See elemfeedback.go.
 			if sp < 2 {
 				return refuse(why, "stack-underflow")
 			}
@@ -1888,7 +1893,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			slow := a.NewLabel()
 			done := a.NewLabel()
 			if sp+jitICElemSpareRegs <= jitStackWindow {
-				jitEmitGetElem(a, recv, key, jitSlot(sp), jitSlot(sp+1), slow, done)
+				obj, idx := jitSlot(sp), jitSlot(sp+1)
+				if kind, ok := fn.elemKindTyped(thisIP); !ok ||
+					!jitEmitGetElemTyped(a, kind, recv, key, obj, idx, slow, done) {
+					jitEmitGetElem(a, recv, key, obj, idx, slow, done)
+				}
 			}
 			a.Bind(slow)
 			if !jitCallHelper(a, sp, jitHelperGetElem, &fixups, deepStack) {

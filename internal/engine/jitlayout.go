@@ -77,6 +77,22 @@ const (
 	jitOffObjArrCap = jitOffObjArr + 8
 	jitOffObjArrLen = unsafe.Offsetof(object{}.arrLen)
 
+	// A TypedArray view, and through it the bytes it is a window onto. The view
+	// hangs off the object rather than living in it, so an element read is one
+	// more load than a fast array's before any field is reached — and then the
+	// bytes are a third object away, which is what bufPtr shortens.
+	//
+	// abuf is a Go []byte, so its data pointer and its length are the first two
+	// words of the header: the same written-down fact as the overflow slice's,
+	// and checked the same way by the round-trip test.
+	jitOffObjTA        = unsafe.Offsetof(object{}.ta)
+	jitOffObjABuf      = unsafe.Offsetof(object{}.abuf)
+	jitOffObjABufLen   = jitOffObjABuf + 8
+	jitOffTABufPtr     = unsafe.Offsetof(typedArray{}.bufPtr)
+	jitOffTAByteOffset = unsafe.Offsetof(typedArray{}.byteOffset)
+	jitOffTALength     = unsafe.Offsetof(typedArray{}.length)
+	jitOffTAJITKind    = unsafe.Offsetof(typedArray{}.jitKind)
+
 	// An upvalue: a pointer to wherever the captured binding lives, which is a
 	// frame's locals slot while the frame is open and the cell itself once it has
 	// been closed. Reading one is the same load either way.
@@ -157,6 +173,9 @@ func jitICGlobalHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.glbH
 
 // jitElemHitAddr is the same for an element read.
 func jitElemHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.elemHit)) }
+
+// jitElemPutHitAddr is the same for an element store.
+func jitElemPutHitAddr() uintptr { return uintptr(unsafe.Pointer(&jitStats.elemPutHit)) }
 
 // jitCallFastAddr is the address of the counter for calls a compiled site made
 // in machine code.
