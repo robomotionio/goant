@@ -1793,16 +1793,32 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 
 		case OpPutElem:
 			// `a[i] = v`. Everything the read's guard chain establishes has to
-			// hold for a write too, and one thing more — the slot has to be
-			// writable and the array extensible — so this goes to the runtime
-			// rather than being emitted. What it buys is the rest of the
-			// function, which is the whole of Richards' remainder.
+			// hold for a write too, and for a FAST ARRAY one thing more — the
+			// slot has to be writable and the array extensible — so that
+			// receiver still goes to the runtime.
+			//
+			// A TypedArray does not, and gets a chain. An integer-indexed store
+			// into a view is never rejected and never throws, writes bytes
+			// rather than Values, and so needs neither the writability check nor
+			// any of the bookkeeping a compiled store to an object needs. See
+			// jit_putelem_typed_emit.go.
 			if sp < 3 {
 				return refuse(why, "stack-underflow")
 			}
+			recv, key, val := jitSlot(sp-3), jitSlot(sp-2), jitSlot(sp-1)
+			slow := a.NewLabel()
+			done := a.NewLabel()
+			if sp+jitICElemSpareRegs <= jitStackWindow {
+				if kind, ok := fn.elemKindTyped(thisIP); ok {
+					jitEmitPutElemTyped(a, kind, recv, key, val,
+						jitSlot(sp), jitSlot(sp+1), slow, done)
+				}
+			}
+			a.Bind(slow)
 			if !jitCallHelper(a, sp, jitHelperPutElem, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
+			a.Bind(done)
 			sp -= 3
 			ip++
 
@@ -3502,6 +3518,9 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		n := int(ctx.StackN)
 		if n < 3 {
 			return rt.typeError("JIT operand stack")
+		}
+		if jitStats.enabled {
+			jitStats.elemPutMiss++
 		}
 		ok, e := rt.setElementR(Value(jitSlotAt(ctx, n-3)), Value(jitSlotAt(ctx, n-2)), Value(jitSlotAt(ctx, n-1)))
 		if e != nil {

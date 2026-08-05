@@ -91,6 +91,12 @@ var jitStats struct {
 	glbMiss  uint64
 	elemHit  uint64
 	elemMiss uint64
+	// elemPutHit counts element STORES the emitted chain made, against
+	// elemPutMiss for the ones that left compiled code. Separate from elemHit
+	// because the two are separate decisions: a site can serve every read and no
+	// write, which is exactly what this tier did before the store was emitted.
+	elemPutHit  uint64
+	elemPutMiss uint64
 	genFast  uint64
 	genSlow  uint64
 	// callFast counts calls a compiled call site made in machine code, against
@@ -147,6 +153,9 @@ func JITGlobalStats() (hit, miss uint64) { return jitStats.glbHit, jitStats.glbM
 // JITElementStats is the same for `a[i]`, which has no cache site and a guard
 // chain of its own.
 func JITElementStats() (hit, miss uint64) { return jitStats.elemHit, jitStats.elemMiss }
+
+// JITElementStoreStats is JITElementStats for `a[i] = v`.
+func JITElementStoreStats() (hit, miss uint64) { return jitStats.elemPutHit, jitStats.elemPutMiss }
 
 // JITOperatorStats reports operators compiled without a known operand type, by
 // whether the guard let them take the machine instruction or sent them to the
