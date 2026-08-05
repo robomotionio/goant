@@ -2993,6 +2993,12 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		f := rt.publishFrame(rt.frameDepth)
 		f.args, f.thisVal, f.fnVal = callArgs, tailThis, callee
 		f.fn, f.cl = next, nextCl
+		// publishFrame clears the struct, and a cleared Value is the number zero
+		// rather than undefined — the same fact the locals slab is filled with
+		// undefined for. Every other way into a frame establishes these two; the
+		// tail handover did not, so a direct eval in a tail callee asking for
+		// new.target would have been answered 0.
+		f.varObj, f.newTarget = mkundef(), mkundef()
 		rt.maybeCollect()
 		if !next.isStrict {
 			if tailThis.IsNullish() {
