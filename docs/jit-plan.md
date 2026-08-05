@@ -1726,6 +1726,139 @@ ever a proxy for the thing that matters.
 
 The whole mechanism is now −0.03% on the geomean, which is nothing.
 
+## The element access, and what a corpus can and cannot tell you
+
+Built 5 August: per-site type feedback, and a compiled read and write for a
+TypedArray element. It is the first thing this tier emits from what the program
+DID rather than from what its bytecode says, and the largest number in this
+document — so it needs the honest frame before the table, not after it.
+
+### What it is worth, split rather than averaged
+
+| workload | before | after | |
+|---|---|---|---|
+| zlib | 788 | 2848 | **+261.4%** |
+| mandreel | 925 | 3282 | **+254.8%** |
+| gbemu | 2999 | 4960 | **+65.4%** |
+| pdfjs | 1737 | 1987 | +14.4% |
+| navier-stokes | 3188 | 3340 | +4.8% |
+| regexp | 302 | 307 | +1.7% |
+| code-load | 12092 | 12231 | +1.1% |
+| box2d | 1749 | 1767 | +1.0% |
+| typescript | 4726 | 4739 | +0.3% |
+| crypto | 1680 | 1682 | +0.1% |
+| earley-boyer | 958 | 953 | −0.5% |
+| richards | 1373 | 1365 | −0.6% |
+| raytrace | 646 | 640 | −0.9% |
+| deltablue | 902 | 891 | −1.2% |
+| splay | 2515 | 2483 | −1.3% |
+
+**zlib, mandreel and gbemu: +176.8% geomean. The other eleven workloads with no
+typed arrays in them: +0.39% geomean — which is zero.** pdfjs is separated from
+both because it is neither asm.js nor typed-array-free: it has 95 typed-array
+uses for its byte streams, and it moved 14.4%.
+
+The all-fifteen geomean is +24.0% and **that number should not be quoted**. It
+is one narrow shape of code averaged with eleven workloads it did not touch, and
+reporting it that way would say something about JavaScript that is not true.
+
+The five small negatives are noise, and the corpus says how much noise it has:
+navier-stokes scored 3188, 3413 and 3340 across three runs of code that does not
+contain a typed array. A ±1.3% band sits inside that. It was checked separately
+rather than assumed — the same three workloads run with the tier OFF, where the
+only change is the interpreter recording feedback it will never be asked for,
+scored 240/241/242 against 245/241/244 on deltablue, 213/214/207 against
+212/207/208 on richards, and 830/829/825 against 841/845/838 on box2d. No tax.
+
+### Why the corpus over-weights it
+
+zlib, mandreel and gbemu are emscripten and asm.js output. They index
+`Int32Array` and `Uint8Array` because they are compiled C, not because that is
+how the language is written, and three of Octane's fifteen workloads are
+substantially the same program. Octane is also old: those benchmarks arrived
+when asm.js was the interesting thing, and a modern corpus would weight this
+lower. Business logic, JSON munging, string work and DOM-ish code never come
+near this path.
+
+So this is the largest measured cost in the corpus AND a narrow one, and both
+halves of that are true at once.
+
+### What it does not touch, measured rather than asserted
+
+The exits are the check, not the scores. If the generic-code shape had moved,
+`getfield` and `callmethod` would have moved with it:
+
+| workload | before | after |
+|---|---|---|
+| typescript | getfield 53.7%, callmethod 19.1% | getfield 53.7%, callmethod 19.1% |
+| box2d | getfield 80.2% | getfield 80.2% |
+| deltablue | getfield 66.3%, callmethod 15.2% | getfield 66.3%, callmethod 15.2% |
+| richards | callmethod 71.2% | callmethod 71.2% |
+| crypto | putelem 81.5% (72,085,742) | putelem 81.5% (72,085,742) |
+
+Identical, to the count on crypto. Property access and method dispatch are what
+ordinary application code is made of, and none of this reached them. Crypto is
+the sharpest version: it is hand-written JavaScript whose largest exit is an
+element STORE, the store was built, and crypto got nothing — because its arrays
+are ordinary ones and only the view's store was emitted. That is item 0a.
+
+What DID move, on the workloads it was aimed at:
+
+| zlib | before | after |
+|---|---|---|
+| element reads served | 6,059 of 2,128,486,098 — 0.0% | 2,116,391,883 — **99.4%** |
+| exits from compiled code | 2,889,902,273 | **71,141,642** |
+| `putelem` exits | 705,373,242 | 2,998,435 |
+
+Forty-fold fewer exits.
+
+### The defence, and where it stops
+
+Three things make this the right next step even granted all of the above.
+
+The mechanism generalises where the workload does not. What was actually built
+is per-site type feedback: the interpreter records what a site saw, the compiler
+emits code specialised to it, a guard sends everything else to the runtime. That
+is the machinery the optimising tier is, and element access is only its first
+customer. The record is deliberately receiver-CLASS aware rather than
+kind-only — `elemKindArr`, a typed kind, or polymorphic — which is the same
+shape a monomorphic-receiver speculation or an inlining decision would read.
+Starting instead with unboxed locals would have built something that pays off on
+numeric code and generalises nowhere.
+
+The `bufPtr` half is not JIT work at all and helps every typed-array user,
+including `Uint8Array` traffic arriving through the embedding API, which is how
+hosts actually use this engine.
+
+And the store half WOULD be broad — for a fast array. It is not built.
+
+Where it stops is item 4 of the standing plan, and nothing here has moved it: the
+generic shape is `getfield` and `callmethod`, and what deletes those is inlining,
+because it deletes frame setup for small callees. **The test after this is not
+Octane's geomean. It is whether `getfield`/`callmethod` exits fall on box2d,
+deltablue and typescript.** If the next piece of work is chosen by counting
+zlib's exits again, the corpus has captured the roadmap.
+
+### Two things the building found
+
+`GOANT_JIT_THRESHOLD=1` does not exercise any of this, and that is worth
+knowing because it is how the corpus is normally made to test the tier. At 1 a
+function is compiled before its body has run even once, so no site has a record,
+every site gets the fast-array chain, and a suite run that way is green without
+the new code having been reached. Measured, not reasoned: the chain serves 0.0%
+of a typed-array loop at threshold 1 and 100.0% at threshold 2. The gate for
+feedback-driven emission is threshold **2**.
+
+The store shares the read's guard chain rather than copying it, so the two
+cannot come to disagree about the bound — and sharing it cost exactly one bug,
+which is why the sharing function now refuses aliased registers instead of
+emitting for them. The store was first given the same register as both the index
+and the address; the closing LEA then scaled the buffer pointer by the element
+size instead of the index. That is a fault at a wild address, not a wrong answer,
+and the unit tests found it immediately — but a panic in the emitter is strictly
+better than discovering it in generated code, on the same argument jitasm makes
+about branching to an unbound label.
+
 ## Still to do
 
 Rewritten 4 August, after the compiled call and the second backend.
@@ -1764,9 +1897,32 @@ arithmetic is already emitted. What is not emitted is `a[i]`.
 | deltablue | 16M | getfield 66.3% | callmethod 15.2% |
 | richards | 3.8M | callmethod 71.2% | putelem 17.7% |
 
-0. **`a[i]` on a typed array, which the emitted guard chain rejects at its first
-   instruction.** The chain serves 100% of crypto's element reads and 98.6% of
-   NavierStokes's, and 6,059 of zlib's 2,128,486,098 — 0.0%. The reason is
+0. ~~**`a[i]` on a typed array**~~ — **built, 5 August**, read and store both. See
+   "The element access, and what a corpus can and cannot tell you" below for what
+   it was worth and what it was not. The reasoning that chose it is kept as item
+   0b, because the method is the transferable part.
+
+0a. **`a[i] = v` on a FAST ARRAY, which is still emitted for nothing.** The
+   typed-array store landed and crypto did not move by one count: 72,085,742
+   `putelem` exits before and 72,085,742 after, 81.5% of its total both times.
+   Crypto's arrays are ordinary ones.
+
+   This is the half of the element store that is about JavaScript people write
+   rather than JavaScript a compiler emitted, and none of it has been done. It is
+   harder than the view's store was easy, and precisely in the places the view's
+   store had nothing: the slot has to be writable and the array extensible, a
+   store past the end grows the storage and moves the length, a store into a hole
+   differs from a store over a value, and the value IS a Value — so it is the
+   first element write needing the invocation-dirty pair maintained from machine
+   code, which `jitEmitNoteSharedMutation` already does for a property store.
+
+   The measured prize, from the same profile: `setElementR` is 11.3% of crypto,
+   14.4% of zlib, 18.0% of mandreel, 11.9% of gbemu. The first is the one that
+   matters for the argument, being the one that is not asm.js.
+
+0b. **The reasoning that chose item 0, kept because the method transfers.** The
+   fast-array chain served 100% of crypto's element reads and 98.6% of
+   NavierStokes's, and 6,059 of zlib's 2,128,486,098 — 0.0%. The reason was
    `jitEmitTagCheck(a, recv, TArr, slow)`: a typed array is not a fast array, so
    every read of one is a helper round trip. Measured rather than reasoned:
    **100.0% of the element-read misses in zlib, mandreel and gbemu have a
