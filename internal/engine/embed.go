@@ -505,7 +505,7 @@ func (rt *Runtime) NewUint8Array(b []byte) Value {
 	o.shape = rt.newShape()
 	o.typeTag = TTypedArray
 	o.flags.extensible = true
-	o.ta = &typedArray{buf: buf, kind: taUint8, length: len(b)}
+	o.ta = rt.newTAView(buf, taUint8, 0, len(b), false)
 	return mkval(TTypedArray, uint64(h))
 }
 

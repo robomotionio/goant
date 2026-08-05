@@ -48,11 +48,54 @@ var taKinds = []taInfo{
 }
 
 type typedArray struct {
-	buf        Value // backing ArrayBuffer value (for .buffer); bytes are read
-	kind       taKind
+	buf Value // backing ArrayBuffer value (for .buffer); bytes are read
+
+	// bufPtr is buf resolved once, for the same reason object.clPtr is: the
+	// handle is what the collector traces, but every element access resolved it
+	// again, and a pool lookup is a chunk index and two dependent loads. The
+	// profile put objPtr at 15.9% of zlib, most of it this.
+	//
+	// Safe to hold as a Go pointer because a pool cell never moves once issued —
+	// chunks are appended and existing ones stay put, which is the same fact
+	// jitEmitResolve depends on — and because buf keeps the cell reachable, so
+	// the object cannot be freed underneath it. buf is written once at
+	// construction and never reassigned, which is what keeps the two in step.
+	bufPtr *object
+
 	byteOffset int
-	length     int  // fixed element length (ignored when track is set)
-	track      bool // length-tracking view over a resizable buffer
+	length     int // fixed element length (ignored when track is set)
+
+	kind  taKind
+	track bool // length-tracking view over a resizable buffer
+
+	// jitKind is the one thing compiled code guards on: the element kind plus
+	// one for a view it can read and write in machine code, and zero for one it
+	// cannot. Zero covers a length-tracking view, whose length is recomputed
+	// from the buffer on every access; a BigInt view, whose elements are
+	// allocated *big.Ints rather than doubles; and Float16, which no instruction
+	// widens. Deciding it here rather than in the emitter means one predicate in
+	// one place, and means a view built by some future path that skips
+	// newTAView is refused by default rather than read wrongly.
+	jitKind uint8
+}
+
+// newTAView builds a view and derives what compiled code needs from it.
+//
+// Every typedArray goes through here so that bufPtr and jitKind cannot drift
+// from the fields they are derived from.
+func (rt *Runtime) newTAView(buf Value, kind taKind, byteOffset, length int, track bool) *typedArray {
+	t := &typedArray{
+		buf:        buf,
+		bufPtr:     rt.objPtr(buf),
+		byteOffset: byteOffset,
+		length:     length,
+		kind:       kind,
+		track:      track,
+	}
+	if !track && !isBigIntKind(kind) && kind != taFloat16 {
+		t.jitKind = uint8(kind) + 1
+	}
+	return t
 }
 
 type dataView struct {
@@ -222,7 +265,7 @@ func float16ToFloat64(h uint16) float64 {
 // if detached). Views never cache the slice: a resizable buffer's resize()
 // re-slices abuf in place, so reading it fresh keeps length-tracking correct.
 func (rt *Runtime) taBytes(t *typedArray) []byte {
-	if b := rt.objPtr(t.buf); b != nil {
+	if b := t.bufPtr; b != nil {
 		return b.abuf
 	}
 	return nil
@@ -234,7 +277,7 @@ func (rt *Runtime) taDetached(o *object) bool {
 	if o == nil || o.ta == nil {
 		return false
 	}
-	b := rt.objPtr(o.ta.buf)
+	b := o.ta.bufPtr
 	return b == nil || b.abuf == nil
 }
 
@@ -247,7 +290,7 @@ func (rt *Runtime) taOutOfBounds(o *object) bool {
 	if t == nil {
 		return true
 	}
-	b := rt.objPtr(t.buf)
+	b := t.bufPtr
 	if b == nil || b.abuf == nil {
 		return true
 	}
@@ -269,8 +312,7 @@ func (rt *Runtime) taCurrentLen(o *object) int {
 		return 0
 	}
 	if t.track {
-		b := rt.objPtr(t.buf)
-		return (len(b.abuf) - t.byteOffset) / t.size()
+		return (len(t.bufPtr.abuf) - t.byteOffset) / t.size()
 	}
 	return t.length
 }
@@ -286,7 +328,7 @@ func (rt *Runtime) taFixedLength(o *object) bool {
 	if t.track {
 		return false
 	}
-	b := rt.objPtr(t.buf)
+	b := t.bufPtr
 	return b == nil || !b.abResizable
 }
 
@@ -492,7 +534,7 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 	switch {
 	case hasLengthArg:
 		buf := rt.newArrayBuffer(lengthArg * size)
-		o.ta = &typedArray{buf: buf, kind: kind, length: lengthArg}
+		o.ta = rt.newTAView(buf, kind, 0, lengthArg, false)
 	case a0.IsObjectType() && rt.objPtr(a0) != nil && rt.objPtr(a0).abObj:
 		// InitializeTypedArrayFromArrayBuffer. The brand check (abObj) also matches
 		// a detached buffer, so it takes this branch and throws the detached
@@ -516,13 +558,14 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 			return mkundef(), rt.typeError("Cannot construct a TypedArray over a detached ArrayBuffer")
 		}
 		bufLen := len(bo.abuf)
-		ta := &typedArray{buf: a0, kind: kind, byteOffset: offset}
+		var viewLen int
+		var track bool
 		switch {
 		case lenArg.IsUndefined() && bo.abResizable:
 			if offset > bufLen {
 				return mkundef(), rt.rangeError("Start offset is outside the bounds of the buffer")
 			}
-			ta.track = true
+			track = true
 		case lenArg.IsUndefined():
 			if bufLen%size != 0 {
 				return mkundef(), rt.rangeError("Byte length of buffer is not a multiple of the element size")
@@ -530,14 +573,14 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 			if offset > bufLen {
 				return mkundef(), rt.rangeError("Start offset is outside the bounds of the buffer")
 			}
-			ta.length = (bufLen - offset) / size
+			viewLen = (bufLen - offset) / size
 		default:
 			if offset+newLen*size > bufLen {
 				return mkundef(), rt.rangeError("Invalid typed array length")
 			}
-			ta.length = newLen
+			viewLen = newLen
 		}
-		o.ta = ta
+		o.ta = rt.newTAView(a0, kind, offset, viewLen, track)
 	default:
 		// Object source (22.2.5.1.3): read @@iterator via GetMethod (a present but
 		// non-callable iterator is a TypeError). A defined iterator drives
@@ -612,7 +655,7 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 			}
 		}
 		buf := rt.newArrayBuffer(len(items) * size)
-		o.ta = &typedArray{buf: buf, kind: kind, length: len(items)}
+		o.ta = rt.newTAView(buf, kind, 0, len(items), false)
 		if isBigIntKind(kind) {
 			for i, it := range items {
 				bi, e := rt.toBigInt(it)
@@ -2491,6 +2534,6 @@ func (rt *Runtime) newTypedArrayView(t *typedArray, start, length int) uint32 {
 	o.shape = rt.newShape()
 	o.typeTag = TTypedArray
 	o.flags.extensible = true
-	o.ta = &typedArray{buf: t.buf, kind: t.kind, byteOffset: t.byteOffset + start*t.size(), length: length}
+	o.ta = rt.newTAView(t.buf, t.kind, t.byteOffset+start*t.size(), length, false)
 	return uint32(h)
 }
