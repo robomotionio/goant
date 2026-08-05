@@ -1780,17 +1780,48 @@ arithmetic is already emitted. What is not emitted is `a[i]`.
    guard the read needs beyond a fast array's is small: the view is not
    detached, and the element kind is the one compiled for.
 
-   That last clause is the whole design question, because no kind dominates:
-   zlib is 53% Int32, mandreel 50% Uint16, gbemu 67% Uint8, with six kinds
+   That last clause looked like the design question, because no kind dominates a
+   workload: zlib is 53% Int32, mandreel 50% Uint16, gbemu 67% Uint8, six kinds
    between them (Int8, Uint8, Int16, Uint16, Int32, Float32). Emitting one kind
-   for every site captures about half. Emitting all six inline is forty
-   instructions on a path that runs two billion times. So it wants a *per-site*
-   record of the kind that site has been seeing — which is the first thing in
-   this tier that would be compiled from type feedback rather than from the
-   bytecode or from a shape cache, and it is what the bail above exists to make
-   safe. Whether a site is monomorphic in its kind is an inference from the
-   workload numbers rather than a measurement; the per-site count is the next
-   thing to take.
+   for every site would capture about half; emitting all six inline is forty
+   instructions on a path that runs two billion times.
+
+   **Counted per site, it is not a question at all.** Every element-read site in
+   all three workloads sees exactly one kind:
+
+   | | misses | sites | at single-kind sites |
+   |---|---|---|---|
+   | zlib | 2,128,480,034 | 791 | **100.0%** |
+   | mandreel | 192,858,491 | 1,673 | **100.0%** |
+   | gbemu | 18,610,223 | 116 | **100.0%** |
+
+   2,580 sites and not one polymorphic. So a site needs a record of the kind it
+   has been reading and one emitted load — not a dispatch — and that record is
+   the first thing in this tier compiled from **type feedback** rather than from
+   the bytecode or from a shape cache. Which is what phase 1 asked for, arrived
+   at by counting rather than by assuming.
+
+   The shape of it:
+
+   - `svFunc` grows a lazily allocated `[]uint8` indexed by bytecode offset, one
+     byte per code byte, holding kind+1 (zero for a site not yet seen, and a
+     sentinel for one that has seen two). Indexed by ip rather than by a site
+     number because OpGetElem has no operand to spare and adding one is a
+     bytecode format change for a table that costs a byte per opcode byte.
+   - The interpreter records it, which is where the property caches are filled
+     too, and for the same reason: a function reaches the compiler only after
+     the interpreter has run it. With the threshold at 8 a site has run seven
+     times before it is compiled.
+   - The emitter reads it and emits the tag check for `TTypedArray`, the resolve,
+     `t.track == 0`, `t.kind == K`, the integer-key test the fast-array chain
+     already has, `idx < t.length`, and one load — `MovzxRegMem8` for a byte
+     kind, `Mov32RegMem` + `MovsxdRegReg` for Int32, and so on. No new encoder
+     instructions are needed for the integer kinds; Float32 wants a cvtss2sd.
+   - A site whose kind was never recorded keeps today's behaviour exactly.
+
+   The detached check is the one that cannot be skipped: a detached buffer keeps
+   its length but loses its bytes, so the bound has to come from the byte slice
+   rather than from `t.length` alone.
 
 1. **The site that gives up, and the half of it that is still on the table.**
    Half of this item has been built — `icMissLimit`, see below — and what remains
