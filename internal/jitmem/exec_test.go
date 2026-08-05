@@ -35,9 +35,15 @@ func TestExecContextLayout(t *testing.T) {
 		{"Nest", unsafe.Offsetof(c.Nest), CtxOffNest},
 		{"NLocals", unsafe.Offsetof(c.NLocals), CtxOffNLocals},
 		{"Deep", unsafe.Offsetof(c.Deep), CtxOffDeep},
-		{"BailIP", unsafe.Offsetof(c.BailIP), CtxOffBailIP},
 		{"Locals", unsafe.Offsetof(c.Locals), CtxOffLocals},
-		{"Locals end", unsafe.Offsetof(c.Locals) + 8*InlineLocals, CtxSize},
+		// BailIP sits past Locals on purpose — see its comment. Checking that it
+		// begins exactly where Locals ends is what keeps it there: a field
+		// inserted between the two would move every frame's variables, which is
+		// a cost rather than a wrong answer and so shows up in a benchmark
+		// rather than in a test.
+		{"Locals end", unsafe.Offsetof(c.Locals) + 8*InlineLocals, CtxOffBailIP},
+		{"BailIP", unsafe.Offsetof(c.BailIP), CtxOffBailIP},
+		{"BailIP end", unsafe.Offsetof(c.BailIP) + 8, CtxSize},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s at %d, ABI says %d", tc.name, tc.got, tc.want)
