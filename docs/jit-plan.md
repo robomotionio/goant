@@ -1668,15 +1668,6 @@ throw behaves identically either way. The handlers in force at any point are
 compile-time knowledge and could be handed over as a small table; that is real
 work, and it belongs with the first speculation that wants to guard inside a try.
 
-**A function that can bail is given no machine entry.** A frame a compiled call
-site opened lives in a context and nothing else — no `vmFrame`, no locals slab,
-no interpreter below it — so there is nowhere to hand it back to. Such a function
-is entered the long way instead. This is the one part of the mechanism with a
-price rather than a limitation: speculating in a function costs it the compiled
-call, which is worth up to 66% on the call-heavy workloads. Closing it means
-giving a site-entered frame something to be resumed into, and that is the next
-piece of this rather than a detail of it.
-
 **A frame that has bailed does not re-enter compiled code.** The loop below would
 enter at the same header, meet the same failing guard and hand back again, a Go
 frame deeper each time. Refusing is also what a real tier does — the standing
@@ -1686,6 +1677,54 @@ there is an assumption to drop.
 Nothing emits a bail yet outside the test knob. This is the mechanism, built and
 proved — and it is what the "type feedback" line at the bottom of this document
 has been waiting on since phase 1 was written down.
+
+### The frame a call site opened
+
+A frame the runtime entered has an interpreter underneath it already: runFrameBody
+is on the Go stack below, holding the locals slab, the operand buffer and the
+published `vmFrame`. A frame a compiled call site opened has none of that. It
+lives in a context and nothing else, and that is not an oversight — building no
+frame is most of what makes the compiled call worth what it is worth.
+
+The first answer was to withhold the machine entry from any body that could bail,
+which is correct and useless: it means speculating in a function costs that
+function its compiled call, up to 66% on the workloads that call most. Trading a
+measured 66% for a guard that is meant never to fail is a bad trade in every
+case, so the mechanism was not finished until this was closed.
+
+`jitBailSiteFrame` builds the frame instead — publish, copy the context's locals
+into a slab, resume — and hands the answer back the way an ordinary return does:
+into the caller's `Ret`, resuming at the address it saved on the way out. The
+caller is machine code suspended mid-call and cannot tell the difference. What
+makes the copy sound is the same predicate that allows the compiled call at all:
+`jitMachineCallable` refuses a body whose locals can outlive it, so nothing
+aliases them, and refuses `arguments`, so nil is an honest argument list.
+
+### What its existence cost, twice, before it emitted anything
+
+Both of these were found by benchmarking a feature that compiles to nothing —
+`jitBailAt` is −1 in production, so no bail is emitted and no entry withheld —
+and both were about what the *possibility* cost the common path. Together they
+were 1.1% of the Octane geomean.
+
+**A rare exit must not be given a case on the dispatch every common exit takes.**
+`case ExitBail:` in the run loop's switch widened its range from 0–4 to 0–6,
+which is enough to change how Go compiles it. The workloads that lost most were
+the ones that leave compiled code most often — NavierStokes 3.2%, zlib 2.7%,
+mandreel 2.3%, gbemu 2.1% — which is what pointed at the dispatch rather than at
+anything a bail does. Testing it inside `default:`, with the body out of line,
+recovered gbemu, zlib and mandreel outright.
+
+**A field added ahead of `Locals` moves every frame's variables.** `BailIP` sat
+between `Deep` and `Locals` and pushed the locals array from offset 416 to 424,
+so a function with four of them began straddling the 448 cache-line boundary it
+used to sit inside. That was the residual: NavierStokes 2.3%, box2d 1.2%.
+Appending it past `Locals` leaves every offset generated code compiles against
+exactly where it was, and NavierStokes came back to +0.3%. The layout test now
+asserts `Locals` ends where `BailIP` begins, because "Locals is last" was only
+ever a proxy for the thing that matters.
+
+The whole mechanism is now −0.03% on the geomean, which is nothing.
 
 ## Still to do
 
