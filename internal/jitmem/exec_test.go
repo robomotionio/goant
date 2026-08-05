@@ -35,6 +35,7 @@ func TestExecContextLayout(t *testing.T) {
 		{"Nest", unsafe.Offsetof(c.Nest), CtxOffNest},
 		{"NLocals", unsafe.Offsetof(c.NLocals), CtxOffNLocals},
 		{"Deep", unsafe.Offsetof(c.Deep), CtxOffDeep},
+		{"BailIP", unsafe.Offsetof(c.BailIP), CtxOffBailIP},
 		{"Locals", unsafe.Offsetof(c.Locals), CtxOffLocals},
 		{"Locals end", unsafe.Offsetof(c.Locals) + 8*InlineLocals, CtxSize},
 	} {

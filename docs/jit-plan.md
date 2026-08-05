@@ -1583,6 +1583,101 @@ between the two arms is empty on amd64 and on arm64. Two tests fail interpreted
 and pass compiled, both about `arguments` — those are interpreter bugs, and they
 are on the list below rather than in this section.
 
+## Handing a frame back partway
+
+Everything above this line is a tier that can only be right. It has two ways to
+end a frame — produce the answer, or decline the arguments before running a
+single instruction — and both are total, so every assumption it makes has to be
+one an entry guard can check. That is the constraint behind the shape of the
+analyses: `jitNumericLocals` is a proof over the whole body rather than a guess
+about the common case, because a local that is a Number nine hundred times and a
+String once has nowhere to put the discovery. The String has to be compiled for.
+
+A bail is the third ending. The frame stops where it is, says which bytecode
+instruction it stopped before, and the interpreter carries it the rest of the
+way. What it buys is the right to be wrong, which is the whole of what separates
+a template tier from an optimising one: code can be emitted for what the program
+has actually been doing, behind a check that costs a compare, and the case it was
+not written for stops being a reason to refuse the function.
+
+**It turned out to cost one number.** The reason is the value representation, and
+this is the payment for the decision two thousand lines above: a Value is a
+NaN-boxed integer whether the interpreter wrote it or compiled code did, and both
+address the frame's locals as one flat array. So there is no state to translate
+on the way out — no register map, no unboxing, no per-site descriptor. The whole
+description of a bail point is its bytecode offset, and the work at run time is
+spilling the two or three operands that were in registers, which is the first
+half of the call-out sequence that was already there.
+
+The Go side is four lines longer than that suggests, and the four lines are the
+interesting part. A frame is not only its locals and its operand stack: it also
+has a `with` chain, a variable object, a new.target and a set of open upvalues,
+and a compiled frame keeps all of those in the *published* frame — which is where
+the collector looks — while the interpreter keeps them in Go locals it computed
+at entry. A resumed frame has to take the first and discard the second.
+
+Getting that backwards is what the sweep below caught, and it is worth writing
+down because it looked right. The resume read those fields out of the published
+frame — after calling `syncFrame`, which writes them *into* the published frame
+out of the very Go locals being replaced. So the resume faithfully restored the
+values entry had computed: the `with` chain the body had since moved on from, and
+a new.target the compiled entry had already consumed. Five test262 tests failed;
+none of the twelve unit programs did, because none of them had a chain that
+moves.
+
+### Testing the thing that is never supposed to happen
+
+A bail cannot be tested where it will be used. Every real one sits behind a guard
+written not to fail, so the paths that matter are the ones no corpus reaches —
+and it fails quietly, because a handover that loses an operand or resumes one
+instruction late computes a plausible number rather than crashing.
+
+So the guard is taken out of the question. `GOANT_JIT_BAILAT=<offset>` plants an
+*unconditional* bail before the instruction at that offset in every function
+compiled, which turns "does the handover work" into something that can be swept:
+
+- **Per instruction.** Twelve programs, each run once per offset in its body,
+  every answer required to be the interpreter's bit for bit. 190 offsets.
+- **Per corpus.** The whole `-core` profile, once per offset from 0 to 23, with
+  the tier forced on at threshold 1. Every function in test262 that compiles at
+  all hands itself back mid-body, and 42,739 of 42,740 still pass — the same one
+  that fails without it.
+
+The unit sweep found nothing and the corpus sweep found the ordering bug, which
+is the right way round for a mechanism whose failures are all about state the
+small cases do not have. Both are checks that can fail: dropping the operand
+stack, resuming at `ip+1`, and re-fetching the locals instead of carrying them
+each make the unit sweep fail, and the last of those is why the locals travel in
+the resume rather than being looked up again.
+
+### What it does not cover yet
+
+**A bail inside a `try` is refused at compile time.** The interpreter's handler
+stack is a Go local of `runFrameBody`, and a frame resumed without it would run
+its catch clauses in the wrong place — silently, because a body that does not
+throw behaves identically either way. The handlers in force at any point are
+compile-time knowledge and could be handed over as a small table; that is real
+work, and it belongs with the first speculation that wants to guard inside a try.
+
+**A function that can bail is given no machine entry.** A frame a compiled call
+site opened lives in a context and nothing else — no `vmFrame`, no locals slab,
+no interpreter below it — so there is nowhere to hand it back to. Such a function
+is entered the long way instead. This is the one part of the mechanism with a
+price rather than a limitation: speculating in a function costs it the compiled
+call, which is worth up to 66% on the call-heavy workloads. Closing it means
+giving a site-entered frame something to be resumed into, and that is the next
+piece of this rather than a detail of it.
+
+**A frame that has bailed does not re-enter compiled code.** The loop below would
+enter at the same header, meet the same failing guard and hand back again, a Go
+frame deeper each time. Refusing is also what a real tier does — the standing
+answer is to recompile without the assumption, which is a thing to build once
+there is an assumption to drop.
+
+Nothing emits a bail yet outside the test knob. This is the mechanism, built and
+proved — and it is what the "type feedback" line at the bottom of this document
+has been waiting on since phase 1 was written down.
+
 ## Still to do
 
 Rewritten 4 August, after the compiled call and the second backend.
@@ -1796,8 +1891,13 @@ support because a back edge already has an empty operand stack and every live
 value in the locals array — the same state the fuel exit resumes from. That case
 is 5.6x.
 
-Phase 1's type feedback is not on this list because this tier guards rather than
-speculates. It moves back up when there is a second tier to feed.
+Phase 1's type feedback was not on this list because this tier guarded rather
+than speculated — an assumption it could not check at entry was an assumption it
+could not make, so feedback had nothing to be spent on. That is what the bail
+above removes, and it is the only thing that was in the way: the tier has read
+its own caches once already (the bounded probe, reverted for other reasons), so
+there is feedback to hand and now somewhere to put it. It moves back up the list
+here.
 
 ## Static coverage, and where it stops
 

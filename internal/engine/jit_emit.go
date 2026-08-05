@@ -208,6 +208,18 @@ type jitCode struct {
 	// before a byte is emitted, because the address of each is compiled into the
 	// code that reads it.
 	sites []jitCallSite
+	// bails says the body can stop partway and ask to be continued in the
+	// interpreter, and it is a restriction on which ways in may be used rather
+	// than a fact about the code.
+	//
+	// A bail needs an interpreted frame underneath it to hand the rest of the
+	// work to, and two of the three ways into compiled code do not build one:
+	// runCompiledFrame skips it deliberately, and a compiled call site never had
+	// one to skip. Both decline a function with this set, so it is entered
+	// through runFrameBody — which is the slower entry, and that is the price of
+	// speculating in a given function until the other two learn to resume as
+	// well.
+	bails bool
 }
 
 // jitHasHandlers reports whether the body installs an exception handler.
@@ -340,6 +352,10 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	nextSite := 0
 
 	a := jitasm.NewAsm()
+	// Whether the body can hand itself back partway. It decides which ways in
+	// this function may be entered by, so it is recorded rather than recomputed
+	// — see jitCode.bails.
+	bails := false
 	bail := a.NewLabel()
 	prologue := a.NewLabel()
 	body := a.NewLabel()
@@ -461,6 +477,28 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			return refuse(why, "undecodable")
 		}
 		spBefore := sp
+
+		// A bail planted by GOANT_JIT_BAILAT: here rather than anywhere else in
+		// the instruction because this is the one point where the operand stack
+		// is exactly what the interpreter would find at this offset — before the
+		// window has moved for what is about to run, and before the template has
+		// written anything.
+		//
+		// A live handler is refused rather than carried. The interpreter's
+		// handler stack is a Go local of runFrameBody, and a frame resumed
+		// without it would run its catch clauses in the wrong place — silently,
+		// because a body that does not throw behaves identically either way. The
+		// handlers in force here are compile-time knowledge and could be handed
+		// over as a small table; that is real work, and it belongs with the first
+		// speculation that wants to guard inside a try rather than here.
+		if thisIP == jitBailAt {
+			if len(live) > 0 {
+				return refuse(why, "bail-inside-try")
+			}
+			jitEmitBail(a, spBefore, thisIP, deepStack)
+			bails = true
+		}
+
 		spAfter := sp - effPop + effPush
 		if spAfter > maxDepth {
 			return refuse(why, "stack-deeper-than-predicted")
@@ -2174,8 +2212,13 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	// live in a context alone — see jitMachineCallable — and for one whose
 	// operand stack is the context's, since a call site has nowhere to put
 	// another.
+	//
+	// Not for a body that can bail. A frame a call site opened lives in a
+	// context and nothing else — no vmFrame, no locals slab, no interpreter
+	// waiting below it — so there is nowhere to hand it back to. Such a function
+	// is entered the long way instead, through a frame that has somewhere.
 	var mentry *jitasm.Label
-	if !deepStack && jitMachineCallable(fn) {
+	if !deepStack && !bails && jitMachineCallable(fn) {
 		nargs := fn.paramCount
 		if nargs > fn.maxLocals {
 			nargs = fn.maxLocals
@@ -2224,7 +2267,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if why != nil {
 		*why = ""
 	}
-	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset()), slots: maxDepth, sites: sites}
+	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset()), slots: maxDepth, sites: sites, bails: bails}
 	if mentry != nil {
 		c.mentry = block.AddrAt(mentry.Offset())
 	}
@@ -2779,6 +2822,38 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 				rt.jitDepth = base
 				rt.dropOpenUpvals(rt.frameDepth)
 				return mkundef(), e, true
+			case jitmem.ExitBail:
+				// A guard failed partway through, so this frame is finished in
+				// the interpreter rather than started again there. See jitbail.go.
+				if d > base {
+					// Unreachable: a body that can bail is given no machine
+					// entry, so no call site can have opened a frame for it, and
+					// a frame that lives in a context alone has no interpreted
+					// one underneath to be handed to. Reported rather than
+					// asserted, because widening that rule must not be able to
+					// turn into a wrong answer.
+					rt.jitDepth = base
+					rt.dropOpenUpvals(rt.frameDepth)
+					return mkundef(), rt.typeError("JIT bail in a machine frame"), true
+				}
+				jitStats.bails++
+				res := &jitResume{ip: int(cur.BailIP), locals: locals}
+				if n := int(cur.StackN); n > 0 {
+					res.stack = make([]Value, n)
+					for i := range res.stack {
+						res.stack[i] = jitSlotAt(cur, i)
+					}
+				}
+				rt.jitDepth = base
+				// The cells this frame captured go with it. The interpreter
+				// takes them over as its own open upvalues, so unlike every
+				// other way out of this loop they are read before they are
+				// dropped rather than merely dropped.
+				open := rt.openUpvalsAt(rt.frameDepth)
+				rt.dropOpenUpvals(rt.frameDepth)
+				res.openUpvals = open
+				v, e := rt.runFrameBody(fn, cl, fnVal, this, args, res)
+				return v, e, true
 			case jitmem.ExitTailCall:
 				if d > base {
 					// Not reachable: jitMachineCallable refuses a body with a

@@ -99,6 +99,12 @@ var jitStats struct {
 	// emitted, and both look like a function that simply calls a lot.
 	callFast uint64
 	callSlow uint64
+	// bails counts frames compiled code handed back partway. Unlike everything
+	// above it this is counted whether or not the diagnostics are on, because it
+	// is not a statistic about a hot path — it is how a test tells a bail that
+	// fired from one that was compiled and never reached, and those look the
+	// same in the answer.
+	bails uint64
 }
 
 func init() { jitStats.enabled = envOn("GOANT_JIT_STATS") }
@@ -144,6 +150,10 @@ func JITOperatorStats() (fast, slow uint64) { return jitStats.genFast, jitStats.
 // JITCallStats reports calls made from compiled code, by whether the call site
 // made them itself or went through the runtime.
 func JITCallStats() (fast, slow uint64) { return jitStats.callFast, jitStats.callSlow }
+
+// JITBailStats reports frames compiled code handed back to the interpreter
+// partway through. See jitbail.go.
+func JITBailStats() uint64 { return jitStats.bails }
 
 // jitOSRThreshold is how many times a loop may go round in the interpreter
 // before the function it is in gets compiled.
@@ -354,6 +364,34 @@ var jitMask = func() uint64 {
 		}
 	}
 	return ^uint64(0)
+}()
+
+// GOANT_JIT_BAILAT=<offset> makes the emitter plant an unconditional bail
+// before the instruction at that bytecode offset in every function it compiles,
+// and −1 (the default) plants none.
+//
+// It exists because a bail is the one thing in the tier that cannot be tested
+// where it is used. Every real bail sits behind a guard that is meant never to
+// fail, so the paths that matter are the ones a corpus does not reach — and a
+// handover that is wrong about the operand stack, or lands one instruction off,
+// produces a plausible answer rather than a crash. Forcing one at a *chosen*
+// point turns that into something a test can sweep: run the same function once
+// per instruction in its body, and every answer has to be the interpreter's.
+//
+// A package variable rather than only an environment variable because the sweep
+// recompiles between runs, and because the same knob then works from a shell for
+// bisecting a real one.
+//
+// Parsed here rather than through envInt, which treats a zero as absent. Zero is
+// the first instruction of every function body, so it is the one offset this
+// must not quietly decline to plant.
+var jitBailAt = func() int {
+	if s := os.Getenv("GOANT_JIT_BAILAT"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil {
+			return v
+		}
+	}
+	return -1
 }()
 
 // jitNameBucket is FNV-1a of the name, folded to one of 64 buckets.

@@ -157,7 +157,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 		}
 	}
 
-	return rt.runFrameBody(fn, cl, fnVal, thisVal, args)
+	return rt.runFrameBody(fn, cl, fnVal, thisVal, args, nil)
 }
 
 // jitCallCompiled is callValue, runFrame, runCompiledFrame and jitTry collapsed
@@ -399,7 +399,12 @@ func (rt *Runtime) publishFrame(depth int) *vmFrame {
 	return f
 }
 
-func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, args []Value) (Value, *ThrowError) {
+// res is a frame compiled code stopped partway through and wants finished here,
+// and nil for the ordinary case of a frame that is starting. See jitbail.go: a
+// resumed frame skips the whole of entry, because entry is what already
+// happened — its locals hold what compiled code wrote and re-seeding the
+// parameters from args would undo it.
+func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, args []Value, res *jitResume) (Value, *ThrowError) {
 	// Frame state, declared up-front so a proper tail call (OP_TAIL_CALL) can reset
 	// it and reuse this Go frame instead of recursing.
 	var (
@@ -418,6 +423,11 @@ func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 		thrown       *ThrowError
 		comp         completion
 		ip           int
+		// bailed says compiled code handed this frame back partway, which is the
+		// one state in which the tier must not be offered it again: the loop
+		// below would enter at the same header, reach the same failing guard and
+		// hand it back once more, a Go frame deeper each time round.
+		bailed bool
 	)
 	// syncFrame publishes the values this frame is holding in Go locals, which
 	// no collector can walk. Called where they are settled: at frame entry,
@@ -526,6 +536,9 @@ func (rt *Runtime) runFrameBody(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 	}
 
 restart:
+	// A tail callee is a fresh function in a reused frame, so whatever the
+	// caller's dealings with the tier were, they are not this one's.
+	bailed = false
 	// OrdinaryCallBindThis for a non-strict function: a nullish `this` becomes the
 	// global object, and a primitive `this` is boxed via ToObject. Strict
 	// functions keep `this` as-is (strict.this-undefined-in-function).
@@ -562,6 +575,42 @@ restart:
 	stack = rt.frameStack(rt.frameDepth, fn.maxStack+16)
 	stack = stack[:cap(stack)]
 	sp = 0
+	if res != nil {
+		// A frame that is already running. Its locals are the array compiled
+		// code has been writing, and everything below — the parameter copy, the
+		// module and script bindings, the with-chain, the tier itself — is entry,
+		// which happened once already and must not happen twice.
+		//
+		// These three are read out of the published frame first, and the order
+		// is the whole of it. A compiled frame keeps its `with` chain, its
+		// variable object and its new.target there — that is where the collector
+		// looks, so that is where they are kept — while the Go locals here still
+		// hold what *entry* computed, which for a resumed frame is a chain the
+		// body has since moved on from, a variable object belonging to the
+		// interpreted attempt that never ran, and a new.target the compiled
+		// entry already consumed. syncFrame writes all three back out of the Go
+		// locals, so reading them afterwards reads what it just destroyed: the
+		// `with` tests and a direct eval's new.target both failed exactly that
+		// way.
+		f := &rt.frames[rt.frameDepth]
+		withStack, varObj, newTarget = f.withStack, f.varObj, f.newTarget
+		locals = res.locals
+		openUpvals = res.openUpvals
+		sp = copy(stack, res.stack)
+		pendingThrow = mkundef()
+		privEnv = nil
+		if cl != nil {
+			privEnv = cl.privEnv
+		}
+		syncFrame()
+		// handlers stays nil: a bail inside a try is refused at compile time,
+		// precisely because this line could not be written truthfully otherwise.
+		ip = res.ip
+		// Consumed. A proper tail call re-enters above this block, and a callee
+		// that arrived that way must not be handed the caller's ip and locals.
+		res, bailed = nil, true
+		goto running
+	}
 	locals = rt.frameLocals(rt.frameDepth, fn.maxLocals)
 	// Parameters occupy the first slots (ant frame arg layout).
 	for i := 0; i < fn.paramCount && i < fn.maxLocals; i++ {
@@ -642,6 +691,7 @@ restart:
 
 	ip = fn.startIP
 
+running:
 	for {
 		if jitStats.enabled {
 			// One bytecode instruction, charged to this function. See
@@ -1742,7 +1792,7 @@ restart:
 				// backward jump is offered: it is the one the compiler emits
 				// with an empty operand stack, so there is nothing here that
 				// would have to be carried across.
-				if jitEnabled && sp == 0 {
+				if jitEnabled && sp == 0 && !bailed {
 					syncFrame()
 					if v, e, ok := jitTryLoop(rt, fn, cl, fnVal, args, locals, thisVal, t); ok {
 						return v, e

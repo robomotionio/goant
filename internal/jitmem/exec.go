@@ -9,7 +9,13 @@ const (
 	ExitReturn  uint64 = iota // the compiled function is done; Ret holds its value
 	ExitHelper                // run Helper with Args, put the result in Ret, resume
 	ExitPreempt               // Go wants this goroutine to yield
-	ExitDeopt                 // a guard failed; fall back to the interpreter
+	// ExitDeopt is the entry guard declining its arguments, and it means
+	// something narrower than its name: nothing has happened yet. The frame has
+	// written no local, called nothing and produced no side effect, so the
+	// runtime is free to forget it entirely and run the function from the top in
+	// the interpreter. That freedom is the whole of what makes it cheap, and it
+	// expires at the first instruction of the body.
+	ExitDeopt
 	// ExitTailCall is a proper tail call: the frame is finished and the spill
 	// area holds the callee, its arguments and — for the method form — the
 	// receiver. It is an exit rather than a helper because the point of a tail
@@ -22,6 +28,27 @@ const (
 	// it and Go has to step out of the way first. Each one saves its operands and
 	// its resume address and returns, and this is the code it returns with.
 	ExitCallout
+	// ExitBail is a guard failing partway through, which is a different thing
+	// from ExitDeopt above and the difference is the whole reason both exist.
+	//
+	// By the time a body is running, forgetting the frame is no longer an
+	// option: locals have been written, calls have been made, and starting the
+	// function again would run every one of those a second time. So this exit
+	// does not discard the frame, it hands it over — BailIP says which bytecode
+	// instruction the interpreter must pick up at, the operand stack is in
+	// Stack[0:StackN] exactly as a call out leaves it, and the locals are
+	// already the array the interpreter reads.
+	//
+	// That last part is not a coincidence and it is what makes this affordable.
+	// A Value is a NaN-boxed integer whether the interpreter wrote it or
+	// compiled code did, and both address the frame's locals as the same flat
+	// array, so there is no state to translate on the way out — no register map,
+	// no boxing, no per-site descriptor beyond the one number in BailIP.
+	//
+	// Nothing emits this yet at the point it was introduced; it exists because
+	// speculation without it is limited to what an entry guard can decide, which
+	// is what had kept the tier to what it could prove statically.
+	ExitBail
 )
 
 // ExecContext is the state that generated code and the runtime share.
@@ -177,6 +204,17 @@ type ExecContext struct {
 	// and a callee compiled for the inline one would write past it. Such a call
 	// takes the old path, which sizes the stack on the way in.
 	Deep uint64
+	// BailIP is the bytecode instruction the interpreter must resume this frame
+	// at, written by generated code immediately before an ExitBail and
+	// meaningless otherwise.
+	//
+	// A bytecode offset rather than a machine address, and that is the point:
+	// the frame is leaving compiled code for good, so what it needs is a place
+	// in the program the interpreter recognises. Resume holds the other kind and
+	// the two are never both live, which is why this is a field of its own
+	// instead — a uintptr that is sometimes an address and sometimes an index is
+	// the sort of thing that reads fine and unwinds into the wrong function.
+	BailIP uint64
 	// Locals is the frame's variables, for a frame compiled code entered on its
 	// own.
 	//
@@ -278,8 +316,9 @@ const (
 	CtxOffNest    = 136 + 8*InlineSlots
 	CtxOffNLocals = 144 + 8*InlineSlots
 	CtxOffDeep    = 152 + 8*InlineSlots
-	CtxOffLocals  = 160 + 8*InlineSlots
-	CtxSize       = 160 + 8*InlineSlots + 8*InlineLocals
+	CtxOffBailIP  = 160 + 8*InlineSlots
+	CtxOffLocals  = 168 + 8*InlineSlots
+	CtxSize       = 168 + 8*InlineSlots + 8*InlineLocals
 )
 
 // Which fields hold a Value, and so must be traced by the runtime's collector
