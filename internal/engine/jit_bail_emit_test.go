@@ -135,45 +135,77 @@ func TestAFrameHandedBackAtAnyPointFinishesTheSame(t *testing.T) {
 	}
 }
 
-// TestABodyThatCanBailGetsNoMachineEntry pins what makes the handover safe.
+// TestACalleeEnteredInMachineCodeCanStillBail is the half of the handover that
+// has no interpreted frame under it.
 //
 // A frame a compiled call site opened lives in a context and nothing else — no
-// vmFrame, no locals slab, no interpreter below it — so there is nowhere to hand
-// it back to. The run loop reports that case rather than asserting it, which
-// means nothing would fail loudly if this stopped being true: the arm would
-// simply start being reached, and a compiled call would begin returning a
-// TypeError about the engine's internals.
-func TestABodyThatCanBailGetsNoMachineEntry(t *testing.T) {
-	// Plain arithmetic on two parameters, which is the shape jitMachineCallable
-	// exists for — so a machine entry without a bail is the control.
-	const src = "function f(a,b){ var t = a*b; return t+a; }"
-	rt, fn := jitFnRT(t, src)
-	_ = rt
+// vmFrame, no locals slab, nothing on the Go stack below it — so finishing one
+// in the interpreter means building the frame first. Withholding the machine
+// entry instead was the first answer, and it was the wrong one: it made
+// speculating in a function cost that function its compiled call.
+//
+// The caller here is machine code suspended mid-call. It must get its answer in
+// Ret and resume where it saved, exactly as if the callee had returned — so the
+// check is that the whole expression is still the interpreter's.
+func TestACalleeEnteredInMachineCodeCanStillBail(t *testing.T) {
+	// The callee is entered in a loop so its site fills and the call is made in
+	// machine code rather than through the runtime; the loop is what makes this
+	// test about the machine call rather than about jitCallCompiled.
+	const src = `function f(n){
+		function g(x,y){ var t = x*y; return t+x; }
+		var s = 0;
+		for (var i = 0; i < n; i = i + 1) { s = s + g(i, 3); }
+		return s;
+	}`
+	want := interpret(t, src, tov(200))
 
+	rt := New()
+	fnVal, err := rt.RunString("bail.js", src+"; f;")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	outer, _ := rt.jitResolveCallee(fnVal)
+	if outer == nil || len(outer.childFuncs) != 1 {
+		t.Fatalf("want f with one inner function")
+	}
+	callee := outer.childFuncs[0]
+
+	// A machine entry for the callee is what the test needs to exist at all.
 	restore := jitBailSettings(true, 1, -1)
-	c := jitCompile(fn, nil)
+	c := jitCompile(callee, nil)
 	restore()
-	if c == nil {
-		t.Fatalf("the control did not compile")
-	}
-	if c.mentry == 0 {
-		t.Fatalf("the control has no machine entry, so this test proves nothing")
-	}
-	if c.bails {
-		t.Fatalf("the control claims it can bail")
+	callee.jit = jitAttempt{}
+	if c == nil || c.mentry == 0 {
+		t.Fatalf("the callee has no machine entry, so this test proves nothing")
 	}
 
-	for _, at := range jitBodyOffsets(t, fn) {
-		restore := jitBailSettings(true, 1, at)
-		c := jitCompile(fn, nil)
-		restore()
-		if c == nil || !c.bails {
-			continue // an offset the emitter declined, or one never reached
+	// The machine-call counter is emitted only when the diagnostics are on, and
+	// it is emitted at compile time — so this has to be set before the runs
+	// below compile anything, not merely before they are read.
+	oldStats := jitStats.enabled
+	jitStats.enabled = true
+	defer func() { jitStats.enabled = oldStats }()
+
+	bails, withCall := uint64(0), 0
+	for _, at := range jitBodyOffsets(t, callee) {
+		before := jitStats.callFast
+		got, n := jitBailRun(t, src, at, []Value{tov(200)})
+		if uint64(got) != uint64(want) {
+			t.Fatalf("callee bail at %d (%s): got %v, interpreter says %v",
+				at, Opcode(callee.code[at]), got.Number(), want.Number())
 		}
-		if c.mentry != 0 {
-			t.Fatalf("a body that can bail at %d was given a machine entry", at)
+		bails += n
+		if n > 0 && jitStats.callFast > before {
+			withCall++
 		}
 	}
+	if bails == 0 {
+		t.Fatalf("no bail fired at all across %d offsets", len(jitBodyOffsets(t, callee)))
+	}
+	if withCall == 0 {
+		t.Fatalf("%d bails fired but never with a machine call live", bails)
+	}
+	t.Logf("%d bails, %d offsets with a machine call live", bails, withCall)
 }
 
 // TestABailInsideATryIsRefused pins the one shape the handover does not cover.
