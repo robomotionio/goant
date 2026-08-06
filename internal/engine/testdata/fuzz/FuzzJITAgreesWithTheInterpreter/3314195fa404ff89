@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("9a\"2XZ728\b+!ba\"2XZ727")

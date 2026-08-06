@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("2\t\x1f\t8\t")
