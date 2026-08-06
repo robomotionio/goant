@@ -617,7 +617,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				a.MovRegImm64(jitRegScratch, uint64(tEmpty))
 				a.CmpRegReg(jitSlot(sp), jitRegScratch)
 				a.Jcc(jitasm.CondNE, ok)
-				if !jitCallHelper(a, sp, jitHelperDeadZone, &fixups, deepStack) {
+				// sp+1: the load above made slot sp live. Benign here in
+				// practice, because the dead-zone helper always throws and a
+				// catch enters with an empty operand stack — but it is the same
+				// shape as the GET_FIELD2 bug, and being right costs one spill.
+				if !jitCallHelper(a, sp+1, jitHelperDeadZone, &fixups, deepStack) {
 					return refuse(why, "stack-too-deep")
 				}
 				a.Bind(ok)
@@ -1742,7 +1746,24 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+16, dst)
 			a.MovRegImm64(jitRegScratch, uint64(idx)|uint64(uint32(icx))<<32)
 			a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+24, jitRegScratch)
-			if !jitCallHelper(a, sp, jitHelperGetField, &fixups, deepStack) {
+			// sp+1, NOT sp: the copy above already made slot sp live, so the
+			// depth across this call is one more than the depth the instruction
+			// started at.
+			//
+			// With sp, the spill wrote the wrong slot's register into the frame.
+			// jitSlot is regs[i%9], so at depth 9 the copy's register — slot 9's
+			// — IS slot 0's, and jitCallHelper spills windowBase(9)=0 upwards
+			// from registers. Slot 0 had already been evicted to memory correctly
+			// by jitEvictSlots; the helper call then overwrote it with the
+			// receiver copy.
+			//
+			// What that looked like: `o.method(...)` whose argument expression
+			// contained another method call at the right depth ran with the INNER
+			// call's receiver. Silent, when the stolen receiver was an ordinary
+			// object — `out.push(x)` writing "0", "1", "length" into a bystander
+			// while the array came up short, no exception anywhere. See
+			// TestAMethodCallGetsTheRightReceiver.
+			if !jitCallHelper(a, sp+1, jitHelperGetField, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.MovRegMem(dst, jitasm.RegCtx, jitmem.CtxOffRet)
@@ -2005,7 +2026,8 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			a.MovRegImm64(jitRegScratch, uint64(tEmpty))
 			a.CmpRegReg(dst, jitRegScratch)
 			a.Jcc(jitasm.CondNE, ok)
-			if !jitCallHelper(a, sp, jitHelperDeadZone, &fixups, deepStack) {
+			// sp+1, for the reason GET_LOCAL's dead-zone check gives.
+			if !jitCallHelper(a, sp+1, jitHelperDeadZone, &fixups, deepStack) {
 				return refuse(why, "stack-too-deep")
 			}
 			a.Bind(ok)

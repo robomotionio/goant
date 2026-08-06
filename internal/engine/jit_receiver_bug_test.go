@@ -4,12 +4,12 @@ package engine
 
 import "testing"
 
-// A method call can be given the wrong receiver, and usually says nothing.
+// A method call must be given the right receiver.
 //
-// SKIPPED BECAUSE IT FAILS. This is a real, unfixed, pre-existing bug in the
-// tier — reproducing at 6e1a135 — and it is here rather than only in
-// docs/jit-fuzz-findings/ so that it is discoverable from the test suite and can
-// be un-skipped the moment it is fixed. Remove the Skip to work on it.
+// FIXED. This was a real, pre-existing bug in the tier — reproducing at
+// 6e1a135 — found by the differential fuzzer and reduced from a generated
+// program to the two cases below. All thirteen of the fuzzer's open findings
+// were this one bug.
 //
 // `o.method(...)` reaches the runtime with something other than `o` when the
 // argument expression contains another METHOD call and the operand stack reaches
@@ -39,10 +39,13 @@ import "testing"
 //     is why `Object.create(...)` and `Object.keys(...)` trigger it (Object is a
 //     function) while `Math.max(...)` does not (Math is not).
 //   - the interpreter is correct at every depth.
+//
+// The cause: GET_FIELD2 copies the receiver up into slot sp and then called the
+// runtime with a depth of sp rather than sp+1. jitSlot is regs[i%9], so slot
+// sp's register IS slot sp-9's — and sp-9 is exactly where jitCallHelper starts
+// spilling registers into the frame. The copy therefore overwrote slot sp-9 in
+// memory, which for `o.m(...)` at that depth is the outer call's receiver.
 func TestAMethodCallGetsTheRightReceiver(t *testing.T) {
-	t.Skip("KNOWN FAILURE: see docs/jit-fuzz-findings/README.md — the tier gives " +
-		"a method call the wrong receiver at certain operand depths")
-
 	for _, tc := range []struct{ name, src string }{
 		// Loud: the stolen receiver is a function, so push raises.
 		{"a function receiver is not stolen", `
