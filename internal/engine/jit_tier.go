@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/robomotionio/goant/internal/jitmem"
 )
 
 // Tiering: when a compiled function is worth having, and when to try.
@@ -127,6 +129,23 @@ func init() { jitStats.enabled = envOn("GOANT_JIT_STATS") }
 // Entries the runtime made. A compiled call site entering a compiled function
 // does not pass through here at all, which is the point of it — JITCallStats is
 // where those are counted, and on a call-heavy program they are most of them.
+// JITCodeMemory reports the executable memory the tier holds: how many blocks
+// are mapped, how many bytes they total, and the high-water mark.
+//
+// This is the number a long-running host has to watch, and the reason it is
+// public rather than diagnostic. Compiled code is NEVER RELEASED — a block has
+// to outlive every entry into it, and nothing here can prove an entry has ended,
+// so a suspended generator or an outer frame of a recursive function would be
+// left holding freed executable memory. A process running one script exits
+// before that matters; one running thousands of different flows over days
+// accumulates a block per hot function, plus one more each time a function is
+// recompiled.
+//
+// "Never freed" is justified. "Unbounded and unmeasured" is not, which is what
+// this closes: a host can sample it, alarm on it, and recycle a Runtime before
+// it becomes a problem.
+func JITCodeMemory() (blocks, bytes, peak int64) { return jitmem.Accounting() }
+
 func JITStats() (compiled, declined, interpreted uint64) {
 	return jitStats.compiled, jitStats.declined, jitStats.interp
 }

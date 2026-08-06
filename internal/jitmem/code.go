@@ -3,6 +3,7 @@ package jitmem
 import (
 	"errors"
 	"os"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -28,6 +29,33 @@ type Block struct {
 	sealed bool   // Protect has run; mem is read+execute
 }
 
+// Code memory is accounted because it is never released.
+//
+// A compiled function's block outlives every entry into it, and nothing in the
+// engine can prove an entry has ended — a suspended generator, a frame a call
+// site opened, an outer frame of a recursive function — so blocks are kept. That
+// is a justified design. What is NOT justified is not knowing how much has
+// accumulated: a process that runs one script exits before it matters, and one
+// that runs thousands of different flows over days does not.
+//
+// So the two numbers a host needs to answer "is this growing without bound" are
+// maintained here rather than estimated from the outside. They are process-wide
+// and atomic because blocks are allocated on whichever goroutine compiled, and a
+// host may run several Runtimes.
+var (
+	liveBlocks atomic.Int64
+	liveBytes  atomic.Int64
+	peakBytes  atomic.Int64
+)
+
+// Accounting reports the code memory this process holds: how many blocks are
+// mapped, how many bytes they total, and the high-water mark. Bytes are the
+// MAPPING size rather than the code written into it, because that is what the
+// process is actually holding.
+func Accounting() (blocks, bytes, peak int64) {
+	return liveBlocks.Load(), liveBytes.Load(), peakBytes.Load()
+}
+
 // Alloc reserves at least size bytes of writable, non-executable memory,
 // rounded up to a whole number of pages.
 func Alloc(size int) (*Block, error) {
@@ -39,6 +67,14 @@ func Alloc(size int) (*Block, error) {
 	mem, err := allocRW(rounded)
 	if err != nil {
 		return nil, err
+	}
+	liveBlocks.Add(1)
+	total := liveBytes.Add(int64(rounded))
+	for {
+		p := peakBytes.Load()
+		if total <= p || peakBytes.CompareAndSwap(p, total) {
+			break
+		}
 	}
 	return &Block{mem: mem}, nil
 }
@@ -106,6 +142,8 @@ func (b *Block) Free() error {
 	if b.mem == nil {
 		return nil
 	}
+	liveBlocks.Add(-1)
+	liveBytes.Add(-int64(len(b.mem)))
 	err := release(b.mem)
 	b.mem, b.n, b.sealed = nil, 0, false
 	return err
