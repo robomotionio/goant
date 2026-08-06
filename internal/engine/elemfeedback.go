@@ -106,6 +106,15 @@ func (rt *Runtime) noteElemKind(fn *svFunc, ip int, recv Value) {
 	}
 }
 
+// elemKindAt is the raw record: elemKindNone, elemKindArr, elemKindPoly, or a
+// TypedArray kind plus one.
+func (fn *svFunc) elemKindAt(ip int) uint8 {
+	if ip >= len(fn.elemKinds) {
+		return elemKindNone
+	}
+	return fn.elemKinds[ip]
+}
+
 // elemKindTyped reports the single TypedArray element kind this site has seen,
 // and whether it saw exactly that and nothing else.
 func (fn *svFunc) elemKindTyped(ip int) (taKind, bool) {

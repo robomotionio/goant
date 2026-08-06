@@ -77,6 +77,12 @@ const (
 	jitOffObjArrCap = jitOffObjArr + 8
 	jitOffObjArrLen = unsafe.Offsetof(object{}.arrLen)
 
+	// A frozen array's elements are non-writable, which is the one attribute an
+	// element STORE has to check and an element read does not. It is a bool in a
+	// run of bools, so it is read a byte at a time — a wider load would pull in
+	// sealed and isExotic and answer yes to any of the three.
+	jitOffObjFrozen = unsafe.Offsetof(object{}.flags) + unsafe.Offsetof(objFlags{}.frozen)
+
 	// A TypedArray view, and through it the bytes it is a window onto. The view
 	// hangs off the object rather than living in it, so an element read is one
 	// more load than a fast array's before any field is reached — and then the

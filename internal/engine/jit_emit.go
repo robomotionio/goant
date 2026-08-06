@@ -1809,9 +1809,11 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 			slow := a.NewLabel()
 			done := a.NewLabel()
 			if sp+jitICElemSpareRegs <= jitStackWindow {
+				obj, idx := jitSlot(sp), jitSlot(sp+1)
 				if kind, ok := fn.elemKindTyped(thisIP); ok {
-					jitEmitPutElemTyped(a, kind, recv, key, val,
-						jitSlot(sp), jitSlot(sp+1), slow, done)
+					jitEmitPutElemTyped(a, kind, recv, key, val, obj, idx, slow, done)
+				} else if fn.elemKindAt(thisIP) == elemKindArr {
+					jitEmitPutElem(a, recv, key, val, obj, idx, slow, done)
 				}
 			}
 			a.Bind(slow)
