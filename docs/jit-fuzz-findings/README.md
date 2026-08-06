@@ -12,50 +12,65 @@ To reproduce one, copy it back and name it:
        internal/engine/testdata/fuzz/FuzzJITAgreesWithTheInterpreter/
     go test ./internal/engine/ -run 'FuzzJITAgreesWithTheInterpreter/<name>'
 
-## What they are
+## All thirteen are one bug: a method call gets the wrong receiver
 
-All 13 are the same shape, and it is a TIER bug rather than a wrong answer in
-the engine: a `TypeError: Cannot assign to read only property 'length'` that the
-interpreter never produces, thrown from `Array.prototype.push` on an array that
-is demonstrably healthy — `writable: true`, not frozen, extensible, and with a
-plausible length — at the moment the surrounding function tiers up.
+**This is reachable in the shipped configuration.** An earlier draft of this file
+said it needed a lowered threshold; that was an artifact of the larger program
+the fuzzer happened to produce. Reduced, it fails at the default threshold of 8.
 
-What is established:
+    var out = [];
+    function f0(a, b) { return a; }
+    function body() { out.push(String(f0(1, f0(1, f0(Object.create({a:9}), 1))))); }
+    for (var r = 0; r < 40; r++) {
+      try { body(); } catch (e) { console.log("FAIL@" + r + ": " + e.message); break; }
+    }
+    console.log("len:", out.length);
 
-- It is **pre-existing**. It reproduces at `6e1a135`, before any of this
-  session's work.
-- It is **threshold-dependent**: fails at `GOANT_JIT_THRESHOLD=1` from the first
-  round and at `2` from round 18, and **passes at the default of 8**. So the
-  shipped configuration does not reach it, which is why nothing had noticed.
-- It is in the **compiled call path**, not the decline path. Declines are
-  identical at every threshold (32); calls the site made itself are not — 81 at
-  threshold 1, 40 at 2, 28 at 8 — and the failure tracks that number.
-- Instrumenting the rejection shows the failing `push` is not on the array the
-  program is building: the state printed at the throw (`n=2`, `arrLen=0`) is
-  inconsistent with the array the program can see (`length: 18`). Something is
-  arriving at `setLengthOrThrow` for an object other than the intended receiver.
+    goant repro.js              # len: 40
+    GOANT_JIT=1 goant repro.js  # FAIL@7: Cannot assign to read only property 'length'
 
-The reading that fits all four is an argument or receiver mismatch on a call a
-compiled site made itself, which `setArrayLengthTo` then answers correctly for
-the wrong object. It has not been proven, and no fix should be written until it
-is: the numbers above are the evidence any candidate has to explain.
+The symptom is a `TypeError` about a read-only `length` from `Array.prototype.push`,
+on an array that is demonstrably healthy — `writable: true`, not frozen,
+extensible. The array is not the problem. Instrumenting `setLengthOrThrow` shows
+the receiver it was handed has **tag 3, T_FUNC**: `push` ran with a function as
+its `this`, and `Function.prototype.length` is non-writable, so the assignment is
+correctly refused for an object that should never have been there.
 
-A reproducer that does not need the fuzzer:
+So this is not a wrong answer about arrays. It is `obj.method(...)` reaching the
+runtime with something other than `obj`.
 
-```js
-var out = [];
-function f0(a, b) { return a; }
-function f1(a, b) { try { return a[b]; } catch (e) { return "E"; } }
-function body(v0, v1) {
-  out.push(String(f0((f1(0, v1) * (v1 * Object.create({a:9}))),
-                     f0((v1 * Object.create({a:9})), f0(Object.create({a:9}), v0)))));
-}
-for (var round = 0; round < 40; round++) {
-  try { body(0, Object.create({a:9})); }
-  catch (e) { out.push("T:" + e.message); }
-}
-console.log(out.slice(15, 21).join(" | "));
-```
+## What the reduction established
 
-    GOANT_JIT=1 GOANT_JIT_THRESHOLD=2 goant repro.js   # TypeErrors from round 18
-    GOANT_JIT=1 goant repro.js                         # clean at the default
+Each of these was checked by removing exactly one thing:
+
+- **Operand depth is required.** The nesting sweep fails at five levels and
+  passes at four. `jitStackWindow` is 9, and the receiver of `push` sits at slot
+  0 — the bottom of the operand stack, which falls out of the register window
+  once the argument expression grows past it. Below the window a slot lives in
+  the frame's memory array, and `jitSpillArgs` reads the receiver from there.
+- **A native call is required.** `Object.create({a:9})` and `Object.keys({a:9})`
+  both trigger it at the deepest position. The plain object literal `{a:9}` in
+  the same position does **not**, and neither does an array literal. So it is the
+  CFunc call path, not the allocation.
+- **The interpreter is correct** at every depth, so this is the tier.
+- **It is pre-existing**, reproducing at `6e1a135`, before any of this session's
+  work.
+
+The reading that fits: a slot below the register window is not written back to
+memory on some path through a native call, so the receiver `jitSpillArgs` reads
+is stale — whatever the register held before, which at that depth is one of the
+callees on the operand stack, hence a function.
+
+That is a hypothesis about WHICH path, not about the shape, and no fix should be
+written until the path is identified. The eviction is driven by the predicted
+stack effect (`jitEvictSlots`, called once per instruction from the depth the
+analysis expects); the same emitter loop has three arms that leave with
+`continue`, and one of those skipping its bookkeeping is exactly the bug that was
+fixed in the catch-stamping this session. That is where to look first.
+
+## Why it matters more than a wrong answer
+
+A method call silently receiving the wrong `this` does not usually raise. Here it
+did, because `push` happened to write `length` and functions refuse that. The
+same corruption on a method that only reads, or writes a normal property, is a
+silently wrong result or a mutation of the wrong object.
