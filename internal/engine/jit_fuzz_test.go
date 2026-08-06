@@ -75,6 +75,17 @@ var fuzzBinOps = []string{
 
 var fuzzUnOps = []string{"-", "+", "!", "~", "typeof ", "void "}
 
+// fuzzProps are the names the prologue actually defines somewhere, plus ones it
+// does not — a miss walks the prototype chain, which is a different emitted path
+// from a hit.
+var fuzzProps = []string{"a", "b", "x", "length", "m", "nope"}
+
+// fuzzHosts are receivers for a method call. Two of them so a site can go
+// polymorphic, which is what makes an inline cache do something interesting.
+var fuzzHosts = []string{"host", "host2"}
+
+var fuzzMethods = []string{"m", "n"}
+
 // fuzzGen turns fuzzer bytes into a program. Deterministic in the bytes, so a
 // failure reproduces from the corpus entry alone.
 type fuzzGen struct {
@@ -114,7 +125,7 @@ func (g *fuzzGen) expr(depth int) string {
 			return fmt.Sprintf("%d", g.next(8))
 		}
 	}
-	switch g.next(9) {
+	switch g.next(18) {
 	case 0:
 		return "(" + g.expr(depth-1) + " " + g.pick(fuzzBinOps) + " " + g.expr(depth-1) + ")"
 	case 1:
@@ -122,7 +133,7 @@ func (g *fuzzGen) expr(depth int) string {
 	case 2:
 		return "(" + g.expr(depth-1) + "[" + g.expr(depth-1) + "])"
 	case 3:
-		return "(" + g.expr(depth-1) + "." + g.pick([]string{"a", "b", "length", "x"}) + ")"
+		return "(" + g.expr(depth-1) + "." + g.pick(fuzzProps) + ")"
 	case 4:
 		return fmt.Sprintf("f%d(%s, %s)", g.next(3), g.expr(depth-1), g.expr(depth-1))
 	case 5:
@@ -130,6 +141,36 @@ func (g *fuzzGen) expr(depth int) string {
 	case 6:
 		return "(typeof " + g.expr(depth-1) + ")"
 	case 7:
+		// A method call: the shape that carries a receiver across an argument
+		// list, which is how the receiver-corruption bug was reachable.
+		return fmt.Sprintf("(%s.%s(%s))", g.pick(fuzzHosts), g.pick(fuzzMethods), g.expr(depth-1))
+	case 8:
+		// An accessor, which turns a property read into a call.
+		return "(acc." + g.pick([]string{"get1", "get2", "boom"}) + ")"
+	case 9:
+		// A closure over a loop variable, invoked immediately.
+		return fmt.Sprintf("((function (p) { return p + %s; })(%s))",
+			g.expr(depth-1), g.expr(depth-1))
+	case 10:
+		// A class instance and a method on it, including one that calls super.
+		return fmt.Sprintf("(new %s(%s).%s())",
+			g.pick([]string{"A", "B"}), g.expr(depth-1), g.pick([]string{"m", "n"}))
+	case 11:
+		// A Proxy, whose traps make every access a call into JavaScript.
+		return "(px." + g.pick(fuzzProps) + ")"
+	case 12:
+		// Spread and destructuring, both of which drive the iterator protocol.
+		return fmt.Sprintf("([...%s].length)", g.pick([]string{"[1,2,3]", "\"ab\"", "new Set([1,2])"}))
+	case 13:
+		return fmt.Sprintf("((function () { var [x, y = %s] = %s; return x; })())",
+			g.expr(depth-1), g.pick([]string{"[1,2]", "[]", "[3]"}))
+	case 14:
+		// A generator driven to completion, bounded.
+		return "((function () { var t = 0; for (var q of gen(3)) t += q; return t; })())"
+	case 15:
+		// eval, which the tier refuses and so exercises the refusal path.
+		return "(ev(" + g.expr(depth-1) + "))"
+	case 16:
 		return "(" + g.expr(depth-1) + ")"
 	default:
 		return g.pick(fuzzValues)
@@ -145,7 +186,7 @@ func (g *fuzzGen) stmt(depth int) string {
 	if depth <= 0 {
 		return fmt.Sprintf("v%d = %s;", g.next(4), g.expr(0))
 	}
-	switch g.next(8) {
+	switch g.next(16) {
 	case 0:
 		return fmt.Sprintf("v%d = %s;", g.next(4), g.expr(depth))
 	case 1:
@@ -170,10 +211,38 @@ func (g *fuzzGen) stmt(depth int) string {
 		// in-range, the end of a three-element array, and past it.
 		return fmt.Sprintf("v%d[%d] = %s;", g.next(4), g.next(8), g.expr(depth-1))
 	case 5:
-		return fmt.Sprintf("v%d.%s = %s;", g.next(4),
-			g.pick([]string{"a", "b", "x"}), g.expr(depth-1))
+		return fmt.Sprintf("v%d.%s = %s;", g.next(4), g.pick(fuzzProps), g.expr(depth-1))
 	case 6:
 		return fmt.Sprintf("out.push(%s);", g.expr(depth-1))
+	case 7:
+		return fmt.Sprintf("out.push(String(%s));", g.expr(depth))
+	case 8:
+		// try/finally, whose unwinding the tier has to get right.
+		return fmt.Sprintf("try { v%d = %s; } finally { v%d = %s; }",
+			g.next(4), g.expr(depth-1), g.next(4), g.expr(depth-1))
+	case 9:
+		// A labelled loop with continue and break, which is control flow the
+		// emitter has to map onto branches rather than onto its own structure.
+		return fmt.Sprintf("L%d: for (var j%d = 0; j%d < %d; j%d++) { if (%s) continue L%d; if (%s) break L%d; v%d = j%d; }",
+			depth, depth, depth, 1+g.next(5), depth, g.expr(depth-1), depth,
+			g.expr(depth-1), depth, g.next(4), depth)
+	case 10:
+		return fmt.Sprintf("switch (%s) { case 1: v%d = 1; break; case %d: v%d = 2; default: v%d = 3; }",
+			g.expr(depth-1), g.next(4), g.next(4), g.next(4), g.next(4))
+	case 11:
+		// A closure that outlives the loop it captured from.
+		return fmt.Sprintf("{ var cs%d = []; for (let q = 0; q < 3; q++) cs%d.push(function () { return q; }); v%d = cs%d[%d](); }",
+			depth, depth, g.next(4), depth, g.next(3))
+	case 12:
+		// Mutating a prototype mid-flight, which retires inline caches.
+		return fmt.Sprintf("proto.%s = %s;", g.pick(fuzzProps), g.expr(depth-1))
+	case 13:
+		// for-in and for-of, both of which allocate iterators.
+		return fmt.Sprintf("for (var k%d in %s) { v%d = k%d; }", depth,
+			g.pick([]string{"({a:1,b:2})", "[1,2]", "px"}), g.next(4), depth)
+	case 14:
+		return fmt.Sprintf("try { for (var w%d of %s) { v%d = w%d; } } catch (e) { out.push('I'); }",
+			depth, g.pick([]string{"[1,2]", "\"ab\"", "new Set([1])", "gen(2)"}), g.next(4), depth)
 	default:
 		return fmt.Sprintf("out.push(String(%s));", g.expr(depth))
 	}
@@ -181,6 +250,13 @@ func (g *fuzzGen) stmt(depth int) string {
 
 // program wraps the generated statements in something hot enough to compile and
 // reports a string that depends on everything it did.
+//
+// The prologue is as much of the language as can be set up deterministically:
+// classes with inheritance, accessors, a Proxy whose traps are real JavaScript,
+// a generator, a closure factory, and an eval. Every one of them is a shape the
+// tier either compiles or has to refuse cleanly, and none of them was reachable
+// by the first version of this generator — which found two tier bugs anyway,
+// both in the only control-flow shape it did cover.
 func (g *fuzzGen) program() string {
 	var body strings.Builder
 	for n := 1 + g.next(6); n > 0; n-- {
@@ -193,6 +269,34 @@ var out = [];
 function f0(a, b) { return a; }
 function f1(a, b) { try { return a[b]; } catch (e) { return "E"; } }
 function f2(a, b) { return (a === b) ? 1 : 0; }
+
+var proto = { a: 1, b: 2 };
+var host = Object.create(proto);
+host.m = function (x) { return x; };
+host.n = function (x) { return this === host ? 1 : 0; };
+var host2 = { m: function (x) { return x; }, n: function () { return 2; }, a: 5, b: 6 };
+
+var acc = {
+  get get1() { return 1; },
+  get get2() { return this.get1 + 1; },
+  get boom() { throw new TypeError("boom"); }
+};
+
+class A { constructor(x) { this.x = x; } m() { return this.x; } n() { return 1; } }
+class B extends A { m() { return super.m() + 1; } n() { return 2; } }
+
+var px = new Proxy({ a: 1, b: 2 }, {
+  get: function (t, k) { return k in t ? t[k] : "P"; },
+  has: function (t, k) { return true; },
+  ownKeys: function (t) { return Reflect.ownKeys(t); },
+  getOwnPropertyDescriptor: function (t, k) {
+    return { value: 1, enumerable: true, configurable: true };
+  }
+});
+
+function* gen(n) { for (var i = 0; i < n; i++) yield i; }
+function ev(x) { try { return eval("x"); } catch (e) { return "V"; } }
+
 function body(v0, v1, v2, v3) {
 %s	return out.length;
 }
@@ -212,14 +316,32 @@ out.length + "|" + out.slice(0, 60).join(",");
 // string. A panic is caught rather than allowed to fail the process, so that the
 // arm that panicked can be reported ALONGSIDE what the other arm answered.
 func fuzzRun(src string, tier bool, threshold int32) (out string) {
+	return fuzzRunAt(src, tier, threshold, -1)
+}
+
+// fuzzRunAt is fuzzRun with a deopt planted before the instruction at bailAt, or
+// -1 for none.
+//
+// The mid-body bail is the least-exercised path in the tier and the one with the
+// most state to get wrong: it hands a half-finished compiled frame back to the
+// interpreter, which then has to carry on from an operand stack, a set of locals
+// and a with-chain that machine code produced. Nothing random reached it before
+// this — GOANT_JIT_BAILAT existed, but only as a sweep someone ran by hand.
+//
+// A third arm costs one more run per input and answers a question the other two
+// cannot: not "does compiled code agree", but "does compiled code agree when it
+// gives up halfway".
+func fuzzRunAt(src string, tier bool, threshold int32, bailAt int) (out string) {
 	defer func() {
 		if r := recover(); r != nil {
 			out = fmt.Sprintf("PANIC:%v", r)
 		}
 	}()
-	wasEnabled, wasThreshold := jitEnabled, jitThreshold
-	jitEnabled, jitThreshold = tier, int32(threshold)
-	defer func() { jitEnabled, jitThreshold = wasEnabled, wasThreshold }()
+	wasEnabled, wasThreshold, wasBail := jitEnabled, jitThreshold, jitBailAt
+	jitEnabled, jitThreshold, jitBailAt = tier, int32(threshold), bailAt
+	defer func() {
+		jitEnabled, jitThreshold, jitBailAt = wasEnabled, wasThreshold, wasBail
+	}()
 
 	rt := New()
 	v, err := rt.RunString("fuzz.js", src)
@@ -259,6 +381,14 @@ func FuzzJITAgreesWithTheInterpreter(f *testing.F) {
 			t.Fatalf("tier disagrees with the interpreter\n--- program ---\n%s\n--- interpreted ---\n%s\n--- compiled ---\n%s",
 				src, interp, compiled)
 		}
+		// And again, giving up partway. The offset comes from the input, so a
+		// failing seed reproduces the same bail point.
+		bailAt := int(b[len(b)-1]) % 64
+		bailed := fuzzRunAt(src, true, 2, bailAt)
+		if interp != bailed {
+			t.Fatalf("tier disagrees with the interpreter when it bails at %d\n--- program ---\n%s\n--- interpreted ---\n%s\n--- bailed ---\n%s",
+				bailAt, src, interp, bailed)
+		}
 	})
 }
 
@@ -278,6 +408,12 @@ func TestJITFuzzSeedsAgree(t *testing.T) {
 		if interp != compiled {
 			t.Errorf("seed %d disagrees\n--- program ---\n%s\n--- interpreted ---\n%s\n--- compiled ---\n%s",
 				i, src, interp, compiled)
+		}
+		for _, at := range []int{4, 11, 18, 25, 40} {
+			if bailed := fuzzRunAt(src, true, 2, at); interp != bailed {
+				t.Errorf("seed %d disagrees when it bails at %d\n--- program ---\n%s\n--- interpreted ---\n%s\n--- bailed ---\n%s",
+					i, at, src, interp, bailed)
+			}
 		}
 	}
 }
