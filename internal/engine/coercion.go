@@ -100,7 +100,10 @@ func (rt *Runtime) toPrimitive(v Value, hint string) (Value, *ThrowError) {
 			if e != nil {
 				return mkundef(), e
 			}
-			if res.IsObjectType() {
+			// IsObjectLike, not IsObjectType: T_TYPEDARRAY is not in tObjectMask,
+			// so a @@toPrimitive that returned a view would be accepted as a
+			// primitive. See ordinaryToPrimitive below for what that cost.
+			if res.IsObjectLike() {
 				return mkundef(), rt.typeError("Cannot convert object to primitive value")
 			}
 			return res, nil
@@ -128,7 +131,22 @@ func (rt *Runtime) ordinaryToPrimitive(v Value, hint string) (Value, *ThrowError
 			if e != nil {
 				return mkundef(), e
 			}
-			if !res.IsObjectType() {
+			// IsObjectLike rather than IsObjectType, and the difference was a
+			// process-killer. Object.prototype.valueOf returns its receiver, so
+			// for a TypedArray this asked "is a view an object?" of a predicate
+			// that answers no — T_TYPEDARRAY is not in tObjectMask — and returned
+			// the view itself as though it were a primitive.
+			//
+			// `6 == new Int16Array([1,2,3])` then recursed in abstractEquals on
+			// unchanged arguments until the Go stack was gone: a fatal error, not
+			// a catchable RangeError, not stoppable by Interrupt. Ordinary
+			// JavaScript, killing the host process.
+			//
+			// The same tag being outside the object mask had already produced a
+			// silent Dirty() failure for every TypedArray write. It is worth
+			// suspecting anywhere IsObjectType guards a "did I get an object
+			// back" question rather than a "which family is this" one.
+			if !res.IsObjectLike() {
 				return res, nil
 			}
 		}

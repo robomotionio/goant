@@ -256,7 +256,7 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (bool, *
 		return false, e
 	}
 	// toJSON: looked up for Objects and (per SerializeJSONProperty) BigInt values.
-	if v.IsObjectType() || v.Type() == TBigInt {
+	if v.IsObjectLike() || v.Type() == TBigInt {
 		if tj, _ := rt.getField(v, "toJSON"); rt.isCallable(tj) {
 			nv, terr := rt.callValue(tj, v, []Value{rt.newString(key)})
 			if terr != nil {
@@ -327,7 +327,10 @@ func (st *jsonStringifier) str(key string, holder Value, indent string) (bool, *
 	case TFunc, TCFunc, TUndef:
 		return false, nil
 	default:
-		if v.IsObjectType() {
+		// IsObjectLike rather than IsObjectType: a TypedArray serialises as an
+		// ordinary object, `{"0":1,"1":2}`. Asking the narrower question dropped
+		// it entirely — JSON.stringify(view) was undefined and {a: view} was {}.
+		if v.IsObjectLike() {
 			// A JSON.rawJSON object emits its [[RawJSON]] text verbatim.
 			if o := rt.objPtr(v); o != nil {
 				if raw := o.getSlot(slotRawJSON); raw.Type() == TStr {
@@ -402,10 +405,16 @@ func (st *jsonStringifier) stringifyObject(v Value, indent string) (bool, *Throw
 	var keys []string
 	if st.hasPropertyList {
 		keys = st.propertyList
-	} else if o.proxy != nil {
+	} else if o.proxy != nil || v.Type() == TTypedArray {
 		// A proxy routes EnumerableOwnPropertyNames through its ownKeys +
 		// getOwnPropertyDescriptor traps; a revoked proxy throws (propagate it
 		// rather than serializing as an empty object).
+		//
+		// A TypedArray comes here for a different reason: its elements are
+		// exotic integer-indexed properties rather than shape entries, so
+		// ownKeysEnumerable — which walks the shape — reports none of them and
+		// every view serialized as {}. enumerableOwnKeysE already knows how to
+		// enumerate one.
 		ek, e := rt.enumerableOwnKeysE(v)
 		if e != nil {
 			return false, e

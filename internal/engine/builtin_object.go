@@ -203,7 +203,11 @@ func (rt *Runtime) initObjectBuiltin() {
 		if o.proxy != nil {
 			return rt.proxyGetPrototypeOf(o.proxy)
 		}
-		if o.proto.IsObjectType() {
+		// IsObjectLike: setPrototypeOf already ACCEPTS a TypedArray as a
+		// prototype, and the chain works — an inherited index read resolves
+		// through it. Reporting null here made getPrototypeOf disagree with the
+		// object it was describing.
+		if o.proto.IsObjectLike() {
 			return o.proto, nil
 		}
 		return mknull(), nil
