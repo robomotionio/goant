@@ -268,3 +268,42 @@ func TestJITFuzzSeedsAgree(t *testing.T) {
 		}
 	}
 }
+
+// The fuzzer is only worth running if its two arms are actually different.
+//
+// jitEnabled is off unless GOANT_JIT is set, and fuzzRun turns it on by hand. If
+// that ever stopped working — a rename, a second gate, a threshold that refuses
+// everything — the differential would compare the interpreter with itself, agree
+// on every input forever, and report a clean campaign. That is a worse outcome
+// than a red one: it is hours of machines saying nothing while looking like
+// evidence.
+//
+// This repo has made exactly that mistake before, in the other direction:
+// GOANT_JIT=0 used to mean ON, because any non-empty value was, and weeks of
+// "Octane is unchanged with the tier on" were measured against the tier.
+//
+// So the arms are checked by counting compiled frames rather than trusted.
+func TestFuzzArmsAreActuallyDifferent(t *testing.T) {
+	was := jitStats.enabled
+	jitStats.enabled = true
+	defer func() { jitStats.enabled = was }()
+
+	// A seed whose program has a loop in it, so there is something to compile.
+	g := &fuzzGen{b: []byte{7, 11, 13, 17, 3, 9}}
+	src := g.program()
+
+	c0 := jitStats.compiled
+	fuzzRun(src, false, 8)
+	c1 := jitStats.compiled
+	fuzzRun(src, true, 2)
+	c2 := jitStats.compiled
+
+	if c1-c0 != 0 {
+		t.Errorf("the interpreted arm compiled %d frames, so the arms are not distinct", c1-c0)
+	}
+	if c2-c1 == 0 {
+		t.Fatal("the compiled arm compiled NOTHING: every campaign this fuzzer has ever " +
+			"run was comparing the interpreter with itself")
+	}
+	t.Logf("interpreted arm: %d frames compiled; tier arm: %d", c1-c0, c2-c1)
+}
