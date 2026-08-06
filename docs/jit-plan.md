@@ -1726,6 +1726,55 @@ ever a proxy for the thing that matters.
 
 The whole mechanism is now −0.03% on the geomean, which is nothing.
 
+## The cache that gave up, and a hypothesis two instruments agreed on
+
+Same day as the element work, and the more useful result of the two — because it
+is worth +57.8% on box2d and +14.4% on DeltaBlue, which are ordinary code, not
+emscripten output.
+
+The question was "what next, after the element chains". The exit counts said
+property access: getfield is 80.2% of box2d's exits, 66.3% of DeltaBlue's, 53.7%
+of TypeScript's, and callmethod 71.2% of Richards'. Item 4 of the standing plan
+says aim speculation at inlining, on the argument that deleting frame setup for
+small callees is what moves those.
+
+**The profile disagreed with the exit counts, and then the miss-reason breakdown
+disagreed with the profile.** Three instruments, each correcting the last.
+
+| workload | wall | `getField` | `shape.lookup` | `jitmem.Enter` | in compiled code |
+|---|---|---|---|---|---|
+| box2d | 2.51 s | 24.7% | 14.9% | 1.2% | 29.4% |
+| typescript | 27.07 s | 13.2% | 18.3% | 1.1% | 22.5% |
+| raytrace | 5.27 s | 15.5% | 7.8% | — | 10.5% |
+| earley-boyer | 11.82 s | 7.6% | 7.9% | 1.5% | 12.6% |
+| deltablue | 2.01 s | 9.3% | 1.5% | 1.0% | 49.0% |
+| richards | 2.00 s | — | — | — | **81.4%** |
+
+Richards is already 81.4% inside compiled code: its callmethod at 71.2% of exits
+— the number that made it look like the inlining case — costs almost nothing.
+DeltaBlue's getfield is 66.3% of its exits and 9.3% of its time, while
+`constructWithTarget` is 23.5%. **Inlining is not what this corpus is waiting
+for**, and the exit counts alone would have said it was.
+
+What the profile did point at was `shape.lookup` — the largest named cost on
+box2d and TypeScript, and on TypeScript larger than `getField` itself, so stores
+reach it too — plus the Go map hashing under it (`aeshashbody` 6.3% on box2d,
+`mapaccess2` 7.2% on TypeScript). That is the inline cache missing, which made
+`icWays = 16` look confirmed: it was already known to be worth +23.4% on box2d,
+and here was ~21% of box2d in cache-miss lookup for it to recover.
+
+**Both instruments were compatible with a hypothesis that was wrong.** Bucketing
+the misses by reason took one run and separated them: "full" — the only state a
+wider cache serves — is 0.6% of box2d's misses and 0.0% on most workloads. The
+answer was that 75.3% of box2d's consults reached a site that had RETIRED. See
+item 1 of "Still to do" for the numbers and the note on `propIC` for why the
+retirement rule was unsound rather than mistuned.
+
+The lesson worth carrying: two instruments agreeing is not confirmation when they
+measure the same thing. Exits and profile both say "property access is expensive
+here"; neither can say why the cache is not serving it, and the fix depended
+entirely on the why.
+
 ## The element access, and what a corpus can and cannot tell you
 
 Built 5 August: per-site type feedback, and a compiled read and write for a
@@ -1979,25 +2028,42 @@ arithmetic is already emitted. What is not emitted is `a[i]`.
    its length but loses its bytes, so the bound has to come from the byte slice
    rather than from `t.length` alone.
 
-1. **The site that gives up, and the half of it that is still on the table.**
-   Half of this item has been built — `icMissLimit`, see below — and what remains
-   is the width.
+1. ~~**The site that gives up**~~ — **resolved 5 August, and not the way this
+   item expected.** The remaining half was supposed to be the WIDTH: `icWays`
+   from 8 to 16 was "the largest single number on this list", +23.4% on box2d and
+   +14.0% on DeltaBlue against -6.5% on EarleyBoyer, wanting a per-site width to
+   collect the win without the memory.
 
-   `icWays` from 8 to 16 is one character and it is the largest single number on
-   this list: **+23.4% on box2d** and **+14.0% on DeltaBlue**, +1.4% geomean. It
-   is also the only thing measured this session that makes a benchmark
-   materially worse, taking 6.5% off EarleyBoyer and 2.7% off TypeScript, and the
-   reason is not the scan — a bounded scan leaves EarleyBoyer at exactly the same
-   914 — but the memory: every site doubles from 320 bytes to 640, and the
-   workloads that lose are the ones that touch the most sites.
+   Width was the wrong lever, and measuring the miss REASON said so in one run.
+   Bucketing every consult that reached the runtime:
 
-   So it wants a width per site rather than a width per build, and the constraint
-   that makes that hard is worth stating: the win needs the extra ways reachable
-   **from machine code**, and the emitted probe reads its ways at a constant
-   address. Anything behind a slice header is a helper round trip, which is the
-   same thing the bounded-scan experiment measured from the other direction. Two
-   pools of sites — narrow and wide, each with its own emitted probe — is the
-   shape that could work.
+   | | consults | hit | empty/retired site | room to spare | **full** |
+   |---|---|---|---|---|---|
+   | box2d | 17.1M | 23.2% | **75.3%** | 0.9% | **0.6%** |
+   | typescript | 51.6M | 6.6% | 41.4% | 49.3% | 2.7% |
+   | deltablue | 10.5M | 22.3% | 30.7% | 46.7% | 0.3% |
+   | raytrace | 7.7M | 62.8% | 0.0% | 37.2% | **0.0%** |
+   | earley-boyer | 0.35M | 61.6% | 0.1% | 38.3% | **0.0%** |
+   | richards | 0.35M | 2.8% | 0.1% | 97.2% | **0.0%** |
+
+   "Full" is the only state a sixteenth way would serve, and it is **0.6% of
+   box2d**. So icWays=16 could never have been winning by caching more — it was
+   winning by delaying retirement, which is a different mechanism with a much
+   cheaper fix.
+
+   Removing retirement outright is +57.8% on box2d, +14.4% on DeltaBlue, +2.8% on
+   TypeScript, **+4.20% geomean**, EarleyBoyer +0.1% rather than -6.5%, and zero
+   memory. See the note on `propIC` for why the rule was wrong rather than merely
+   mistuned — the counter was fed only by accesses the emitted probe had already
+   failed, so it could not observe the hits it was destroying — and for why the
+   "rate" this document asked for is not the answer either.
+
+   **The transferable part is the method.** The exit counts named property access
+   on box2d (getfield 80.2%) and the profile agreed (`shape.lookup` 14.9% plus
+   `aeshashbody` 6.3%), and BOTH were compatible with the width hypothesis that
+   had been on this list for weeks. Only bucketing the reason separated them. Two
+   instruments agreeing is not confirmation when they measure the same thing.
+
 2. **The 1.56 million reads the emitted probe declines that the cache answers
    anyway** — `JITNarrowStats()` counts them, and the guard chain in machine
    code is narrower than `icWay.hit` for a receiver that is not a plain object.
