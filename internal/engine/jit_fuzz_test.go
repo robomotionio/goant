@@ -35,7 +35,10 @@ import (
 //   - is deterministic, because nothing reads the clock, the environment or a
 //     random source, and property enumeration order is the only ordering it can
 //     observe;
-//   - allocates a bounded amount, because sizes are literals too.
+//   - allocates a bounded amount, because sizes are literals too — including
+//     array indices in STORES, which is not a detail: `a[2147483647] = 1` is a
+//     legal, instant-looking statement that grows an array to two billion
+//     entries and makes the program take minutes under both arms.
 //
 // Without those three a disagreement means nothing: a timeout, a clock read or
 // an OOM would differ between the arms for reasons that are not miscompilation.
@@ -155,7 +158,17 @@ func (g *fuzzGen) stmt(depth int) string {
 		return fmt.Sprintf("if (%s) { %s } else { %s }",
 			g.expr(depth-1), g.stmt(depth-1), g.stmt(depth-1))
 	case 4:
-		return fmt.Sprintf("v%d[%s] = %s;", g.next(4), g.expr(depth-1), g.expr(depth-1))
+		// A SMALL literal index, not an expression. The value list contains
+		// 2147483647 and 4294967295 because a compiled element read has to
+		// reject them, and a READ of one is instant — but a STORE to one grows
+		// an array to two billion entries, and the program then runs for minutes
+		// under BOTH arms. That is not a finding, it is the generator wasting a
+		// campaign: two of the first four chunks after the receiver fix died on
+		// exactly this, reported as "hung or terminated unexpectedly".
+		//
+		// The store path still gets index coverage from 0..7, which spans
+		// in-range, the end of a three-element array, and past it.
+		return fmt.Sprintf("v%d[%d] = %s;", g.next(4), g.next(8), g.expr(depth-1))
 	case 5:
 		return fmt.Sprintf("v%d.%s = %s;", g.next(4),
 			g.pick([]string{"a", "b", "x"}), g.expr(depth-1))
