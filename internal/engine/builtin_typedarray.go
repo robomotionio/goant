@@ -425,6 +425,7 @@ func (rt *Runtime) taGet(o *object, i int) (Value, bool) {
 }
 
 func (rt *Runtime) taSet(o *object, i int, v float64) bool {
+	rt.noteSharedMutationOf(o)
 	t := o.ta
 	if t == nil || i < 0 || i >= rt.taCurrentLen(o) {
 		return false
@@ -436,6 +437,7 @@ func (rt *Runtime) taSet(o *object, i int, v float64) bool {
 // taSetBig writes a BigInt element (BigInt64Array / BigUint64Array) as its
 // low-64-bit two's-complement pattern.
 func (rt *Runtime) taSetBig(o *object, i int, v *big.Int) bool {
+	rt.noteSharedMutationOf(o)
 	t := o.ta
 	if t == nil || i < 0 || i >= rt.taCurrentLen(o) {
 		return false

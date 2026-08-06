@@ -51,6 +51,23 @@ func (rt *Runtime) noteSharedMutation(obj Value) {
 	}
 }
 
+// noteSharedMutationOf is noteSharedMutation for a caller holding the object
+// rather than a Value that names it.
+//
+// Two callers need it and neither can use the Value form. An element write
+// reaches its array as an *object, and a TypedArray write cannot go through the
+// Value form at all: IsObjectType() is false for T_TYPEDARRAY — the tag is not
+// in tObjectMask — so noteSharedMutation returns early for every view handed to
+// it, which is how a whole family of writes went unnoticed.
+func (rt *Runtime) noteSharedMutationOf(o *object) {
+	if rt.invWatermark == 0 || rt.invDirty || o == nil {
+		return
+	}
+	if o.self < rt.invWatermark {
+		rt.invDirty = true
+	}
+}
+
 // Dirty reports whether this invocation modified state that predates it, which
 // means the next run on this Runtime would inherit the change.
 //

@@ -199,3 +199,108 @@ func TestSequentialRunsDoNotShareScriptObjects(t *testing.T) {
 		t.Fatalf("an object stored on globalThis leaked to the next run: %q", got)
 	}
 }
+
+// An INDEXED write into an array that predates the invocation is state the next
+// run inherits, exactly as a named one is — and none of them were noticed.
+//
+// The isolation model rests on Dirty(): a host pooling Runtimes recycles one
+// whose invocation reported false. So a write that mutates pre-existing state
+// without setting the flag does not merely under-report, it hands the next
+// message an array the last one edited.
+//
+// Two separate reasons it was missed, and the second is why the list below is
+// exhaustive rather than a single case:
+//
+//   - The plain-array path never called noteSharedMutation at all. Named writes
+//     go through setField, which notes; `a[0] = 1` goes through setElementR,
+//     which did not.
+//   - Every TypedArray write was unreachable by the check even when called.
+//     noteSharedMutation takes a Value and returns early unless IsObjectType(),
+//     and T_TYPEDARRAY is not in tObjectMask — so every view handed to it was
+//     silently ignored. That is what noteSharedMutationOf exists for.
+//
+// The operations that already worked are kept in the list. They are what makes
+// it a specification of the boundary rather than a regression test for two bugs:
+// the rule is "any script-driven mutation of an object older than the
+// invocation", and the way to check a rule is to include the cases that pass.
+func TestIndexedWritesToPreexistingArraysAreNoticed(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		// The two that did not work, and the growth case beside them.
+		{"element store", `shared[0] = 99; "ok"`},
+		{"element store past the end", `shared[9] = 99; "ok"`},
+		{"typed array element", `view[0] = 99; "ok"`},
+		{"typed array via set()", `view.set([9, 9]); "ok"`},
+
+		// Already noticed, and they have to stay that way.
+		{"named property", `shared.tag = 99; "ok"`},
+		{"length", `shared.length = 1; "ok"`},
+		{"plain object index", `obj[0] = 99; "ok"`},
+		{"push", `shared.push(99); "ok"`},
+		{"pop", `shared.pop(); "ok"`},
+		{"shift", `shared.shift(); "ok"`},
+		{"splice", `shared.splice(0, 1); "ok"`},
+		{"fill", `shared.fill(0); "ok"`},
+		{"copyWithin", `shared.copyWithin(0, 1); "ok"`},
+		{"sort", `shared.sort(function (a, b) { return b - a; }); "ok"`},
+		{"reverse", `shared.reverse(); "ok"`},
+		{"delete an element", `delete shared[0]; "ok"`},
+		{"defineProperty an index", `Object.defineProperty(shared, "0", {value: 5}); "ok"`},
+		{"typed array fill", `view.fill(7); "ok"`},
+		{"typed array copyWithin", `view.copyWithin(0, 1); "ok"`},
+		{"typed array sort", `view.sort(); "ok"`},
+		{"typed array reverse", `view.reverse(); "ok"`},
+	} {
+		rt := New()
+		// Built BEFORE the invocation, which is what makes it shared: this is the
+		// host state a pooled Runtime carries between messages.
+		if _, err := rt.RunString("pre.js", `
+			globalThis.shared = [1, 2, 3];
+			globalThis.view = new Int32Array(4);
+			globalThis.obj = {};
+			1;`); err != nil {
+			t.Fatalf("%s: pre: %v", tc.name, err)
+		}
+		inv := rt.BeginInvocation()
+		sc, err := rt.CompileScript("d.js", tc.src)
+		if err != nil {
+			t.Fatalf("%s: compile: %v", tc.name, err)
+		}
+		if _, err := rt.RunScript(sc); err != nil {
+			t.Fatalf("%s: run: %v", tc.name, err)
+		}
+		got := inv.Dirty()
+		inv.End()
+		if !got {
+			t.Errorf("%s: Dirty() = false, but %q mutated state older than the invocation",
+				tc.name, tc.src)
+		}
+	}
+}
+
+// The other half of the boundary: a script mutating only what it made itself
+// must NOT dirty the Runtime, or pooling degenerates to a fresh Runtime per
+// message and the isolation model buys nothing.
+func TestWritesToATotalledArrayOfItsOwnAreNotNoticed(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"its own array", `var a = [1, 2, 3]; a[0] = 9; a[7] = 9; a.push(1); "ok"`},
+		{"its own view", `var v = new Int32Array(4); v[0] = 9; v.fill(1); "ok"`},
+		{"a view over its own buffer", `
+			var b = new ArrayBuffer(16), v = new Int32Array(b); v[1] = 5; "ok"`},
+	} {
+		rt := New()
+		inv := rt.BeginInvocation()
+		sc, err := rt.CompileScript("c.js", tc.src)
+		if err != nil {
+			t.Fatalf("%s: compile: %v", tc.name, err)
+		}
+		if _, err := rt.RunScript(sc); err != nil {
+			t.Fatalf("%s: run: %v", tc.name, err)
+		}
+		got := inv.Dirty()
+		inv.End()
+		if got {
+			t.Errorf("%s: Dirty() = true for %q, which touched nothing it did not create",
+				tc.name, tc.src)
+		}
+	}
+}

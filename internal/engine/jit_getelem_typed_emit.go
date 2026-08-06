@@ -42,15 +42,6 @@ import (
 //     the end of abuf", which is the one compare below — bound on the byte
 //     slice, never on the view's own length.
 
-// jitEmitGetElemTyped emits the read for one element kind.
-//
-// recv holds the view and key the index; recv holds the result on the
-// fall-through to done. obj and idx are scratch, as is jitRegScratch. Control
-// reaches slow with recv and key untouched, which is what the runtime path
-// needs — so nothing is written to recv until every guard has passed.
-//
-// Reports whether it emitted anything: a kind with no single load is refused
-// here as well as by the runtime's jitKind, so that the two cannot disagree.
 // jitEmitTypedWindow emits everything both element chains share: that the
 // receiver is a view of this site's kind, that its window is still over the
 // buffer's bytes, and that the key is an integer index inside it.
@@ -63,7 +54,12 @@ import (
 // agree about the bound: a read that checked the window and a write that checked
 // the view's own length would differ only on a detached buffer, which is the one
 // case that matters and the one no ordinary test reaches.
-func jitEmitTypedWindow(a *jitasm.Asm, kind taKind, recv, key, obj, idx, addr jitasm.Reg, slow *jitasm.Label) {
+//
+// note asks for the invocation-dirty pair to be maintained, which a write owes
+// and a read does not. It is emitted here rather than by the caller because
+// straight after the tag check is the only point where the receiver is known to
+// be an object AND all three scratch registers are still free.
+func jitEmitTypedWindow(a *jitasm.Asm, kind taKind, recv, key, obj, idx, addr jitasm.Reg, note bool, slow *jitasm.Label) {
 	// addr and idx are both live across the LEA at the end, so naming the same
 	// register twice scales the buffer pointer by the element size instead of
 	// the index. That is a fault at a wild address rather than a wrong answer,
@@ -79,6 +75,15 @@ func jitEmitTypedWindow(a *jitasm.Asm, kind taKind, recv, key, obj, idx, addr ji
 	// for the same reason: the tag check is what makes resolving the handle
 	// safe, and it is the cheapest rejection here.
 	jitEmitTagCheck(a, recv, TTypedArray, slow)
+
+	// A write into a view older than this invocation is state the next run
+	// inherits. Noted on the attempt rather than on the store, which is what the
+	// runtime does too — setElementR notes before it knows whether the index is
+	// in range — so the two tiers cannot disagree about a write that misses.
+	if note {
+		jitEmitNoteSharedMutation(a, recv, obj, idx)
+	}
+
 	a.MovRegMem(idx, jitasm.RegCtx, jitmem.CtxOffPool)
 	jitEmitResolve(a, obj, recv, idx)
 
@@ -138,12 +143,21 @@ func jitEmitTypedWindow(a *jitasm.Asm, kind taKind, recv, key, obj, idx, addr ji
 	a.LeaRegMemIndex(addr, addr, idx, uint8(size), 0)
 }
 
+// jitEmitGetElemTyped emits the read for one element kind.
+//
+// recv holds the view and key the index; recv holds the result on the
+// fall-through to done. obj and idx are scratch, as is jitRegScratch. Control
+// reaches slow with recv and key untouched, which is what the runtime path
+// needs — so nothing is written to recv until every guard has passed.
+//
+// Reports whether it emitted anything: a kind with no single load is refused
+// here as well as by the runtime's jitKind, so that the two cannot disagree.
 func jitEmitGetElemTyped(a *jitasm.Asm, kind taKind, recv, key, obj, idx jitasm.Reg, slow, done *jitasm.Label) bool {
 	if !jitElemKindEmittable(kind) {
 		return false
 	}
 	scratch := jitRegScratch
-	jitEmitTypedWindow(a, kind, recv, key, obj, idx, scratch, slow)
+	jitEmitTypedWindow(a, kind, recv, key, obj, idx, scratch, false, slow)
 
 	// The element, into idx rather than recv: the float kinds have one guard
 	// left after the load, and reaching slow with the receiver overwritten

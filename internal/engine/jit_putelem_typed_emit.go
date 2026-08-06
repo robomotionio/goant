@@ -18,13 +18,18 @@ import (
 //     store into a view is never rejected and never throws: an index outside the
 //     window is a silent no-op, in strict mode as well as sloppy, so the emitted
 //     path and the runtime path have the same answer for the caller — nothing.
-//   - There is no invocation-dirty bookkeeping. That exists so a handle written
-//     into an object older than the invocation stops the pools being truncated
-//     underneath it; this writes BYTES into storage Go already owns, and creates
-//     no reference at all. Which is why noteSharedMutation is nowhere in the
-//     runtime's typed-array store either.
-//   - There is no write barrier, for the same reason. The collector traces
-//     Values, and an element here is not one.
+//   - There is no write barrier. The collector traces Values, and an element
+//     here is not one — these are bytes in storage Go already owns.
+//
+// It DOES owe the invocation-dirty pair, and the first version of this did not
+// pay it. The reasoning that skipped it was that the pair exists to stop the
+// pools being truncated under a handle written into an older object, and a byte
+// is not a handle. That is true and it is not what the flag means: Dirty() says
+// whether the next run on a pooled Runtime would inherit the change, and bytes
+// written into a view that predates the invocation are inherited exactly as a
+// property would be. The runtime did not pay it either — see
+// TestIndexedWritesToPreexistingArraysAreNoticed for the family of writes that
+// went unnoticed, of which this was one.
 //
 // So the store is the read's guard chain with the load turned around, and the
 // only new question is the value.
@@ -67,7 +72,7 @@ func jitEmitPutElemTyped(a *jitasm.Asm, kind taKind, recv, key, val, obj, idx ji
 	// idx is where it goes. Both idx and obj are finished with by then — the
 	// address no longer depends on either — and obj is the register the
 	// converted value needs.
-	jitEmitTypedWindow(a, kind, recv, key, obj, idx, scratch, slow)
+	jitEmitTypedWindow(a, kind, recv, key, obj, idx, scratch, true, slow)
 	a.MovRegReg(idx, scratch)
 
 	// The value is a Number. An untagged Value is a double, the same single

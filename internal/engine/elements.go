@@ -636,6 +636,11 @@ func (rt *Runtime) setElementR(obj Value, key, v Value) (bool, *ThrowError) {
 	}
 	if idx, ok := rt.arrayIndexOf(key); ok && obj.Type() == TArr {
 		o := rt.objPtr(obj)
+		// An indexed write into an array older than this invocation is state the
+		// next run inherits, exactly as a named one is. Noted here rather than in
+		// arraySet, which is inlined into the interpreter's dispatch loop and
+		// whose comment explains at length why nothing may be added to it.
+		rt.noteSharedMutationOf(o)
 		// Fast paths: a live in-range element, or an index at/past the current
 		// length (no named index property lives there — a defineProperty on an
 		// index extends the length past it). Otherwise a hole inside the logical

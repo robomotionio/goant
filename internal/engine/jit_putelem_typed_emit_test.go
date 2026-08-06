@@ -226,3 +226,62 @@ func TestJITTypedElementStoreRefusesWhatItCannotConvert(t *testing.T) {
 		})
 	}
 }
+
+// The compiled store maintains the invocation-dirty pair, and the interpreted
+// one is what it has to agree with.
+//
+// This is the failure mode a tier introduces that no correctness test finds: both
+// tiers store the same bytes, both answer the same value, and the only difference
+// is a flag nothing in the program can read. A host pooling Runtimes reads it,
+// and recycles one whose compiled code quietly edited state the next message
+// inherits.
+//
+// Warmed past the threshold so the store is genuinely emitted — jitStats confirms
+// the chain served it, because a test that fell back to the helper would pass
+// while proving nothing.
+func TestCompiledStoreToAnOlderViewIsNoticed(t *testing.T) {
+	was, wasEnabled := jitEnabled, jitStats.enabled
+	jitEnabled, jitStats.enabled = true, true
+	defer func() { jitEnabled, jitStats.enabled = was, wasEnabled }()
+
+	for _, tc := range []struct {
+		name  string
+		src   string
+		dirty bool
+	}{
+		{"a view older than the invocation", `for (var k = 0; k < 400; k++) w(view, 1, k); "ok"`, true},
+		{"a view it made itself", `var v = new Int32Array(4);
+			for (var k = 0; k < 400; k++) w(v, 1, k); "ok"`, false},
+		{"an out-of-range store into an older view", `
+			for (var k = 0; k < 400; k++) w(view, 99, k); "ok"`, true},
+	} {
+		rt := New()
+		if _, err := rt.RunString("pre.js", `
+			function w(a, i, v) { a[i] = v; }
+			globalThis.w = w;
+			globalThis.view = new Int32Array(4);
+			1;`); err != nil {
+			t.Fatalf("%s: pre: %v", tc.name, err)
+		}
+		hit0 := jitStats.elemPutHit
+		inv := rt.BeginInvocation()
+		sc, err := rt.CompileScript("d.js", tc.src)
+		if err != nil {
+			t.Fatalf("%s: compile: %v", tc.name, err)
+		}
+		if _, err := rt.RunScript(sc); err != nil {
+			t.Fatalf("%s: run: %v", tc.name, err)
+		}
+		got := inv.Dirty()
+		inv.End()
+		if got != tc.dirty {
+			t.Errorf("%s: Dirty() = %v, want %v", tc.name, got, tc.dirty)
+		}
+		// The in-range cases must actually have been served by the emitted chain,
+		// or this test is measuring the helper.
+		if tc.name != "an out-of-range store into an older view" &&
+			jitStats.elemPutHit == hit0 {
+			t.Errorf("%s: the emitted store never ran, so the flag proves nothing", tc.name)
+		}
+	}
+}
