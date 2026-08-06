@@ -158,3 +158,81 @@ func TestPendingInterruptBlocksNewRuns(t *testing.T) {
 		t.Fatalf("got %v, want ErrTerminated", err)
 	}
 }
+
+// Every interruptible shape again, with the compiled tier forced on.
+//
+// The bug this pins ran for four months and the suite was green throughout,
+// because jitEnabled is off unless GOANT_JIT is set and so nothing above ever
+// reached compiled code. A tiered `for (;;) {}` ignored Interrupt entirely: the
+// engine's interrupt checks are all at FUNCTION ENTRY, and a loop that calls
+// nothing never reaches one. The interpreter is safe because it also checks on a
+// back edge; compiled code took its back edge in machine code.
+//
+// The fix costs nothing because the safepoint already existed — the fuel counter
+// at each back edge was already returning to Go periodically to let the
+// collector run. It simply was not being asked whether anything wanted to stop.
+//
+// Threshold 1 rather than the default, so a loop is compiled on the spot instead
+// of after the interrupt has already had its chance in the interpreter.
+func TestInterruptStopsCompiledLoops(t *testing.T) {
+	wasEnabled, wasThreshold := jitEnabled, jitThreshold
+	jitEnabled, jitThreshold = true, 1
+	defer func() { jitEnabled, jitThreshold = wasEnabled, wasThreshold }()
+
+	for _, tc := range []struct{ name, src string }{
+		{"an empty loop, which calls nothing at all", `for (;;) {}`},
+		{"a loop with a body", `var i = 0; while (true) { i++; }`},
+		{"a loop inside a function, called once", `
+			function spin() { for (;;) {} }
+			spin();`},
+		{"a loop inside a function that ran hot first", `
+			function spin(n) { for (var i = 0; i < n; i++) {} return n; }
+			for (var k = 0; k < 100; k++) spin(10);
+			spin(Infinity);`},
+		{"a loop the script tries to protect with catch", `
+			for (;;) { try { for (;;) {} } catch (e) {} }`},
+		{"a loop the script tries to resume in finally", `
+			for (;;) { try { for (;;) {} } finally {} }`},
+		{"a nested loop", `for (;;) { for (;;) {} }`},
+		{"a loop calling a compiled function", `
+			function f(x) { return x + 1; }
+			var i = 0; for (;;) { i = f(i); }`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			done := make(chan error, 1)
+			go func() { done <- runInterrupted(t, tc.src) }()
+			select {
+			case err := <-done:
+				if !errors.Is(err, ErrTerminated) {
+					t.Fatalf("got %v, want ErrTerminated", err)
+				}
+			case <-time.After(20 * time.Second):
+				// Reported rather than left to the binary's own timeout, which
+				// kills the whole package and says only that something hung.
+				t.Fatalf("compiled code ignored the interrupt: still running after 20s")
+			}
+		})
+	}
+}
+
+// The interrupt is checked at the back edge, so a script that never loops must
+// still not pay for it — and one that finishes normally must not be stopped by a
+// flag left over from something else.
+func TestCompiledLoopsRunToCompletionWithoutAnInterrupt(t *testing.T) {
+	wasEnabled, wasThreshold := jitEnabled, jitThreshold
+	jitEnabled, jitThreshold = true, 1
+	defer func() { jitEnabled, jitThreshold = wasEnabled, wasThreshold }()
+
+	rt := New()
+	v, err := rt.RunString("sum.js", `
+		function sum(n) { var s = 0; for (var i = 0; i < n; i++) s += i; return s; }
+		var t = 0;
+		for (var k = 0; k < 50; k++) t += sum(20000);
+		t;`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if want := float64(50) * (19999.0 * 20000.0 / 2); v.Number() != want {
+		t.Errorf("got %v, want %v", v.Number(), want)
+	}
+}

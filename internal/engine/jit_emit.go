@@ -2829,6 +2829,23 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 			case jitmem.ExitPreempt:
 				// Being here is the safepoint: this is ordinary Go, so the runtime
 				// can collect and preempt before the loop is re-entered.
+				//
+				// It is also the ONLY place a compiled loop can be stopped from
+				// outside, which is why the host interrupt is tested here. Every
+				// other check in the engine is at function entry, and a loop that
+				// never calls anything never reaches one — so `for (;;) {}` ran
+				// forever once it tiered up, ignoring Interrupt, the heap limit
+				// and a failed blob fetch alike. The fuel counter that brings us
+				// here already existed; nothing was asking.
+				//
+				// Not routed through jitCatch, unlike a throw: termination is a
+				// control throw precisely so a script cannot swallow its own
+				// cancellation in a catch or resume itself in a finally.
+				if rt.interruptPending() {
+					rt.jitDepth = base
+					rt.dropOpenUpvals(rt.frameDepth)
+					return mkundef(), rt.terminated(), true
+				}
 				cur.Args[1] = jitFuel
 				run, runPC = cur, cur.Resume
 			case jitmem.ExitHelper:
