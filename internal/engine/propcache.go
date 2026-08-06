@@ -51,11 +51,6 @@ func (ic *propIC) lookup(o *object) *icWay {
 	return nil
 }
 
-// dead reports that this site has seen too many shapes to be worth caching.
-// Nothing revives it; the cost of being wrong is one slow-path lookup, which is
-// what the site would have paid anyway.
-func (ic *propIC) dead() bool { return ic.misses >= icMissLimit }
-
 // known reports that some way already describes o's shape, hit or miss, so
 // there is nothing for a fill to learn. This is what keeps a site from
 // re-probing a shape whose answer it has already recorded.
@@ -69,8 +64,8 @@ func (ic *propIC) known(o *object) bool {
 }
 
 // way returns the entry to record o's shape in: a stale one if there is any,
-// otherwise a fresh one, otherwise nil once the site is full and has been
-// pushed past icMissLimit.
+// otherwise a fresh one, otherwise the oldest once the site is full. It never
+// returns nil — a site is never given up on, for the reason propIC records.
 //
 // Reusing a stale way first is what keeps a site working across an epoch bump
 // (a collection retires every way) without charging it a miss: invalidation is
@@ -86,27 +81,9 @@ func (ic *propIC) way(o *object) *icWay {
 		ic.n++
 		return w
 	}
-	ic.misses++
-	if ic.dead() {
-		ic.retire()
-		return nil
-	}
-	// Full and still useful: replace the oldest.
+	// Full: replace the oldest. A site is never given up on — see the note on
+	// propIC for the measurement that removed the rule which used to.
 	return &ic.ways[0]
-}
-
-// retire empties a site that has seen too many shapes to be worth caching.
-//
-// Setting n to zero is what stops lookup consulting it. Clearing the ways as
-// well is what lets a reader that does not carry n — compiled code, which has
-// four registers and no room for a bound — decide a way is empty by looking at
-// it. A retired way describes a shape that is still real, so consulting one
-// would not give a wrong answer; it would give an answer this site has decided
-// not to spend probe time on, and the two readers disagreeing about that is
-// worth more to avoid than the fills it costs.
-func (ic *propIC) retire() {
-	ic.ways = [icWays]icWay{}
-	ic.n = 0
 }
 
 // wayIndex is way() for an entry keyed on a shape the receiver no longer has —
@@ -120,11 +97,6 @@ func (ic *propIC) wayIndex(o *object, key *shape) int {
 	if int(ic.n) < icWays {
 		ic.n++
 		return int(ic.n) - 1
-	}
-	ic.misses++
-	if ic.dead() {
-		ic.retire()
-		return -1
 	}
 	return 0
 }
@@ -154,12 +126,58 @@ func (ic *propIC) recordProto(o, holder *object, slot uint32) {
 // answer without the full lookup.
 func (rt *Runtime) icCachedRead(ic *propIC, o *object) (Value, bool) {
 	if ic.n == 0 {
+		icNote(icReasonEmpty)
 		return mkundef(), false
 	}
 	if w := ic.lookup(o); w != nil {
+		icNote(icReasonHit)
 		return w.read(o), true
 	}
+	switch {
+	case int(ic.n) < icWays:
+		icNote(icReasonRoom)
+	default:
+		icNote(icReasonFull)
+	}
 	return mkundef(), false
+}
+
+// Why a property read did not come from its site, which is the only thing that
+// can choose between widening the cache and something else.
+//
+// It exists because inferring the answer was wrong twice. box2d's exits said
+// "property access" and its profile agreed — but the reason turned out to be
+// retirement, not width: with the rule in place 75.3% of consults reached a site
+// that had given up and only 0.6% reached a FULL one, so the icWays=16 trade that
+// had been on the plan for weeks would have bought its box2d win by delaying
+// retirement rather than by caching more.
+//
+// Counted here rather than in compiled code deliberately, and read with the bias
+// in mind: this path runs only when the emitted probe has already missed, so
+// these are not a sample of a site's accesses. See the note on propIC for what
+// believing otherwise cost.
+type icMissReason int
+
+const (
+	icReasonHit   icMissReason = iota // served here after the emitted probe missed
+	icReasonEmpty                     // nothing cached at this site yet
+	icReasonRoom                      // ways to spare: a shape this site has not met
+	icReasonFull                      // every way used and none of them match
+	icReasonN
+)
+
+var icMissReasons [icReasonN]uint64
+
+func icNote(r icMissReason) {
+	if jitStats.enabled {
+		icMissReasons[r]++
+	}
+}
+
+// ICMissReasons reports the breakdown: hit, empty, room-left, full.
+func ICMissReasons() (hit, empty, room, full uint64) {
+	return icMissReasons[icReasonHit], icMissReasons[icReasonEmpty],
+		icMissReasons[icReasonRoom], icMissReasons[icReasonFull]
 }
 
 // icCachedStore performs a store from the site if it describes this receiver,

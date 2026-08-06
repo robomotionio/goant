@@ -1149,7 +1149,7 @@ running:
 				v, e = rt.getPrivate(obj, name, privEnv)
 			} else {
 				v, e = rt.getField(obj, name)
-				if icx := readU16(code, ip+5); icx != icNoSlot && !ics[icx].dead() {
+				if icx := readU16(code, ip+5); icx != icNoSlot {
 					rt.icFillGet(&ics[icx], rt.icReceiver(obj), name)
 				}
 			}
@@ -1178,7 +1178,7 @@ running:
 				v, e = rt.getPrivate(obj, name, privEnv)
 			} else {
 				v, e = rt.getField(obj, name)
-				if icx := readU16(code, ip+5); icx != icNoSlot && !ics[icx].dead() {
+				if icx := readU16(code, ip+5); icx != icNoSlot {
 					rt.icFillGet(&ics[icx], rt.icReceiver(obj), name)
 				}
 			}
@@ -1219,7 +1219,7 @@ running:
 				thrown = rt.typeError("Cannot assign to read only property '" + name + "'")
 				goto unwind
 			}
-			if icx := readU16(code, ip+5); icx != icNoSlot && ok && !ics[icx].dead() {
+			if icx := readU16(code, ip+5); icx != icNoSlot && ok {
 				o := rt.icReceiver(obj)
 				if o != nil && preShape != nil && o.shape != preShape {
 					rt.icFillPutTransition(&ics[icx], o, preShape, name)
@@ -1324,7 +1324,7 @@ running:
 				thrown = ge
 				goto unwind
 			}
-			if icx != icNoSlot && !ics[icx].dead() {
+			if icx != icNoSlot {
 				rt.icFillGet(&ics[icx], rt.objPtr(rt.global), name)
 			}
 			push(v)

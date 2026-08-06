@@ -3270,7 +3270,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 		// loop header may never have run this site at all — and a site nothing
 		// ever fills is a probe that misses forever.
 		if icx := uint32(ctx.Args[3] >> 32); icx != icNoSlot {
-			if ics := frameICs(fn); int(icx) < len(ics) && !ics[icx].dead() {
+			if ics := frameICs(fn); int(icx) < len(ics) {
 				rt.icFillGet(&ics[icx], rt.icReceiver(recv), name)
 			}
 		}
@@ -3410,7 +3410,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			return e
 		}
 		if icx := uint32(ctx.Args[3] >> 32); icx != icNoSlot {
-			if ics := frameICs(fn); int(icx) < len(ics) && !ics[icx].dead() {
+			if ics := frameICs(fn); int(icx) < len(ics) {
 				rt.icFillGet(&ics[icx], rt.objPtr(rt.global), name)
 			}
 		}
@@ -3465,7 +3465,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			return rt.typeError("Cannot assign to read only property '" + name + "'")
 		}
 		if icx != icNoSlot && ok {
-			if ics := frameICs(fn); int(icx) < len(ics) && !ics[icx].dead() {
+			if ics := frameICs(fn); int(icx) < len(ics) {
 				// icReceiver again: setFieldR may have been handed something
 				// that was not an object at all, and a store that reached a
 				// prototype's setter can have replaced what obj resolves to.

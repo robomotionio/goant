@@ -110,8 +110,9 @@ type icWay struct {
 // just past four and fell back to the shape lookup on nearly every access —
 // Richards 194 -> 252, DeltaBlue 221 -> 270 on the widening alone. Sixteen is
 // no better and sometimes worse: a hit scans the ways linearly, so width is not
-// free, and past that a site is megamorphic and better served by giving up
-// (see icMissLimit).
+// free. Whether eight is still the right number is a question the miss-reason
+// breakdown answers directly rather than by argument — see icMissReason, which
+// says "full" is 0.6% of box2d's misses and 0.0% of most workloads'.
 const icWays = 8
 
 // propIC is one inline-cache site: the shapes it has seen and where the name
@@ -121,46 +122,55 @@ const icWays = 8
 // shape hashes the property name. That was measured at ~37% of interpreter CPU
 // on a monomorphic read loop.
 type propIC struct {
-	ways   [icWays]icWay
-	n      uint8 // ways filled
-	misses uint8 // shapes seen beyond what fits; at icMissLimit the site is abandoned
+	ways [icWays]icWay
+	n    uint8 // ways filled
 }
 
-// icMissLimit is how many shapes beyond its ways a site may see before it stops
-// caching for good.
+// A SITE IS NEVER ABANDONED, and this is where the reason it used to be lives.
 //
-// A truly megamorphic site cannot be served by a fixed set of ways, and every
-// attempt costs a probe on top of the lookup that already happened. Giving up
-// makes such a site cost what it did before the cache existed.
+// There was a retirement rule: a site that saw more shapes than it had ways, too
+// many times, stopped caching for good, on the argument that a truly megamorphic
+// site cannot be served by a fixed set of ways and every attempt costs a probe on
+// top of the lookup that happens anyway. The limit was thirty-two, then two
+// hundred and fifty, each raise worth real percentages — which should have been
+// the clue.
 //
-// It was thirty-two, and the comment here said why that was more than the eight
-// which suited a four-way cache: with eight ways, a site that sees nine or ten
-// shapes is not megamorphic, it is merely wider than the cache, and replacing
-// the oldest way still hits most of the time. That argument was right and the
-// number was still far too small, because the counter measures the wrong thing.
-// A site cycling through ten shapes misses on about one access in five however
-// well it is doing on the other four, so it reaches any fixed count eventually
-// and then stops caching *while it was hitting 80% of the time*.
+// The rule was not too tight. It was measuring something it could not see.
 //
-// Two Octane workloads reach that state, and they are the only two: a retired
-// site is consulted 16.9 million times in box2d and 1.68 million in DeltaBlue,
-// and never at all in EarleyBoyer or RayTrace. Raising this to 250 is worth
-// **+9.9% on box2d** and +1.7% on DeltaBlue, +0.9% geomean over the suite, and
-// costs nothing anywhere — no memory, and nothing on the hit path.
+// `misses` was incremented from icCachedRead and icCachedStore, which run ONLY
+// WHEN COMPILED CODE'S EMITTED PROBE HAS ALREADY MISSED. So the sample deciding
+// whether a site was worth keeping consisted, by construction, entirely of that
+// site's failures. A site serving machine code at ninety percent presents to this
+// counter as a site that never hits — and retiring it zeroed the ways, which is
+// the storage the emitted probe reads. The rule destroyed the hit path using
+// evidence that could not contain it.
 //
-// Widening `icWays` to 16 instead reaches further into the same problem, +23.4%
-// on box2d and +14.0% on DeltaBlue, and takes 6.5% off EarleyBoyer and 2.7% off
-// TypeScript for ways they never fill: every site doubles from 320 bytes to 640.
-// That is a trade; this is not, which is why this is what is here.
+// Measured, on the ordinary-code half of the corpus where property access is the
+// cost. Removing retirement entirely:
 //
-// What should eventually replace the count is a rate. A site that hits four
-// times out of five is not megamorphic at any number of misses, and nothing here
-// can tell the two apart.
+//	              score           compiled cache hit rate
+//	box2d      1748 -> 2758  +57.8%     75.7% -> 94.2%
+//	deltablue   894 -> 1023  +14.4%     88.2% -> 91.8%
+//	typescript 4705 -> 4837   +2.8%     79.5% -> 84.1%
+//	code-load 12087 -> 12224  +1.1%
 //
-// 250 and not more because propIC.misses is a byte, and a limit above 255 would
-// not be a longer leash — it would be a counter that wraps and a site that never
-// retires at all.
-const icMissLimit = 250
+// and +4.20% geomean over all fifteen, nothing else outside noise, no memory: the
+// counter's three bytes were padding, so propIC is 328 either way. It is strictly
+// better than the icWays=16 trade the old comment weighed — that bought +23.4% on
+// box2d for -6.5% on EarleyBoyer, by doubling every site from 320 bytes to 640.
+// Here EarleyBoyer is +0.1% and splay, richards and crypto sit inside the noise
+// the corpus demonstrates (richards best-of-three: 1373 retiring, 1377 not).
+//
+// The old comment said "what should eventually replace the count is a rate". A
+// rate was tried first and it is not the answer either: resetting the counter on
+// every hit — so it counts consecutive failures — leaves box2d at 1775 against
+// 2758, because the hits it would reset on are the ones this path never sees.
+// The bias is in which accesses reach here at all, and no statistic gathered here
+// can correct for it.
+//
+// What is left when the rule goes is the part that was always right: a full site
+// replaces its oldest way. A site wider than its ways keeps working, at the cost
+// of the replacements.
 
 // icMissSlot marks a shape this site has already tried and cannot cache — most
 // often because the property lives on the prototype, which is every method call.

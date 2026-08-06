@@ -144,6 +144,15 @@ func dumpJITStats() {
 		fmt.Fprintf(os.Stderr, "jit: %d element reads, %d served by the emitted guard chain (%.1f%%)\n",
 			reads, ehit, 100*float64(ehit)/float64(reads))
 	}
+	// Why the reads that reached the runtime did. "full" is the only one more
+	// ways would serve; it is the number that decides whether icWays is worth
+	// widening, and it has been 0.6% or less everywhere it has been measured.
+	if h, e, r, f := engine.ICMissReasons(); h+e+r+f > 0 {
+		tot := float64(h + e + r + f)
+		fmt.Fprintf(os.Stderr, "jit: %d cache consults after an emitted miss: %d served here (%.1f%%), %d empty site (%.1f%%), %d room to spare (%.1f%%), %d full (%.1f%%)\n",
+			uint64(tot), h, 100*float64(h)/tot, e, 100*float64(e)/tot,
+			r, 100*float64(r)/tot, f, 100*float64(f)/tot)
+	}
 	shit, smiss := engine.JITElementStoreStats()
 	if writes := shit + smiss; writes > 0 {
 		fmt.Fprintf(os.Stderr, "jit: %d element stores, %d served by the emitted guard chain (%.1f%%)\n",
