@@ -382,6 +382,7 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if handlers != nil {
 		live = handlers[start]
 	}
+
 	// The blocks a call site defers: the body of a compiled call, emitted with
 	// the entry stubs rather than inline. See jitEmitMachineCallBody.
 	var deferred []func()
@@ -393,6 +394,31 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	// holding whatever the machine had, which reads as a frame of nonsense
 	// rather than as a crash.
 	catchStubs := map[int]*jitasm.Label{}
+	// pendingFixups and pendingCatchIP carry one instruction's worth of state
+	// across the top of the loop: which fixups it appended, and which catch was
+	// in force while it did. stampCatch marks them, and reports false for a catch
+	// target the emitter never bound — a function whose handler it cannot name is
+	// one it must decline rather than compile without.
+	pendingFixups, pendingCatchIP := 0, -1
+	stampCatch := func() bool {
+		if pendingCatchIP < 0 || len(fixups) <= pendingFixups {
+			return true
+		}
+		if _, known := labels[pendingCatchIP]; !known {
+			return false
+		}
+		stub, ok := catchStubs[pendingCatchIP]
+		if !ok {
+			stub = a.NewLabel()
+			catchStubs[pendingCatchIP] = stub
+		}
+		for i := pendingFixups; i < len(fixups); i++ {
+			if fixups[i].catch == nil {
+				fixups[i].catch = stub
+			}
+		}
+		return true
+	}
 	// The locals whose Number-ness the body relies on, and the loop headers it
 	// could be entered at. Both are only known once the body has been walked,
 	// which is why the entry stubs are emitted after it.
@@ -456,6 +482,29 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 		// answer the analyses were built on, so this is also where the emitter
 		// and those analyses are checked against each other — once per
 		// instruction rather than once per label.
+		// Every call out the PREVIOUS instruction emitted belongs to the handler
+		// that was in force while it ran. Stamped at the top of the next
+		// iteration rather than at the bottom of its own, because three arms
+		// leave the loop body with `continue` and a stamp at the bottom is a
+		// stamp those three skip.
+		//
+		// That is not hypothetical. A relational fused with the branch that
+		// consumes it — `(a >= b) ? x : y`, or any `if (a < b)` — took the
+		// `continue` at the end of its arm, so the fixup for its slow path was
+		// never given a catch. A TypeError from comparing a Symbol then walked
+		// straight out of the enclosing try, which the interpreter caught. The
+		// differential fuzzer found it in five seconds; nothing else had, in
+		// months, because a try around a fused comparison is not a thing anyone
+		// writes a test for.
+		if !stampCatch() {
+			return refuse(why, "catch-target")
+		}
+		pendingFixups = len(fixups)
+		pendingCatchIP = -1
+		if len(live) > 0 {
+			pendingCatchIP = live[len(live)-1].catchIP
+		}
+
 		fixupsBefore := len(fixups)
 		effPop, effPush, effOK := jitStackEffect(fn, ip)
 		if !effOK {
@@ -2106,26 +2155,12 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 				jitRefillSlots(a, spBefore, spAfter, effPush, deepStack)
 			}
 		}
-		// Every call out this instruction emitted belongs to the handler that
-		// was in force when it ran. Stamped here rather than passed down through
-		// sixty-five templates, none of which has any other reason to know.
-		if len(live) > 0 && len(fixups) > fixupsBefore {
-			h := live[len(live)-1]
-			if _, known := labels[h.catchIP]; !known {
-				return refuse(why, "catch-target")
-			}
-			stub, ok := catchStubs[h.catchIP]
-			if !ok {
-				stub = a.NewLabel()
-				catchStubs[h.catchIP] = stub
-			}
-			for i := fixupsBefore; i < len(fixups); i++ {
-				if fixups[i].catch == nil {
-					fixups[i].catch = stub
-				}
-			}
-		}
+		_ = fixupsBefore
 		prevOp, prevIP = thisOp, thisIP
+	}
+	// The last instruction's calls out, which no next iteration will stamp.
+	if !stampCatch() {
+		return refuse(why, "catch-target")
 	}
 	if !returned {
 		// Falling off the end is an implicit `return undefined`, which is not a

@@ -249,3 +249,66 @@ func TestCompilingEveryFunctionInTheCorpusDoesNotFault(t *testing.T) {
 		}
 	}
 }
+
+// A throw from a FUSED comparison inside a try must reach that try's catch.
+//
+// This is the bug the differential fuzzer found in five seconds, and it is worth
+// its own test rather than only a corpus entry, because the shape is invisible:
+// the program is correct, the tier compiles it, and the only symptom is that a
+// catch does not catch.
+//
+// Which throw reaches which catch is decided at COMPILE time here — each call out
+// of compiled code carries a fixup naming the catch that was in force when it was
+// emitted. The stamping ran at the bottom of the emitter's instruction loop, and
+// three arms leave that loop with `continue`. One of them is a relational fused
+// with the branch that consumes it, which is what `(a >= b) ? x : y` and every
+// `if (a < b)` compile to — so a comparison that threw inside a try had no catch
+// recorded and walked straight out of the function.
+//
+// The cases below are the operators that fuse, against operands that make them
+// throw: a Symbol has no ordering and no arithmetic, and an object whose valueOf
+// throws turns any of them into a call that does.
+func TestAThrowFromAFusedComparisonIsCaught(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"a ternary on a relational", `
+			function f(v) { try { return (v >= -Infinity) ? 1 : 2; } catch (e) { return "caught"; } }
+			var out = ""; for (var k = 0; k < 200; k++) out = "" + f(Symbol.iterator); out;`},
+		{"an if on a relational", `
+			function f(v) { try { if (v < 1) { return 1; } return 2; } catch (e) { return "caught"; } }
+			var out = ""; for (var k = 0; k < 200; k++) out = "" + f(Symbol.iterator); out;`},
+		{"a while on a relational", `
+			function f(v) { try { while (v > 0) { return 1; } return 2; } catch (e) { return "caught"; } }
+			var out = ""; for (var k = 0; k < 200; k++) out = "" + f(Symbol.iterator); out;`},
+		{"a for-condition on a relational", `
+			function f(v) { try { for (var i = 0; i <= v; i++) {} return 1; } catch (e) { return "caught"; } }
+			var out = ""; for (var k = 0; k < 200; k++) out = "" + f(Symbol.iterator); out;`},
+		{"a throwing valueOf in a fused comparison", `
+			var bad = {valueOf: function () { throw new Error("no"); }};
+			function f(v) { try { return (v < 1) ? 1 : 2; } catch (e) { return "caught"; } }
+			var out = ""; for (var k = 0; k < 200; k++) out = "" + f(bad); out;`},
+		{"a fused equality", `
+			var bad = {valueOf: function () { throw new Error("no"); }};
+			function f(v) { try { return (v == 1) ? 1 : 2; } catch (e) { return "caught"; } }
+			var out = ""; for (var k = 0; k < 200; k++) out = "" + f(bad); out;`},
+		{"arithmetic that throws inside a try", `
+			var bad = {valueOf: function () { throw new Error("no"); }};
+			function f(v) { try { return v * 2 + 1; } catch (e) { return "caught"; } }
+			var out = ""; for (var k = 0; k < 200; k++) out = "" + f(bad); out;`},
+		{"a property read on null inside a try", `
+			function f(v) { try { return v.x; } catch (e) { return "caught"; } }
+			var out = ""; for (var k = 0; k < 200; k++) out = "" + f(null); out;`},
+		{"a nested try, innermost wins", `
+			function f(v) { try { try { return (v >= 0) ? 1 : 2; } catch (e) { return "inner"; } }
+			                catch (e) { return "outer"; } }
+			var out = ""; for (var k = 0; k < 200; k++) out = "" + f(Symbol.iterator); out;`},
+		{"a fused comparison AFTER the try has been left", `
+			function f(v) { try { } catch (e) { return "caught"; } return (v >= 0) ? 1 : 2; }
+			var c = 0; for (var k = 0; k < 200; k++) { try { f(Symbol.iterator); } catch (e) { c++; } } c;`},
+		{"finally still runs", `
+			var ran = 0;
+			function f(v) { try { return (v >= 0) ? 1 : 2; } catch (e) { return "caught"; } finally { ran++; } }
+			var out = ""; for (var k = 0; k < 200; k++) out = "" + f(Symbol.iterator); out + "|" + (ran > 0);`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { jitBothWays(t, tc.name+".js", tc.src) })
+	}
+}
