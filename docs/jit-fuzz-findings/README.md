@@ -39,6 +39,27 @@ correctly refused for an object that should never have been there.
 So this is not a wrong answer about arrays. It is `obj.method(...)` reaching the
 runtime with something other than `obj`.
 
+## The silent half, which is the one that matters
+
+`push` raised in the reproducer above only because the receiver it was handed
+happened to be a FUNCTION, and `Function.prototype.length` is non-writable. When
+the stolen receiver is a plain object, `push` SUCCEEDS — into the wrong object:
+
+    var out = [];
+    function f0(a, b) { return a; }
+    var Plain = { make: function () { return 1; } };
+    function body() { out.push(String(f0(1, f0(1, f0(Plain.make(), 1))))); }
+    for (var r = 0; r < 12; r++) body();
+    console.log(out.length, Object.keys(Plain));
+
+    goant repro.js              # 12  [ "make" ]
+    GOANT_JIT=1 goant repro.js  # 7   [ "0","1","2","3","4","make","length" ]
+
+Five of the twelve pushes went into a bystander object. Nothing raised, nothing
+was logged, and the array is simply short. That is silent cross-object data
+corruption in the default configuration, and it is the reason this finding is
+worth more than the four bugs fixed today put together.
+
 ## What the reduction established
 
 Each of these was checked by removing exactly one thing:
@@ -48,18 +69,24 @@ Each of these was checked by removing exactly one thing:
   0 — the bottom of the operand stack, which falls out of the register window
   once the argument expression grows past it. Below the window a slot lives in
   the frame's memory array, and `jitSpillArgs` reads the receiver from there.
-- **A native call is required.** `Object.create({a:9})` and `Object.keys({a:9})`
-  both trigger it at the deepest position. The plain object literal `{a:9}` in
-  the same position does **not**, and neither does an array literal. So it is the
-  CFunc call path, not the allocation.
+- **An inner METHOD call is required**, and the outer call ends up with the
+  INNER call's receiver. That is why `Object.create(...)` and `Object.keys(...)`
+  trigger it — `Object` is a function, which is what the corrupted receiver was
+  measured to be — while `Math.max(...)` does not, because `Math` is not. A
+  custom `Holder.make()` reproduces it exactly; the same depth built from plain
+  calls does not, nor does an object literal in that position.
+- **Depth decides it, periodically.** Nesting 3 is clean, 3-plus-one corrupts, 4
+  raises, 5 is clean again. `jitSlot` is `regs[i % jitStackWindow]` with a window
+  of 9, so slot 0 and slot 9 share a register — the outer receiver's slot and the
+  inner call's.
 - **The interpreter is correct** at every depth, so this is the tier.
 - **It is pre-existing**, reproducing at `6e1a135`, before any of this session's
   work.
 
-The reading that fits: a slot below the register window is not written back to
-memory on some path through a native call, so the receiver `jitSpillArgs` reads
-is stale — whatever the register held before, which at that depth is one of the
-callees on the operand stack, hence a function.
+The reading that fits: the outer receiver's slot has left the register window and
+lives in memory, its register has been reused by the inner call's receiver, and
+on some path the eviction or the refill around the inner CALL_METHOD does not
+keep the two in step — so the outer call reads the inner receiver.
 
 That is a hypothesis about WHICH path, not about the shape, and no fix should be
 written until the path is identified. The eviction is driven by the predicted
