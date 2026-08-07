@@ -35,10 +35,13 @@ import (
 //   - is deterministic, because nothing reads the clock, the environment or a
 //     random source, and property enumeration order is the only ordering it can
 //     observe;
-//   - allocates a bounded amount, because sizes are literals too — including
-//     array indices in STORES, which is not a detail: `a[2147483647] = 1` is a
+//   - is bounded in MEMORY by a heap budget rather than by construction. Sizes
+//     are literals, including array indices in stores — `a[2147483647] = 1` is a
 //     legal, instant-looking statement that grows an array to two billion
-//     entries and makes the program take minutes under both arms.
+//     entries — but a value can still grow exponentially, since `v = v + v` in
+//     three nested bounded loops is two hundred doublings. The budget is what
+//     makes that an ordinary termination on both arms instead of the OOM killer
+//     on one.
 //
 // Without those three a disagreement means nothing: a timeout, a clock read or
 // an OOM would differ between the arms for reasons that are not miscompilation.
@@ -188,12 +191,12 @@ func (g *fuzzGen) stmt(depth int) string {
 	}
 	switch g.next(16) {
 	case 0:
-		return fmt.Sprintf("v%d = %s;", g.next(4), g.expr(depth))
+		return fmt.Sprintf("v%d = cap(%s);", g.next(4), g.expr(depth))
 	case 1:
-		return fmt.Sprintf("try { v%d = %s; } catch (e) { out.push('E'); }", g.next(4), g.expr(depth))
+		return fmt.Sprintf("try { v%d = cap(%s); } catch (e) { out.push('E'); }", g.next(4), g.expr(depth))
 	case 2:
 		// A bounded loop: this is what makes a function tier up at all.
-		return fmt.Sprintf("for (var i%d = 0; i%d < %d; i%d++) { v%d = %s; }",
+		return fmt.Sprintf("for (var i%d = 0; i%d < %d; i%d++) { v%d = cap(%s); }",
 			depth, depth, 1+g.next(6), depth, g.next(4), g.expr(depth-1))
 	case 3:
 		return fmt.Sprintf("if (%s) { %s } else { %s }",
@@ -209,16 +212,16 @@ func (g *fuzzGen) stmt(depth int) string {
 		//
 		// The store path still gets index coverage from 0..7, which spans
 		// in-range, the end of a three-element array, and past it.
-		return fmt.Sprintf("v%d[%d] = %s;", g.next(4), g.next(8), g.expr(depth-1))
+		return fmt.Sprintf("v%d[%d] = cap(%s);", g.next(4), g.next(8), g.expr(depth-1))
 	case 5:
-		return fmt.Sprintf("v%d.%s = %s;", g.next(4), g.pick(fuzzProps), g.expr(depth-1))
+		return fmt.Sprintf("v%d.%s = cap(%s);", g.next(4), g.pick(fuzzProps), g.expr(depth-1))
 	case 6:
 		return fmt.Sprintf("out.push(%s);", g.expr(depth-1))
 	case 7:
 		return fmt.Sprintf("out.push(String(%s));", g.expr(depth))
 	case 8:
 		// try/finally, whose unwinding the tier has to get right.
-		return fmt.Sprintf("try { v%d = %s; } finally { v%d = %s; }",
+		return fmt.Sprintf("try { v%d = cap(%s); } finally { v%d = cap(%s); }",
 			g.next(4), g.expr(depth-1), g.next(4), g.expr(depth-1))
 	case 9:
 		// A labelled loop with continue and break, which is control flow the
@@ -235,7 +238,7 @@ func (g *fuzzGen) stmt(depth int) string {
 			depth, depth, g.next(4), depth, g.next(3))
 	case 12:
 		// Mutating a prototype mid-flight, which retires inline caches.
-		return fmt.Sprintf("proto.%s = %s;", g.pick(fuzzProps), g.expr(depth-1))
+		return fmt.Sprintf("proto.%s = cap(%s);", g.pick(fuzzProps), g.expr(depth-1))
 	case 13:
 		// for-in and for-of, both of which allocate iterators.
 		return fmt.Sprintf("for (var k%d in %s) { v%d = k%d; }", depth,
@@ -269,6 +272,21 @@ var out = [];
 function f0(a, b) { return a; }
 function f1(a, b) { try { return a[b]; } catch (e) { return "E"; } }
 function f2(a, b) { return (a === b) ? 1 : 0; }
+
+// Every value assigned back into a variable goes through this, and it is what
+// keeps the generator honest about termination. Without it "v = v + v" inside
+// three nested bounded loops is two hundred doublings, and the fuzzer reports
+// the OOM killer as a finding: a campaign of 48 chunks produced five
+// reproducible inputs and every one was "signal: killed".
+//
+// A TIME limit could not do this job. The two arms run at different speeds by
+// construction, so a watchdog would fire at different points in each and invent
+// disagreements out of nothing. This is deterministic, so both arms truncate in
+// the same place.
+function cap(x) {
+  if (typeof x === "string" && x.length > 64) return x.slice(0, 64);
+  return x;
+}
 
 var proto = { a: 1, b: 2 };
 var host = Object.create(proto);
@@ -344,6 +362,22 @@ func fuzzRunAt(src string, tier bool, threshold int32, bailAt int) (out string) 
 	}()
 
 	rt := New()
+	// The same heap budget on every arm, which is what keeps a runaway program
+	// from being mistaken for a finding.
+	//
+	// The grammar can grow a value exponentially — `v = v + v` inside three
+	// nested bounded loops is two hundred doublings — and the earlier claim that
+	// it "allocates a bounded amount" was only ever true of the LITERALS in it.
+	// A campaign of 48 chunks reported 40 with findings and produced five
+	// reproducible inputs, and every one of those five was `signal: killed`
+	// rather than a disagreement: the fuzzer was reporting the OOM killer.
+	//
+	// A budget turns that into an ordinary termination the engine performs
+	// ITSELF, identically on both arms, so the two still agree and the input is
+	// not recorded as a bug. It also means the memory-interrupt path — which is
+	// the same flag a host uses and which nothing else here exercises — is now
+	// crossed by every large program the fuzzer generates.
+	rt.SetHeapLimit(64 << 20)
 	v, err := rt.RunString("fuzz.js", src)
 	if err != nil {
 		return "ERR:" + err.Error()

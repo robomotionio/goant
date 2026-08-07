@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("92Sacc1\x01(1\xff\x7f1")

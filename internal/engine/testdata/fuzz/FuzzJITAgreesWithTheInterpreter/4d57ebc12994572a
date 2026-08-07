@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("XR\"0cQR$27X1")
