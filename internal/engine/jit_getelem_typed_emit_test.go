@@ -231,9 +231,17 @@ func TestJITTypedElementFeedbackPicksTheChain(t *testing.T) {
 		{"neither", "var a = {1: 'x'}; for (var k=0;k<400;k++) f(a, 1);", elemKindNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			was := jitEnabled
+			was, wasT := jitEnabled, jitThreshold
 			jitEnabled = true
-			defer func() { jitEnabled = was }()
+			// The threshold is pinned rather than inherited, because what is
+			// being measured is the record the INTERPRETER builds and compiling
+			// stops it: a compiled site records nothing further. With
+			// GOANT_JIT_THRESHOLD=2 in the environment the "both" case compiled
+			// after its first sample and reported a monomorphic site, which is
+			// a true statement about a threshold of 2 and says nothing about
+			// the decision this test is here to pin.
+			jitThreshold = 1 << 30
+			defer func() { jitEnabled, jitThreshold = was, wasT }()
 
 			rt := New()
 			fnVal, err := rt.RunString("pick.js",

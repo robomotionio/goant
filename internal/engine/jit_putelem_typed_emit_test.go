@@ -146,10 +146,21 @@ func TestJITTypedElementStoreEdgeCases(t *testing.T) {
 // TestJITTypedElementStoreChainActuallyRuns is the counter check: the agreement
 // above would hold just as well if nothing were emitted at all, because the
 // runtime would then be agreeing with itself.
+//
+// It pins the threshold rather than inheriting it, and so does the invocation
+// test below. The store chain is emitted from feedback the INTERPRETER records,
+// so a threshold of 1 compiles before any interpreted pass has run and no site
+// has a kind to emit from — see elemfeedback.go. Both of these then failed with
+// "the emitted chain served none of 200 in-range stores", which was a true
+// report about GOANT_JIT_THRESHOLD=1 in the environment and said nothing about
+// the chain. Two is the smallest value that leaves the interpreter one pass,
+// which is why it is also what the fuzzer uses.
 func TestJITTypedElementStoreChainActuallyRuns(t *testing.T) {
-	was, wasEnabled := jitEnabled, jitStats.enabled
-	jitEnabled, jitStats.enabled = true, true
-	defer func() { jitEnabled, jitStats.enabled = was, wasEnabled }()
+	was, wasEnabled, wasT := jitEnabled, jitStats.enabled, jitThreshold
+	jitEnabled, jitStats.enabled, jitThreshold = true, true, 2
+	defer func() {
+		jitEnabled, jitStats.enabled, jitThreshold = was, wasEnabled, wasT
+	}()
 
 	for _, k := range taKindNames {
 		emittable := jitStoreKindEmittable(k.kind)
@@ -240,9 +251,11 @@ func TestJITTypedElementStoreRefusesWhatItCannotConvert(t *testing.T) {
 // the chain served it, because a test that fell back to the helper would pass
 // while proving nothing.
 func TestCompiledStoreToAnOlderViewIsNoticed(t *testing.T) {
-	was, wasEnabled := jitEnabled, jitStats.enabled
-	jitEnabled, jitStats.enabled = true, true
-	defer func() { jitEnabled, jitStats.enabled = was, wasEnabled }()
+	was, wasEnabled, wasT := jitEnabled, jitStats.enabled, jitThreshold
+	jitEnabled, jitStats.enabled, jitThreshold = true, true, 2
+	defer func() {
+		jitEnabled, jitStats.enabled, jitThreshold = was, wasEnabled, wasT
+	}()
 
 	for _, tc := range []struct {
 		name  string

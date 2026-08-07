@@ -30,5 +30,10 @@ func (c *jitCode) jitRunOSR(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, a
 	return mkundef(), nil, false
 }
 
+// Nothing was mapped, so there is nothing to unmap. Present so that the
+// reclamation in jit_reclaim.go, which is not architecture-specific, builds here
+// too rather than needing a build tag of its own.
+func (c *jitCode) free() {}
+
 // Every function is missing the same one thing here, and it is not an opcode.
 func jitMissingTemplates(fn *svFunc) []string { return nil }

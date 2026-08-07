@@ -238,12 +238,17 @@ type jitAttempt struct {
 	loops int32
 	code  *jitCode
 	// retired is every block this function has had before the current one. They
-	// are kept rather than freed because a recursive function can have an outer
-	// frame suspended inside one, and because a call site in another function
-	// can be holding its call caches — see jitCallSite, whose address a
-	// suspended frame publishes as its own identity.
+	// are kept for as long as the function is rather than freed at the moment of
+	// recompilation, because a recursive function can have an outer frame
+	// suspended inside one, and because a call site in another function can be
+	// holding its call caches — see jitCallSite, whose address a suspended frame
+	// publishes as its own identity. Both of those hold the function, which is
+	// what lets jit_reclaim.go release them with it.
 	retired []*jitCode
 	tried   bool
+	// owned records that this function's code is tied to its lifetime, so the
+	// finalizer is installed once however many times it is rebuilt.
+	owned bool
 	// declines counts entries the prologue's parameter check turned away, and
 	// unchecked records that it has stopped making that check. Functional, not
 	// diagnostic — see jitNoteDecline.
@@ -295,6 +300,7 @@ func jitNoteDecline(fn *svFunc) {
 	if c := jitCompile(fn, nil); c != nil {
 		fn.jit.retired = append(fn.jit.retired, fn.jit.code)
 		fn.jit.code = c
+		jitOwnCode(fn)
 	}
 }
 
@@ -327,6 +333,7 @@ func jitTryLoop(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals 
 		jitNoteRefusal(fn, why)
 		return mkundef(), nil, false
 	}
+	jitOwnCode(fn)
 	return fn.jit.code.jitRunOSR(rt, fn, cl, fnVal, args, locals, this, header)
 }
 
@@ -405,6 +412,7 @@ func jitTry(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals []Va
 		jitNoteRefusal(fn, why)
 		return mkundef(), nil, false
 	}
+	jitOwnCode(fn)
 	return fn.jit.code.jitRun(rt, fn, cl, fnVal, args, locals, this)
 }
 
