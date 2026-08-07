@@ -701,3 +701,64 @@ func TestBothConditionFamiliesEncodeTheSame(t *testing.T) {
 		}
 	}
 }
+
+// TestSubsSetsTheFlags is the amd64 side of a bug that only bit arm64.
+//
+// Here SubsRegImm32 and SubRegImm32 are the same instruction, so this cannot
+// fail — which is exactly why it is worth having. It pins the CONTRACT that the
+// shared templates rely on, so that the two encoders are checked against the
+// same statement rather than against each of their own habits.
+//
+// The loop back edge decrements a fuel counter and branches on whether it
+// reached zero. That template was written on amd64, where a SUB cannot help
+// setting the flags, and it used the plain subtract. On arm64 SUB and SUBS are
+// different instructions and the plain one leaves NZCV alone — so the branch
+// read flags left by something else, the same flags on every iteration, and the
+// exit never fired. A compiled `for (;;) {}` ran forever: no interrupt, no heap
+// limit, and no safepoint, since that exit is also where collection happens.
+//
+// It is asserted without a loop on purpose. The failing behaviour is "branches
+// the wrong way forever", and a test that reproduces it by looping hangs the
+// suite instead of failing it.
+func TestSubsSetsTheFlags(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		start uint64
+		want  uint64 // 222 when the subtract reached zero, 111 when it did not
+	}{
+		{"reaches zero", 1, 222},
+		{"does not reach zero", 2, 111},
+		{"reaches zero from a large immediate", 1 << 20, 111},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := NewAsm()
+			notZero := a.NewLabel()
+			a.MovRegImm64(RCX, tc.start)
+			a.SubsRegImm32(RCX, 1)
+			a.MovRegImm64(RAX, 111)
+			a.Jcc(CondNE, notZero)
+			a.MovRegImm64(RAX, 222)
+			a.Bind(notZero)
+			a.Ret()
+			if got := run(t, a.Code(), &jitmem.ExecContext{}); got != tc.want {
+				t.Errorf("SubsRegImm32(%d, 1) then branch-if-not-equal: got %d, want %d "+
+					"(the subtract did not set the flags)", tc.start, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSubsLeavesTheValueAlone: setting the flags must not change what the
+// subtract computes, which is the other way a SUBS-for-SUB swap can go wrong.
+func TestSubsLeavesTheValueAlone(t *testing.T) {
+	for _, start := range []uint64{1, 2, 4096, 1 << 20, 1<<32 + 7} {
+		a := NewAsm()
+		a.MovRegImm64(RCX, start)
+		a.SubsRegImm32(RCX, 1)
+		a.MovRegReg(RAX, RCX)
+		a.Ret()
+		if got := run(t, a.Code(), &jitmem.ExecContext{}); got != start-1 {
+			t.Errorf("SubsRegImm32(%d, 1) = %d, want %d", start, got, start-1)
+		}
+	}
+}

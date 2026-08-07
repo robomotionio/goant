@@ -2535,8 +2535,12 @@ func jitBackEdge(a *jitasm.Asm, top *jitasm.Label, fixups *[]jitResumeFixup) {
 	resume := a.NewLabel()
 
 	a.MovRegMem(jitRegTmp, jitasm.RegCtx, jitmem.CtxOffArgs+8)
-	a.SubRegImm32(jitRegTmp, 1)
-	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+8, jitRegTmp) // MOV leaves the flags alone
+	// SUBS, not SUB. On amd64 the distinction does not exist and this template
+	// was written without it; on arm64 the plain subtract leaves NZCV alone, so
+	// the branch below read flags set by something else entirely — the same
+	// flags every iteration, so the loop never exited. See SubsRegImm32.
+	a.SubsRegImm32(jitRegTmp, 1)
+	a.MovMemReg(jitasm.RegCtx, jitmem.CtxOffArgs+8, jitRegTmp) // the store leaves the flags alone
 	a.Jcc(jitasm.CondNE, cont)
 
 	a.MovMemImm32(jitasm.RegCtx, jitmem.CtxOffExit, uint32(jitmem.ExitPreempt))

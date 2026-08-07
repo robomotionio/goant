@@ -465,6 +465,13 @@ func (a *Asm) SubRegImm32(r Reg, v uint32) {
 	a.emit32(v)
 }
 
+// SubsRegImm32 subtracts a constant and sets the flags. Identical to
+// SubRegImm32 here, because on amd64 a SUB cannot do otherwise — the two names
+// exist so that a template which branches on the result SAYS so, and so gets
+// the right instruction on arm64, where SUB and SUBS are different. See the
+// note on the arm64 implementation for what the silent version cost.
+func (a *Asm) SubsRegImm32(r Reg, v uint32) { a.SubRegImm32(r, v) }
+
 // CmpRegImm32 compares against a sign-extended 32-bit immediate.
 func (a *Asm) CmpRegImm32(r Reg, v uint32) {
 	a.emitRM(true, []byte{0x81}, 7, uint8(r))

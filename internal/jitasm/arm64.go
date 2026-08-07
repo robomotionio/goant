@@ -489,6 +489,34 @@ func (a *Asm) dataReg(op uint32, dst, lhs, rhs Reg) {
 func (a *Asm) AddRegImm32(r Reg, v uint32) { a.addImm(r, r, int32(v)) }
 func (a *Asm) SubRegImm32(r Reg, v uint32) { a.addImm(r, r, -int32(v)) }
 
+// SubsRegImm32 subtracts a constant AND sets the flags, for a caller that
+// branches on the result.
+//
+// It exists because the difference is invisible from the shared templates. On
+// amd64 a SUB cannot help setting the flags, so a template that subtracts and
+// then branches is correct without saying anything; on arm64 SUB and SUBS are
+// different instructions and the plain one leaves NZCV alone. A template
+// written against the amd64 behaviour therefore branches on whatever flags were
+// left by something earlier — which is CONSTANT across iterations, so the branch
+// does not sometimes go the wrong way, it always does.
+//
+// That is what happened to the loop back edge: the fuel counter decremented
+// correctly and the branch never saw it reach zero, so compiled loops on arm64
+// never returned to Go. `for (;;) {}` could not be interrupted, and since that
+// exit is also the safepoint, a compiled loop reached no collection and no Go
+// preemption either. It cost a twelve-hour campaign to not find, because every
+// loop the fuzzer generates is bounded by a literal.
+//
+// See AndsRegImm32, which is the same distinction for the bitwise ops.
+func (a *Asm) SubsRegImm32(r Reg, v uint32) {
+	if v < 1<<12 {
+		a.word(0xF1000000 | v<<10 | uint32(r)<<5 | uint32(r)) // SUBS Xd, Xn, #imm
+		return
+	}
+	a.MovRegImm64(scratch0, uint64(v))
+	a.dataReg(0xEB000000, r, r, scratch0) // SUBS Xd, Xn, Xm
+}
+
 // CmpRegImm32 sets the flags from r minus a sign-extended constant.
 func (a *Asm) CmpRegImm32(r Reg, v uint32) {
 	if u := uint32(int32(v)); int32(v) >= 0 && u < 1<<12 {
