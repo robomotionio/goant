@@ -165,9 +165,16 @@ func TestJITArrayElementStoreAgreesWithTheInterpreter(t *testing.T) {
 // a three-element array and reported 293 of 300 served — which was the chain
 // being right and the test being wrong.
 func TestJITArrayElementStoreChainActuallyRuns(t *testing.T) {
-	was, wasEnabled := jitEnabled, jitStats.enabled
-	jitEnabled, jitStats.enabled = true, true
-	defer func() { jitEnabled, jitStats.enabled = was, wasEnabled }()
+	was, wasEnabled, wasT := jitEnabled, jitStats.enabled, jitThreshold
+	// Pinned rather than inherited: the chain is emitted from feedback the
+	// INTERPRETER records, so GOANT_JIT_THRESHOLD=1 in the environment compiles
+	// before any interpreted pass has run and no site has a kind to emit from.
+	// These then reported an empty chain, which was true of the environment and
+	// said nothing about the chain. See elemfeedback.go.
+	jitEnabled, jitStats.enabled, jitThreshold = true, true, 2
+	defer func() {
+		jitEnabled, jitStats.enabled, jitThreshold = was, wasEnabled, wasT
+	}()
 
 	const warm = `
 		function w(a, i, v) { a[i] = v; }
@@ -229,9 +236,16 @@ func TestJITArrayElementStoreChainActuallyRuns(t *testing.T) {
 // Invisible to every test above — both tiers write the same Value and return the
 // same result, and the flag is the only thing that differs.
 func TestCompiledArrayStoreToAnOlderArrayIsNoticed(t *testing.T) {
-	was, wasEnabled := jitEnabled, jitStats.enabled
-	jitEnabled, jitStats.enabled = true, true
-	defer func() { jitEnabled, jitStats.enabled = was, wasEnabled }()
+	was, wasEnabled, wasT := jitEnabled, jitStats.enabled, jitThreshold
+	// Pinned rather than inherited: the chain is emitted from feedback the
+	// INTERPRETER records, so GOANT_JIT_THRESHOLD=1 in the environment compiles
+	// before any interpreted pass has run and no site has a kind to emit from.
+	// These then reported an empty chain, which was true of the environment and
+	// said nothing about the chain. See elemfeedback.go.
+	jitEnabled, jitStats.enabled, jitThreshold = true, true, 2
+	defer func() {
+		jitEnabled, jitStats.enabled, jitThreshold = was, wasEnabled, wasT
+	}()
 
 	for _, tc := range []struct {
 		name  string

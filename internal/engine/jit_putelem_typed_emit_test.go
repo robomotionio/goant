@@ -201,9 +201,11 @@ func TestJITTypedElementStoreChainActuallyRuns(t *testing.T) {
 // to reach the runtime — and the counter is the only way to tell "went to the
 // runtime and got it right" from "answered it and happened to agree".
 func TestJITTypedElementStoreRefusesWhatItCannotConvert(t *testing.T) {
-	was, wasEnabled := jitEnabled, jitStats.enabled
-	jitEnabled, jitStats.enabled = true, true
-	defer func() { jitEnabled, jitStats.enabled = was, wasEnabled }()
+	was, wasEnabled, wasT := jitEnabled, jitStats.enabled, jitThreshold
+	jitEnabled, jitStats.enabled, jitThreshold = true, true, 2
+	defer func() {
+		jitEnabled, jitStats.enabled, jitThreshold = was, wasEnabled, wasT
+	}()
 
 	for _, tc := range []struct{ name, val string }{
 		{"a-fraction", "1.5"},

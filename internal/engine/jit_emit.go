@@ -190,6 +190,10 @@ func refuse(why *string, reason string) *jitCode {
 // compiled code without waiting to be called again.
 type jitCode struct {
 	block *jitmem.Block
+	// owner carries the finalizer that unmaps block. A record of its own, and
+	// hanging off this rather than off the function, for two reasons that are
+	// both load-bearing — see jit_reclaim.go.
+	owner *jitCodeOwner
 	entry uintptr
 	osr   map[int]uintptr
 	// slots is how many operand slots the body needs, which is what the frame's
@@ -2337,7 +2341,8 @@ func jitCompile(fn *svFunc, why *string) *jitCode {
 	if why != nil {
 		*why = ""
 	}
-	c := &jitCode{block: block, entry: block.AddrAt(prologue.Offset()), slots: maxDepth, sites: sites}
+	c := &jitCode{block: block, owner: jitOwnBlock(block),
+		entry: block.AddrAt(prologue.Offset()), slots: maxDepth, sites: sites}
 	if mentry != nil {
 		c.mentry = block.AddrAt(mentry.Offset())
 	}

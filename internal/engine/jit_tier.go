@@ -99,8 +99,8 @@ var jitStats struct {
 	// write, which is exactly what this tier did before the store was emitted.
 	elemPutHit  uint64
 	elemPutMiss uint64
-	genFast  uint64
-	genSlow  uint64
+	genFast     uint64
+	genSlow     uint64
 	// callFast counts calls a compiled call site made in machine code, against
 	// callSlow for the ones that went round through the runtime. It is the
 	// number that says whether the compiled call is reaching the calls that
@@ -246,9 +246,6 @@ type jitAttempt struct {
 	// what lets jit_reclaim.go release them with it.
 	retired []*jitCode
 	tried   bool
-	// owned records that this function's code is tied to its lifetime, so the
-	// finalizer is installed once however many times it is rebuilt.
-	owned bool
 	// declines counts entries the prologue's parameter check turned away, and
 	// unchecked records that it has stopped making that check. Functional, not
 	// diagnostic — see jitNoteDecline.
@@ -300,7 +297,6 @@ func jitNoteDecline(fn *svFunc) {
 	if c := jitCompile(fn, nil); c != nil {
 		fn.jit.retired = append(fn.jit.retired, fn.jit.code)
 		fn.jit.code = c
-		jitOwnCode(fn)
 	}
 }
 
@@ -333,7 +329,6 @@ func jitTryLoop(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals 
 		jitNoteRefusal(fn, why)
 		return mkundef(), nil, false
 	}
-	jitOwnCode(fn)
 	return fn.jit.code.jitRunOSR(rt, fn, cl, fnVal, args, locals, this, header)
 }
 
@@ -412,7 +407,6 @@ func jitTry(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, args, locals []Va
 		jitNoteRefusal(fn, why)
 		return mkundef(), nil, false
 	}
-	jitOwnCode(fn)
 	return fn.jit.code.jitRun(rt, fn, cl, fnVal, args, locals, this)
 }
 

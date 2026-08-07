@@ -251,9 +251,9 @@ func uintptrOf(ctx *jitmem.ExecContext) uintptr { return ctx.Addr() }
 // as an index into an empty pool, at a call depth of three and only after two
 // million calls had gone right.
 func TestARefillDoesNotReassignALiveFrame(t *testing.T) {
-	saved := jitEnabled
-	jitEnabled = true
-	defer func() { jitEnabled = saved }()
+	saved, savedT := jitEnabled, jitThreshold
+	jitEnabled, jitThreshold = true, 2
+	defer func() { jitEnabled, jitThreshold = saved, savedT }()
 
 	rt := New()
 	if _, err := rt.RunString("refill.js", `
@@ -310,9 +310,9 @@ func TestARefillDoesNotReassignALiveFrame(t *testing.T) {
 // function that recompiles itself could talk every one of its callers out of
 // calling it in machine code, which is worth 12% of DeltaBlue.
 func TestARebuiltCalleeDoesNotRetireItsCallSites(t *testing.T) {
-	saved := jitEnabled
-	jitEnabled = true
-	defer func() { jitEnabled = saved }()
+	saved, savedT := jitEnabled, jitThreshold
+	jitEnabled, jitThreshold = true, 2
+	defer func() { jitEnabled, jitThreshold = saved, savedT }()
 
 	rt := New()
 	if _, err := rt.RunString("rebuild.js", `

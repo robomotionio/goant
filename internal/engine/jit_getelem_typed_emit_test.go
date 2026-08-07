@@ -177,9 +177,14 @@ func TestJITTypedElementSeesTheBufferChange(t *testing.T) {
 // is checked in the same run, because a chain that answered everything would
 // also make the hit count go up.
 func TestJITTypedElementChainActuallyRuns(t *testing.T) {
-	was, wasEnabled := jitEnabled, jitStats.enabled
-	jitEnabled, jitStats.enabled = true, true
-	defer func() { jitEnabled, jitStats.enabled = was, wasEnabled }()
+	was, wasEnabled, wasT := jitEnabled, jitStats.enabled, jitThreshold
+	// See the note on jitThreshold in TestJITTypedElementFeedbackPicksTheChain:
+	// the chain is emitted from what the interpreter recorded, so inheriting a
+	// threshold of 1 leaves no interpreted pass and no site with a kind.
+	jitEnabled, jitStats.enabled, jitThreshold = true, true, 2
+	defer func() {
+		jitEnabled, jitStats.enabled, jitThreshold = was, wasEnabled, wasT
+	}()
 
 	for _, k := range taKindNames {
 		emittable := jitElemKindEmittable(k.kind)
@@ -316,9 +321,9 @@ func TestTypedArrayJITKindMatchesTheEmitter(t *testing.T) {
 // the length and takes the bytes away, so a chain that trusted length would read
 // freed memory rather than answer undefined.
 func TestJITTypedElementBoundsAreOnTheBytes(t *testing.T) {
-	was := jitEnabled
-	jitEnabled = true
-	defer func() { jitEnabled = was }()
+	was, wasT := jitEnabled, jitThreshold
+	jitEnabled, jitThreshold = true, 2
+	defer func() { jitEnabled, jitThreshold = was, wasT }()
 
 	rt := New()
 	got, err := rt.RunString("detach.js", `

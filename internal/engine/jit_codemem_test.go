@@ -252,11 +252,17 @@ func TestCodeMemoryGrowsWithDISTINCTFunctions(t *testing.T) {
 // frame may still be inside it.
 //
 // The test asserts the retention is ACCOUNTED, not that it does not happen.
+//
+// It settles the counter before taking a baseline, and holds the Runtime across
+// both readings. Without the settle it read a drop of 81,920 bytes and called
+// the accounting wrong: the counter is process-wide, and what fell was an
+// earlier test's code being reclaimed in the middle of this one.
 func TestRecompilationRetainsTheOldBlockAndSaysSo(t *testing.T) {
 	wasEnabled, wasThreshold := jitEnabled, jitThreshold
 	jitEnabled, jitThreshold = true, 2
 	defer func() { jitEnabled, jitThreshold = wasEnabled, wasThreshold }()
 
+	settleCodeMemory(t)
 	rt := New()
 	// A site that goes polymorphic is the ordinary way a function is rebuilt.
 	if _, err := rt.RunString("warm.js", `
@@ -275,12 +281,17 @@ func TestRecompilationRetainsTheOldBlockAndSaysSo(t *testing.T) {
 		t.Fatalf("shift: %v", err)
 	}
 	_, after, _ := JITCodeMemory()
-	// Either nothing was rebuilt (fine) or something was and it is counted.
+	// Either nothing was rebuilt (fine) or something was and it is counted. What
+	// must not happen is a DROP, because f is still reachable: a retired block
+	// released while its function can be re-entered is a jump into an unmapped
+	// page, and a suspended frame inside one is exactly what retiring is for.
 	if after < before {
-		t.Errorf("code memory went DOWN by %d bytes without anything being freed; "+
-			"the accounting is wrong", before-after)
+		t.Errorf("code memory went DOWN by %d bytes while the function that owns it "+
+			"is still reachable; a retired block was released too early",
+			before-after)
 	}
 	t.Logf("after a receiver-shape shift: %d bytes, was %d", after, before)
+	runtime.KeepAlive(rt)
 }
 
 // TestCodeMemoryIsReclaimedWhenTheFunctionIsGone is the test the OOM killer
@@ -346,6 +357,67 @@ func TestCodeMemoryIsReclaimedWhenTheFunctionIsGone(t *testing.T) {
 		t.Errorf("after dropping %d Runtimes, %d of %d bytes of executable memory "+
 			"were still mapped (%d%%). Code is not being reclaimed with its function, "+
 			"which is what takes a long-running host down.",
+			programs, kept, grew, 100*kept/grew)
+	}
+}
+
+// TestCodeMemoryIsReclaimedFromRECURSIVEFunctions is the same property asked of
+// the shape that breaks it, and it is a separate test because the first version
+// of the reclamation passed everything else while failing this.
+//
+// A compiled call site holds a jitCallee and a jitCallee names the function it
+// resolved to, so a function that calls itself closes fn -> code -> sites ->
+// bind -> fn, and two that call each other close a longer one. Go runs no
+// finalizer on an object in a reference cycle and frees no such cycle either, so
+// a finalizer placed on svFunc pins every recursive compiled function forever —
+// together with the closure a jitCallee holds and therefore a pointer into the
+// JavaScript heap's chunk. It measured as four fuzz workers going from 1.7 GB to
+// 10 GB each in thirty seconds.
+//
+// Nothing about that is visible from a straight-line program, which is why this
+// test generates only recursion: direct, mutual, and through a method.
+func TestCodeMemoryIsReclaimedFromRECURSIVEFunctions(t *testing.T) {
+	wasEnabled, wasThreshold := jitEnabled, jitThreshold
+	jitEnabled, jitThreshold = true, 2
+	defer func() { jitEnabled, jitThreshold = wasEnabled, wasThreshold }()
+
+	const programs = 90
+	start := settleCodeMemory(t)
+
+	live := make([]*Runtime, 0, programs)
+	for i := 0; i < programs; i++ {
+		src := fmt.Sprintf(`
+			function down%d(n){ return n <= 0 ? %d : down%d(n-1) + 1; }
+			function even%d(n){ return n === 0 ? 1 : odd%d(n-1); }
+			function odd%d(n){ return n === 0 ? 0 : even%d(n-1); }
+			var o%d = { d: 0, step: function(n){ return n <= 0 ? this.d : this.step(n-1); } };
+			var t = 0;
+			for (var k = 0; k < 300; k++) { t += down%d(6) + even%d(6) + o%d.step(5); }
+			t;`, i, i, i, i, i, i, i, i, i, i, i)
+		rt := New()
+		if _, err := rt.RunString(fmt.Sprintf("r%d.js", i), src); err != nil {
+			t.Fatalf("program %d: %v", i, err)
+		}
+		live = append(live, rt)
+	}
+	_, peak, _ := JITCodeMemory()
+	runtime.KeepAlive(live)
+	live = nil
+	settled := settleCodeMemory(t)
+
+	grew := peak - start
+	kept := settled - start
+	t.Logf("%d recursive programs held: %d bytes; after dropping them: %d "+
+		"(grew %d, kept %d)", programs, peak, settled, grew, kept)
+
+	if grew < int64(programs)*1024 {
+		t.Fatalf("%d recursive programs grew executable memory by only %d bytes; "+
+			"nothing compiled and the test proves nothing", programs, grew)
+	}
+	if kept > grew/4 {
+		t.Errorf("after dropping %d Runtimes of RECURSIVE functions, %d of %d bytes "+
+			"were still mapped (%d%%). A finalizer reachable from the call-site "+
+			"cycle never runs — see jit_reclaim.go.",
 			programs, kept, grew, 100*kept/grew)
 	}
 }

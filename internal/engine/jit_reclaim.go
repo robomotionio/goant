@@ -1,6 +1,10 @@
 package engine
 
-import "runtime"
+import (
+	"runtime"
+
+	"github.com/robomotionio/goant/internal/jitmem"
+)
 
 // Giving executable memory back.
 //
@@ -23,52 +27,86 @@ import "runtime"
 // did not cover the part that was growing.
 //
 // The proof that was missing is easier than it looked, because it is not needed
-// per entry. Entering a function's code requires reaching the function: the
-// interpreter enters through fn.jit.code, a compiled call site's frame holds a
-// jitCallee that names fn, and a suspended generator or an outer recursive frame
-// holds fn as well. So while any entry is possible, *svFunc is reachable — and
-// when it is not, no entry is. That makes the function's own lifetime the exact
-// lifetime of its code, and a finalizer the mechanism, since svFunc is an
-// ordinary Go allocation with no back-pointer to make a cycle.
+// per entry. Entering compiled code requires reaching the jitCode that describes
+// it: the interpreter enters through fn.jit.code, a compiled call site's frame
+// holds a jitCallee that names one, a suspended generator or an outer recursive
+// frame reaches one through the function it is running, and jitCompile hands one
+// back to whoever asked. So while any entry is possible the jitCode is
+// reachable, and when it is not, no entry is. The jitCode's own lifetime is
+// therefore the exact lifetime of its mapping.
 //
-// This reclaims the retired blocks too. They are the ones a recompilation left
-// behind, and they are kept for the same reason and released by the same
-// argument: a frame suspended in a retired block holds the function it is
-// running.
+// WHERE THE FINALIZER GOES is the whole of the difficulty, and two placements
+// that both look right are both wrong.
 //
-// What it does NOT do is free code while its function is alive. A pooled host
+// Not on svFunc, which is the obvious one and was the first thing tried. A
+// compiled call site holds a jitCallee, and a jitCallee names the function it
+// resolved to, so
+//
+//	fn -> jit.code -> sites -> bind -> fn
+//
+// closes for any function that calls itself, and two of them close for any pair
+// that call each other. Go runs no finalizer on an object in a reference cycle
+// and frees no such cycle either, so every recursive compiled function would be
+// pinned forever together with everything it reaches — which includes a
+// jitCallee's closure and so a pointer into the JavaScript heap's chunk.
+// Measured, four fuzz workers went from 1.7 GB to 10 GB each in thirty seconds
+// and took a 31 GB machine to zero free.
+//
+// And not on svFunc even with the cycle avoided, because a jitCode does not have
+// to be reached through its function: jitCompile RETURNS one, and a caller
+// holding it holds nothing that keeps an svFunc alive. Tying the mapping to the
+// function meant that block could be unmapped while a live *jitCode still
+// pointed into it — which is a use-after-free of executable memory, and which
+// turned up immediately as a test reading Len() off a freed block and as the
+// race detector finding a finalizer writing it.
+//
+// So the finalizer goes on a jitCodeOwner hanging off the jitCode: a record that
+// holds the mapping and NOTHING that can point back into the engine's graph. The
+// cycle above keeps no finalizer and is collected normally; the owner is
+// reachable from the jitCode and from nothing else, and dies with it.
+//
+// The retired blocks a recompilation left behind need no special handling under
+// this rule. Each is its own jitCode, held in fn.jit.retired for exactly as long
+// as a frame suspended in it could still be running, and released when that
+// stops being true.
+//
+// What this does NOT do is free code while anything can enter it. A pooled host
 // running the same flow forever still compiles once and keeps it, which is the
-// behaviour the tier is built around; see jit_codemem_test.go, which pins both
-// halves.
+// behaviour the tier is built around; see jit_codemem_test.go, which pins every
+// half of this including the cycle.
 
-// jitOwnCode ties a function's compiled code to the function's own lifetime.
+// jitCodeOwner is one compiled function's mapping and nothing else.
 //
-// Called at each of the three points a function acquires code. The flag is why
-// it is safe to call more than once: SetFinalizer panics on an object that
-// already has one, and a function that is rebuilt without its parameter check
-// reaches here a second time.
-func jitOwnCode(fn *svFunc) {
-	if fn == nil || fn.jit.owned {
-		return
-	}
-	fn.jit.owned = true
-	runtime.SetFinalizer(fn, jitReleaseCode)
+// The absence of other fields is the design. Anything here that reached back
+// into the engine's graph would put this record inside the very cycle it exists
+// to stay out of, and the finalizer would then never run — silently, and only
+// for the functions that happen to recurse.
+type jitCodeOwner struct {
+	block *jitmem.Block
 }
 
-// jitReleaseCode unmaps everything a function ever compiled to.
+// release unmaps the block.
 //
-// Runs on the collector's goroutine with fn unreachable from anywhere else, so
-// there is nothing to synchronise with: nothing can be executing this code and
-// nothing can start. It touches only fn's own fields — resurrecting fn by
-// publishing it somewhere would put a function back in play whose code is
-// already unmapped.
-func jitReleaseCode(fn *svFunc) {
-	if c := fn.jit.code; c != nil {
-		fn.jit.code = nil
-		c.free()
+// Runs on the collector's goroutine with the owner unreachable, which means its
+// jitCode is unreachable, which means nothing is executing this code and nothing
+// can start. Free is idempotent, so a block a caller has already released
+// explicitly is not freed twice.
+func (o *jitCodeOwner) release() {
+	if o.block != nil {
+		o.block.Free()
+		o.block = nil
 	}
-	for _, c := range fn.jit.retired {
-		c.free()
+}
+
+// jitOwnBlock ties a mapping to the lifetime of the jitCode that describes it.
+//
+// Called once per successful compilation, at the point the mapping is handed
+// over, and the result is stored in that jitCode and nowhere else.
+func jitOwnBlock(b *jitmem.Block) *jitCodeOwner {
+	if b == nil {
+		return nil
 	}
-	fn.jit.retired = nil
+	o := &jitCodeOwner{block: b}
+	runtime.SetFinalizer(o, (*jitCodeOwner).release)
+	return o
 }
