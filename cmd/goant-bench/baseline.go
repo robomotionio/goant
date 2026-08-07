@@ -99,11 +99,47 @@ var goantBuild string
 
 // engineKey is the engine's name, with the build stamped on for goant — the one
 // engine that is expected to differ from run to run.
+//
+// The TIER is part of the key too, and leaving it out was silently answering
+// the one question this tool is most often pointed at. The same binary run with
+// GOANT_JIT=1 and without it produced the same key, so an A/B of the tier
+// returned whichever of the two ran first — measured once, reported twice. It
+// showed up as fifteen workloads agreeing to the integer across two runs that
+// should have differed, which is the only reason it was caught rather than
+// believed.
+//
+// This is the second time the same mistake has cost real work here: GOANT_JIT=0
+// once read as ON, and weeks of "the tier changes nothing" were measured that
+// way. A cache key that cannot tell two configurations apart is that bug with a
+// different spelling.
 func engineKey(e engine) string {
-	if e.name == "goant" && goantBuild != "" {
-		return "goant@" + goantBuild
+	if e.name != "goant" {
+		return e.name
 	}
-	return e.name
+	key := "goant"
+	if goantBuild != "" {
+		key += "@" + goantBuild
+	}
+	if envOn("GOANT_JIT") {
+		key += "+jit"
+		if t := os.Getenv("GOANT_JIT_THRESHOLD"); t != "" {
+			key += t
+		}
+	}
+	return key
+}
+
+// envOn reads a boolean environment variable the way the engine does: absent or
+// a spelling of "no" is off, anything else is on. Duplicated rather than
+// imported because this tool shells out to a goant BINARY and does not link the
+// engine, and because reading it differently from the engine is precisely the
+// failure this guards against.
+func envOn(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "", "0", "false", "no", "off":
+		return false
+	}
+	return true
 }
 
 // hashBinary is the short content hash of a file, or "" if it cannot be read —
