@@ -83,6 +83,20 @@ var fuzzUnOps = []string{"-", "+", "!", "~", "typeof ", "void "}
 // from a hit.
 var fuzzProps = []string{"a", "b", "x", "length", "m", "nope"}
 
+// fuzzWriteProps is fuzzProps minus `length`, for the statement forms that
+// ASSIGN.
+//
+// Reading `a.length` is instant and worth generating. Writing it is not the same
+// operation at all: `v0.length = 2147483648` is a legal statement that leaves an
+// array claiming two billion entries, and the next `String(v0)` joins them. Two
+// of the campaign's five surviving findings were exactly that, reported as
+// "signal: killed".
+//
+// The same asymmetry as the element index, and for the same reason: what a
+// compiled read has to REJECT is worth generating, and what a write has to
+// ALLOCATE is not.
+var fuzzWriteProps = []string{"a", "b", "x", "m", "nope"}
+
 // fuzzHosts are receivers for a method call. Two of them so a site can go
 // polymorphic, which is what makes an inline cache do something interesting.
 var fuzzHosts = []string{"host", "host2"}
@@ -214,7 +228,7 @@ func (g *fuzzGen) stmt(depth int) string {
 		// in-range, the end of a three-element array, and past it.
 		return fmt.Sprintf("v%d[%d] = cap(%s);", g.next(4), g.next(8), g.expr(depth-1))
 	case 5:
-		return fmt.Sprintf("v%d.%s = cap(%s);", g.next(4), g.pick(fuzzProps), g.expr(depth-1))
+		return fmt.Sprintf("v%d.%s = cap(%s);", g.next(4), g.pick(fuzzWriteProps), g.expr(depth-1))
 	case 6:
 		return fmt.Sprintf("out.push(%s);", g.expr(depth-1))
 	case 7:
@@ -238,7 +252,7 @@ func (g *fuzzGen) stmt(depth int) string {
 			depth, depth, g.next(4), depth, g.next(3))
 	case 12:
 		// Mutating a prototype mid-flight, which retires inline caches.
-		return fmt.Sprintf("proto.%s = cap(%s);", g.pick(fuzzProps), g.expr(depth-1))
+		return fmt.Sprintf("proto.%s = cap(%s);", g.pick(fuzzWriteProps), g.expr(depth-1))
 	case 13:
 		// for-in and for-of, both of which allocate iterators.
 		return fmt.Sprintf("for (var k%d in %s) { v%d = k%d; }", depth,
