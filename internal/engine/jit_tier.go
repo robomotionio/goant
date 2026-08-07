@@ -150,6 +150,26 @@ func JITStats() (compiled, declined, interpreted uint64) {
 	return jitStats.compiled, jitStats.declined, jitStats.interp
 }
 
+// JITIsEnabled reports whether the tier is on for this process.
+//
+// Exported so a harness can say which tier it measured rather than assume it —
+// GOANT_JIT=0 used to read as ON, and weeks of "the tier changes nothing" were
+// measured that way. A run that cannot state what it ran is not a measurement.
+func JITIsEnabled() bool { return jitEnabled }
+
+// JITSetEnabled turns the tier on or off and returns what it was.
+//
+// For a harness that needs both tiers in one process — computing an answer key
+// with the interpreter before measuring the compiler against it, which is the
+// only way to have an oracle that is not the thing under test. Not for a host:
+// switching mid-flight leaves already-compiled functions compiled, so this
+// turns COMPILING off rather than compiled code.
+func JITSetEnabled(on bool) bool {
+	was := jitEnabled
+	jitEnabled = on
+	return was
+}
+
 // JITPropertyStats reports compiled property reads served by the emitted
 // inline-cache probe, and those that fell through to the runtime.
 func JITPropertyStats() (hit, miss uint64) { return jitStats.icHit, jitStats.icMiss }
