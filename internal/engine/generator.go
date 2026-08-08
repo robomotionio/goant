@@ -1,5 +1,7 @@
 package engine
 
+import "github.com/robomotionio/goant/internal/jitmem"
+
 // Generators and async functions (ant modules/generator.c + the async driver).
 //
 // A generator/async function does not run its body when called; instead it
@@ -69,6 +71,12 @@ type genState struct {
 	// arrangement for what those frames publish to the collector.
 	slabs  []frameSlab
 	frames []vmFrame
+	// jitFrames is the same arrangement again for the per-depth ExecContext
+	// chain compiled code runs in. A coroutine body can hold compiled frames —
+	// an async function that never awaits is compiled like any other — and a
+	// context is addressed by depth, so sharing the driver's chain would let
+	// the driver hand a live frame's context to something else at that depth.
+	jitFrames []*jitmem.ExecContext
 
 	// asyncReqs is the async-generator request queue (AsyncGeneratorRequest
 	// records): next/return/throw calls are serviced one at a time, since an
@@ -153,6 +161,10 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 	// the driver reuses, and the collector reads both sets.
 	mainFrames := rt.frames
 	rt.frames = g.frames
+	// And the same for the compiled frames' contexts, which are addressed by
+	// depth like the two above and stay live for the same reason.
+	mainJIT := rt.jitFrames
+	rt.jitFrames = g.jitFrames
 	if !g.started {
 		g.started = true
 		go rt.genRun(g)
@@ -164,6 +176,7 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 	g.genDepth = rt.frameDepth
 	g.slabs = rt.swapSlabs(mainSlabs)
 	g.frames, rt.frames = rt.frames, mainFrames
+	g.jitFrames, rt.jitFrames = rt.jitFrames, mainJIT
 	rt.curGen = prevGen
 	rt.frameDepth = mainDepth
 	if m.done || m.err != nil {

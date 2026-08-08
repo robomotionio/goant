@@ -405,7 +405,22 @@ func jitEligible(fn *svFunc) bool {
 	if jitMask != ^uint64(0) && jitMask&(1<<jitNameBucket(fn.name)) == 0 {
 		return false
 	}
-	return !fn.isAsync && !fn.isGenerator && !fn.isClassCtor &&
+	// isAsync is no longer here either. An async function suspends at `await`,
+	// and a compiled frame cannot suspend — but an async function that never
+	// awaits never suspends, and there are a great many of those. Every
+	// JavaScript embedded in a host that hands scripts a message and takes a
+	// value back is wrapped in one, because the wrapper has to be able to accept
+	// a promise from the scripts that do await; the ones that do not still pay
+	// for the wrapper. Refusing them all cost the whole body of the script.
+	//
+	// The ones that do await are still refused, by the opcode scan rather than
+	// here: AWAIT has no template, so jitUnsupported names it. That is the
+	// better place for it — one refusal, stated in terms of what is in the body,
+	// rather than a shape rejected before the body is read.
+	//
+	// A compiled frame inside a coroutine is why genDrive swaps the ExecContext
+	// chain along with the frame slabs.
+	return !fn.isGenerator && !fn.isClassCtor &&
 		!fn.evalVarObj &&
 		fn.globalLex == nil && fn.moduleExports == nil
 }
