@@ -117,6 +117,11 @@ func (rt *Runtime) intlDigitOptions(options Value, defMinFrac, defMaxFrac int) (
 	if hasMinFrac && !hasMaxFrac && p.maxFrac < p.minFrac {
 		p.maxFrac = p.minFrac
 	}
+	// The other way round too: a currency's default minimum is two digits, and
+	// asking for at most one is a narrowing rather than a contradiction.
+	if hasMaxFrac && !hasMinFrac && p.minFrac > p.maxFrac {
+		p.minFrac = p.maxFrac
+	}
 	if p.minFrac > p.maxFrac {
 		return p, rt.rangeError("minimumFractionDigits is greater than maximumFractionDigits")
 	}

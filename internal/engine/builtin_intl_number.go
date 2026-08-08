@@ -326,18 +326,28 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 			out = append(out, numberPart{typ, val})
 		}
 	}
-	if v != v {
-		add("nan", li.nan)
-		return withStyleAffixes(n, out)
-	}
-	if n.style == "percent" {
+	if n.style == "percent" && v == v {
 		v *= 100
 	}
 
 	neg := math.Signbit(v)
+	nan := v != v
 	var intPart, frac string
+	var exponent int
 	infinite := math.IsInf(v, 0)
-	if !infinite {
+	if !nan && !infinite && (n.notation == "scientific" || n.notation == "engineering") {
+		// The mantissa is what gets formatted; the exponent is written after
+		// it. Engineering keeps the exponent a multiple of three, which is what
+		// makes 0.000345 read as 345E-6 rather than 3.45E-4.
+		if v != 0 {
+			exponent = int(math.Floor(math.Log10(math.Abs(v))))
+			if n.notation == "engineering" {
+				exponent = int(math.Floor(float64(exponent)/3)) * 3
+			}
+			v /= math.Pow(10, float64(exponent))
+		}
+	}
+	if !infinite && !nan {
 		intPart, frac = expandDecimal(strings.TrimPrefix(numberToString(math.Abs(v)), "-"))
 		if digits != "" {
 			// A BigInt arrives as its exact decimal digits rather than as a
@@ -364,7 +374,7 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 
 	// Rounding can turn a small negative number into a zero, and a signed zero
 	// is not what "-0.0000001 to two places" should print.
-	zero := !infinite && strings.Trim(intPart, "0") == "" && strings.Trim(frac, "0") == ""
+	zero := !infinite && !nan && strings.Trim(intPart, "0") == "" && strings.Trim(frac, "0") == ""
 	switch n.signDisplay {
 	case "never":
 	case "always":
@@ -387,6 +397,10 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 		}
 	}
 
+	if nan {
+		add("nan", li.nan)
+		return withStyleAffixes(n, out)
+	}
 	if infinite {
 		add("infinity", li.inf)
 		return withStyleAffixes(n, out)
@@ -408,20 +422,82 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 		add("decimal", li.decimal)
 		add("fraction", frac)
 	}
+	if n.notation == "scientific" || n.notation == "engineering" {
+		add("exponentSeparator", "E")
+		e := exponent
+		if e < 0 {
+			add("exponentMinusSign", li.minus)
+			e = -e
+		}
+		add("exponentInteger", strconv.Itoa(e))
+	}
 	return withStyleAffixes(n, out)
 }
 
+// currencySymbols is the standard symbol of the currencies a script is likely
+// to name, and the narrow symbol where it differs. CLDR carries one per
+// currency PER LOCALE -- "US$" in most of the world and "$" in the United
+// States -- and this is the en table; a currency not in it is written as its
+// code, which is what `currencyDisplay: "code"` asks for and a truthful answer
+// rather than a guess.
+var currencySymbols = map[string][2]string{
+	"USD": {"$", "$"}, "EUR": {"€", "€"}, "GBP": {"£", "£"}, "JPY": {"¥", "¥"},
+	"CNY": {"CN¥", "¥"}, "KRW": {"₩", "₩"}, "INR": {"₹", "₹"}, "RUB": {"RUB", "₽"},
+	"TRY": {"TRY", "₺"}, "BRL": {"R$", "R$"}, "CAD": {"CA$", "$"}, "AUD": {"A$", "$"},
+	"CHF": {"CHF", "CHF"}, "SEK": {"SEK", "kr"}, "NOK": {"NOK", "kr"},
+	"DKK": {"DKK", "kr"}, "PLN": {"PLN", "zł"}, "MXN": {"MX$", "$"},
+	"ZAR": {"ZAR", "R"}, "NZD": {"NZ$", "$"}, "HKD": {"HK$", "$"},
+	"SGD": {"SGD", "$"}, "ILS": {"₪", "₪"}, "THB": {"THB", "฿"},
+	"VND": {"₫", "₫"}, "PHP": {"₱", "₱"}, "NGN": {"₦", "₦"},
+}
+
+// currencyText is what the currency span reads, given the display option.
+func currencyText(code, display string) string {
+	pair, ok := currencySymbols[code]
+	if !ok {
+		return code
+	}
+	switch display {
+	case "symbol":
+		return pair[0]
+	case "narrowSymbol":
+		return pair[1]
+	}
+	return code
+}
+
 // withStyleAffixes puts the style's own marker around the number: the percent
-// sign after it, the currency code or the unit beside it.
+// sign after it, the currency symbol before it, the unit after it.
 func withStyleAffixes(n numberOptions, parts []numberPart) []numberPart {
 	switch n.style {
 	case "percent":
 		return append(parts, numberPart{"percentSign", "%"})
 	case "currency":
-		// Without CLDR's currency symbols and placement rules the code is what
-		// gets written -- which is exactly `currencyDisplay: "code"`, and a
-		// truthful answer rather than a guessed symbol in a guessed position.
-		return append([]numberPart{{"currency", n.currency}, {"literal", " "}}, parts...)
+		// English places the symbol first with no space, and the accounting
+		// sign writes a negative amount in parentheses instead of with a minus
+		// -- which means taking the minus back out. Both are en's rules; CLDR
+		// carries a pattern per locale.
+		neg := false
+		if len(parts) > 0 && parts[0].typ == "minusSign" {
+			neg = true
+		}
+		if n.currencySign == "accounting" && neg {
+			parts = parts[1:]
+		}
+		text := currencyText(n.currency, n.currencyDisplay)
+		out := []numberPart{{"currency", text}}
+		if n.currencyDisplay == "code" || n.currencyDisplay == "name" || text == n.currency {
+			out = append(out, numberPart{"literal", "\u00a0"})
+		}
+		if n.currencySign == "accounting" && neg {
+			out = append([]numberPart{{"literal", "("}}, out...)
+			return append(append(out, parts...), numberPart{"literal", ")"})
+		}
+		if neg {
+			// The minus belongs outside the symbol: -$987.00, not $-987.00.
+			return append(append([]numberPart{parts[0]}, out...), parts[1:]...)
+		}
+		return append(out, parts...)
 	case "unit":
 		return append(parts, numberPart{"literal", " "}, numberPart{"unit", n.unit})
 	}
