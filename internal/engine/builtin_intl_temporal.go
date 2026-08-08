@@ -214,10 +214,6 @@ func (rt *Runtime) temporalLocaleString(v Value, kind temporalKind, locales, opt
 	}
 	o := rt.objPtr(v)
 	var ms float64
-	loc := zoneFor(d.timeZone)
-	if temporalIsPlain(kind) {
-		loc = time.UTC
-	}
 	if kind == kindZonedDateTime {
 		d.timeZone = rt.tTimeZone(o)
 		if cal := rt.tCalendar(o); cal != "iso8601" && cal != d.calendar {
@@ -239,6 +235,10 @@ func (rt *Runtime) temporalLocaleString(v Value, kind temporalKind, locales, opt
 		ms = got
 		eff, _ := temporalEffective(d, kind)
 		d = eff
+	}
+	loc := zoneFor(d.timeZone)
+	if temporalIsPlain(kind) {
+		loc = time.UTC
 	}
 	var b []rune
 	for _, p := range d.dateTimeParts(msInZone(ms, loc)) {

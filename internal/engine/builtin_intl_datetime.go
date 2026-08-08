@@ -457,7 +457,7 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 				h = 24
 			}
 		}
-		if style == "2-digit" {
+		if style == "2-digit" || d.paddedTimeField("hour") {
 			return two(h)
 		}
 		return strconv.Itoa(h)
@@ -498,6 +498,16 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 // paddedTimeField reports whether a field is preceded by another time field,
 // in which case it is written to two digits whatever its option said.
 func (d dateTimeOptions) paddedTimeField(comp string) bool {
+	if comp == "hour" {
+		// A twenty-four-hour reading is always two digits, whatever the option
+		// asked for and whether or not a minute follows: the whole point of
+		// the cycle is that "09" and "21" line up. The twelve-hour cycles do
+		// not pad, because there the AM or PM is what tells them apart.
+		switch d.resolvedHourCycle() {
+		case "h23", "h24":
+			return true
+		}
+	}
 	n := 0
 	for _, c := range []string{"hour", "minute", "second"} {
 		if _, ok := d.comps[c]; ok {
