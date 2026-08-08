@@ -116,21 +116,32 @@ func discover(testDir, only string) ([]string, error) {
 
 // ---- harness ----
 
+// loadHarness indexes every helper by the path a test names it with, which for
+// the staging tree means a subdirectory: SpiderMonkey's imports there include
+// "sm/non262-shell.js", and reading only the top level left 164 of them
+// unrunnable and counted as skips.
 func loadHarness(dir string) (map[string]string, error) {
 	m := map[string]string{}
-	ents, err := os.ReadDir(dir)
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".js") {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		m[filepath.ToSlash(rel)] = string(b)
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("harness dir %s: %w", dir, err)
-	}
-	for _, e := range ents {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".js") {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			return nil, err
-		}
-		m[e.Name()] = string(b)
 	}
 	return m, nil
 }
