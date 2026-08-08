@@ -110,15 +110,21 @@ func (rt *Runtime) deferredAt(o *object, key string) *ThrowError {
 	return nil
 }
 
-// deferredOnChain triggers a deferred namespace anywhere on a receiver's
-// prototype chain. [[Set]] walks that chain looking for a setter, so a write
-// through `super` to an object whose prototype is a deferred namespace is a
-// question about the module even though the write lands somewhere else.
+// deferredOnChain triggers a deferred namespace found on a receiver's prototype
+// chain, NOT counting the receiver itself. The distinction is the whole rule for
+// [[Set]]: writing to a namespace directly is refused without asking the module
+// anything, since a namespace is read-only whatever it holds -- but a write
+// through `super` to an object whose prototype is one has to look up that chain
+// for a setter, and looking is asking.
 func (rt *Runtime) deferredOnChain(obj Value, key string) *ThrowError {
 	if rt.deferredNamespaces == nil || key == "then" {
 		return nil
 	}
-	cur := obj
+	start := rt.objPtr(obj)
+	if start == nil {
+		return nil
+	}
+	cur := start.proto
 	for depth := 0; depth < maxProtoChainDepth; depth++ {
 		o := rt.objPtr(cur)
 		if o == nil {
@@ -166,11 +172,12 @@ func (rt *Runtime) runDeferred(m *moduleRecord) *ThrowError {
 	if m.status == modEvaluated {
 		return nil
 	}
-	// Mid-evaluation. The module is on the stack -- its own, or another in its
-	// cycle, or one suspended at a top-level await -- so running it now would
-	// run it twice, and waiting for it is not something a property read can do.
-	// Neither is an answer, so there is no answer.
-	if m.status == modEvaluating || m.status == modEvaluatingAsync {
+	// Anything in the subgraph already on the stack -- this module, another in
+	// its cycle, or one suspended at a top-level await -- means running it now
+	// would run something twice, and waiting is not something a property read can
+	// do. Neither is an answer, so there is no answer, and the check happens
+	// BEFORE any of it runs: a subgraph that cannot finish must not half-start.
+	if rt.evaluatingWithin(m, map[*moduleRecord]bool{}) {
 		return rt.typeError("cannot access a deferred module while it is being evaluated")
 	}
 	_, _, err := rt.innerModuleEvaluation(m, nil, 0)
@@ -183,4 +190,31 @@ func (rt *Runtime) runDeferred(m *moduleRecord) *ThrowError {
 		return err
 	}
 	return nil
+}
+
+// evaluatingWithin reports whether anything m would have to run is running
+// already. Deferred requests are not walked: evaluating m does not evaluate
+// them, so whatever state they are in is not m's problem.
+func (rt *Runtime) evaluatingWithin(m *moduleRecord, seen map[*moduleRecord]bool) bool {
+	if m == nil || seen[m] {
+		return false
+	}
+	seen[m] = true
+	if m.status == modEvaluating || m.status == modEvaluatingAsync {
+		return true
+	}
+	if m.status.settled() {
+		return false
+	}
+	for _, req := range m.requestedWith() {
+		if req.deferred {
+			continue
+		}
+		if dep, ok := rt.modules[rt.resolveSpecifier(req.key, m.path)]; ok {
+			if rt.evaluatingWithin(dep, seen) {
+				return true
+			}
+		}
+	}
+	return false
 }
