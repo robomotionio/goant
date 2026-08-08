@@ -315,55 +315,71 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 		}
 		return name
 	case "era":
-		// The proleptic Gregorian calendar has no year zero: ISO year 0 is
-		// 1 BC, ISO -1 is 2 BC, and the era says which side of that the date
-		// falls on.
-		if t.Year() <= 0 {
-			switch style {
-			case "long":
-				return "Before Christ"
-			case "narrow":
-				return "B"
-			}
-			return "BC"
-		}
-		switch style {
-		case "long":
-			return "Anno Domini"
-		case "narrow":
-			return "A"
-		}
-		return "AD"
+		return eraName(d.calendarDate(t).era, style)
 	case "year":
-		y := t.Year()
-		// Counted from the era's own first year, so 1 BC is year 1 and not
-		// year 0 -- unless the calendar is ISO 8601, which has no eras and
-		// numbers straight through zero into the negatives.
-		if y <= 0 && d.calendar != "iso8601" {
-			y = 1 - y
+		// The era's own year, so 1 BC is year 1 and not year 0 -- unless the
+		// calendar is ISO 8601, which has no eras and numbers straight
+		// through zero into the negatives.
+		cd := d.calendarDate(t)
+		y := cd.eraYear
+		if d.calendar == "iso8601" {
+			y = cd.year
 		}
 		if style == "2-digit" {
 			return two(((y % 100) + 100) % 100)
 		}
 		return strconv.Itoa(y)
+	case "relatedYear":
+		cd := d.calendarDate(t)
+		return relatedGregorianYear(calendarFor(d.calendar), d.calendar, cd.year)
+	case "yearName":
+		lang := ""
+		if tag, ok := parseLangTag(d.tag); ok {
+			lang = tag.lang
+		}
+		return sexagenaryName(d.calendarDate(t).year, lang)
 	case "month":
-		m := int(t.Month())
+		cd := d.calendarDate(t)
+		m := cd.month
+		// A lunisolar month is written by its NAME rather than its place in
+		// the year: in a year with a leap fourth month, the month after it is
+		// still the fifth. The leap month itself takes the name of the one
+		// before with a marker on it.
+		marker := ""
+		if d.lunisolar() {
+			if n, leap, ok := parseMonthCode(cd.code); ok {
+				m = n
+				if leap {
+					marker = "bis"
+				}
+			}
+		}
 		switch style {
 		case "2-digit":
-			return two(m)
+			return two(m) + marker
 		case "numeric":
+			return strconv.Itoa(m) + marker
+		}
+		name := d.monthName(cd)
+		if name == "" {
 			return strconv.Itoa(m)
+		}
+		switch style {
 		case "short":
-			return enMonthsLong[m-1][:3]
+			if len(name) > 3 {
+				return name[:3]
+			}
+			return name
 		case "narrow":
-			return enMonthsLong[m-1][:1]
+			return name[:1]
 		}
-		return enMonthsLong[m-1]
+		return name
 	case "day":
+		day := d.calendarDate(t).day
 		if style == "2-digit" {
-			return two(t.Day())
+			return two(day)
 		}
-		return strconv.Itoa(t.Day())
+		return strconv.Itoa(day)
 	case "dayPeriod":
 		// AM/PM is what follows an hour on a 12-hour clock, and it is a
 		// different field from the dayPeriod component even though both end up
@@ -508,6 +524,24 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 		style, ok := d.comps[comp]
 		if !ok {
 			return false
+		}
+		// A lunisolar year is not a number, it is a name in a sixty-year
+		// cycle, and it is written beside the Gregorian year it began in --
+		// "2019(ji-hai)" -- because the name alone does not say which round
+		// of the cycle it is.
+		if comp == "year" && d.lunisolar() {
+			related := numberPart{"relatedYear",
+				mapDigits(d.dtFieldText("relatedYear", style, t), d.numbering)}
+			name := numberPart{"yearName", d.dtFieldText("yearName", style, t)}
+			// Chinese writes the two together and marks them as a year;
+			// everything else brackets the name after the number.
+			if lang, ok := parseLangTag(d.tag); ok && lang.lang == "zh" {
+				out = append(out, related, name, numberPart{"literal", "年"})
+				return true
+			}
+			out = append(out, related, numberPart{"literal", "("}, name,
+				numberPart{"literal", ")"})
+			return true
 		}
 		out = append(out, numberPart{comp, mapDigits(d.dtFieldText(comp, style, t), d.numbering)})
 		return true
@@ -856,4 +890,31 @@ func (d dateTimeOptions) rangeParts(start, end []numberPart) []sourcedPart {
 		out = append(out, sourcedPart{p, "shared"})
 	}
 	return out
+}
+
+// calendarDate is the instant's wall-clock date as the formatter's calendar
+// sees it. Everything above the hour goes through here, because a year, a
+// month and a day mean different things in each of the sixteen.
+func (d dateTimeOptions) calendarDate(t time.Time) calendarDate {
+	return calendarFor(d.calendar).dateFromDay(isoDay(t.Year(), int(t.Month()), t.Day()))
+}
+
+// monthName is the month's name in the formatter's calendar, or "" where that
+// calendar numbers its months. The Gregorian family keeps the English names
+// that were here before the other calendars existed.
+func (d dateTimeOptions) monthName(cd calendarDate) string {
+	switch d.calendar {
+	case "gregory", "iso8601", "buddhist", "roc", "japanese":
+		if cd.month >= 1 && cd.month <= 12 {
+			return enMonthsLong[cd.month-1]
+		}
+		return ""
+	}
+	return monthNameFor(d.calendar, calendarFor(d.calendar), cd.year, cd.month)
+}
+
+// lunisolar reports whether the formatter's calendar names its years rather
+// than numbering them.
+func (d dateTimeOptions) lunisolar() bool {
+	return d.calendar == "chinese" || d.calendar == "dangi"
 }
