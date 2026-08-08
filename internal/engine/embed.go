@@ -27,6 +27,19 @@ type HostFunc = func(rt *Runtime, this Value, args []Value) (Value, *ThrowError)
 // Script is a compiled program, separated from execution so an embedder can
 // compile once and run many times (the "unbound script" pattern). The compiled
 // form is bound to the Runtime that produced it.
+//
+// Bound is meant literally, and running one on a DIFFERENT Runtime concurrently
+// is a data race rather than a style violation. A Script holds the function, the
+// function holds the tier's state — how many times it has been entered and the
+// code it was compiled to — and none of that is synchronised, because within one
+// Runtime nothing is concurrent. Two Runtimes sharing a Script race on it, which
+// the race detector reports in jitTry.
+//
+// This is worth stating because there is an obvious reason to want it. A host
+// pooling Runtimes for one script would like them to share the compiled code, so
+// that the first to go hot warms the rest — each pooled Runtime otherwise pays
+// its own entries before it compiles. Compile per Runtime instead; the parse is
+// what a pool saves by sharing, and the parse is not where the time goes.
 type Script struct {
 	fn  *svFunc
 	src string
