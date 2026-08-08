@@ -280,6 +280,9 @@ func (rt *Runtime) bigIntBinaryOp(op Opcode, x, y *big.Int) (Value, *ThrowError)
 	case OpSub:
 		r.Sub(x, y)
 	case OpMul:
+		if x.BitLen()+y.BitLen() > maxBigIntBits {
+			return mkundef(), rt.rangeError("Maximum BigInt size exceeded")
+		}
 		r.Mul(x, y)
 	case OpDiv:
 		if y.Sign() == 0 {
@@ -294,6 +297,9 @@ func (rt *Runtime) bigIntBinaryOp(op Opcode, x, y *big.Int) (Value, *ThrowError)
 	case OpExp:
 		if y.Sign() < 0 {
 			return mkundef(), rt.rangeError("Exponent must be non-negative")
+		}
+		if e := rt.checkBigIntExp(x, y); e != nil {
+			return mkundef(), e
 		}
 		r.Exp(x, y, nil)
 	case OpBand:
@@ -328,6 +334,9 @@ func (rt *Runtime) bigIntBinaryOp(op Opcode, x, y *big.Int) (Value, *ThrowError)
 			return rt.newBigInt(big.NewInt(0)), nil
 		}
 		if left {
+			if x.Sign() != 0 && n.Int64() > int64(maxBigIntBits-x.BitLen()) {
+				return mkundef(), rt.rangeError("Maximum BigInt size exceeded")
+			}
 			r.Lsh(x, uint(n.Int64()))
 		} else {
 			r.Rsh(x, uint(n.Int64()))
@@ -359,4 +368,26 @@ func bigIntAsUintN(bits int, v *big.Int) *big.Int {
 	}
 	mod := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 	return new(big.Int).Mod(v, mod)
+}
+
+// maxBigIntBits is how large a BigInt this engine will build. The value is
+// V8's, and the reason for having one at all is that a BigInt is the one
+// JavaScript value whose size a script chooses directly: "1n << 2n**40n" asks
+// for a hundred and thirty gigabytes, and without a limit the answer is the
+// host process dying rather than a RangeError.
+const maxBigIntBits = 1 << 30
+
+// checkBigIntExp reports whether a power would be larger than that, without
+// computing it: the result of x**y has about y times as many bits as x.
+func (rt *Runtime) checkBigIntExp(x, y *big.Int) *ThrowError {
+	bits := x.BitLen()
+	if bits <= 1 || y.Sign() == 0 {
+		// Zero, one and minus one stay their own size however far they are
+		// raised.
+		return nil
+	}
+	if !y.IsInt64() || y.Int64() > int64(maxBigIntBits)/int64(bits-1)+1 {
+		return rt.rangeError("Maximum BigInt size exceeded")
+	}
+	return nil
 }
