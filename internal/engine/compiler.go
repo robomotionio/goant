@@ -27,11 +27,13 @@ type localVar struct {
 }
 
 type compiler struct {
-	rt         *Runtime
-	fn         *svFunc
-	enclosing  *compiler
-	locals     []localVar
-	upvalues   []upvalDesc
+	rt        *Runtime
+	fn        *svFunc
+	enclosing *compiler
+	locals    []localVar
+	upvalues  []upvalDesc
+	// capCache memoises mayCapture; see compile_periter.go.
+	capCache   map[*Node]bool
 	scopeDepth int
 	curStack   int
 	err        error

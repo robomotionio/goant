@@ -2,18 +2,7 @@
 
 package engine
 
-import (
-	"sync/atomic"
-	"testing"
-)
-
-// withThreshold lowers the compile threshold for one test and puts it back, so
-// a fixture does not have to run a function eight times to have it compiled.
-func withThreshold(n int32) func() {
-	was := atomic.LoadInt32(&jitThreshold)
-	atomic.StoreInt32(&jitThreshold, n)
-	return func() { atomic.StoreInt32(&jitThreshold, was) }
-}
+import "testing"
 
 // An async function suspends at `await`, and a compiled frame cannot suspend.
 // The tier used to conclude from that that no async function could be compiled,
