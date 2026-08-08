@@ -117,13 +117,22 @@ func (rt *Runtime) initNumberBuiltin() {
 		if !ok {
 			return mkundef(), rt.typeError("Number.prototype.toLocaleString requires a number")
 		}
-		// Grouped and capped at three fraction digits, the same as
-		// Intl.NumberFormat's defaults (see intl_format.go).
+		// Specified as Intl.NumberFormat's format when ECMA-402 is present,
+		// which it is here. Delegating rather than reimplementing is what makes
+		// the two agree on every option, and a test checks exactly that.
 		li, e := rt.resolveLocaleArg(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(li.formatNumber(n)), nil
+		requested, e := rt.canonicalizeLocaleList(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		opts, e := rt.initNumberOptions(arg(args, 1), requested)
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newString(rt.formatNumberWith(opts, li, n)), nil
 	})
 
 	ctor := rt.newNativeFunc("Number", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

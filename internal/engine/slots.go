@@ -57,6 +57,7 @@ const (
 	slotLocaleTag        // an Intl.Locale's [[Locale]] tag (a String), also its brand
 	slotIntlPluralOpts   // a PluralRules' type and digit options (a String; see builtin_intl_plural.go)
 	slotIntlCollatorOpts // a Collator's resolved options (a String; see builtin_intl_collator.go)
+	slotIntlNumberOpts   // a NumberFormat's resolved options (a String; see builtin_intl_number.go)
 	slotMax              = 255
 )
 

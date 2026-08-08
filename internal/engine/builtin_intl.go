@@ -111,18 +111,73 @@ func (rt *Runtime) initIntl() {
 			return o, nil
 		})
 	})
-	defineService("NumberFormat", false, nil, func(po *object) {
+	defineService("NumberFormat", false, func(inst *object, options Value, requested []string) *ThrowError {
+		n, e := rt.initNumberOptions(options, requested)
+		if e != nil {
+			return e
+		}
+		inst.setSlot(slotIntlNumberOpts, rt.newString(n.String()))
+		return nil
+	}, func(po *object) {
 		getter := rt.newNativeFunc("get format", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			li := rt.intlLocaleOf(this)
+			opts, e := rt.requireNumberFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 				n, e := rt.toNumber(arg(args, 0))
 				if e != nil {
 					return mkundef(), e
 				}
-				return rt.newString(li.formatNumber(n)), nil
+				return rt.newString(rt.formatNumberWith(opts, li, n)), nil
 			}), nil
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
+		// The key order is the specification's and a test reads it back with
+		// Reflect.ownKeys.
+		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			n, e := rt.requireNumberFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			o := rt.newPlainObject()
+			oo := rt.objPtr(o)
+			str := func(k, v string) {
+				if v != "" {
+					oo.defineOwn(k, rt.newString(v), attrDefault)
+				}
+			}
+			oo.defineOwn("locale", rt.newString(n.tag), attrDefault)
+			oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
+			oo.defineOwn("style", rt.newString(n.style), attrDefault)
+			str("currency", n.currency)
+			str("currencyDisplay", n.currencyDisplay)
+			str("currencySign", n.currencySign)
+			str("unit", n.unit)
+			str("unitDisplay", n.unitDisplay)
+			oo.defineOwn("minimumIntegerDigits", mknum(float64(n.digits.minInt)), attrDefault)
+			if n.digits.maxSig > 0 {
+				oo.defineOwn("minimumSignificantDigits", mknum(float64(n.digits.minSig)), attrDefault)
+				oo.defineOwn("maximumSignificantDigits", mknum(float64(n.digits.maxSig)), attrDefault)
+			} else {
+				oo.defineOwn("minimumFractionDigits", mknum(float64(n.digits.minFrac)), attrDefault)
+				oo.defineOwn("maximumFractionDigits", mknum(float64(n.digits.maxFrac)), attrDefault)
+			}
+			if n.useGrouping == "" {
+				oo.defineOwn("useGrouping", mkbool(false), attrDefault)
+			} else {
+				oo.defineOwn("useGrouping", rt.newString(n.useGrouping), attrDefault)
+			}
+			oo.defineOwn("notation", rt.newString(n.notation), attrDefault)
+			str("compactDisplay", n.compactDisplay)
+			oo.defineOwn("signDisplay", rt.newString(n.signDisplay), attrDefault)
+			oo.defineOwn("roundingIncrement", mknum(1), attrDefault)
+			oo.defineOwn("roundingMode", rt.newString("halfExpand"), attrDefault)
+			oo.defineOwn("roundingPriority", rt.newString("auto"), attrDefault)
+			oo.defineOwn("trailingZeroDisplay", rt.newString("auto"), attrDefault)
+			return o, nil
+		})
 	})
 	defineService("DateTimeFormat", false, func(inst *object, options Value, _ []string) *ThrowError {
 		// [[TimeZone]] is fixed at construction: an unknown zone is a RangeError

@@ -174,10 +174,29 @@ func roundToSignificant(intPart, frac string, maxSig, minSig int) (string, strin
 			intPart, frac = roundFraction(intPart, frac, z+maxSig)
 		}
 	} else if lead > maxSig {
-		// More integer digits than significant digits asked for: rounding
-		// happens above the point, which roundFraction cannot express, so the
-		// value is left alone. Plural selection never distinguishes these.
-		return intPart, ""
+		// More integer digits than significant digits asked for, so the
+		// rounding happens above the decimal point: 123456 to three
+		// significant digits is 123000, not 123456. roundFraction cannot
+		// express that, so the digits are rounded in place and the tail
+		// replaced with zeros.
+		kept := []byte(digits[:maxSig])
+		if digits[maxSig] >= '5' {
+			i := len(kept) - 1
+			for ; i >= 0; i-- {
+				if kept[i] < '9' {
+					kept[i]++
+					break
+				}
+				kept[i] = '0'
+			}
+			if i < 0 {
+				// 999 rounded up is 1000, which is one digit longer: the zeros
+				// that follow are counted from maxSig, not from what is now in
+				// hand, so 999999 becomes 1000000 rather than 100000.
+				kept = append([]byte{'1'}, kept...)
+			}
+		}
+		return string(kept) + strings.Repeat("0", lead-maxSig), ""
 	} else {
 		intPart, frac = roundFraction(intPart, frac, maxSig-lead)
 	}
