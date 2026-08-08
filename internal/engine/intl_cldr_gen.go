@@ -2451,6 +2451,498 @@ const cldrNumberingSystemsData = "" +
 	"wcho 𞋰𞋱𞋲𞋳𞋴𞋵𞋶𞋷𞋸𞋹\n" +
 	""
 
+// cldrCalendarPreferenceData = calendars a region prefers, best first, space-separated.
+const cldrCalendarPreferenceData = "" +
+	"001 gregorian\n" +
+	"AE gregorian islamic-umalqura islamic islamic-civil islamic-tbla\n" +
+	"AF persian gregorian islamic islamic-civil islamic-tbla\n" +
+	"AL gregorian islamic-civil islamic-tbla\n" +
+	"AZ gregorian islamic-civil islamic-tbla\n" +
+	"BD gregorian islamic islamic-civil islamic-tbla\n" +
+	"BH gregorian islamic-umalqura islamic islamic-civil islamic-tbla\n" +
+	"CN gregorian chinese\n" +
+	"CX gregorian chinese\n" +
+	"DJ gregorian islamic islamic-civil islamic-tbla\n" +
+	"DZ gregorian islamic islamic-civil islamic-tbla\n" +
+	"EG gregorian coptic islamic islamic-civil islamic-tbla\n" +
+	"EH gregorian islamic islamic-civil islamic-tbla\n" +
+	"ER gregorian islamic islamic-civil islamic-tbla\n" +
+	"ET gregorian ethiopic\n" +
+	"HK gregorian chinese\n" +
+	"ID gregorian islamic islamic-civil islamic-tbla\n" +
+	"IL gregorian hebrew islamic islamic-civil islamic-tbla\n" +
+	"IN gregorian indian\n" +
+	"IQ gregorian islamic islamic-civil islamic-tbla\n" +
+	"IR persian gregorian islamic islamic-civil islamic-tbla\n" +
+	"JO gregorian islamic islamic-civil islamic-tbla\n" +
+	"JP gregorian japanese\n" +
+	"KM gregorian islamic islamic-civil islamic-tbla\n" +
+	"KR gregorian dangi\n" +
+	"KW gregorian islamic-umalqura islamic islamic-civil islamic-tbla\n" +
+	"LB gregorian islamic islamic-civil islamic-tbla\n" +
+	"LY gregorian islamic islamic-civil islamic-tbla\n" +
+	"MA gregorian islamic islamic-civil islamic-tbla\n" +
+	"MO gregorian chinese\n" +
+	"MR gregorian islamic islamic-civil islamic-tbla\n" +
+	"MV gregorian islamic-civil islamic-tbla\n" +
+	"MY gregorian islamic islamic-civil islamic-tbla\n" +
+	"NE gregorian islamic islamic-civil islamic-tbla\n" +
+	"OM gregorian islamic islamic-civil islamic-tbla\n" +
+	"PK gregorian islamic islamic-civil islamic-tbla\n" +
+	"PS gregorian islamic islamic-civil islamic-tbla\n" +
+	"QA gregorian islamic-umalqura islamic islamic-civil islamic-tbla\n" +
+	"SA gregorian islamic-umalqura islamic islamic-rgsa\n" +
+	"SD gregorian islamic islamic-civil islamic-tbla\n" +
+	"SG gregorian chinese\n" +
+	"SY gregorian islamic islamic-civil islamic-tbla\n" +
+	"TD gregorian islamic islamic-civil islamic-tbla\n" +
+	"TH buddhist gregorian\n" +
+	"TJ gregorian islamic-civil islamic-tbla\n" +
+	"TM gregorian islamic-civil islamic-tbla\n" +
+	"TN gregorian islamic islamic-civil islamic-tbla\n" +
+	"TR gregorian islamic-civil islamic-tbla\n" +
+	"TW gregorian roc chinese\n" +
+	"UZ gregorian islamic-civil islamic-tbla\n" +
+	"XK gregorian islamic-civil islamic-tbla\n" +
+	"YE gregorian islamic islamic-civil islamic-tbla\n" +
+	""
+
+// cldrHourCycleData = the clock a region or locale reads: h11, h12, h23 or h24.
+const cldrHourCycleData = "" +
+	"001 h23\n" +
+	"419 h12\n" +
+	"AC h23\n" +
+	"AD h23\n" +
+	"AE h12\n" +
+	"AF h23\n" +
+	"AG h12\n" +
+	"AI h23\n" +
+	"AL h12\n" +
+	"AM h23\n" +
+	"AO h23\n" +
+	"AR h12\n" +
+	"AS h12\n" +
+	"AT h23\n" +
+	"AU h12\n" +
+	"AW h23\n" +
+	"AX h23\n" +
+	"AZ h23\n" +
+	"BA h23\n" +
+	"BB h12\n" +
+	"BD h12\n" +
+	"BE h23\n" +
+	"BF h23\n" +
+	"BG h23\n" +
+	"BH h12\n" +
+	"BI h23\n" +
+	"BJ h23\n" +
+	"BL h23\n" +
+	"BM h12\n" +
+	"BN h12\n" +
+	"BO h12\n" +
+	"BQ h23\n" +
+	"BR h23\n" +
+	"BS h12\n" +
+	"BT h12\n" +
+	"BW h23\n" +
+	"BY h23\n" +
+	"BZ h23\n" +
+	"CA h12\n" +
+	"CC h23\n" +
+	"CD h23\n" +
+	"CF h23\n" +
+	"CG h23\n" +
+	"CH h23\n" +
+	"CI h23\n" +
+	"CK h23\n" +
+	"CL h12\n" +
+	"CM h23\n" +
+	"CN h23\n" +
+	"CO h12\n" +
+	"CP h23\n" +
+	"CR h12\n" +
+	"CU h12\n" +
+	"CV h23\n" +
+	"CW h23\n" +
+	"CX h23\n" +
+	"CY h12\n" +
+	"CZ h23\n" +
+	"DE h23\n" +
+	"DG h23\n" +
+	"DJ h12\n" +
+	"DK h23\n" +
+	"DM h12\n" +
+	"DO h12\n" +
+	"DZ h12\n" +
+	"EA h23\n" +
+	"EC h12\n" +
+	"EE h23\n" +
+	"EG h12\n" +
+	"EH h12\n" +
+	"ER h12\n" +
+	"ES h23\n" +
+	"ET h12\n" +
+	"FI h23\n" +
+	"FJ h12\n" +
+	"FK h23\n" +
+	"FM h12\n" +
+	"FO h23\n" +
+	"FR h23\n" +
+	"GA h23\n" +
+	"GB h23\n" +
+	"GD h12\n" +
+	"GE h23\n" +
+	"GF h23\n" +
+	"GG h23\n" +
+	"GH h12\n" +
+	"GI h23\n" +
+	"GL h23\n" +
+	"GM h12\n" +
+	"GN h23\n" +
+	"GP h23\n" +
+	"GQ h23\n" +
+	"GR h12\n" +
+	"GS h23\n" +
+	"GT h12\n" +
+	"GU h12\n" +
+	"GW h23\n" +
+	"GY h12\n" +
+	"HK h12\n" +
+	"HN h12\n" +
+	"HR h23\n" +
+	"HU h23\n" +
+	"IC h23\n" +
+	"ID h23\n" +
+	"IE h23\n" +
+	"IL h23\n" +
+	"IM h23\n" +
+	"IN h12\n" +
+	"IO h23\n" +
+	"IQ h12\n" +
+	"IR h23\n" +
+	"IS h23\n" +
+	"IT h23\n" +
+	"JE h23\n" +
+	"JM h12\n" +
+	"JO h12\n" +
+	"JP h23\n" +
+	"KE h23\n" +
+	"KG h23\n" +
+	"KH h12\n" +
+	"KI h12\n" +
+	"KM h23\n" +
+	"KN h12\n" +
+	"KP h12\n" +
+	"KR h12\n" +
+	"KW h12\n" +
+	"KY h12\n" +
+	"KZ h23\n" +
+	"LA h23\n" +
+	"LB h12\n" +
+	"LC h12\n" +
+	"LI h23\n" +
+	"LK h23\n" +
+	"LR h12\n" +
+	"LS h12\n" +
+	"LT h23\n" +
+	"LU h23\n" +
+	"LV h23\n" +
+	"LY h12\n" +
+	"MA h23\n" +
+	"MC h23\n" +
+	"MD h23\n" +
+	"ME h23\n" +
+	"MF h23\n" +
+	"MG h23\n" +
+	"MH h12\n" +
+	"MK h23\n" +
+	"ML h23\n" +
+	"MM h23\n" +
+	"MN h23\n" +
+	"MO h12\n" +
+	"MP h12\n" +
+	"MQ h23\n" +
+	"MR h12\n" +
+	"MS h23\n" +
+	"MT h23\n" +
+	"MU h23\n" +
+	"MV h23\n" +
+	"MW h12\n" +
+	"MX h12\n" +
+	"MY h12\n" +
+	"MZ h23\n" +
+	"NA h12\n" +
+	"NC h23\n" +
+	"NE h23\n" +
+	"NF h23\n" +
+	"NG h23\n" +
+	"NI h12\n" +
+	"NL h23\n" +
+	"NO h23\n" +
+	"NP h23\n" +
+	"NR h23\n" +
+	"NU h23\n" +
+	"NZ h12\n" +
+	"OM h12\n" +
+	"PA h12\n" +
+	"PE h12\n" +
+	"PF h23\n" +
+	"PG h12\n" +
+	"PH h12\n" +
+	"PK h12\n" +
+	"PL h23\n" +
+	"PM h23\n" +
+	"PN h23\n" +
+	"PR h12\n" +
+	"PS h12\n" +
+	"PT h23\n" +
+	"PW h12\n" +
+	"PY h12\n" +
+	"QA h12\n" +
+	"RE h23\n" +
+	"RO h23\n" +
+	"RS h23\n" +
+	"RU h23\n" +
+	"RW h23\n" +
+	"SA h12\n" +
+	"SB h12\n" +
+	"SC h23\n" +
+	"SD h12\n" +
+	"SE h23\n" +
+	"SG h12\n" +
+	"SH h23\n" +
+	"SI h23\n" +
+	"SJ h23\n" +
+	"SK h23\n" +
+	"SL h12\n" +
+	"SM h23\n" +
+	"SN h23\n" +
+	"SO h12\n" +
+	"SR h23\n" +
+	"SS h12\n" +
+	"ST h23\n" +
+	"SV h12\n" +
+	"SX h23\n" +
+	"SY h12\n" +
+	"SZ h12\n" +
+	"TA h23\n" +
+	"TC h12\n" +
+	"TD h12\n" +
+	"TF h23\n" +
+	"TG h23\n" +
+	"TH h23\n" +
+	"TJ h23\n" +
+	"TL h23\n" +
+	"TM h23\n" +
+	"TN h12\n" +
+	"TO h12\n" +
+	"TR h23\n" +
+	"TT h12\n" +
+	"TW h12\n" +
+	"TZ h23\n" +
+	"UA h23\n" +
+	"UG h23\n" +
+	"UM h12\n" +
+	"US h12\n" +
+	"UY h12\n" +
+	"UZ h23\n" +
+	"VA h23\n" +
+	"VC h12\n" +
+	"VE h12\n" +
+	"VG h12\n" +
+	"VI h12\n" +
+	"VN h23\n" +
+	"VU h12\n" +
+	"WF h23\n" +
+	"WS h12\n" +
+	"XK h23\n" +
+	"YE h12\n" +
+	"YT h23\n" +
+	"ZA h23\n" +
+	"ZM h12\n" +
+	"ZW h23\n" +
+	"af-ZA h23\n" +
+	"ar-001 h12\n" +
+	"ca-ES h23\n" +
+	"en-001 h12\n" +
+	"en-HK h12\n" +
+	"en-IL h23\n" +
+	"en-MY h12\n" +
+	"es-BR h23\n" +
+	"es-ES h23\n" +
+	"es-GQ h23\n" +
+	"fr-CA h23\n" +
+	"gl-ES h23\n" +
+	"gu-IN h12\n" +
+	"hi-IN h12\n" +
+	"it-CH h23\n" +
+	"it-IT h23\n" +
+	"kn-IN h12\n" +
+	"ku-SY h23\n" +
+	"ml-IN h12\n" +
+	"mr-IN h12\n" +
+	"pa-IN h12\n" +
+	"ta-IN h12\n" +
+	"te-IN h12\n" +
+	"zu-ZA h23\n" +
+	""
+
+// cldrWeekData = week data per region: first day, weekend start and weekend end as
+// ISO weekday numbers, space-separated.
+const cldrWeekData = "" +
+	"001 1 6 7\n" +
+	"AD 1  \n" +
+	"AE 1  \n" +
+	"AF 6 4 5\n" +
+	"AG 7  \n" +
+	"AI 1  \n" +
+	"AL 1  \n" +
+	"AM 1  \n" +
+	"AN 1  \n" +
+	"AR 1  \n" +
+	"AS 7  \n" +
+	"AT 1  \n" +
+	"AU 1  \n" +
+	"AX 1  \n" +
+	"AZ 1  \n" +
+	"BA 1  \n" +
+	"BD 7  \n" +
+	"BE 1  \n" +
+	"BG 1  \n" +
+	"BH 6 5 6\n" +
+	"BM 1  \n" +
+	"BN 1  \n" +
+	"BR 7  \n" +
+	"BS 7  \n" +
+	"BT 7  \n" +
+	"BW 7  \n" +
+	"BY 1  \n" +
+	"BZ 7  \n" +
+	"CA 7  \n" +
+	"CH 1  \n" +
+	"CL 1  \n" +
+	"CM 1  \n" +
+	"CN 1  \n" +
+	"CO 7  \n" +
+	"CR 1  \n" +
+	"CY 1  \n" +
+	"CZ 1  \n" +
+	"DE 1  \n" +
+	"DJ 6  \n" +
+	"DK 1  \n" +
+	"DM 7  \n" +
+	"DO 7  \n" +
+	"DZ 6 5 6\n" +
+	"EC 1  \n" +
+	"EE 1  \n" +
+	"EG 6 5 6\n" +
+	"ES 1  \n" +
+	"ET 7  \n" +
+	"FI 1  \n" +
+	"FJ 1  \n" +
+	"FO 1  \n" +
+	"FR 1  \n" +
+	"GB 1  \n" +
+	"GE 1  \n" +
+	"GF 1  \n" +
+	"GP 1  \n" +
+	"GR 1  \n" +
+	"GT 7  \n" +
+	"GU 7  \n" +
+	"HK 7  \n" +
+	"HN 7  \n" +
+	"HR 1  \n" +
+	"HU 1  \n" +
+	"ID 7  \n" +
+	"IE 1  \n" +
+	"IL 7 5 6\n" +
+	"IN 7 7 \n" +
+	"IQ 6 5 6\n" +
+	"IR 6 5 5\n" +
+	"IS 7  \n" +
+	"IT 1  \n" +
+	"JM 7  \n" +
+	"JO 6 5 6\n" +
+	"JP 7  \n" +
+	"KE 7  \n" +
+	"KG 1  \n" +
+	"KH 7  \n" +
+	"KR 7  \n" +
+	"KW 6 5 6\n" +
+	"KZ 1  \n" +
+	"LA 7  \n" +
+	"LB 1  \n" +
+	"LI 1  \n" +
+	"LK 1  \n" +
+	"LT 1  \n" +
+	"LU 1  \n" +
+	"LV 1  \n" +
+	"LY 6 5 6\n" +
+	"MC 1  \n" +
+	"MD 1  \n" +
+	"ME 1  \n" +
+	"MH 7  \n" +
+	"MK 1  \n" +
+	"MM 7  \n" +
+	"MN 1  \n" +
+	"MO 7  \n" +
+	"MQ 1  \n" +
+	"MT 7  \n" +
+	"MV 5  \n" +
+	"MX 7  \n" +
+	"MY 1  \n" +
+	"MZ 7  \n" +
+	"NI 7  \n" +
+	"NL 1  \n" +
+	"NO 1  \n" +
+	"NP 7  \n" +
+	"NZ 1  \n" +
+	"OM 6 5 6\n" +
+	"PA 7  \n" +
+	"PE 7  \n" +
+	"PH 7  \n" +
+	"PK 7  \n" +
+	"PL 1  \n" +
+	"PR 7  \n" +
+	"PT 7  \n" +
+	"PY 7  \n" +
+	"QA 6 5 6\n" +
+	"RE 1  \n" +
+	"RO 1  \n" +
+	"RS 1  \n" +
+	"RU 1  \n" +
+	"SA 7 5 6\n" +
+	"SD 6 5 6\n" +
+	"SE 1  \n" +
+	"SG 7  \n" +
+	"SI 1  \n" +
+	"SK 1  \n" +
+	"SM 1  \n" +
+	"SV 7  \n" +
+	"SY 6 5 6\n" +
+	"TH 7  \n" +
+	"TJ 1  \n" +
+	"TM 1  \n" +
+	"TR 1  \n" +
+	"TT 7  \n" +
+	"TW 7  \n" +
+	"UA 1  \n" +
+	"UG  7 \n" +
+	"UM 7  \n" +
+	"US 7  \n" +
+	"UY 1  \n" +
+	"UZ 1  \n" +
+	"VA 1  \n" +
+	"VE 7  \n" +
+	"VI 7  \n" +
+	"VN 1  \n" +
+	"WS 7  \n" +
+	"XK 1  \n" +
+	"YE 7 5 6\n" +
+	"ZA 7  \n" +
+	"ZW 7  \n" +
+	""
+
 // cldrLikelyData = likely subtags. The value is the full tag when the language changes and
 // the script-region remainder when it does not, which is the common case.
 const cldrLikelyData = "" +

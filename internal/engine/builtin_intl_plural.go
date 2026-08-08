@@ -371,8 +371,43 @@ func (p pluralOptions) rules() *plural.Rules {
 }
 
 func (p pluralOptions) selectForm(tag language.Tag, n float64) string {
+	if p.romanceMany(tag, n) {
+		return "many"
+	}
 	i, v, w, f, t := pluralOperands(n, p)
 	return pluralFormNames[p.rules().MatchPlural(tag, i, v, w, f, t)]
+}
+
+// romanceMany is the plural category CLDR gave the Romance languages for the
+// round millions -- "un million de personnes" takes a different noun form from
+// "deux personnes" -- which x/text's compiled rules predate. It holds for a
+// whole non-zero multiple of a million, and for anything a compact notation
+// writes with an exponent outside 0 to 5, which is what makes 1,5 million
+// "many" written compactly and "other" written out.
+func (p pluralOptions) romanceMany(tag language.Tag, n float64) bool {
+	if p.ordinal {
+		return false
+	}
+	base, _ := tag.Base()
+	switch base.String() {
+	case "fr", "es", "it", "pt", "ca":
+	default:
+		return false
+	}
+	n = math.Abs(n)
+	if p.notation == "compact" {
+		// The exponent a compact form would use: thousands, millions and so
+		// on, and never past a trillion because the names stop there.
+		e := 0
+		for a := n; a >= 1000 && e < 12; a /= 1000 {
+			e += 3
+		}
+		if e > 5 {
+			return true
+		}
+	}
+	i := math.Trunc(n)
+	return i != 0 && n == i && math.Mod(i, 1e6) == 0
 }
 
 // pluralCategories is the set of forms this locale can produce. x/text does not
@@ -385,7 +420,7 @@ func (p pluralOptions) categories(tag language.Tag) []string {
 	for n := 0; n <= 200; n++ {
 		seen[p.selectForm(tag, float64(n))] = true
 	}
-	for _, n := range []float64{0.1, 0.5, 1.1, 1.5, 2.5, 3.5, 10.1, 11.5, 100.5, 1000000} {
+	for _, n := range []float64{0.1, 0.5, 1.1, 1.5, 2.5, 3.5, 10.1, 11.5, 100.5, 1e6, 1e9} {
 		seen[p.selectForm(tag, n)] = true
 	}
 	// CLDR's order, which is what the specification means by "the categories

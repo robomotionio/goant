@@ -124,44 +124,60 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 			return mkundef(), rt.rangeError("Incorrect locale information provided: " + tag)
 		}
 
-		// ApplyOptionsToTag: the language, script, region and variants options
-		// replace the corresponding subtags before anything is canonicalised.
-		if v, present, e := rt.intlStringOption(options, "language", nil); e != nil {
+		// ApplyOptionsToTag reads these four, then canonicalises the tag, then
+		// replaces the subtags with what it read. The order matters and the
+		// test suite checks it: "und-Armn-SU" canonicalises to "und-Armn-AM"
+		// -- the Soviet Union's Armenian script says Armenia -- and only then
+		// becomes Russian, giving "ru-Armn-AM". Applied the other way round,
+		// the Russian would have dragged the region to RU.
+		lang, hasLang, e := rt.intlStringOption(options, "language", nil)
+		if e != nil {
 			return mkundef(), e
-		} else if present {
-			if !isLangSubtag(v) {
-				return mkundef(), rt.rangeError("Invalid language option: " + v)
-			}
-			t.lang = asciiLower(v)
 		}
-		if v, present, e := rt.intlStringOption(options, "script", nil); e != nil {
-			return mkundef(), e
-		} else if present {
-			if !isScriptSubtag(v) {
-				return mkundef(), rt.rangeError("Invalid script option: " + v)
-			}
-			t.script = tagTitle(v)
+		if hasLang && !isLangSubtag(lang) {
+			return mkundef(), rt.rangeError("Invalid language option: " + lang)
 		}
-		if v, present, e := rt.intlStringOption(options, "region", nil); e != nil {
+		script, hasScript, e := rt.intlStringOption(options, "script", nil)
+		if e != nil {
 			return mkundef(), e
-		} else if present {
-			if !isRegionSubtag(v) {
-				return mkundef(), rt.rangeError("Invalid region option: " + v)
-			}
-			t.region = asciiUpper(v)
 		}
-		if v, present, e := rt.intlStringOption(options, "variants", nil); e != nil {
+		if hasScript && !isScriptSubtag(script) {
+			return mkundef(), rt.rangeError("Invalid script option: " + script)
+		}
+		region, hasRegion, e := rt.intlStringOption(options, "region", nil)
+		if e != nil {
 			return mkundef(), e
-		} else if present {
-			vs := strings.Split(asciiLower(v), "-")
+		}
+		if hasRegion && !isRegionSubtag(region) {
+			return mkundef(), rt.rangeError("Invalid region option: " + region)
+		}
+		variants, hasVariants, e := rt.intlStringOption(options, "variants", nil)
+		if e != nil {
+			return mkundef(), e
+		}
+		var variantList []string
+		if hasVariants {
+			variantList = strings.Split(asciiLower(variants), "-")
 			seen := map[string]bool{}
-			for _, s := range vs {
-				if !isVariantSubtag(s) || seen[s] {
-					return mkundef(), rt.rangeError("Invalid variants option: " + v)
+			for _, v := range variantList {
+				if !isVariantSubtag(v) || seen[v] {
+					return mkundef(), rt.rangeError("Invalid variants option: " + variants)
 				}
-				seen[s] = true
+				seen[v] = true
 			}
-			t.variants = vs
+		}
+		t.canonicalize()
+		if hasLang {
+			t.lang = asciiLower(lang)
+		}
+		if hasScript {
+			t.script = tagTitle(script)
+		}
+		if hasRegion {
+			t.region = asciiUpper(region)
+		}
+		if hasVariants {
+			t.variants = variantList
 		}
 
 		// The remaining options are read in this order, and the order is
@@ -256,7 +272,9 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 		}
 		return rest
 	}
-	list("getCalendars", func(t *langTag) []string { return preferred(t, "ca", []string{"gregory"}) })
+	list("getCalendars", func(t *langTag) []string {
+		return preferred(t, "ca", calendarsForRegion(effectiveRegion(t)))
+	})
 	list("getCollations", func(t *langTag) []string { return preferred(t, "co", []string{"emoji", "eor"}) })
 	list("getNumberingSystems", func(t *langTag) []string { return preferred(t, "nu", []string{"latn"}) })
 	list("getHourCycles", func(t *langTag) []string {
@@ -436,30 +454,43 @@ func weekdayNumber(s string) int {
 	return 0
 }
 
-// hourCycleForRegion is the clock a region reads. Twelve hours is the
-// English-speaking world and a scattering of others; twenty-four is the rest,
-// which is why the twelve-hour list is the one written out.
-func hourCycleForRegion(region string) string {
-	switch region {
-	case "US", "GB", "CA", "AU", "NZ", "IE", "IN", "PH", "PK", "BD", "EG",
-		"MX", "CO", "SA", "MY", "NG", "KE", "ZA", "GR", "KR", "JP":
-		return "h12"
+// hourCycleForLocale is the clock a locale reads. CLDR keys this on a region
+// and, where the language disagrees with its neighbours, on a whole locale:
+// Quebec writes 14:00 and Ontario writes 2 PM, and both of them are CA.
+func hourCycleForLocale(t *langTag) string {
+	region := effectiveRegion(t)
+	if hc, ok := cldrHourCycles()[t.lang+"-"+region]; ok {
+		return hc
+	}
+	if hc, ok := cldrHourCycles()[region]; ok {
+		return hc
+	}
+	if hc, ok := cldrHourCycles()["001"]; ok {
+		return hc
 	}
 	return "h23"
 }
 
-// hourCycleForLocale reads the language before the region, because the clock
-// travels with the language rather than the country: Quebec writes 14:00 and
-// Ontario writes 2 PM, and both of them are CA.
-func hourCycleForLocale(t *langTag) string {
-	switch t.lang {
-	case "fr", "de", "ru", "pl", "cs", "sk", "hu", "ro", "bg", "uk", "lt",
-		"lv", "et", "sl", "hr", "sr", "ku", "fa", "vi", "id", "tr", "nl",
-		"sv", "nb", "no", "da", "fi", "is", "ca", "eu", "gl", "sq", "mk",
-		"be", "hy", "ka", "kk", "uz", "az", "mn", "th", "zh", "ja":
-		return "h23"
+// calendarsForRegion is what a region reckons in, best first, filtered to the
+// calendars this engine has. Gregorian is always in the list, so the filter
+// cannot empty it.
+func calendarsForRegion(region string) []string {
+	ordering, ok := cldrCalendarPreference()[region]
+	if !ok {
+		ordering = cldrCalendarPreference()["001"]
 	}
-	return hourCycleForRegion(effectiveRegion(t))
+	var out []string
+	for _, c := range strings.Fields(ordering) {
+		// CLDR spells them the long way -- "gregorian", "islamic-umalqura" --
+		// and the -u-ca keyword spells the first of those "gregory".
+		if v, ok := supportedCalendar(c); ok && !tagContains(out, v) {
+			out = append(out, v)
+		}
+	}
+	if len(out) == 0 {
+		out = []string{"gregory"}
+	}
+	return out
 }
 
 // textDirection is the writing direction of a language. The right-to-left
@@ -473,36 +504,33 @@ func textDirection(lang string) string {
 	return "ltr"
 }
 
-// weekInfo is CLDR's week data: the first day of the week, which days are the
-// weekend, and how many days of a week must fall in a year for it to count as
-// that year's first. The values are ISO weekday numbers, so Monday is 1 and
-// Sunday is 7. Monday-start with a Saturday-Sunday weekend is the rule; the
-// regions listed are the exceptions that a European or American script is
-// likely to meet.
+// weekInfo is CLDR's week data: which day the week starts on and which days
+// are the weekend, as ISO weekday numbers, so Monday is 1 and Sunday is 7.
+// A region CLDR says nothing about takes the world's answer.
 func weekInfo(region string) (first int, weekend []int) {
-	switch region {
-	case "US", "CA", "JP", "IL", "PH", "BR", "MX", "KR", "TW", "ZA", "HK", "MO":
-		first = 7
-	case "AE", "AF", "BH", "DZ", "EG", "IQ", "IR", "JO", "KW", "LY", "OM",
-		"QA", "SA", "SD", "SY", "YE":
-		first = 6
-	case "MV":
-		first = 5
-	default:
-		first = 1
+	fields := strings.Fields(cldrWeek()[region])
+	world := strings.Fields(cldrWeek()["001"])
+	pick := func(i int) int {
+		if i < len(fields) && fields[i] != "" {
+			return atoiDefault(fields[i], 0)
+		}
+		if i < len(world) {
+			return atoiDefault(world[i], 0)
+		}
+		return 0
 	}
-	switch region {
-	case "AE", "BH", "DZ", "EG", "IL", "IQ", "JO", "KW", "LY", "OM", "QA",
-		"SA", "SD", "SY", "YE":
-		weekend = []int{5, 6}
-	case "AF", "IR":
-		weekend = []int{5}
-	case "IN", "NP":
-		weekend = []int{7}
-	default:
-		weekend = []int{6, 7}
+	first = pick(0)
+	start, end := pick(1), pick(2)
+	// The weekend is a run of days, and it may wrap around the end of the
+	// week: Friday to Saturday is two days, Sunday to Monday would be two as
+	// well.
+	for d := start; ; d = d%7 + 1 {
+		weekend = append(weekend, d)
+		if d == end || len(weekend) >= 7 {
+			break
+		}
 	}
-	return
+	return first, weekend
 }
 
 // zonesForRegion is the IANA zones of an ISO 3166 region, from the database's

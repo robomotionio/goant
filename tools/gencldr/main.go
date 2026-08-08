@@ -10,7 +10,7 @@
 // The <dir> must contain, from
 // https://github.com/unicode-org/cldr/tree/release-<n>/common/supplemental:
 //
-//	supplementalMetadata.xml   likelySubtags.xml
+//	supplementalMetadata.xml   likelySubtags.xml   supplementalData.xml
 //
 // The generated file is committed; regenerate only when bumping CLDR version.
 //
@@ -135,6 +135,24 @@ package engine
 	emit(&b, "cldrNumberingSystemsData",
 		"numbering systems with a simple digit mapping: name -> its ten digits.",
 		numberingSystems(filepath.Join(*dir, "numberingSystems.xml")))
+
+	// The three region tables Intl.Locale answers questions from. All three
+	// key on a region, and the hour cycle also keys on a full locale, because
+	// the clock travels with the language: Quebec writes 14:00 and Ontario
+	// writes 2 PM, and both of them are CA.
+	sup := filepath.Join(*dir, "supplementalData.xml")
+	var supp supplemental
+	read(sup, &supp)
+	emit(&b, "cldrCalendarPreferenceData",
+		"calendars a region prefers, best first, space-separated.",
+		calendarPreference(supp))
+	emit(&b, "cldrHourCycleData",
+		"the clock a region or locale reads: h11, h12, h23 or h24.",
+		hourCycles(supp))
+	emit(&b, "cldrWeekData",
+		"week data per region: first day, weekend start and weekend end as\n"+
+			"// ISO weekday numbers, space-separated.",
+		weekData(supp))
 
 	// The likely-subtags value is written as a script+region pair whenever the
 	// language is unchanged, which it is for all but the und-* entries. That is
@@ -351,6 +369,110 @@ func regionZones(path string) [][2]string {
 		zones := byRegion[r]
 		sort.Strings(zones)
 		out = append(out, [2]string{r, strings.Join(zones, " ")})
+	}
+	return out
+}
+
+type supplemental struct {
+	CalendarPreference []struct {
+		Territories string `xml:"territories,attr"`
+		Ordering    string `xml:"ordering,attr"`
+	} `xml:"calendarPreferenceData>calendarPreference"`
+	Hours []struct {
+		Preferred string `xml:"preferred,attr"`
+		Regions   string `xml:"regions,attr"`
+	} `xml:"timeData>hours"`
+	FirstDay []struct {
+		Day         string `xml:"day,attr"`
+		Territories string `xml:"territories,attr"`
+		Alt         string `xml:"alt,attr"`
+	} `xml:"weekData>firstDay"`
+	WeekendStart []struct {
+		Day         string `xml:"day,attr"`
+		Territories string `xml:"territories,attr"`
+		Alt         string `xml:"alt,attr"`
+	} `xml:"weekData>weekendStart"`
+	WeekendEnd []struct {
+		Day         string `xml:"day,attr"`
+		Territories string `xml:"territories,attr"`
+		Alt         string `xml:"alt,attr"`
+	} `xml:"weekData>weekendEnd"`
+}
+
+// isoWeekday is CLDR's day name as the number ECMA-402 reports, Monday first.
+var isoWeekday = map[string]string{
+	"mon": "1", "tue": "2", "wed": "3", "thu": "4", "fri": "5", "sat": "6", "sun": "7",
+}
+
+func calendarPreference(s supplemental) [][2]string {
+	var out [][2]string
+	for _, p := range s.CalendarPreference {
+		for _, t := range strings.Fields(p.Territories) {
+			out = append(out, [2]string{t, strings.Join(strings.Fields(p.Ordering), " ")})
+		}
+	}
+	return out
+}
+
+// hourCycles maps CLDR's pattern letter to the hourCycle name: H is 0-23, h is
+// 1-12, K is 0-11 and k is 1-24.
+func hourCycles(s supplemental) [][2]string {
+	cycle := map[string]string{"H": "h23", "h": "h12", "K": "h11", "k": "h24"}
+	var out [][2]string
+	for _, h := range s.Hours {
+		c, ok := cycle[h.Preferred]
+		if !ok {
+			continue
+		}
+		for _, r := range strings.Fields(h.Regions) {
+			out = append(out, [2]string{dash(r), c})
+		}
+	}
+	return out
+}
+
+// weekData collects the three per-region week facts into one row each. The
+// "variant" alternatives are skipped: they are a second opinion (the Shorter
+// Oxford's view of when a British week starts), not the data.
+func weekData(s supplemental) [][2]string {
+	first, start, end := map[string]string{}, map[string]string{}, map[string]string{}
+	collect := func(into map[string]string, day, territories, alt string) {
+		if alt != "" {
+			return
+		}
+		for _, t := range strings.Fields(territories) {
+			into[t] = isoWeekday[day]
+		}
+	}
+	for _, e := range s.FirstDay {
+		collect(first, e.Day, e.Territories, e.Alt)
+	}
+	for _, e := range s.WeekendStart {
+		collect(start, e.Day, e.Territories, e.Alt)
+	}
+	for _, e := range s.WeekendEnd {
+		collect(end, e.Day, e.Territories, e.Alt)
+	}
+	seen := map[string]bool{}
+	var regions []string
+	for _, m := range []map[string]string{first, start, end} {
+		for r := range m {
+			if !seen[r] {
+				seen[r], regions = true, append(regions, r)
+			}
+		}
+	}
+	sort.Strings(regions)
+	var out [][2]string
+	for _, r := range regions {
+		pick := func(m map[string]string, fallback string) string {
+			if v, ok := m[r]; ok {
+				return v
+			}
+			return fallback
+		}
+		out = append(out, [2]string{r,
+			pick(first, "") + " " + pick(start, "") + " " + pick(end, "")})
 	}
 	return out
 }

@@ -14,6 +14,7 @@ package engine
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -860,4 +861,27 @@ func (t *langTag) dropUKeyword(key string) {
 		return
 	}
 	e.subtags = out
+}
+
+// The three region tables Intl.Locale answers questions from, built on first
+// use from the generated CLDR data.
+var (
+	cldrCalendarPreference = sync.OnceValue(func() map[string]string {
+		return parseAliasTable(cldrCalendarPreferenceData)
+	})
+	cldrHourCycles = sync.OnceValue(func() map[string]string {
+		return parseAliasTable(cldrHourCycleData)
+	})
+	cldrWeek = sync.OnceValue(func() map[string]string {
+		return parseAliasTable(cldrWeekData)
+	})
+)
+
+// atoiDefault reads a small decimal, answering the fallback for anything else.
+func atoiDefault(s string, fallback int) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return fallback
+	}
+	return n
 }
