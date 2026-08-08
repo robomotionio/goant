@@ -188,8 +188,18 @@ func (rt *Runtime) initDurationOptions(options Value, requested []string) (durat
 // not there is zero.
 func (rt *Runtime) durationRecord(v Value) ([10]float64, *ThrowError) {
 	var out [10]float64
+	if v.IsString() {
+		// A duration written down. A string that is not one is a RangeError:
+		// it is a duration that could not be read, not a value of the wrong
+		// kind.
+		rec, ok := parseISODuration(rt.strGo(v))
+		if !ok {
+			return out, rt.rangeError("Invalid duration string: " + rt.strGo(v))
+		}
+		return rec, nil
+	}
 	if !v.IsObjectType() {
-		return out, rt.typeError("Duration must be an object")
+		return out, rt.typeError("Duration must be an object or a string")
 	}
 	any := false
 	sign := 0
