@@ -166,7 +166,13 @@ Tracks run in parallel after Phase 0: **A** = engine (Phases 1–8), **B** = JIT
 - [ ] Property-enumeration-order and other misc rows in these categories
 
 ### 8.3 Intl-lite (28 → 1471)
-- [ ] Port ant's `modules/intl.c` (~570 lines) surface exactly: `Intl` object, Collator, NumberFormat, DateTimeFormat (+resolvedOptions/supportedLocalesOf), `String.prototype.localeCompare`, `toLocaleString` family wiring
+- [x] The `Intl` object, Collator, NumberFormat, DateTimeFormat with
+      resolvedOptions and supportedLocalesOf, `String.prototype.localeCompare`
+      and the `toLocaleString` family, plus `Intl.Locale` and
+      `Intl.PluralRules`. Real rather than ant's C surface: see
+      [docs/intl402-and-temporal.md](docs/intl402-and-temporal.md) for what is
+      implemented, what is deliberately not, and the measured `intl402` numbers
+      per stage.
 - [ ] Back with `x/text/language` (BCP47 parse — verify rejects-invalid-tags strictness; small own validator if x/text too lenient), `x/text/collate`, stdlib `time` + `time/tzdata` embed
 - [ ] Gate: intl/ 28/28
 

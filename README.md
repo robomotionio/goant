@@ -311,7 +311,7 @@ runs 42,740 and excludes 10,835:
 
 | excluded | files | why |
 |---|---|---|
-| `intl402/` | 3,357 | ECMA-402 is a separate specification. goant's Intl is stubs. |
+| `intl402/` | 3,357 | ECMA-402 is a separate specification. goant's Intl is partial — see [docs/intl402-and-temporal.md](docs/intl402-and-temporal.md). |
 | `Temporal` | 4,611 | **In the specification. Simply not implemented.** |
 | `staging/` | 1,483 | test262's own staging area — its CONTRIBUTING.md says these "do not count towards the test262 coverage requirement for a TC39 proposal to reach Stage 4". |
 | Atomics, SharedArrayBuffer | 602 | Need the agent/worker host model. |
@@ -337,9 +337,14 @@ Whole directories are at 100%, including `built-ins/RegExp` (1867/1867),
 `built-ins/Array`, `built-ins/Promise`, `built-ins/Proxy`, `built-ins/Date`,
 `built-ins/JSON`, `built-ins/Iterator` and `language/module-code` (595/595).
 
-Not implemented: **Temporal**, and **Intl** beyond stubs for
-`Collator`/`NumberFormat`/`DateTimeFormat` that ignore locale and options. If
-your scripts need real internationalisation, goant is not ready for you yet.
+Not implemented: **Temporal**. **Intl** is partial and being worked on — the
+tag grammar, canonicalisation and negotiation are real (`Intl.Locale`,
+`getCanonicalLocales`, `supportedLocalesOf`), `Collator` runs the Unicode
+Collation Algorithm, `PluralRules` runs CLDR's rules, `NumberFormat` reads its
+options, and `DateTimeFormat` honours `timeZone`. Date and number *patterns*
+still come from a fixed table of locales rather than from CLDR. See
+[docs/intl402-and-temporal.md](docs/intl402-and-temporal.md) for what is done
+and what is not.
 
 [Benchmarks](#benchmarks) has the same profile scored against goja, on the same
 checkout and the same harness.
@@ -900,7 +905,11 @@ Working, and in production for Function-node scripts. What is not there yet:
   revoked Proxy must report the TypeError of the realm its function came from,
   and goant has a single realm's worth of intrinsics to reach for.
 - **Temporal.** Not implemented.
-- **Intl.** Stubs that ignore locale and options.
+- **Intl.** Partial: see [docs/intl402-and-temporal.md](docs/intl402-and-temporal.md).
+  Locale identifiers, collation, plural rules, number options and time zones
+  are implemented; per-locale date and number *patterns* come from a fixed
+  table rather than from CLDR, and DisplayNames, ListFormat,
+  RelativeTimeFormat, Segmenter and DurationFormat do not exist.
 - **Host modules.** No `fs`, no `http`, no Node compatibility layer — the engine
   plus a minimal runtime (event loop, timers, microtasks, `console`) is the
   whole scope. Give a script what it needs with `Set`.
