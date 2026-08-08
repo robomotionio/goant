@@ -508,15 +508,12 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 // $262.global uses globalThis rather than (0,eval)("this") so the harness does
 // not reference `eval` at the script's top level — a test that declares
 // `let eval` would otherwise put that reference in its temporal dead zone.
-const host262Body = "var $262 = { global: globalThis, evalScript: evalScript, gc: function () {}, " +
-	"detachArrayBuffer: function (b) { try { b.transfer(); } catch (e) {} }, " +
-	"createRealm: function () { var r = createRealm(); " +
-	"r.evalScript('globalThis.$262src = ' + JSON.stringify(globalThis.$262src) + ';'); " +
-	"r.evalScript(globalThis.$262src); return r.global.$262; } };"
-
-// host262JS installs $262 and keeps its own source in `$262src`, so
-// createRealm() can install the same object in the realm it makes.
-var host262JS = "globalThis.$262src = " + jsQuote(host262Body) + ";\n" + host262Body + "\n"
+// The engine provides $262 itself now -- global, createRealm, evalScript, gc
+// and detachArrayBuffer -- and its createRealm makes a real second realm with
+// its own global lexical environment. The shim that used to stand in for it
+// could only fake one, so a script evaluated in the "other" realm shared this
+// realm's bindings and a test declaring the same name in both failed to parse.
+var host262JS = ""
 
 // jsQuote renders s as a JavaScript string literal.
 func jsQuote(s string) string {
