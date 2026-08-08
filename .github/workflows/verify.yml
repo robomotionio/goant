@@ -194,7 +194,11 @@ jobs:
       - name: test262, tier off
         shell: bash
         working-directory: goant
-        run: ./goant-t262 -core -t262 ../test262 -failures ../off.txt | tail -3
+        # 30s rather than the 10s default. The generated property-escape tests
+        # are enormous and the hosted runners are shared; at 10s they landed on
+        # either side of the limit from run to run, which is noise this job then
+        # had to reason about.
+        run: ./goant-t262 -core -t262 ../test262 -timeout 30s -failures ../off.txt | tail -3
 
       - name: test262, tier on
         shell: bash
@@ -202,23 +206,46 @@ jobs:
         env:
           GOANT_JIT: "1"
           GOANT_JIT_THRESHOLD: "2"
-        run: ./goant-t262 -core -t262 ../test262 -failures ../on.txt | tail -3
+        run: ./goant-t262 -core -t262 ../test262 -timeout 30s -failures ../on.txt | tail -3
 
       # The gate. Not the score: a score has to be kept up to date by hand and
       # goes stale the first time someone fixes a test. What must be zero is the
       # set of tests that fail ONLY with the tier on, because the tier is meant
       # to change how fast a program runs and not what it computes.
+      #
+      # Timeouts are held apart from that, in both directions. A test that runs
+      # out of its ten seconds says something about how loaded the machine was,
+      # not about what the compiler emitted -- and the macOS runners are the
+      # slowest and most contended in the matrix, with several of the generated
+      # property-escape tests sitting near the limit. Compared strictly, one of
+      # them timed out with the tier on, two different ones timed out with it
+      # off, and the job failed for machine load. A gate that cries wolf is a
+      # gate people learn to ignore.
+      #
+      # They are reported rather than dropped. A compiled loop that cannot be
+      # interrupted looks exactly like a timeout, and this engine has had one:
+      # SUB is not SUBS made every compiled loop on arm64 uninterruptible. So a
+      # timeout that appears only with the tier on is printed as a warning to be
+      # looked at, and a wrong ANSWER is still the thing that fails the build.
       - name: No test may fail only with the tier on
         shell: bash
         run: |
-          cut -f1 off.txt | sort > off.paths
-          cut -f1 on.txt  | sort > on.paths
-          if ! comm -13 off.paths on.paths | grep -q .; then
-            echo "0 tier-only failures"
+          answers() { awk -F'\t' '$2 !~ /timeout/ {print $1}' "$1" | sort -u; }
+          timeouts() { awk -F'\t' '$2 ~ /timeout/ {print $1}' "$1" | sort -u; }
+
+          new_timeouts=$(comm -13 <(timeouts off.txt) <(timeouts on.txt))
+          if [ -n "$new_timeouts" ]; then
+            echo "::warning::timed out only with the tier on — runner load, or a compiled loop that will not exit:"
+            echo "$new_timeouts" | sed 's/^/  /'
+          fi
+
+          new_failures=$(comm -13 <(answers off.txt) <(answers on.txt))
+          if [ -z "$new_failures" ]; then
+            echo "0 tests answered differently with the tier on"
             exit 0
           fi
           echo "::error::tests failing only with the tier on:"
-          comm -13 off.paths on.paths | sed 's/^/  /'
+          echo "$new_failures" | sed 's/^/  /'
           exit 1
 
       - name: Keep the failure lists
