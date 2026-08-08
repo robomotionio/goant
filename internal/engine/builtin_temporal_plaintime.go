@@ -197,7 +197,7 @@ func (rt *Runtime) initTemporalPlainTime(ns *object) {
 		return mkbool(compareTimeRec(tTime(o), other) == 0), nil
 	})
 
-	rt.defMethod(po, "toString", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	rt.defMethod(po, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o, e := rt.requireTemporal(this, kindPlainTime)
 		if e != nil {
 			return mkundef(), e

@@ -423,7 +423,7 @@ func (rt *Runtime) initTemporalPlainDate(ns *object) {
 		return rt.createTemporalZonedDateTime(nsv, tz, cal)
 	})
 
-	rt.defMethod(po, "toString", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	rt.defMethod(po, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		_, iso, cal, e := self(this)
 		if e != nil {
 			return mkundef(), e

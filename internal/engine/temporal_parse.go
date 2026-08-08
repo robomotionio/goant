@@ -9,6 +9,7 @@ package engine
 // grammar and the callers say which shapes they will take.
 
 import (
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -744,11 +745,26 @@ func formatTemporalDuration(d durationRec, precision int) string {
 	writeUnit(d.weeks, 'W')
 	writeUnit(d.days, 'D')
 
-	// The seconds and everything under them are written as one number.
+	// The seconds and everything under them are written as one number. The
+	// count of nanoseconds is taken exactly: a duration may hold eighteen
+	// quadrillion microseconds, and multiplying that by a thousand in an int64
+	// wraps round to one.
 	secs := abs(d.seconds)
-	subNs := int64(abs(d.ms))*nsPerMilli + int64(abs(d.us))*nsPerMicro + int64(abs(d.ns))
-	secs += float64(subNs / nsPerSecond)
-	rem := subNs % nsPerSecond
+	subNs := new(big.Int)
+	addSub := func(v float64, mul int64) {
+		// The float is turned into the integer it exactly is before it is
+		// scaled: a big.Float carries fifty-three bits by default, so
+		// multiplying inside one would round away the bits the scaling adds.
+		i, _ := new(big.Float).SetFloat64(abs(v)).Int(nil)
+		subNs.Add(subNs, i.Mul(i, bigInt(mul)))
+	}
+	addSub(d.ms, nsPerMilli)
+	addSub(d.us, nsPerMicro)
+	addSub(d.ns, 1)
+	whole, remBig := new(big.Int).QuoRem(subNs, bigInt(nsPerSecond), new(big.Int))
+	wholeF, _ := new(big.Float).SetInt(whole).Float64()
+	secs += wholeF
+	rem := remBig.Int64()
 	timeAny := d.hours != 0 || d.minutes != 0 || secs != 0 || rem != 0 || precision >= 0
 	if timeAny {
 		b.WriteByte('T')

@@ -419,7 +419,7 @@ func (rt *Runtime) initTemporalPlainYearMonth(ns *object) {
 		return rt.createTemporalDate(out, cal)
 	})
 
-	rt.defMethod(po, "toString", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	rt.defMethod(po, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		iso, cal, e := self(this)
 		if e != nil {
 			return mkundef(), e
@@ -593,7 +593,7 @@ func (rt *Runtime) initTemporalPlainMonthDay(ns *object) {
 		return rt.createTemporalDate(out, cal)
 	})
 
-	rt.defMethod(po, "toString", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	rt.defMethod(po, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		iso, cal, e := self(this)
 		if e != nil {
 			return mkundef(), e

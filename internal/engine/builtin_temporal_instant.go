@@ -181,7 +181,7 @@ func (rt *Runtime) initTemporalInstant(ns *object) {
 		return mkbool(tEpochNs(o).Cmp(other) == 0), nil
 	})
 
-	rt.defMethod(po, "toString", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	rt.defMethod(po, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o, e := rt.requireTemporal(this, kindInstant)
 		if e != nil {
 			return mkundef(), e

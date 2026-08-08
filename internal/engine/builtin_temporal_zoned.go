@@ -460,7 +460,7 @@ func (rt *Runtime) initTemporalZonedDateTime(ns *object) {
 		return rt.createTemporalDateTime(z.dateTimeFor(epoch), cal)
 	})
 
-	rt.defMethod(po, "toString", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	rt.defMethod(po, "toString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		_, epoch, tz, cal, e := self(this)
 		if e != nil {
 			return mkundef(), e

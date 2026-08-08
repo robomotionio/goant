@@ -195,10 +195,11 @@ func (d internalDuration) sign() int {
 func timeDurationFromComponents(h, mi, s, ms, us, ns float64) *big.Int {
 	total := new(big.Int)
 	add := func(v float64, mul int64) {
-		r := new(big.Float).SetFloat64(v)
-		r.Mul(r, new(big.Float).SetInt64(mul))
-		i, _ := r.Int(nil)
-		total.Add(total, i)
+		// Exactly as in formatTemporalDuration: take the integer the float is
+		// before scaling it, because a big.Float would round the product back
+		// to fifty-three bits and a duration may hold more than that.
+		i, _ := new(big.Float).SetFloat64(v).Int(nil)
+		total.Add(total, i.Mul(i, bigInt(mul)))
 	}
 	add(h, nsPerHour)
 	add(mi, nsPerMinute)
