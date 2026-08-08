@@ -505,7 +505,12 @@ func (rt *Runtime) initTemporalZonedDateTime(ns *object) {
 		return rt.newString(rt.formatZonedDateTime(epoch, tz, cal, -1, "auto", "auto", "auto")), nil
 	}
 	rt.defMethod(po, "toJSON", 0, toJSON)
-	rt.defMethod(po, "toLocaleString", 0, toJSON)
+	rt.defMethod(po, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := rt.requireTemporal(this, kindZonedDateTime); e != nil {
+			return mkundef(), e
+		}
+		return rt.temporalLocaleString(this, kindZonedDateTime, arg(args, 0), arg(args, 1))
+	})
 }
 
 func (rt *Runtime) formatZonedDateTime(ns *big.Int, tz, cal string, precision int,

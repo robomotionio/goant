@@ -436,7 +436,12 @@ func (rt *Runtime) initTemporalPlainYearMonth(ns *object) {
 		return rt.newString(formatYearMonth(iso, cal, "auto")), nil
 	}
 	rt.defMethod(po, "toJSON", 0, toJSON)
-	rt.defMethod(po, "toLocaleString", 0, toJSON)
+	rt.defMethod(po, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := rt.requireTemporal(this, kindPlainYearMonth); e != nil {
+			return mkundef(), e
+		}
+		return rt.temporalLocaleString(this, kindPlainYearMonth, arg(args, 0), arg(args, 1))
+	})
 }
 
 // formatYearMonth writes "2020-01", or the whole date where the calendar is not
@@ -605,7 +610,12 @@ func (rt *Runtime) initTemporalPlainMonthDay(ns *object) {
 		return rt.newString(formatMonthDay(iso, cal, "auto")), nil
 	}
 	rt.defMethod(po, "toJSON", 0, toJSON)
-	rt.defMethod(po, "toLocaleString", 0, toJSON)
+	rt.defMethod(po, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := rt.requireTemporal(this, kindPlainMonthDay); e != nil {
+			return mkundef(), e
+		}
+		return rt.temporalLocaleString(this, kindPlainMonthDay, arg(args, 0), arg(args, 1))
+	})
 }
 
 // formatMonthDay writes "--12-31", keeping the reference year where the

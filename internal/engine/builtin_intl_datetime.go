@@ -267,12 +267,21 @@ func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, req
 		needed = !has(dateFields)
 	case "time":
 		needed = !has(timeFields)
+	case "year-month":
+		needed = !has([]string{"year", "month"})
+	case "month-day":
+		needed = !has([]string{"month", "day"})
 	default:
 		needed = !has(dateFields) && !has(timeFields)
 	}
 	if needed {
-		if defaults == "date" || defaults == "all" {
+		switch defaults {
+		case "date", "all":
 			d.comps["year"], d.comps["month"], d.comps["day"] = "numeric", "numeric", "numeric"
+		case "year-month":
+			d.comps["year"], d.comps["month"] = "numeric", "numeric"
+		case "month-day":
+			d.comps["month"], d.comps["day"] = "numeric", "numeric"
 		}
 		if defaults == "time" || defaults == "all" {
 			d.comps["hour"], d.comps["minute"], d.comps["second"] = "numeric", "numeric", "numeric"

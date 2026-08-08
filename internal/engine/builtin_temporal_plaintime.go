@@ -237,7 +237,12 @@ func (rt *Runtime) initTemporalPlainTime(ns *object) {
 		return rt.newString(formatTimeString(tTime(o), -1)), nil
 	}
 	rt.defMethod(po, "toJSON", 0, toJSON)
-	rt.defMethod(po, "toLocaleString", 0, toJSON)
+	rt.defMethod(po, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := rt.requireTemporal(this, kindPlainTime); e != nil {
+			return mkundef(), e
+		}
+		return rt.temporalLocaleString(this, kindPlainTime, arg(args, 0), arg(args, 1))
+	})
 }
 
 // mergeTime overlays whichever time fields were given onto an existing time.

@@ -348,7 +348,12 @@ func (rt *Runtime) initTemporalPlainDateTime(ns *object) {
 			formatCalendarAnnotation(cal, "auto")), nil
 	}
 	rt.defMethod(po, "toJSON", 0, toJSON)
-	rt.defMethod(po, "toLocaleString", 0, toJSON)
+	rt.defMethod(po, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := rt.requireTemporal(this, kindPlainDateTime); e != nil {
+			return mkundef(), e
+		}
+		return rt.temporalLocaleString(this, kindPlainDateTime, arg(args, 0), arg(args, 1))
+	})
 }
 
 // defTimeGetters installs hour through nanosecond for the types that carry a

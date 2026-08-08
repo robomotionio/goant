@@ -504,7 +504,7 @@ func (c lunisolarCalendar) monthFromCode(year string, code string) (int, bool) {
 		return 0, false
 	}
 	m, leap, ok := parseMonthCode(code)
-	if !ok {
+	if !ok || m > 12 {
 		return 0, false
 	}
 	y := c.year(n)

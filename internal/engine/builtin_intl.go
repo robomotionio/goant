@@ -291,10 +291,15 @@ func (rt *Runtime) initIntl() {
 		inst.setSlot(slotIntlDateTimeOpts, rt.newString(d.String()))
 		return nil
 	}, func(po *object) {
-		instant := func(rt *Runtime, args []Value) (float64, *ThrowError) {
+		instant := func(rt *Runtime, d dateTimeOptions, args []Value) (float64, *ThrowError) {
 			// With no argument the spec formats the current time.
 			ms := float64(time.Now().UnixMilli())
 			if a := arg(args, 0); !a.IsUndefined() {
+				// A Temporal value says what it is; everything else is a
+				// timestamp, or is coerced to one.
+				if rt.temporalKindOf(a) != kindNone {
+					return rt.temporalFormatEpochMs(a, d)
+				}
 				n, e := rt.toNumber(a)
 				if e != nil {
 					return 0, e
@@ -313,7 +318,7 @@ func (rt *Runtime) initIntl() {
 			}
 			loc := zoneFor(d.timeZone)
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-				ms, e := instant(rt, args)
+				ms, e := instant(rt, d, args)
 				if e != nil {
 					return mkundef(), e
 				}
@@ -330,7 +335,7 @@ func (rt *Runtime) initIntl() {
 			if e != nil {
 				return mkundef(), e
 			}
-			ms, e := instant(rt, args)
+			ms, e := instant(rt, d, args)
 			if e != nil {
 				return mkundef(), e
 			}
@@ -344,15 +349,37 @@ func (rt *Runtime) initIntl() {
 			if arg(args, 0).IsUndefined() || arg(args, 1).IsUndefined() {
 				return nil, rt.typeError("formatRange requires two time values")
 			}
-			a, e := rt.toNumber(arg(args, 0))
-			if e != nil {
-				return nil, e
+			// The two ends must be the same kind of thing: a range from a
+			// date to a time is not a range.
+			ka, kb := rt.temporalKindOf(arg(args, 0)), rt.temporalKindOf(arg(args, 1))
+			if ka != kb {
+				return nil, rt.typeError("the two ends of a range must be the same kind of value")
 			}
-			b, e := rt.toNumber(arg(args, 1))
-			if e != nil {
-				return nil, e
+			var a, b float64
+			if ka != kindNone {
+				got, e := rt.temporalFormatEpochMs(arg(args, 0), d)
+				if e != nil {
+					return nil, e
+				}
+				a = got
+				got, e = rt.temporalFormatEpochMs(arg(args, 1), d)
+				if e != nil {
+					return nil, e
+				}
+				b = got
+			} else {
+				got, e := rt.toNumber(arg(args, 0))
+				if e != nil {
+					return nil, e
+				}
+				a = got
+				got, e = rt.toNumber(arg(args, 1))
+				if e != nil {
+					return nil, e
+				}
+				b = got
+				a, b = timeClip(a), timeClip(b)
 			}
-			a, b = timeClip(a), timeClip(b)
 			if math.IsNaN(a) || math.IsNaN(b) {
 				return nil, rt.rangeError("Invalid time value")
 			}

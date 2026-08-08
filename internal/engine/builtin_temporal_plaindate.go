@@ -447,7 +447,12 @@ func (rt *Runtime) initTemporalPlainDate(ns *object) {
 		return rt.newString(formatISODate(iso) + formatCalendarAnnotation(cal, "auto")), nil
 	}
 	rt.defMethod(po, "toJSON", 0, toJSON)
-	rt.defMethod(po, "toLocaleString", 0, toJSON)
+	rt.defMethod(po, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if _, e := rt.requireTemporal(this, kindPlainDate); e != nil {
+			return mkundef(), e
+		}
+		return rt.temporalLocaleString(this, kindPlainDate, arg(args, 0), arg(args, 1))
+	})
 }
 
 // calendarArg reads the optional calendar argument the three ISO constructors

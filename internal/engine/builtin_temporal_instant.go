@@ -237,11 +237,10 @@ func (rt *Runtime) initTemporalInstant(ns *object) {
 	})
 
 	rt.defMethod(po, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o, e := rt.requireTemporal(this, kindInstant)
-		if e != nil {
+		if _, e := rt.requireTemporal(this, kindInstant); e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(rt.formatInstantString(tEpochNs(o), "", -1)), nil
+		return rt.temporalLocaleString(this, kindInstant, arg(args, 0), arg(args, 1))
 	})
 
 	rt.defMethod(po, "toZonedDateTimeISO", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

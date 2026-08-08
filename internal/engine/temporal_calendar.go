@@ -155,87 +155,143 @@ func calendarYearMonthFromFields(id string, f calFieldSet, overflow string) (iso
 	return calendarDateFromFields(id, f, overflow)
 }
 
+// monthNumberNeedsYear is true wherever the number of a month says nothing
+// without a year. Outside the ISO calendar that is everywhere: a leap month
+// shifts every month after it, so "month 6" is Adar in one year and Adar I in
+// the next, and even where the months are fixed the spec asks for the year.
+func monthNumberNeedsYear(id string) bool { return id != "iso8601" }
+
+// lunisolarID is true of the two calendars whose months are moons.
+func lunisolarID(id string) bool { return id == "chinese" || id == "dangi" }
+
+// The years a month-day's reference date is looked for in. A month code that
+// names a leap month may not occur for decades, so the search runs backwards
+// from the reference year first and then forwards -- which is how M09L in the
+// Chinese calendar comes to be dated 2014 when every other month is dated 1972.
+const (
+	monthDayRefDay   = 1972
+	monthDaySearchLo = 1900
+	monthDaySearchHi = 2100
+)
+
 // calendarMonthDayFromFields is a month and a day with no year. The result
-// still needs an ISO date, so it takes the latest year at or before 1972 in
-// which that month and day both exist.
+// still needs an ISO date, so it takes the year in which that month and day
+// last occurred at or before 1972 -- or, for a month that has not happened
+// since, the year it next occurs in.
 func calendarMonthDayFromFields(id string, f calFieldSet, overflow string) (isoDateRec, error) {
 	cal := calendarFor(id)
+	// The fields are checked for presence before any of them is checked for
+	// sense: a missing field is a different kind of mistake from a wrong one.
+	if !f.got(fMonth) && !f.got(fMonthCode) {
+		return isoDateRec{}, errCalendarFields
+	}
 	if !f.got(fDay) {
 		return isoDateRec{}, errCalendarFields
 	}
-	// With a year in hand there is nothing to search for.
-	if f.got(fYear) || (f.got(fEra) && f.got(fEraYear)) {
+	hasYear := f.got(fYear) || (f.got(fEra) && f.got(fEraYear))
+	if f.got(fMonth) && !hasYear && monthNumberNeedsYear(id) {
+		return isoDateRec{}, errCalendarFields
+	}
+	// With a year in hand the date is fully determined, and the month-day is
+	// read back off it.
+	if hasYear {
 		iso, err := calendarDateFromFields(id, f, overflow)
 		if err != nil {
 			return iso, err
 		}
 		cd := cal.dateFromDay(iso.epochDays())
-		f = calFieldSet{monthCode: cd.code, day: cd.day, has: fMonthCode | fDay}
-		return calendarMonthDayFromFields(id, f, overflow)
+		return calendarMonthDayFromFields(id,
+			calFieldSet{monthCode: cd.code, day: cd.day, has: fMonthCode | fDay}, overflow)
 	}
-	// A numeric month with no year does not name a month in a calendar whose
-	// months move; only a month code does.
 	code := f.monthCode
 	if !f.got(fMonthCode) {
-		if id != "iso8601" && id != "gregory" && id != "japanese" && id != "roc" &&
-			id != "buddhist" {
-			return isoDateRec{}, errCalendarFields
-		}
-		if f.month < 1 || f.month > 12 {
+		if f.month < 1 || f.month > cal.monthsInYear(1972) {
 			if overflow == "reject" {
 				return isoDateRec{}, errCalendarOverflow
 			}
-			f.month = clampInt(f.month, 1, 12)
+			f.month = clampInt(f.month, 1, cal.monthsInYear(1972))
 		}
 		code = simpleMonthCode(f.month)
+	} else if f.got(fMonth) {
+		// Both were given and there is no year to resolve the number against,
+		// so the two can only be compared where the number means one thing.
+		if n, _, ok := parseMonthCode(code); !ok || n != f.month {
+			return isoDateRec{}, errCalendarValue
+		}
 	}
-	// 1972-12-31 is where the search starts, the last day of the reference year.
-	start := cal.dateFromDay(isoDay(1972, 12, 31))
-	for y := start.year; y > start.year-200; y-- {
-		m, ok := cal.monthFromCode(strconv.Itoa(y), code)
-		if !ok {
-			continue
+	if _, _, ok := parseMonthCode(code); !ok {
+		return isoDateRec{}, errCalendarValue
+	}
+	day := f.day
+	if day < 1 {
+		return isoDateRec{}, errCalendarOverflow
+	}
+	// How long that month ever is. The lunisolar calendars answer thirty for
+	// every month, because the rule there is about which years the month
+	// happens in rather than how long it is.
+	maxDays := 0
+	if lunisolarID(id) {
+		maxDays = 30
+	} else {
+		maxDays = maxDaysOfMonthCode(cal, code)
+		if maxDays == 0 {
+			return isoDateRec{}, errCalendarValue // no such month, ever
 		}
-		day := f.day
-		if n := cal.daysInMonth(y, m); day > n {
-			// The last year in which the day itself fits is the one wanted, so
-			// keep looking rather than clamping here.
-			if y == start.year && overflow == "reject" && day > maxDayOfMonthCode(cal, code) {
-				return isoDateRec{}, errCalendarOverflow
-			}
-			continue
-		}
-		if day < 1 {
+	}
+	if day > maxDays {
+		if overflow == "reject" {
 			return isoDateRec{}, errCalendarOverflow
 		}
-		d := cal.dayFromDate(y, m, day)
-		if d > isoDay(1972, 12, 31) {
-			continue
-		}
-		return epochDaysToISODate(d), nil
+		day = maxDays
 	}
+	if iso, ok := searchMonthDayReference(cal, code, day); ok {
+		return iso, nil
+	}
+	// The month code never occurs with that many days. A leap month then
+	// constrains to the month it follows; anything else has nowhere to go.
 	if overflow == "reject" {
 		return isoDateRec{}, errCalendarOverflow
 	}
-	// Nothing fits: constrain the day to the longest that month ever is.
-	for y := start.year; y > start.year-200; y-- {
-		m, ok := cal.monthFromCode(strconv.Itoa(y), code)
-		if !ok {
-			continue
-		}
-		d := cal.dayFromDate(y, m, cal.daysInMonth(y, m))
-		if d <= isoDay(1972, 12, 31) {
-			return epochDaysToISODate(d), nil
-		}
+	base, leap, ok := parseMonthCode(code)
+	if !ok || !leap {
+		return isoDateRec{}, errCalendarValue
 	}
-	return isoDateRec{}, errCalendarFields
+	if iso, ok := searchMonthDayReference(cal, simpleMonthCode(base), day); ok {
+		return iso, nil
+	}
+	return isoDateRec{}, errCalendarValue
 }
 
-// maxDayOfMonthCode is the most days a month with this code ever has, over the
-// years near the reference year.
-func maxDayOfMonthCode(cal calendar, code string) int {
+// searchMonthDayReference finds the year whose month names this code and is
+// long enough to hold the day, looking backwards from 1972 and then forwards.
+func searchMonthDayReference(cal calendar, code string, day int) (isoDateRec, bool) {
+	try := func(y int) (isoDateRec, bool) {
+		m, ok := cal.monthFromCode(strconv.Itoa(y), code)
+		if !ok || day > cal.daysInMonth(y, m) {
+			return isoDateRec{}, false
+		}
+		return epochDaysToISODate(cal.dayFromDate(y, m, day)), true
+	}
+	last := cal.dateFromDay(isoDay(monthDayRefDay, 12, 31)).year
+	first := cal.dateFromDay(isoDay(monthDaySearchLo, 1, 1)).year
+	end := cal.dateFromDay(isoDay(monthDaySearchHi, 12, 31)).year
+	for y := last; y >= first; y-- {
+		if iso, ok := try(y); ok && iso.year <= monthDayRefDay {
+			return iso, true
+		}
+	}
+	for y := last + 1; y <= end; y++ {
+		if iso, ok := try(y); ok {
+			return iso, true
+		}
+	}
+	return isoDateRec{}, false
+}
+
+// maxDaysOfMonthCode is the most days a month with this code ever has.
+func maxDaysOfMonthCode(cal calendar, code string) int {
 	best := 0
-	base := cal.dateFromDay(isoDay(1972, 12, 31)).year
+	base := cal.dateFromDay(isoDay(monthDayRefDay, 12, 31)).year
 	for y := base; y > base-40; y-- {
 		if m, ok := cal.monthFromCode(strconv.Itoa(y), code); ok {
 			if n := cal.daysInMonth(y, m); n > best {
