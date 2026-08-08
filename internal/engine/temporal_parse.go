@@ -180,7 +180,10 @@ func (p *tparse) fraction() (int, bool) {
 func (p *tparse) timeSpec() (t isoTimeRec, fields int, sep bool, ok bool) {
 	start := p.i
 	h, good := p.digits(2)
-	if !good {
+	if !good || h > 23 {
+		// The grammar spells the hour out as 00 through 23, so twenty-five
+		// o'clock is not a time that was out of range: it is not a time.
+		p.i = start
 		return t, 0, false, false
 	}
 	t.hour = h
@@ -198,6 +201,10 @@ func (p *tparse) timeSpec() (t isoTimeRec, fields int, sep bool, ok bool) {
 		}
 		return t, fields, sep, true
 	}
+	if mi > 59 {
+		p.i = start
+		return t, 0, false, false
+	}
 	t.minute = mi
 	fields = 2
 	if colon != p.accept(':') {
@@ -211,7 +218,12 @@ func (p *tparse) timeSpec() (t isoTimeRec, fields int, sep bool, ok bool) {
 		}
 		return t, fields, sep, true
 	}
-	// A second of 60 is a leap second, which Temporal accepts and clamps.
+	// A second of 60 is a leap second, which Temporal accepts and clamps; 61
+	// is nothing at all.
+	if s > 60 {
+		p.i = start
+		return t, 0, false, false
+	}
 	t.second = s
 	fields = 3
 	if ns, has := p.fraction(); has {
@@ -524,6 +536,13 @@ func parseTemporalYearMonthString(s string) (temporalParse, bool) {
 					if m < 1 || m > 12 {
 						return r, false
 					}
+					// A year and a month name a month of the ISO calendar. In
+					// any other calendar the two do not settle which month it
+					// is, because the years do not line up, so the string has
+					// to carry a whole date for the calendar to convert.
+					if cal != "" && cal != "iso8601" {
+						return r, false
+					}
 					r.hasDate, r.year, r.month, r.day = true, y, m, 1
 					r.dayAbsent = true
 					r.calendar = cal
@@ -533,7 +552,14 @@ func parseTemporalYearMonthString(s string) (temporalParse, bool) {
 			_ = dash
 		}
 	}
-	return parseTemporalDateString(s)
+	// A date that carries an offset carries it as a fact about an instant, and
+	// an instant needs a time of day: "2022-09-15+00:00" says where the clock
+	// was without saying what it read.
+	r, ok = parseTemporalDateString(s)
+	if ok && !r.hasTime && (r.z || r.hasOffset) {
+		return r, false
+	}
+	return r, ok
 }
 
 // parseTemporalMonthDayString takes "--12-31" and "12-31" as well as a date.
@@ -568,7 +594,14 @@ func parseTemporalMonthDayString(s string) (temporalParse, bool) {
 	if strings.HasPrefix(s, "--") {
 		return r, false
 	}
-	return parseTemporalDateString(s)
+	// A date that carries an offset carries it as a fact about an instant, and
+	// an instant needs a time of day: "2022-09-15+00:00" says where the clock
+	// was without saying what it read.
+	r, ok = parseTemporalDateString(s)
+	if ok && !r.hasTime && (r.z || r.hasOffset) {
+		return r, false
+	}
+	return r, ok
 }
 
 // parseTemporalInstantString needs a time and something that says where in the
