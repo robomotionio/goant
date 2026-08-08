@@ -2380,11 +2380,13 @@ func (rt *Runtime) defineTypedArrayMethods(tp *object) {
 				continue
 			}
 			// Call the element's own toLocaleString, then ToString the result.
+			// The locales and options arguments go with it: ECMA-402 replaces
+			// the ECMA-262 definition with one that passes them along.
 			m, e := rt.getField(el, "toLocaleString")
 			if e != nil {
 				return mkundef(), e
 			}
-			r, e := rt.callValue(m, el, nil)
+			r, e := rt.callValue(m, el, []Value{arg(args, 0), arg(args, 1)})
 			if e != nil {
 				return mkundef(), e
 			}

@@ -1625,7 +1625,10 @@ func (rt *Runtime) initArrayBuiltin() {
 			if !rt.isCallable(tls) {
 				return mkundef(), rt.typeError("element toLocaleString is not a function")
 			}
-			r, e := rt.callValue(tls, el, nil)
+			// The locales and options arguments are passed straight through:
+			// ECMA-402 replaces the ECMA-262 definition of this method with
+			// one that hands them to every element.
+			r, e := rt.callValue(tls, el, []Value{arg(args, 0), arg(args, 1)})
 			if e != nil {
 				return mkundef(), e
 			}
