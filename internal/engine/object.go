@@ -120,6 +120,11 @@ type object struct {
 	// staying true after detach so the prototype getters can require the slot on
 	// their receiver while still distinguishing a detached buffer from a non-buffer.
 	abObj bool
+	// abShared marks a SharedArrayBuffer. It is an ArrayBuffer as far as anything
+	// that VIEWS one is concerned -- a TypedArray or a DataView over it is the
+	// point of it existing -- and not one at all to the methods that would detach,
+	// transfer or resize it, since it is not any single agent's to take away.
+	abShared bool
 	// argMap is the [[ParameterMap]] of a mapped arguments object: the indices
 	// that alias their function's formal parameters (see arguments.go).
 	argMap *argumentsMap

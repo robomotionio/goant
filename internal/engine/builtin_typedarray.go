@@ -896,7 +896,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	po := rt.objPtr(proto)
 	po.defineAccessor("byteLength", rt.newNativeFunc("get byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj {
+		if o == nil || !o.abObj || o.abShared {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.byteLength getter called on a non-ArrayBuffer")
 		}
 		return mknum(float64(len(o.abuf))), nil // 0 when detached
@@ -904,7 +904,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	// detached: an ArrayBuffer whose bytes have been transferred away (abuf nil).
 	po.defineAccessor("detached", rt.newNativeFunc("get detached", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj {
+		if o == nil || !o.abObj || o.abShared {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.detached getter called on a non-ArrayBuffer")
 		}
 		return mkbool(o.abuf == nil), nil
@@ -954,7 +954,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	// buffer (zero-filling any growth) and detach the source.
 	rt.defMethod(po, "transferToImmutable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj {
+		if o == nil || !o.abObj || o.abShared {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.transferToImmutable on incompatible receiver")
 		}
 		newLen := len(o.abuf)
@@ -986,7 +986,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	// the detached check and a currentLen<final RangeError happen after.
 	rt.defMethod(po, "sliceToImmutable", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj {
+		if o == nil || !o.abObj || o.abShared {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.sliceToImmutable on incompatible receiver")
 		}
 		// Non-detachment is verified before the index arguments are coerced.
@@ -1025,7 +1025,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	})
 	rt.defMethod(po, "resize", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || o.ta != nil || o.dv != nil || !o.abResizable {
+		if o == nil || !o.abObj || o.abShared || !o.abResizable {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.resize called on a non-resizable ArrayBuffer")
 		}
 		n, e := rt.toIndex(arg(args, 0))
@@ -1047,7 +1047,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	})
 	rt.defMethod(po, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || o.ta != nil || o.dv != nil {
+		if o == nil || !o.abObj || o.abShared {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.slice on incompatible receiver")
 		}
 		if o.abuf == nil {
@@ -1124,7 +1124,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	})
 	po.defineAccessor("maxByteLength", rt.newNativeFunc("get maxByteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj {
+		if o == nil || !o.abObj || o.abShared {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.maxByteLength on incompatible receiver")
 		}
 		if o.abuf == nil {
@@ -1134,7 +1134,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	}), mkundef(), true, false, attrConfigurable)
 	po.defineAccessor("resizable", rt.newNativeFunc("get resizable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj {
+		if o == nil || !o.abObj || o.abShared {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.resizable on incompatible receiver")
 		}
 		return mkbool(o.abResizable), nil
@@ -1142,7 +1142,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	// immutable getter (Immutable ArrayBuffer proposal): IsImmutableBuffer.
 	po.defineAccessor("immutable", rt.newNativeFunc("get immutable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj {
+		if o == nil || !o.abObj || o.abShared {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.immutable on incompatible receiver")
 		}
 		return mkbool(rt.abIsImmutable(o)), nil
