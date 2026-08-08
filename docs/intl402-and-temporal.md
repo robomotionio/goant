@@ -261,28 +261,33 @@ The plural rules and the collator cover every CLDR locale, so both now keep the
 tag that was **asked for**. Arabic has six plural categories and no entry in
 that table; it was answering with English's two.
 
-### A4 — `Intl.DateTimeFormat`, properly
+### A4 — `Intl.DateTimeFormat`, properly  ▸ **done**, `9e86937` and before
 
 The large one. Everything above is an API over finished data; this is not.
 
-- [ ] Decide: finish an API over `x/text/date`'s tables, or generate our own
-      CLDR subset with a `tools/gencldr` in the shape of `tools/genunicode`
-- [ ] Skeleton and pattern resolution (`dateStyle`/`timeStyle`, then components)
-- [ ] Month, weekday, era, dayPeriod names per locale
-- [ ] `formatToParts`, `formatRange`, `formatRangeToParts`
-- [ ] Calendars beyond Gregorian — **probably decline**; see "What we will not do"
+- [x] **Decided: generate our own.** `tools/gencldrlocale` reads cldr-json for
+      the locales `intl_data.go` carries and writes `intl_locale_gen.go`. The
+      shape is `tools/gencldr`'s: newline-separated string constants, read into
+      maps on first use, so a host that formats nothing pays nothing.
+- [x] Skeleton and pattern resolution (`dateStyle`/`timeStyle`, then components)
+- [x] Month, weekday, era, dayPeriod names per locale
+- [x] `formatToParts`, `formatRange`, `formatRangeToParts` — including the
+      sharing rule, which is per-locale data everywhere else and here is the
+      one rule that holds: the date is said once when only the clock moved.
+- [x] Calendars beyond Gregorian — taken after all, because Temporal needed
+      them. Sixteen of them, with their eras and month codes.
 
-### A5 — the rest
+### A5 — the rest  ▸ **done**
 
-~400 tests, near-zero value for a host running RPA scripts. Listed for
-completeness, not scheduled.
+~400 tests, near-zero value for a host running RPA scripts. Done because the
+3,357 / 3,357 goal counts them.
 
-- [ ] `Intl.DisplayNames` (57), `ListFormat` (81), `RelativeTimeFormat` (80),
+- [x] `Intl.DisplayNames` (57), `ListFormat` (81), `RelativeTimeFormat` (80),
       `Segmenter` (79), `DurationFormat` (110)
 
 ---
 
-## Track B — Temporal  ▸ **scheduled** by the 3,357 / 3,357 goal
+## Track B — Temporal  ▸ **done**
 
 **6,632 tests**, 2,029 of them inside `intl402`. This is not "the rest of
 Intl"; it is a second date/time API alongside `Date`, with its own arithmetic,
@@ -295,18 +300,15 @@ Before any of `intl402/Temporal` can pass, `built-ins/Temporal` has to exist:
 - [x] **Decided: yes.** The goal is 3,357 / 3,357 and 2,029 of those are
       Temporal, so it cannot be reached without it. It remains the single
       largest item in the engine — larger than the JIT was.
-- [ ] `Duration` and `Instant` first, since everything else is defined in terms
+- [x] `Duration` and `Instant` first, since everything else is defined in terms
       of them. Then `PlainDate`, `PlainTime`, `PlainDateTime`, `PlainYearMonth`,
       `PlainMonthDay`, `ZonedDateTime`, `Temporal.Now`.
-- [ ] The `intl402/Temporal` tests are the LAST step, not the first: they format
-      Temporal objects through `DateTimeFormat`, so they need both
-      `built-ins/Temporal` (4,603) and A4 finished before any of them can pass.
-      Ordered by what unblocks the most: ZonedDateTime 583, PlainDate 493,
-      PlainDateTime 483, PlainYearMonth 327, PlainMonthDay 90, Duration 21,
-      Instant 17, PlainTime 12, Now 3.
-- [ ] Nail the ISO 8601 grammar early; a large fraction of the suite is parsing
-- [ ] Go's `time` package gives the arithmetic and the zone database; the
-      calendar model is the part with no Go equivalent
+- [x] The `intl402/Temporal` tests came last, as planned, and all 2,029 pass.
+- [x] The ISO 8601 grammar went in early and it was the right call.
+- [x] Go's `time` gave the arithmetic and the zone database; the calendar model
+      had no Go equivalent and is `calendar.go` and `temporal_calendar.go`.
+- [ ] `built-ins/Temporal` is at 4,340 / 4,603. The remainder is outside the
+      goal, which was `intl402`, and is the next thing to pick up.
 
 ---
 
@@ -350,6 +352,30 @@ Each stage is finished when:
    move ECMA-262;
 3. the unit suite passes with the tier off, on, and on at threshold 1;
 4. the differential fuzzer finds no disagreement.
+
+Point 2 needs restating now that Temporal exists. `-core` used to run 42,740
+tests because Temporal was skipped; it now runs 47,351 and the number to hold is
+the non-Temporal part of it. Nothing here moved ECMA-262: the eight
+`built-ins/Date/prototype` failures were `toTemporalInstant`, which did not
+exist, and the one in `built-ins/Proxy` is a cross-realm error identity that
+only became visible when `$262.createRealm` started working.
+
+---
+
+## Where it ended
+
+`intl402` **3,357 / 3,357**, from 3,218 / 3,357 with 10 skipped. The ten were
+all `proto-from-ctor-realm.js` and needed `$262.createRealm`, which needed
+`GetPrototypeFromConstructor` to take its fallback from new.target's realm
+rather than the running one.
+
+Two things are honest approximations rather than data:
+
+- The German **search** collation is implemented from CLDR's rule — `&ae<<ä` —
+  rather than from its table. It handles the umlaut expansions and nothing else,
+  because x/text carries no search tailorings.
+- `x/text`'s `collate.IgnoreDiacritics` does not ignore diacritics (`"o"` and
+  `"ö"` still differ under it), so sensitivity `"case"` strips the marks itself.
 
 ---
 
