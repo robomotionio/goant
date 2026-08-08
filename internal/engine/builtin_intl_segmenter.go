@@ -61,11 +61,49 @@ func isExtender(r rune) bool {
 
 func isRegionalIndicator(r rune) bool { return r >= 0x1F1E6 && r <= 0x1F1FF }
 
-// The Hangul jamo classes of UAX #29. A syllable is L* V+ T* and counts as one
-// grapheme however many code points spell it.
-func isHangulLead(r rune) bool  { return r >= 0x1100 && r <= 0x115F }
-func isHangulVowel(r rune) bool { return r >= 0x1160 && r <= 0x11A7 }
-func isHangulTrail(r rune) bool { return r >= 0x11A8 && r <= 0x11FF }
+// The Hangul syllable classes of UAX #29. A syllable written as jamo is one
+// grapheme however many code points spell it, and a precomposed syllable joins
+// a following trailing consonant the same way.
+const (
+	hangulNone = iota
+	hangulL
+	hangulV
+	hangulT
+	hangulLV
+	hangulLVT
+)
+
+func hangulClass(r rune) int {
+	switch {
+	case r >= 0x1100 && r <= 0x115F, r >= 0xA960 && r <= 0xA97C:
+		return hangulL
+	case r >= 0x1160 && r <= 0x11A7, r >= 0xD7B0 && r <= 0xD7C6:
+		return hangulV
+	case r >= 0x11A8 && r <= 0x11FF, r >= 0xD7CB && r <= 0xD7FB:
+		return hangulT
+	case r >= 0xAC00 && r <= 0xD7A3:
+		if (r-0xAC00)%28 == 0 {
+			return hangulLV
+		}
+		return hangulLVT
+	}
+	return hangulNone
+}
+
+// hangulJoins is GB6, GB7 and GB8: L takes anything that can begin or continue
+// a syllable, a vowel takes vowels and trailing consonants, and a trailing
+// consonant takes only more of itself.
+func hangulJoins(prev, next int) bool {
+	switch prev {
+	case hangulL:
+		return next == hangulL || next == hangulV || next == hangulLV || next == hangulLVT
+	case hangulV, hangulLV:
+		return next == hangulV || next == hangulT
+	case hangulT, hangulLVT:
+		return next == hangulT
+	}
+	return false
+}
 
 func isWordChar(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' ||
@@ -152,24 +190,16 @@ func segmentEnd(units []rune, i int, granularity string) (int, bool) {
 				j += w2
 			}
 		}
-		// A Hangul syllable written as jamo is one grapheme: a leading
-		// consonant, then vowels, then trailing consonants, in that order.
-		if isHangulLead(r) {
-			for j < len(units) {
-				r2, w2 := codePointAt(units, j)
-				if !isHangulVowel(r2) && !isHangulTrail(r2) {
-					break
-				}
-				j += w2
+		// A Hangul syllable written as jamo is one grapheme: leading
+		// consonants, then vowels, then trailing consonants, in that order.
+		for state := hangulClass(r); state != hangulNone && j < len(units); {
+			r2, w2 := codePointAt(units, j)
+			next := hangulClass(r2)
+			if !hangulJoins(state, next) {
+				break
 			}
-		} else if isHangulVowel(r) {
-			for j < len(units) {
-				r2, w2 := codePointAt(units, j)
-				if !isHangulVowel(r2) && !isHangulTrail(r2) {
-					break
-				}
-				j += w2
-			}
+			j += w2
+			state = next
 		}
 		for j < len(units) {
 			r2, w2 := codePointAt(units, j)
