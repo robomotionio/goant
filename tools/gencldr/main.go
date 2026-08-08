@@ -130,6 +130,12 @@ package engine
 	// The numbering systems whose digits are ten consecutive code points --
 	// which is all of them except the four algorithmic ones. The value is the
 	// zero digit; the rest follow it.
+	// The collation types a -u-co keyword may name. Without this list any
+	// well-formed type would be accepted, and "en-US-u-co-invalid" would
+	// resolve to a collation that does not exist.
+	emit(&b, "cldrCollationsData",
+		"collation types, name -> \"\" (a set).", collationTypes(filepath.Join(*dir, "bcp47", "collation.xml")))
+
 	emit(&b, "cldrNumberingSystemsData",
 		"numbering systems with a simple digit mapping: name -> the code point of its zero.",
 		numberingSystems(filepath.Join(*dir, "numberingSystems.xml")))
@@ -384,6 +390,26 @@ func numberingSystems(path string) [][2]string {
 		}
 		if ok {
 			out = append(out, [2]string{s.ID, strconv.Itoa(int(runes[0]))})
+		}
+	}
+	return out
+}
+
+// collationTypes reads the collation key's types out of the bcp47 data,
+// dropping the two that are not collations a caller may ask for by name.
+func collationTypes(path string) [][2]string {
+	var doc keyDoc
+	read(path, &doc)
+	var out [][2]string
+	for _, k := range doc.Keys {
+		if k.Name != "co" {
+			continue
+		}
+		for _, t := range k.Types {
+			if t.Name == "standard" || t.Name == "search" || t.Name == "" {
+				continue
+			}
+			out = append(out, [2]string{t.Name, "x"})
 		}
 	}
 	return out

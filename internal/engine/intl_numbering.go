@@ -97,3 +97,25 @@ func resolveNumberingSystem(tag, option string) (resolvedTag, system string) {
 	}
 	return kept.String(), system
 }
+
+// cldrCollations is the set of collation types a -u-co keyword may name. A
+// well-formed type that is not one of these is not a collation, so it is
+// dropped rather than carried into the resolved locale.
+var cldrCollations = sync.OnceValue(func() map[string]string { return parseAliasTable(cldrCollationsData) })
+
+func isCollationType(s string) bool {
+	_, ok := cldrCollations()[s]
+	return ok
+}
+
+// collationNames is every collation type, sorted -- what
+// Intl.supportedValuesOf("collation") answers.
+var collationNames = sync.OnceValue(func() []string {
+	m := cldrCollations()
+	out := make([]string, 0, len(m))
+	for name := range m {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+})

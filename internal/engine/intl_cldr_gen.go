@@ -2348,6 +2348,27 @@ const cldrRegionZonesData = "" +
 	"ZW Africa/Harare\n" +
 	""
 
+// cldrCollationsData = collation types, name -> "" (a set).
+const cldrCollationsData = "" +
+	"big5han x\n" +
+	"compat x\n" +
+	"dict x\n" +
+	"direct x\n" +
+	"ducet x\n" +
+	"emoji x\n" +
+	"eor x\n" +
+	"gb2312 x\n" +
+	"phonebk x\n" +
+	"phonetic x\n" +
+	"pinyin x\n" +
+	"reformed x\n" +
+	"searchjl x\n" +
+	"stroke x\n" +
+	"trad x\n" +
+	"unihan x\n" +
+	"zhuyin x\n" +
+	""
+
 // cldrNumberingSystemsData = numbering systems with a simple digit mapping: name -> the code point of its zero.
 const cldrNumberingSystemsData = "" +
 	"adlm 125264\n" +

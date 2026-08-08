@@ -210,7 +210,7 @@ func (rt *Runtime) supportedValuesOf(keyv Value) (Value, *ThrowError) {
 	case "calendar":
 		return rt.newArrayOfStrings([]string{"gregory"}), nil
 	case "collation":
-		return rt.newArrayOfStrings(nil), nil
+		return rt.newArrayOfStrings(collationNames()), nil
 	case "currency":
 		return rt.newArrayOfStrings(nil), nil
 	case "numberingSystem":

@@ -155,7 +155,9 @@ func (rt *Runtime) initCollatorOptions(options Value, requested []string) (colla
 		if !isUnicodeType(collation) {
 			return c, rt.rangeError("Invalid value " + collation + " for option collation")
 		}
-		c.collation = asciiLower(collation)
+		if isCollationType(asciiLower(collation)) {
+			c.collation = asciiLower(collation)
+		}
 	}
 	numeric, e := rt.intlBoolOption(options, "numeric")
 	if e != nil {
@@ -196,7 +198,7 @@ func (rt *Runtime) initCollatorOptions(options Value, requested []string) (colla
 	// ResolveLocale keeps the keyword when the value it settled on is the one
 	// the extension asked for -- including when an option asked for the same
 	// thing. Only an option that CHANGES the value removes it.
-	if v, has := t.uKeyword("co"); has && v != "standard" && v != "search" && isUnicodeType(v) {
+	if v, has := t.uKeyword("co"); has && isCollationType(v) {
 		if collation == "" || asciiLower(collation) == v {
 			c.collation = v
 			kept.setUKeyword("co", v)
