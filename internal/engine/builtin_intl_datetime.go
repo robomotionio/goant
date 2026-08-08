@@ -54,11 +54,17 @@ type dateTimeOptions struct {
 	timeStyle  string
 	comps      map[string]string // component -> value, absent when not asked for
 	fracDigits int               // 0 when not asked for
+	// defaulted records that no field was asked for and the defaults were
+	// filled in. A Temporal value formatted by such a formatter gets its own
+	// kind's defaults instead: a formatter that was told nothing has no reason
+	// to insist on a date when it is handed a time.
+	defaulted bool
 }
 
 func (d dateTimeOptions) String() string {
 	fields := []string{d.tag, d.numbering, d.timeZone, d.calendar, d.hourCycle,
-		boolKeyword(d.hour12Set), d.dateStyle, d.timeStyle, strconv.Itoa(d.fracDigits)}
+		boolKeyword(d.hour12Set), d.dateStyle, d.timeStyle, strconv.Itoa(d.fracDigits),
+		boolKeyword(d.defaulted)}
 	for _, c := range dtComponents {
 		fields = append(fields, d.comps[c])
 	}
@@ -67,16 +73,16 @@ func (d dateTimeOptions) String() string {
 
 func parseDateTimeOptions(s string) dateTimeOptions {
 	f := strings.Split(s, "\t")
-	if len(f) != 9+len(dtComponents) {
+	if len(f) != 10+len(dtComponents) {
 		return dateTimeOptions{tag: defaultLocale, numbering: "latn", timeZone: localZoneID(),
 			calendar: "gregory", comps: map[string]string{}}
 	}
 	fd, _ := strconv.Atoi(f[8])
 	d := dateTimeOptions{tag: f[0], numbering: f[1], timeZone: f[2], calendar: f[3], hourCycle: f[4],
 		hour12Set: f[5] == "true", dateStyle: f[6], timeStyle: f[7], fracDigits: fd,
-		comps: map[string]string{}}
+		defaulted: f[9] == "true", comps: map[string]string{}}
 	for i, c := range dtComponents {
-		if v := f[9+i]; v != "" {
+		if v := f[10+i]; v != "" {
 			d.comps[c] = v
 		}
 	}
@@ -274,6 +280,7 @@ func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, req
 	default:
 		needed = !has(dateFields) && !has(timeFields)
 	}
+	d.defaulted = needed
 	if needed {
 		switch defaults {
 		case "date", "all":

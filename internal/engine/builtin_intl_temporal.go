@@ -26,10 +26,10 @@ type temporalFieldSet struct {
 var temporalFieldSets = [kindCount]temporalFieldSet{
 	kindInstant: {"any", "all", dtComponents, true, true},
 	kindPlainDate: {"date", "date",
-		[]string{"weekday", "era", "year", "month", "day"}, true, false},
+		[]string{"weekday", "era", "year", "month", "day", "timeZoneName"}, true, false},
 	kindPlainTime: {"time", "time",
-		[]string{"dayPeriod", "hour", "minute", "second", "fractionalSecondDigits"},
-		false, true},
+		[]string{"dayPeriod", "hour", "minute", "second", "fractionalSecondDigits",
+			"timeZoneName"}, false, true},
 	kindPlainDateTime: {"any", "all",
 		[]string{"weekday", "era", "year", "month", "day", "dayPeriod",
 			"hour", "minute", "second", "fractionalSecondDigits"}, true, true},
@@ -38,6 +38,41 @@ var temporalFieldSets = [kindCount]temporalFieldSet{
 	kindPlainMonthDay: {"month-day", "month-day",
 		[]string{"month", "day"}, false, false},
 	kindZonedDateTime: {"any", "all", dtComponents, true, true},
+}
+
+// withTemporalDefaults re-fills a formatter that was given no fields at all
+// with the ones this kind of value has.
+func withTemporalDefaults(d dateTimeOptions, kind temporalKind) dateTimeOptions {
+	if !d.defaulted {
+		return d
+	}
+	out := d
+	out.comps = map[string]string{}
+	for k, v := range d.comps {
+		switch k {
+		case "year", "month", "day", "hour", "minute", "second":
+		default:
+			out.comps[k] = v
+		}
+	}
+	set := func(names ...string) {
+		for _, n := range names {
+			out.comps[n] = "numeric"
+		}
+	}
+	switch temporalFieldSets[kind].defaults {
+	case "date":
+		set("year", "month", "day")
+	case "time":
+		set("hour", "minute", "second")
+	case "year-month":
+		set("year", "month")
+	case "month-day":
+		set("month", "day")
+	case "all":
+		set("year", "month", "day", "hour", "minute", "second")
+	}
+	return out
 }
 
 // temporalFormatAllows reports whether a formatter's fields are ones this kind
@@ -80,6 +115,9 @@ func (rt *Runtime) temporalFormatEpochMs(v Value, d dateTimeOptions) (float64, *
 				" calendar and the formatter is in the " + d.calendar + " one")
 		}
 	}
+	// A formatter that was told nothing insists on nothing, so its fields are
+	// replaced before they are checked.
+	d = withTemporalDefaults(d, kind)
 	if !temporalFormatAllows(d, kind) {
 		return 0, rt.typeError("this formatter asks for fields a Temporal." +
 			temporalKindNames[kind] + " does not have")

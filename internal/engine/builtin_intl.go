@@ -291,37 +291,44 @@ func (rt *Runtime) initIntl() {
 		inst.setSlot(slotIntlDateTimeOpts, rt.newString(d.String()))
 		return nil
 	}, func(po *object) {
-		instant := func(rt *Runtime, d dateTimeOptions, args []Value) (float64, *ThrowError) {
+		// instant answers the timestamp to format and the options to format it
+		// with: a Temporal value formatted by a formatter that was told nothing
+		// gets its own kind's fields rather than a date's.
+		instant := func(rt *Runtime, d dateTimeOptions, args []Value) (float64, dateTimeOptions, *ThrowError) {
 			// With no argument the spec formats the current time.
 			ms := float64(time.Now().UnixMilli())
 			if a := arg(args, 0); !a.IsUndefined() {
 				// A Temporal value says what it is; everything else is a
 				// timestamp, or is coerced to one.
-				if rt.temporalKindOf(a) != kindNone {
-					return rt.temporalFormatEpochMs(a, d)
+				if kind := rt.temporalKindOf(a); kind != kindNone {
+					got, e := rt.temporalFormatEpochMs(a, d)
+					if e != nil {
+						return 0, d, e
+					}
+					return got, withTemporalDefaults(d, kind), nil
 				}
 				n, e := rt.toNumber(a)
 				if e != nil {
-					return 0, e
+					return 0, d, e
 				}
 				ms = timeClip(n)
 			}
 			if math.IsNaN(ms) {
-				return 0, rt.rangeError("Invalid time value")
+				return 0, d, rt.rangeError("Invalid time value")
 			}
-			return ms, nil
+			return ms, d, nil
 		}
 		getter := rt.newNativeFunc("get format", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			d, e := rt.requireDateTimeFormat(this)
 			if e != nil {
 				return mkundef(), e
 			}
-			loc := zoneFor(d.timeZone)
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-				ms, e := instant(rt, d, args)
+				ms, d, e := instant(rt, d, args)
 				if e != nil {
 					return mkundef(), e
 				}
+				loc := zoneFor(d.timeZone)
 				var b strings.Builder
 				for _, p := range d.dateTimeParts(msInZone(ms, loc)) {
 					b.WriteString(p.val)
@@ -335,7 +342,7 @@ func (rt *Runtime) initIntl() {
 			if e != nil {
 				return mkundef(), e
 			}
-			ms, e := instant(rt, d, args)
+			ms, d, e := instant(rt, d, args)
 			if e != nil {
 				return mkundef(), e
 			}
