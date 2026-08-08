@@ -165,6 +165,21 @@ type Runtime struct {
 	// enqueued jobs.
 	microtasks []job
 
+	// inFlight roots what the job or timer currently running captured.
+	//
+	// A job is taken off its queue before it runs — it has to be, or a
+	// re-entrant drain would run it twice — so between those two moments the
+	// only reference to what it captured is a Go local, and the collector walks
+	// this struct. A collection during a reaction then swept the promise the
+	// reaction was about to settle. It took twenty thousand queued reactions to
+	// see, because that is how many it takes to reach the collector's floor
+	// while the queue is still draining; below that the queue empties first and
+	// nothing is ever collected at the wrong moment.
+	//
+	// A stack rather than a field: a job can drain the queue again beneath
+	// itself, and the outer job's roots have to survive that.
+	inFlight []Value
+
 	// macrotasks is the timer queue (setTimeout/setInterval). goant has no real
 	// clock: tasks run in (delay, insertion) order after microtasks drain.
 	macrotasks []macrotask
