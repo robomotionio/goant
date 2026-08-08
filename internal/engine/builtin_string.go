@@ -21,16 +21,80 @@ import (
 // 1→many and contextual mappings Go's strings.ToUpper/ToLower miss (ß→SS,
 // İ→i̇, ﬀ→FF, final sigma). A string carrying lone surrogates isn't valid
 // UTF-8, so it falls back to simple casing (which leaves those bytes intact).
-func jsToUpperCase(b []byte) string {
-	if utf8.Valid(b) {
-		return cases.Upper(language.Und).String(string(b))
+//
+// An all-ASCII string is answered without any of that. For ASCII the Unicode
+// default mapping IS the ASCII mapping: no ASCII character has a 1→many
+// uppercase mapping (ß is U+00DF, ﬀ is U+FB00) and none takes part in a
+// contextual rule (final sigma needs Σ), so the two paths agree exactly and
+// the fast one is around ten times cheaper. cases.Upper builds a fresh Caser
+// on every call, which measured 5.1% of the CPU of a benchmark whose script
+// uppercases one field per record — before the transform it then runs.
+//
+// Both return a slice the caller owns, always freshly allocated, because
+// newStringBytes takes ownership of what it is given. Returning the input
+// unchanged when there is nothing to convert would hand a string cell the
+// receiver's own buffer.
+func jsToUpperCase(b []byte) []byte {
+	if isASCIIBytes(b) {
+		out := make([]byte, len(b))
+		for i, c := range b {
+			if 'a' <= c && c <= 'z' {
+				c -= 'a' - 'A'
+			}
+			out[i] = c
+		}
+		return out
 	}
-	return strings.ToUpper(string(b))
+	if utf8.Valid(b) {
+		return []byte(cases.Upper(language.Und).String(string(b)))
+	}
+	return wtf8Case(b, unicode.ToUpper)
 }
 
-func jsToLowerCase(b []byte) string {
+// wtf8Case applies the simple case mapping f to every code point in b, copying
+// through any byte that is not part of a decodable one.
+//
+// This is the lone-surrogate path. goant stores strings as WTF-8, so an
+// unpaired surrogate is three bytes that are not valid UTF-8, and the code
+// point has no case mapping — toUpperCase must hand it back untouched.
+// strings.ToUpper cannot: it decodes, and an undecodable byte decodes to
+// U+FFFD, so "a\uD800b".toUpperCase() came back with the surrogate replaced by
+// a replacement character. Silent corruption of the one input the fallback
+// existed to protect, and the comment above it said it did the opposite.
+func wtf8Case(b []byte, f func(rune) rune) []byte {
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); {
+		r, size := utf8.DecodeRune(b[i:])
+		if r == utf8.RuneError && size <= 1 {
+			// Undecodable: pass the byte through rather than mapping it. A real
+			// U+FFFD in the input decodes with size 3 and so does not land here.
+			out = append(out, b[i])
+			i++
+			continue
+		}
+		out = utf8.AppendRune(out, f(r))
+		i += size
+	}
+	return out
+}
+
+func jsToLowerCase(b []byte) []byte {
+	if isASCIIBytes(b) {
+		out := make([]byte, len(b))
+		for i, c := range b {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			out[i] = c
+		}
+		return out
+	}
+	return []byte(jsToLowerCaseSlow(b))
+}
+
+func jsToLowerCaseSlow(b []byte) string {
 	if !utf8.Valid(b) {
-		return strings.ToLower(string(b))
+		return string(wtf8Case(b, unicode.ToLower))
 	}
 	s := string(b)
 	lower := cases.Lower(language.Und)
@@ -381,14 +445,14 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(jsToUpperCase(b)), nil
+		return rt.newStringBytes(jsToUpperCase(b)), nil
 	})
 	rt.defMethod(proto, "toLowerCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(jsToLowerCase(b)), nil
+		return rt.newStringBytes(jsToLowerCase(b)), nil
 	})
 	// isWellFormed / toWellFormed (ES2024): a string is well-formed iff it has no
 	// UNPAIRED surrogate code units. goant stores strings as WTF-8, but a surrogate
@@ -567,14 +631,14 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(jsToLowerCase(b)), nil
+		return rt.newStringBytes(jsToLowerCase(b)), nil
 	})
 	rt.defMethod(proto, "toLocaleUpperCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		_, b, e := rt.thisString(this)
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(jsToUpperCase(b)), nil
+		return rt.newStringBytes(jsToUpperCase(b)), nil
 	})
 
 	pad := func(atStart bool) nativeFunc {
