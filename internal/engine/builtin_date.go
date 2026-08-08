@@ -8,6 +8,7 @@ package engine
 // do not. Conformance is run with TZ=UTC so the two coincide there.
 
 import (
+	"math/big"
 	"math"
 	"strconv"
 	"strings"
@@ -190,6 +191,20 @@ func (rt *Runtime) initDateBuiltin() {
 	setter("setUTCMilliseconds", 1, false, utc, setMillis)
 
 	// String conversions.
+	// Temporal.Instant is the type a Date is really a wrapper around, and this
+	// is the way across. It reads the time value directly rather than through
+	// valueOf, so a Date whose prototype has been rewritten still converts.
+	rt.defMethod(proto, "toTemporalInstant", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		v, e := rt.dateMs(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		if math.IsNaN(v.Number()) {
+			return mkundef(), rt.rangeError("Invalid time value")
+		}
+		ns := new(big.Int).Mul(big.NewInt(int64(v.Number())), bigInt(nsPerMilli))
+		return rt.createTemporalInstant(ns)
+	})
 	rt.defMethod(proto, "toISOString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		v, e := rt.dateMs(this)
 		if e != nil {
