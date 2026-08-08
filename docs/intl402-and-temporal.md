@@ -26,6 +26,8 @@ Temporal's 2,029, so Track B below is no longer a decision — it is scheduled.
 | sign placement, day periods, duration signs | 1,049 | unchanged |
 | numbering systems (77 of them) | 1,057 | unchanged |
 | legacy constructed symbol, bare-language availability | 1,065 | unchanged |
+| AM/PM vs dayPeriod, time-field padding | 1,072 | unchanged |
+| significant digits obey the rounding mode | 1,080 | unchanged |
 
 **Where the remaining 2,338 are, and what the ceiling actually is.** Counted by
 what each failure needs rather than by which directory it sits in:
@@ -36,7 +38,7 @@ what each failure needs rather than by which directory it sits in:
 | **elsewhere, but needs Temporal** | **66** | 62 in DateTimeFormat, 4 in DurationFormat: they format a Temporal object |
 | genuinely classic Intl | 243 | |
 
-So **the ceiling without Temporal is 1,262, and 1,065 of it is reached — 84%.**
+So **the ceiling without Temporal is 1,262, and 1,080 of it is reached — 86%.**
 The 66 is the number worth knowing: more than half of what is left in
 `DateTimeFormat` is not a date-formatting problem at all.
 
@@ -44,8 +46,8 @@ The 243:
 
 | block | passing | needs |
 |---|---|---|
-| NumberFormat | 183 / 249 | per-locale currency placement and compact patterns |
-| DateTimeFormat | 146 / 244 | CLDR date patterns; 62 of the rest need Temporal |
+| NumberFormat | 191 / 249 | per-locale currency placement and compact patterns |
+| DateTimeFormat | 153 / 244 | CLDR date patterns; 62 of the rest need Temporal |
 | Locale | 149 / 168 | per-locale calendar and collation availability |
 | DurationFormat | 83 / 110 | `fractionalDigits`, ISO duration strings as an argument |
 | ListFormat | 75 / 81 | per-locale list patterns |
