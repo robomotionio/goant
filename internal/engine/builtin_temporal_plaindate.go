@@ -225,8 +225,8 @@ func (rt *Runtime) initTemporalPlainDate(ns *object) {
 				return mkundef(), e
 			}
 			internal := d.toInternal24()
-			days, _ := balanceTime(internal.time)
-			dd := adjustDays(internal.date, days.Int64())
+			days := dateDaysOf(internal.time)
+			dd := adjustDays(internal.date, days)
 			out, err := calendarDateAdd(cal, iso, dd, overflow)
 			if err != nil {
 				return mkundef(), rt.throwFor(err)

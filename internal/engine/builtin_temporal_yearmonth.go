@@ -239,23 +239,23 @@ func (rt *Runtime) initTemporalPlainYearMonth(ns *object) {
 			// Going backwards, the duration is measured from the end of the
 			// month rather than its start: a month minus a day is the day
 			// before the month ended, not the day before it began.
-			f := fieldsOfDate(cal, iso)
-			f.has &^= fDay
-			f.day, f.has = 1, f.has|fDay
-			start, err := calendarDateFromFields(cal, f, "constrain")
-			if err != nil {
-				return mkundef(), rt.throwFor(err)
-			}
+			//
+			// Both ends are counted in days rather than built as dates,
+			// because the day this walks through need not be representable
+			// even when the answer is: the last month there is runs out on the
+			// thirteenth, and its end and the first of the month after it are
+			// both past the end of time. Only the year-month that comes out is
+			// checked.
+			c := calendarFor(cal)
+			cd := c.dateFromDay(iso.epochDays())
+			day := c.dayFromDate(cd.year, cd.month, 1)
 			if d.sign() < 0 {
-				next, err := calendarDateAdd(cal, start, dateDuration{months: 1}, "constrain")
-				if err != nil {
-					return mkundef(), rt.throwFor(err)
-				}
-				start = epochDaysToISODate(next.epochDays() - 1)
+				day += c.daysInMonth(cd.year, cd.month) - 1
 			}
+			start := epochDaysToISODate(day)
 			internal := d.toInternal24()
-			days, _ := balanceTime(internal.time)
-			dd := adjustDays(internal.date, days.Int64())
+			days := dateDaysOf(internal.time)
+			dd := adjustDays(internal.date, days)
 			// The day was put there by this algorithm rather than by the
 			// caller, so it is constrained whatever the caller asked for. A
 			// month the target year has not got is still a rejection.

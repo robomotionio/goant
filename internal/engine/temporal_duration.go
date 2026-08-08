@@ -318,3 +318,16 @@ func bigToFloat(i *big.Int) float64 {
 	f, _ := new(big.Float).SetInt(i).Float64()
 	return f
 }
+
+// dateDaysOf is ToDateDurationRecordWithoutTime's day count: the whole days a
+// duration holds, counted TOWARDS ZERO. A date has no time for the remainder to
+// live in, so a duration of minus one nanosecond short of a day is no days at
+// all -- flooring it would make it minus one, and a date at the edge of the
+// representable range would fall off it.
+func dateDaysOf(t *big.Int) int64 {
+	q := new(big.Int).Quo(t, bigNsPerDay)
+	if !q.IsInt64() {
+		return 0
+	}
+	return q.Int64()
+}
