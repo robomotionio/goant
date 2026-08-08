@@ -167,6 +167,21 @@ func isoDateTimeWithinLimits(dt isoDateTimeRec) bool {
 	return ns.Cmp(lo) > 0 && ns.Cmp(hi) < 0
 }
 
+// isoYearMonthWithinLimits is the same question asked of a whole month: a
+// year-month is representable when any day of it is, so the two end months are
+// in range even though their reference day -- always the first -- is not.
+func isoYearMonthWithinLimits(d isoDateRec) bool {
+	switch {
+	case d.year < -271821 || d.year > 275760:
+		return false
+	case d.year == -271821 && d.month < 4:
+		return false
+	case d.year == 275760 && d.month > 9:
+		return false
+	}
+	return true
+}
+
 func epochNsWithinLimits(ns *big.Int) bool {
 	return ns.Cmp(nsMinInstant) >= 0 && ns.Cmp(nsMaxInstant) <= 0
 }

@@ -169,9 +169,9 @@ func (rt *Runtime) createTemporalDateTime(dt isoDateTimeRec, calendar string) (V
 }
 
 func (rt *Runtime) createTemporalYearMonth(d isoDateRec, calendar string) (Value, *ThrowError) {
-	// A year-month is in range when some day of it is, so the check is made at
-	// the end of the month one way and the start the other.
-	if !isoDateWithinLimits(d) {
+	// A year-month is in range when some day of it is, which is a wider window
+	// than its reference day -- the first -- would allow on its own.
+	if !isoYearMonthWithinLimits(d) {
 		return mkundef(), rt.rangeError("year-month is outside the representable range")
 	}
 	v, o, e := rt.newTemporalObject(kindPlainYearMonth)

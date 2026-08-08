@@ -294,30 +294,32 @@ func (rt *Runtime) initIntl() {
 		// instant answers the timestamp to format and the options to format it
 		// with: a Temporal value formatted by a formatter that was told nothing
 		// gets its own kind's fields rather than a date's.
-		instant := func(rt *Runtime, d dateTimeOptions, args []Value) (float64, dateTimeOptions, *ThrowError) {
+		instant := func(rt *Runtime, d dateTimeOptions, args []Value) (float64, dateTimeOptions, *time.Location, *ThrowError) {
 			// With no argument the spec formats the current time.
 			ms := float64(time.Now().UnixMilli())
 			if a := arg(args, 0); !a.IsUndefined() {
 				// A Temporal value says what it is; everything else is a
 				// timestamp, or is coerced to one.
-				if kind := rt.temporalKindOf(a); kind != kindNone {
-					got, e := rt.temporalFormatEpochMs(a, d)
+				if rt.temporalKindOf(a) != kindNone {
+					got, eff, plain, e := rt.temporalFormatValue(a, d)
 					if e != nil {
-						return 0, d, e
+						return 0, d, nil, e
 					}
-					eff, _ := temporalEffective(d, kind)
-					return got, eff, nil
+					if plain {
+						return got, eff, time.UTC, nil
+					}
+					return got, eff, zoneFor(d.timeZone), nil
 				}
 				n, e := rt.toNumber(a)
 				if e != nil {
-					return 0, d, e
+					return 0, d, nil, e
 				}
 				ms = timeClip(n)
 			}
 			if math.IsNaN(ms) {
-				return 0, d, rt.rangeError("Invalid time value")
+				return 0, d, nil, rt.rangeError("Invalid time value")
 			}
-			return ms, d, nil
+			return ms, d, zoneFor(d.timeZone), nil
 		}
 		getter := rt.newNativeFunc("get format", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			d, e := rt.requireDateTimeFormat(this)
@@ -325,11 +327,10 @@ func (rt *Runtime) initIntl() {
 				return mkundef(), e
 			}
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-				ms, d, e := instant(rt, d, args)
+				ms, d, loc, e := instant(rt, d, args)
 				if e != nil {
 					return mkundef(), e
 				}
-				loc := zoneFor(d.timeZone)
 				var b strings.Builder
 				for _, p := range d.dateTimeParts(msInZone(ms, loc)) {
 					b.WriteString(p.val)
@@ -343,11 +344,11 @@ func (rt *Runtime) initIntl() {
 			if e != nil {
 				return mkundef(), e
 			}
-			ms, d, e := instant(rt, d, args)
+			ms, d, loc, e := instant(rt, d, args)
 			if e != nil {
 				return mkundef(), e
 			}
-			return rt.partsArray(d.dateTimeParts(msInZone(ms, zoneFor(d.timeZone)))), nil
+			return rt.partsArray(d.dateTimeParts(msInZone(ms, loc))), nil
 		})
 		dateRange := func(rt *Runtime, this Value, args []Value) ([]sourcedPart, *ThrowError) {
 			d, e := rt.requireDateTimeFormat(this)
@@ -357,41 +358,51 @@ func (rt *Runtime) initIntl() {
 			if arg(args, 0).IsUndefined() || arg(args, 1).IsUndefined() {
 				return nil, rt.typeError("formatRange requires two time values")
 			}
-			// The two ends must be the same kind of thing: a range from a
-			// date to a time is not a range.
+			// ToDateTimeFormattable runs on both ends before either is looked
+			// at: a Temporal value passes through, anything else is coerced,
+			// and only then must the two ends turn out to be the same kind of
+			// thing -- a range from a date to a time is not a range.
 			ka, kb := rt.temporalKindOf(arg(args, 0)), rt.temporalKindOf(arg(args, 1))
-			if ka != kb {
-				return nil, rt.typeError("the two ends of a range must be the same kind of value")
-			}
 			var a, b float64
-			if ka != kindNone {
-				got, e := rt.temporalFormatEpochMs(arg(args, 0), d)
-				if e != nil {
-					return nil, e
-				}
-				a = got
-				got, e = rt.temporalFormatEpochMs(arg(args, 1), d)
-				if e != nil {
-					return nil, e
-				}
-				b = got
-			} else {
+			if ka == kindNone {
 				got, e := rt.toNumber(arg(args, 0))
 				if e != nil {
 					return nil, e
 				}
 				a = got
-				got, e = rt.toNumber(arg(args, 1))
+			}
+			if kb == kindNone {
+				got, e := rt.toNumber(arg(args, 1))
 				if e != nil {
 					return nil, e
 				}
 				b = got
+			}
+			if ka != kb {
+				return nil, rt.typeError("the two ends of a range must be the same kind of value")
+			}
+			loc := zoneFor(d.timeZone)
+			if ka != kindNone {
+				got, eff, plain, e := rt.temporalFormatValue(arg(args, 0), d)
+				if e != nil {
+					return nil, e
+				}
+				a = got
+				got, _, _, e = rt.temporalFormatValue(arg(args, 1), d)
+				if e != nil {
+					return nil, e
+				}
+				b = got
+				d = eff
+				if plain {
+					loc = time.UTC
+				}
+			} else {
 				a, b = timeClip(a), timeClip(b)
 			}
 			if math.IsNaN(a) || math.IsNaN(b) {
 				return nil, rt.rangeError("Invalid time value")
 			}
-			loc := zoneFor(d.timeZone)
 			return d.rangeParts(d.dateTimeParts(msInZone(a, loc)), d.dateTimeParts(msInZone(b, loc))), nil
 		}
 		rt.defMethod(po, "formatRange", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

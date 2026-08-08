@@ -5,13 +5,21 @@ package engine
 // it for you.
 //
 // A Temporal value is not a timestamp, so the formatter has to be told what to
-// make of it. A PlainDate has no time, so it is read at noon -- the hour least
-// likely to fall on the wrong side of a zone's midnight. A PlainTime has no
-// date, so it is read on the first of January 1970. And a formatter asked for
-// a field the value does not have is a mistake, not something to fill in: a
-// PlainYearMonth formatted with a timeStyle would have to invent an hour.
+// make of it. A PlainDate has no time, so it is read at noon. A PlainTime has
+// no date, so it is read on the first of January 1970. And a formatter asked
+// for a field the value does not have is a mistake, not something to fill in:
+// a PlainYearMonth formatted with a timeStyle would have to invent an hour.
+//
+// A plain value is read and shown in UTC, never in the formatter's zone. It
+// says a wall reading and nothing else, so moving it into a zone would only
+// choose a different reading to show -- and in a zone's spring-forward gap
+// there is no reading to choose. That is also why no plain value can carry a
+// time-zone name: it does not have one.
 
-import "math/big"
+import (
+	"math/big"
+	"time"
+)
 
 // temporalFieldSet is the required/defaults pair each type asks
 // CreateDateTimeFormat for, and the components it can answer for.
@@ -104,8 +112,32 @@ func temporalEffective(d dateTimeOptions, kind temporalKind) (dateTimeOptions, b
 	return out, len(out.comps) > 0
 }
 
-// temporalFormatEpochMs is HandleDateTimeValue: the instant a Temporal value
-// formats as, in the formatter's own time zone.
+// temporalFormatValue is HandleDateTimeValue: the instant a Temporal value
+// formats as, the options narrowed to the fields it actually has, and whether
+// it is plain -- which is to say read and shown in UTC rather than in the
+// formatter's zone.
+func (rt *Runtime) temporalFormatValue(v Value, d dateTimeOptions) (float64, dateTimeOptions, bool, *ThrowError) {
+	ms, e := rt.temporalFormatEpochMs(v, d)
+	if e != nil {
+		return 0, d, false, e
+	}
+	kind := rt.temporalKindOf(v)
+	eff, _ := temporalEffective(d, kind)
+	return ms, eff, temporalIsPlain(kind), nil
+}
+
+// temporalIsPlain reports whether this kind of value carries no zone, and so
+// is read as the wall reading it states.
+func temporalIsPlain(kind temporalKind) bool {
+	switch kind {
+	case kindPlainDate, kindPlainTime, kindPlainDateTime,
+		kindPlainYearMonth, kindPlainMonthDay:
+		return true
+	}
+	return false
+}
+
+// temporalFormatEpochMs is the epoch half of HandleDateTimeValue.
 func (rt *Runtime) temporalFormatEpochMs(v Value, d dateTimeOptions) (float64, *ThrowError) {
 	kind := rt.temporalKindOf(v)
 	o := rt.objPtr(v)
@@ -150,15 +182,7 @@ func (rt *Runtime) temporalFormatEpochMs(v Value, d dateTimeOptions) (float64, *
 	default:
 		return 0, rt.typeError("not a Temporal value")
 	}
-	z, ok := temporalZoneFor(d.timeZone)
-	if !ok {
-		return 0, rt.rangeError("unknown time zone: " + d.timeZone)
-	}
-	ns, ok := z.disambiguate(local, "compatible")
-	if !ok {
-		return 0, rt.rangeError("this local time does not exist in " + d.timeZone)
-	}
-	f, _ := bigRatFloat(ns, nsPerMilli)
+	f, _ := bigRatFloat(isoDateTimeToEpochNanoseconds(local, 0), nsPerMilli)
 	return f, nil
 }
 
@@ -190,6 +214,10 @@ func (rt *Runtime) temporalLocaleString(v Value, kind temporalKind, locales, opt
 	}
 	o := rt.objPtr(v)
 	var ms float64
+	loc := zoneFor(d.timeZone)
+	if temporalIsPlain(kind) {
+		loc = time.UTC
+	}
 	if kind == kindZonedDateTime {
 		d.timeZone = rt.tTimeZone(o)
 		if cal := rt.tCalendar(o); cal != "iso8601" && cal != d.calendar {
@@ -213,7 +241,7 @@ func (rt *Runtime) temporalLocaleString(v Value, kind temporalKind, locales, opt
 		d = eff
 	}
 	var b []rune
-	for _, p := range d.dateTimeParts(msInZone(ms, zoneFor(d.timeZone))) {
+	for _, p := range d.dateTimeParts(msInZone(ms, loc)) {
 		b = append(b, []rune(p.val)...)
 	}
 	return rt.newString(string(b)), nil
