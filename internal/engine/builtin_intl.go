@@ -146,6 +146,42 @@ func (rt *Runtime) initIntl() {
 			}
 			return rt.formatNumberParts(opts, rt.intlLocaleOf(this), v), nil
 		})
+		numberRange := func(rt *Runtime, this Value, args []Value) ([]sourcedPart, *ThrowError) {
+			opts, e := rt.requireNumberFormat(this)
+			if e != nil {
+				return nil, e
+			}
+			if arg(args, 0).IsUndefined() || arg(args, 1).IsUndefined() {
+				return nil, rt.typeError("formatRange requires two numbers")
+			}
+			lo, e := rt.toNumber(arg(args, 0))
+			if e != nil {
+				return nil, e
+			}
+			hi, e := rt.toNumber(arg(args, 1))
+			if e != nil {
+				return nil, e
+			}
+			if math.IsNaN(lo) || math.IsNaN(hi) {
+				return nil, rt.rangeError("Range bounds must not be NaN")
+			}
+			li := rt.intlLocaleOf(this)
+			return rangeParts(numberParts(opts, li, lo), numberParts(opts, li, hi)), nil
+		}
+		rt.defMethod(po, "formatRange", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			parts, e := numberRange(rt, this, args)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.newString(sourcedString(parts)), nil
+		})
+		rt.defMethod(po, "formatRangeToParts", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			parts, e := numberRange(rt, this, args)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.sourcedPartsArray(parts), nil
+		})
 		// The key order is the specification's and a test reads it back with
 		// Reflect.ownKeys.
 		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -247,6 +283,43 @@ func (rt *Runtime) initIntl() {
 				return mkundef(), e
 			}
 			return rt.partsArray(d.dateTimeParts(msInZone(ms, zoneFor(d.timeZone)))), nil
+		})
+		dateRange := func(rt *Runtime, this Value, args []Value) ([]sourcedPart, *ThrowError) {
+			d, e := rt.requireDateTimeFormat(this)
+			if e != nil {
+				return nil, e
+			}
+			if arg(args, 0).IsUndefined() || arg(args, 1).IsUndefined() {
+				return nil, rt.typeError("formatRange requires two time values")
+			}
+			a, e := rt.toNumber(arg(args, 0))
+			if e != nil {
+				return nil, e
+			}
+			b, e := rt.toNumber(arg(args, 1))
+			if e != nil {
+				return nil, e
+			}
+			a, b = timeClip(a), timeClip(b)
+			if math.IsNaN(a) || math.IsNaN(b) {
+				return nil, rt.rangeError("Invalid time value")
+			}
+			loc := zoneFor(d.timeZone)
+			return rangeParts(d.dateTimeParts(msInZone(a, loc)), d.dateTimeParts(msInZone(b, loc))), nil
+		}
+		rt.defMethod(po, "formatRange", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			parts, e := dateRange(rt, this, args)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.newString(sourcedString(parts)), nil
+		})
+		rt.defMethod(po, "formatRangeToParts", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			parts, e := dateRange(rt, this, args)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.sourcedPartsArray(parts), nil
 		})
 		// The key order is the specification's and a test reads it back.
 		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

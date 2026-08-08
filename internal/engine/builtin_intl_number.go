@@ -478,3 +478,62 @@ func intContains(xs []int, x int) bool {
 	}
 	return false
 }
+
+// rangeParts is CreatePartsFromRange: the two ends formatted, marked with
+// which end each span came from. When both ends format identically the range
+// is the single value with every span "shared", which is what makes
+// formatRange(1, 1) read as "1" rather than "1 – 1".
+func rangeParts(start, end []numberPart) []sourcedPart {
+	same := len(start) == len(end)
+	if same {
+		for i := range start {
+			if start[i] != end[i] {
+				same = false
+				break
+			}
+		}
+	}
+	var out []sourcedPart
+	if same {
+		for _, p := range start {
+			out = append(out, sourcedPart{p, "shared"})
+		}
+		return out
+	}
+	for _, p := range start {
+		out = append(out, sourcedPart{p, "startRange"})
+	}
+	out = append(out, sourcedPart{numberPart{"literal", "\u2009\u2013\u2009"}, "shared"})
+	for _, p := range end {
+		out = append(out, sourcedPart{p, "endRange"})
+	}
+	return out
+}
+
+// sourcedPart is a span that also says which end of a range it came from.
+type sourcedPart struct {
+	numberPart
+	source string
+}
+
+func (rt *Runtime) sourcedPartsArray(parts []sourcedPart) Value {
+	arr := rt.newArray()
+	ao := rt.objPtr(arr)
+	for i, p := range parts {
+		o := rt.newPlainObject()
+		oo := rt.objPtr(o)
+		oo.defineOwn("type", rt.newString(p.typ), attrDefault)
+		oo.defineOwn("value", rt.newString(p.val), attrDefault)
+		oo.defineOwn("source", rt.newString(p.source), attrDefault)
+		rt.arraySet(ao, uint32(i), o)
+	}
+	return arr
+}
+
+func sourcedString(parts []sourcedPart) string {
+	var b strings.Builder
+	for _, p := range parts {
+		b.WriteString(p.val)
+	}
+	return b.String()
+}
