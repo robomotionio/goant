@@ -264,7 +264,7 @@ func (rt *Runtime) formatInstantString(ns *big.Int, tz string, precision int) st
 		z, _ := temporalZoneFor(tz)
 		off := z.offsetNs(ns)
 		dt = getISODateTimeFor(off, ns)
-		offset = formatOffsetNanoseconds(off)
+		offset = formatOffsetNanosecondsRounded(off)
 	}
 	return formatISODateTime(dt, precision) + offset
 }

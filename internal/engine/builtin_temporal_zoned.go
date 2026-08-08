@@ -519,7 +519,7 @@ func (rt *Runtime) formatZonedDateTime(ns *big.Int, tz, cal string, precision in
 	off := z.offsetNs(ns)
 	s := formatISODateTime(getISODateTimeFor(off, ns), precision)
 	if showOffset != "never" {
-		s += formatOffsetNanoseconds(off)
+		s += formatOffsetNanosecondsRounded(off)
 	}
 	switch showZone {
 	case "never":
@@ -545,33 +545,66 @@ func timeZoneEquals(a, b string) bool {
 // transition is the next or previous instant at which this zone's offset
 // changed. Go keeps the bounds of the period an instant falls in, which is
 // exactly the pair of transitions either side of it.
+// A zone changes what it calls itself more often than it changes its offset:
+// Europe/London stopped calling its clocks "summer time" in 1968 without moving
+// them, and Europe/Paris renamed its local mean time in 1891. Go reports both as
+// bounds, so a bound that leaves the offset alone is stepped over rather than
+// returned. The count is a backstop; no zone has anything like that many names
+// for one offset.
+const zoneBoundScanLimit = 100
+
 func (z temporalZone) transition(epochNs *big.Int, next bool) (*big.Int, bool) {
 	if z.fixed {
 		return nil, false
 	}
-	sec := new(big.Int).Div(epochNs, bigInt(nsPerSecond))
-	rem := new(big.Int).Mod(epochNs, bigInt(nsPerSecond))
-	t := time.Unix(sec.Int64(), rem.Int64()).In(z.loc)
-	start, end := t.ZoneBounds()
-	if next {
-		if end.IsZero() {
+	// changesOffsetAt reports whether the zone reads differently on the two
+	// sides of an instant, which is what makes a bound a transition.
+	changesOffsetAt := func(at *big.Int) bool {
+		return z.offsetNs(at) != z.offsetNs(new(big.Int).Sub(at, bigInt(1)))
+	}
+	at := new(big.Int).Set(epochNs)
+	for i := 0; i < zoneBoundScanLimit; i++ {
+		if !at.IsInt64() && at.Cmp(nsMinInstant) < 0 || at.Cmp(nsMaxInstant) > 0 {
 			return nil, false
 		}
-		return new(big.Int).Mul(bigInt(end.Unix()), bigInt(nsPerSecond)), true
+		sec := new(big.Int).Div(at, bigInt(nsPerSecond))
+		rem := new(big.Int).Mod(at, bigInt(nsPerSecond))
+		if !sec.IsInt64() {
+			return nil, false
+		}
+		start, end := time.Unix(sec.Int64(), rem.Int64()).In(z.loc).ZoneBounds()
+		bound := start
+		if next {
+			bound = end
+		}
+		if bound.IsZero() {
+			return nil, false
+		}
+		ns := new(big.Int).Mul(bigInt(bound.Unix()), bigInt(nsPerSecond))
+		ns.Add(ns, bigInt(int64(bound.Nanosecond())))
+		if next {
+			if ns.Cmp(nsMaxInstant) > 0 {
+				return nil, false
+			}
+			if changesOffsetAt(ns) {
+				return ns, true
+			}
+			at = ns
+			continue
+		}
+		if ns.Cmp(at) >= 0 {
+			// The instant sits exactly on a bound, so the one being asked for
+			// is whatever comes before this period begins.
+			at = new(big.Int).Sub(ns, bigInt(1))
+			continue
+		}
+		if ns.Cmp(nsMinInstant) < 0 {
+			return nil, false
+		}
+		if changesOffsetAt(ns) {
+			return ns, true
+		}
+		at = new(big.Int).Sub(ns, bigInt(1))
 	}
-	if start.IsZero() {
-		return nil, false
-	}
-	startNs := new(big.Int).Mul(bigInt(start.Unix()), bigInt(nsPerSecond))
-	if startNs.Cmp(epochNs) < 0 {
-		return startNs, true
-	}
-	// The instant is exactly on a transition, so the one before it is the
-	// start of the period that ends here.
-	prev := time.Unix(start.Unix()-1, 0).In(z.loc)
-	before, _ := prev.ZoneBounds()
-	if before.IsZero() {
-		return nil, false
-	}
-	return new(big.Int).Mul(bigInt(before.Unix()), bigInt(nsPerSecond)), true
+	return nil, false
 }

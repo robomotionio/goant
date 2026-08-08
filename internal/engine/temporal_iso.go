@@ -383,6 +383,16 @@ func formatOffsetNanoseconds(offsetNs int64) string {
 	return out
 }
 
+// formatOffsetNanosecondsRounded writes the offset a serialised date-time
+// carries, which is the offset to the nearest minute. The reading itself is
+// still made at the exact offset, so Africa/Monrovia at the epoch is
+// "1969-12-31T23:15:30-00:45": a quarter past eleven by a clock forty-four and
+// a half minutes behind, written as three quarters of an hour behind.
+func formatOffsetNanosecondsRounded(offsetNs int64) string {
+	r := roundNumberToIncrement(bigInt(offsetNs), bigInt(nsPerMinute), "halfExpand")
+	return formatOffsetNanoseconds(r.Int64())
+}
+
 // ---- numbers that must be integers ----
 
 // isIntegralNumber is the test the Temporal constructors apply to every
