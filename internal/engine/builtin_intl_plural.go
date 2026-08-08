@@ -139,7 +139,7 @@ func pluralOperands(n float64, p pluralOptions) (i, v, w, f, tOp int) {
 	}
 	intPart, frac := expandDecimal(numberToString(n))
 	if p.maxSig > 0 {
-		intPart, frac = roundToSignificant(intPart, frac, p.maxSig, p.minSig)
+		intPart, frac = roundToSignificant(intPart, frac, p.maxSig, p.minSig, "halfExpand", false)
 	} else {
 		intPart, frac = roundFraction(intPart, frac, p.maxFrac)
 		for len(frac) < p.minFrac {
@@ -169,14 +169,15 @@ func pluralOperands(n float64, p pluralOptions) (i, v, w, f, tOp int) {
 // roundToSignificant rounds to at most maxSig significant digits and pads the
 // fraction out to minSig of them, which is what the significant-digit options
 // mean once the number is written down.
-func roundToSignificant(intPart, frac string, maxSig, minSig int) (string, string) {
+func roundToSignificant(intPart, frac string, maxSig, minSig int, mode string, neg bool) (string, string) {
 	digits := strings.TrimLeft(intPart, "0")
 	lead := len(digits)
 	if lead == 0 {
 		// 0.00123: the significant digits start after the leading zeros.
 		z := len(frac) - len(strings.TrimLeft(frac, "0"))
 		if z < len(frac) {
-			intPart, frac = roundFraction(intPart, frac, z+maxSig)
+			intPart, frac = roundDecimal(intPart, frac, z+maxSig, mode, 1, neg)
+			frac = strings.TrimRight(frac, "0")
 		}
 	} else if lead > maxSig {
 		// More integer digits than significant digits asked for, so the
@@ -184,6 +185,15 @@ func roundToSignificant(intPart, frac string, maxSig, minSig int) (string, strin
 		// significant digits is 123000, not 123456. roundFraction cannot
 		// express that, so the digits are rounded in place and the tail
 		// replaced with zeros.
+		// Rounding above the point still obeys the mode: the digits after the
+		// cut are the remainder, and roundDecimal is the one that knows what
+		// each mode does with one.
+		cut := digits[:maxSig] + "." + digits[maxSig:]
+		ci, _ := expandDecimal(cut)
+		ri, _ := roundDecimal(ci, digits[maxSig:], 0, mode, 1, neg)
+		if len(ri) > 0 {
+			return ri + strings.Repeat("0", lead-maxSig), ""
+		}
 		kept := []byte(digits[:maxSig])
 		if digits[maxSig] >= '5' {
 			i := len(kept) - 1
@@ -203,7 +213,8 @@ func roundToSignificant(intPart, frac string, maxSig, minSig int) (string, strin
 		}
 		return string(kept) + strings.Repeat("0", lead-maxSig), ""
 	} else {
-		intPart, frac = roundFraction(intPart, frac, maxSig-lead)
+		intPart, frac = roundDecimal(intPart, frac, maxSig-lead, mode, 1, neg)
+		frac = strings.TrimRight(frac, "0")
 	}
 	sig := lead + len(strings.TrimRight(frac, "0"))
 	if lead == 0 {

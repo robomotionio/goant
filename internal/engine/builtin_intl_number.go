@@ -402,7 +402,7 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 		if n.compactAuto {
 			// Both roundings, and the one that keeps more significant digits
 			// wins. "More precision" is exactly that comparison.
-			si, sf := roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig)
+			si, sf := roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig, n.roundingMode, neg)
 			fi, ff := roundDecimal(intPart, frac, n.digits.maxFrac, n.roundingMode, 1, neg)
 			ff = strings.TrimRight(ff, "0")
 			// "More precision" is the one that moved the number less.
@@ -412,7 +412,7 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 				intPart, frac = si, sf
 			}
 		} else if n.digits.maxSig > 0 {
-			intPart, frac = roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig)
+			intPart, frac = roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig, n.roundingMode, neg)
 		} else {
 			intPart, frac = roundDecimal(intPart, frac, n.digits.maxFrac,
 				n.roundingMode, n.roundingIncr, neg)
