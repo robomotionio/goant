@@ -26,10 +26,10 @@ type temporalFieldSet struct {
 var temporalFieldSets = [kindCount]temporalFieldSet{
 	kindInstant: {"any", "all", dtComponents, true, true},
 	kindPlainDate: {"date", "date",
-		[]string{"weekday", "era", "year", "month", "day", "timeZoneName"}, true, false},
+		[]string{"weekday", "era", "year", "month", "day"}, true, false},
 	kindPlainTime: {"time", "time",
-		[]string{"dayPeriod", "hour", "minute", "second", "fractionalSecondDigits",
-			"timeZoneName"}, false, true},
+		[]string{"dayPeriod", "hour", "minute", "second", "fractionalSecondDigits"},
+		false, true},
 	kindPlainDateTime: {"any", "all",
 		[]string{"weekday", "era", "year", "month", "day", "dayPeriod",
 			"hour", "minute", "second", "fractionalSecondDigits"}, true, true},
@@ -75,25 +75,28 @@ func withTemporalDefaults(d dateTimeOptions, kind temporalKind) dateTimeOptions 
 	return out
 }
 
-// temporalFormatAllows reports whether a formatter's fields are ones this kind
-// of value can supply.
-func temporalFormatAllows(d dateTimeOptions, kind temporalKind) bool {
+// temporalEffective is the formatter as it applies to one kind of Temporal
+// value: its styles written out, its defaults replaced with this kind's, and
+// every field this kind has not got dropped. It reports false when nothing is
+// left, which is the case a TypeError is for -- a formatter asked only for an
+// hour cannot show a year-month at all.
+func temporalEffective(d dateTimeOptions, kind temporalKind) (dateTimeOptions, bool) {
+	d = withTemporalDefaults(d, kind)
+	if d.dateStyle != "" || d.timeStyle != "" {
+		d = d.styleComponents()
+	}
 	set := temporalFieldSets[kind]
-	if d.dateStyle != "" && !set.styles {
-		return false
-	}
-	if d.timeStyle != "" && !set.timeOK {
-		return false
-	}
-	for c := range d.comps {
-		if !tagContains(set.allowed, c) {
-			return false
+	out := d
+	out.comps = map[string]string{}
+	for c, v := range d.comps {
+		if tagContains(set.allowed, c) {
+			out.comps[c] = v
 		}
 	}
-	if d.fracDigits != 0 && !tagContains(set.allowed, "fractionalSecondDigits") {
-		return false
+	if !tagContains(set.allowed, "fractionalSecondDigits") {
+		out.fracDigits = 0
 	}
-	return true
+	return out, len(out.comps) > 0
 }
 
 // temporalFormatEpochMs is HandleDateTimeValue: the instant a Temporal value
@@ -115,11 +118,8 @@ func (rt *Runtime) temporalFormatEpochMs(v Value, d dateTimeOptions) (float64, *
 				" calendar and the formatter is in the " + d.calendar + " one")
 		}
 	}
-	// A formatter that was told nothing insists on nothing, so its fields are
-	// replaced before they are checked.
-	d = withTemporalDefaults(d, kind)
-	if !temporalFormatAllows(d, kind) {
-		return 0, rt.typeError("this formatter asks for fields a Temporal." +
+	if _, ok := temporalEffective(d, kind); !ok {
+		return 0, rt.typeError("this formatter asks only for fields a Temporal." +
 			temporalKindNames[kind] + " does not have")
 	}
 	if kind == kindInstant {
@@ -184,9 +184,11 @@ func (rt *Runtime) temporalLocaleString(v Value, kind temporalKind, locales, opt
 			return mkundef(), rt.rangeError("this value is in the " + cal +
 				" calendar and the formatter is in the " + d.calendar + " one")
 		}
-		if !temporalFormatAllows(d, kind) {
-			return mkundef(), rt.typeError("this formatter asks for fields this value does not have")
+		eff, ok := temporalEffective(d, kind)
+		if !ok {
+			return mkundef(), rt.typeError("this formatter asks only for fields this value does not have")
 		}
+		d = eff
 		f, _ := bigRatFloat(tEpochNs(o), nsPerMilli)
 		ms = f
 	} else {
@@ -195,6 +197,8 @@ func (rt *Runtime) temporalLocaleString(v Value, kind temporalKind, locales, opt
 			return mkundef(), e
 		}
 		ms = got
+		eff, _ := temporalEffective(d, kind)
+		d = eff
 	}
 	var b []rune
 	for _, p := range d.dateTimeParts(msInZone(ms, zoneFor(d.timeZone))) {

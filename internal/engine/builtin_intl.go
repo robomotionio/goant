@@ -305,7 +305,8 @@ func (rt *Runtime) initIntl() {
 					if e != nil {
 						return 0, d, e
 					}
-					return got, withTemporalDefaults(d, kind), nil
+					eff, _ := temporalEffective(d, kind)
+					return got, eff, nil
 				}
 				n, e := rt.toNumber(a)
 				if e != nil {

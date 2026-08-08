@@ -686,8 +686,16 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 // styleParts renders dateStyle/timeStyle, which name whole patterns rather than
 // components. They are expressed as component sets so there is one renderer.
 func (d dateTimeOptions) styleParts(t time.Time) []numberPart {
+	return d.styleComponents().dateTimeParts(t)
+}
+
+// styleComponents is the same formatter with its styles written out as the
+// components they stand for, which is what lets a Temporal value take the part
+// of a style that applies to it.
+func (d dateTimeOptions) styleComponents() dateTimeOptions {
 	sub := dateTimeOptions{tag: d.tag, timeZone: d.timeZone, calendar: d.calendar,
-		hourCycle: d.hourCycle, hour12Set: d.hour12Set, comps: map[string]string{}}
+		hourCycle: d.hourCycle, hour12Set: d.hour12Set, numbering: d.numbering,
+		fracDigits: d.fracDigits, comps: map[string]string{}}
 	switch d.dateStyle {
 	case "full":
 		sub.comps["weekday"], sub.comps["month"] = "long", "long"
@@ -711,7 +719,7 @@ func (d dateTimeOptions) styleParts(t time.Time) []numberPart {
 	case "short":
 		sub.comps["hour"], sub.comps["minute"] = "numeric", "2-digit"
 	}
-	return sub.dateTimeParts(t)
+	return sub
 }
 
 // patternParts renders the locale's own date and time patterns, and reports
