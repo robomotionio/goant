@@ -17,19 +17,22 @@ Temporal's 2,029, so Track B below is no longer a decision — it is scheduled.
 | A5b — DisplayNames, Segmenter | 806 | unchanged |
 | A5c — DurationFormat | 859 | unchanged |
 | A1b — the Locale-info methods | 895 | unchanged |
+| A4a — DateTimeFormat options | 940 | unchanged |
+| formatRange on both formatters | 976 | unchanged |
+| locale-sensitive casing, BigInt | 985 | unchanged |
 
-**Where the remaining 2,462 are.** 2,029 of them are Temporal and 433 are
+**Where the remaining 2,372 are.** 2,029 of them are Temporal and 343 are
 classic Intl:
 
 | block | failing | needs |
 |---|---:|---|
 | **Temporal** | 2,029 | the proposal, and `built-ins/Temporal` under it |
-| DateTimeFormat | 172 | CLDR date patterns and field names — A4 |
-| NumberFormat | 117 | currency symbols, compact/scientific, `formatRange` |
+| NumberFormat | 105 | currency symbols and placement, compact/scientific |
 | DurationFormat | 57 | per-locale unit patterns, `fractionalDigits` |
-| `Locale.prototype.get*` | 19 | per-locale calendar and collation availability |
+| DateTimeFormat | 104 | CLDR date patterns and field names — A4 |
 | ListFormat, RelativeTimeFormat, Segmenter, DisplayNames | 34 | per-locale wording |
-| the rest | 37 | `supportedValuesOf`, per-locale collation availability |
+| `Locale.prototype.get*` | 19 | per-locale week and calendar data |
+| the rest | 24 | `supportedValuesOf`, per-locale collation availability |
 
 Every one of the classic-Intl blocks except the last two is the same missing
 thing: **CLDR locale data**. `tools/gencldr` already reads the supplemental
