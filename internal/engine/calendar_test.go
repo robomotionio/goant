@@ -70,6 +70,33 @@ func TestCalendarConversions(t *testing.T) {
 	}
 }
 
+// The Hebrew year begins on a day the postponements decide, and its length
+// follows from that. These are the published Rosh Hashanah dates and the
+// deficient/regular/complete years they imply.
+func TestHebrewNewYear(t *testing.T) {
+	cal := calendarFor("hebrew")
+	for _, c := range []struct {
+		year   int
+		iso    [3]int
+		length int
+	}{
+		{5778, [3]int{2017, 9, 21}, 354}, {5779, [3]int{2018, 9, 10}, 385},
+		{5780, [3]int{2019, 9, 30}, 355}, {5781, [3]int{2020, 9, 19}, 353},
+		{5782, [3]int{2021, 9, 7}, 384}, {5783, [3]int{2022, 9, 26}, 355},
+		{5784, [3]int{2023, 9, 16}, 383}, {5785, [3]int{2024, 10, 3}, 355},
+		{5786, [3]int{2025, 9, 23}, 354},
+	} {
+		day := cal.dayFromDate(c.year, 1, 1)
+		if want := isoDay(c.iso[0], c.iso[1], c.iso[2]); day != want {
+			y, m, d := isoDate(day)
+			t.Errorf("hebrew: %d Tishri 1 is %04d-%02d-%02d, want %v", c.year, y, m, d, c.iso)
+		}
+		if n := cal.daysInYear(c.year); n != c.length {
+			t.Errorf("hebrew: year %d is %d days, want %d", c.year, n, c.length)
+		}
+	}
+}
+
 // The lunisolar calendars, on the one date a year everyone knows.
 func TestChineseNewYear(t *testing.T) {
 	for iso, want := range map[[3]int]int{

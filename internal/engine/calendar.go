@@ -923,17 +923,22 @@ func hebrewElapsedDays(y int) int {
 	monthsElapsed := 235*floorDiv(y-1, 19) + 12*floorMod(y-1, 19) +
 		floorDiv(7*floorMod(y-1, 19)+1, 19)
 	partsElapsed := 204 + 793*floorMod(monthsElapsed, 1080)
-	hoursElapsed := 11 + 12*monthsElapsed + 793*floorDiv(monthsElapsed, 1080) +
+	// The molad of Tishri in year 1 was five hours and 204 parts into the day,
+	// which is where the count starts.
+	hoursElapsed := 5 + 12*monthsElapsed + 793*floorDiv(monthsElapsed, 1080) +
 		floorDiv(partsElapsed, 1080)
 	day := 29*monthsElapsed + floorDiv(hoursElapsed, 24)
 	parts := 1080*floorMod(hoursElapsed, 24) + floorMod(partsElapsed, 1080)
+	// The count is of days elapsed rather than of the day itself, so the
+	// weekday is one further on than the count.
+	weekday := func(d int) int { return floorMod(d+1, 7) }
 	switch {
 	case parts >= 19440,
-		floorMod(day, 7) == 2 && parts >= 9924 && !hebrewLeapYear(y),
-		floorMod(day, 7) == 1 && parts >= 16789 && hebrewLeapYear(y-1):
+		weekday(day) == 2 && parts >= 9924 && !hebrewLeapYear(y),
+		weekday(day) == 1 && parts >= 16789 && hebrewLeapYear(y-1):
 		day++
 	}
-	if d := floorMod(day, 7); d == 0 || d == 3 || d == 5 {
+	if d := weekday(day); d == 0 || d == 3 || d == 5 {
 		day++
 	}
 	return day
@@ -943,9 +948,28 @@ func hebrewLeapYear(y int) bool { return floorMod(7*y+1, 19) < 7 }
 
 // hebrewEpoch is the day number of 1 Tishri, year 1 (7 October 3761 BC
 // Julian), anchored on Rosh Hashanah 5785 falling on 2024-10-03.
-var hebrewEpoch = isoDay(-3760, 9, 7) - 1
+var hebrewEpoch = isoDay(-3760, 9, 7)
 
-func (c hebrewCalendar) newYear(y int) int { return hebrewEpoch + hebrewElapsedDays(y) }
+// hebrewYearCorrection is the last pair of postponements: a year that would
+// otherwise come to 356 days is pushed two days on, and one following a year
+// of 382 is pushed one. Without them the deficient, regular and complete years
+// come out in the wrong places, and every month length after Kislev with them.
+func hebrewYearCorrection(y int) int {
+	ny0 := hebrewElapsedDays(y - 1)
+	ny1 := hebrewElapsedDays(y)
+	ny2 := hebrewElapsedDays(y + 1)
+	switch {
+	case ny2-ny1 == 356:
+		return 2
+	case ny1-ny0 == 382:
+		return 1
+	}
+	return 0
+}
+
+func (c hebrewCalendar) newYear(y int) int {
+	return hebrewEpoch + hebrewElapsedDays(y) + hebrewYearCorrection(y)
+}
 
 func (c hebrewCalendar) daysInYear(y int) int { return c.newYear(y+1) - c.newYear(y) }
 
