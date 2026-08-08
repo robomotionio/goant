@@ -289,7 +289,11 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 	// part inside its number -- not as a literal in front of the whole thing.
 	// "-1 hr, 30 min" is one negative duration, not a minus and a duration.
 	signPending := neg
+	subSecondsFolded := false
 	for i, unit := range durationUnits {
+		if subSecondsFolded && tagContains(subSecondUnits, unit) {
+			continue
+		}
 		v := math.Abs(rec[i])
 		style := d.unitStyle[i]
 		if v == 0 && d.display[i] == "auto" {
@@ -311,8 +315,23 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 			n := defaultNumberOptions()
 			n.tag, n.numbering = d.tag, d.numbering
 			n.useGrouping = ""
-			if style == "2-digit" {
+			// Two digits for every field after the first in a run: "1:02:03",
+			// not "1:2:3". The leading field is written as it was asked for.
+			if style == "2-digit" || len(numericRun) > 0 {
 				n.digits.minInt = 2
+			}
+			if unit == "seconds" {
+				// The sub-second units are the seconds' fraction, not more
+				// colon-separated fields. fractionalDigits says how many to
+				// show; without it, as many as are there.
+				signed += sign(signed) * (math.Abs(rec[7])/1e3 + math.Abs(rec[8])/1e6 + math.Abs(rec[9])/1e9)
+				if d.fracDigits >= 0 {
+					n.digits.minFrac, n.digits.maxFrac = d.fracDigits, d.fracDigits
+				} else {
+					n.digits.maxFrac = 9
+				}
+				n.roundingMode = "trunc"
+				subSecondsFolded = true
 			}
 			if len(numericRun) > 0 {
 				numericRun = append(numericRun, relPart{numberPart{"literal", ":"}, ""})
@@ -377,4 +396,12 @@ func joinDurationGroups(l listOptions, groups [][]relPart) []relPart {
 		out = append(out, groups[i]...)
 	}
 	return out
+}
+
+// sign is the multiplier that carries v's sign onto another magnitude.
+func sign(v float64) float64 {
+	if math.Signbit(v) {
+		return -1
+	}
+	return 1
 }
