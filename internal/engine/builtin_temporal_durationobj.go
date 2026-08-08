@@ -447,7 +447,7 @@ func (rt *Runtime) totalDuration(d durationRec, rel relativeToRec, unit int) (*b
 			return nil, e
 		}
 		z, _ := temporalZoneFor(rel.timeZone)
-		return rt.totalRelativeDuration(diff, target, z.dateTimeFor(rel.epochNs),
+		return rt.totalRelativeDuration(diff, rel.epochNs, target, z.dateTimeFor(rel.epochNs),
 			rel.timeZone, rel.calendar, unit)
 	case kindPlainDate:
 		internal := d.toInternal24()
@@ -460,7 +460,7 @@ func (rt *Runtime) totalDuration(d durationRec, rel relativeToRec, unit int) (*b
 		from := isoDateTimeRec{rel.date, midnightTime()}
 		to := isoDateTimeRec{target, t}
 		diff := rt.differenceISODateTime(from, to, rel.calendar, unit)
-		return rt.totalRelativeDuration(diff, isoDateTimeToEpochNanoseconds(to, 0), from,
+		return rt.totalRelativeDuration(diff, nil, isoDateTimeToEpochNanoseconds(to, 0), from,
 			"", rel.calendar, unit)
 	}
 	if isCalendarUnit(defaultLargestUnit(d)) || isCalendarUnit(unit) {
@@ -473,14 +473,14 @@ func (rt *Runtime) totalDuration(d durationRec, rel relativeToRec, unit int) (*b
 // totalRelativeDuration is the exact total of a duration measured against a
 // starting point, which for a calendar unit means asking how far between two
 // neighbouring months the end fell.
-func (rt *Runtime) totalRelativeDuration(d internalDuration, destNs *big.Int,
+func (rt *Runtime) totalRelativeDuration(d internalDuration, originNs, destNs *big.Int,
 	dt isoDateTimeRec, tz, calendar string, unit int) (*big.Rat, *ThrowError) {
 	if isCalendarUnit(unit) || (tz != "" && unit == unitDay) {
 		sign := 1
 		if d.sign() < 0 {
 			sign = -1
 		}
-		nr, e := rt.nudgeToCalendarUnit(sign, d, destNs, dt, tz, calendar, 1, unit, "trunc")
+		nr, e := rt.nudgeToCalendarUnit(sign, d, originNs, destNs, dt, tz, calendar, 1, unit, "trunc")
 		if e != nil {
 			return nil, e
 		}

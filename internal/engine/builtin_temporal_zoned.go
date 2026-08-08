@@ -354,6 +354,17 @@ func (rt *Runtime) initTemporalZonedDateTime(ns *object) {
 				return mkundef(), rt.rangeError("this day is of no length in " + tz)
 			}
 			progress := new(big.Int).Sub(epoch, start)
+			// An instant belongs to the day its clock reads, and it is inside
+			// that day however far the offsets moved. Antarctica/Casey put its
+			// clocks back three hours at two in the morning on 2010-03-05, so
+			// the fourth of March lasted twenty-seven hours by the clock while
+			// the fifth still began twenty-four hours after the fourth did: an
+			// instant late on the fourth is past the start of the fifth. It is
+			// still the fourth, so it rounds down to the fourth and up to the
+			// fifth, which is what keeping it short of a whole day says.
+			if progress.Cmp(length) >= 0 {
+				progress = new(big.Int).Sub(length, bigInt(1))
+			}
 			rounded := roundNumberToIncrement(progress, length, mode)
 			return rt.createTemporalZonedDateTime(new(big.Int).Add(start, rounded), tz, cal)
 		}

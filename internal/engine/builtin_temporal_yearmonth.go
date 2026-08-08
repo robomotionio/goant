@@ -369,7 +369,7 @@ func (rt *Runtime) initTemporalPlainYearMonth(ns *object) {
 				}
 			} else {
 				destNs := isoDateTimeToEpochNanoseconds(isoDateTimeRec{b, midnightTime()}, 0)
-				out, e = rt.roundRelativeDuration(newInternal(dd, nil), destNs,
+				out, e = rt.roundRelativeDuration(newInternal(dd, nil), nil, destNs,
 					isoDateTimeRec{a, midnightTime()}, "", cal, s.largest, s.increment,
 					s.smallest, s.mode)
 				if e != nil {

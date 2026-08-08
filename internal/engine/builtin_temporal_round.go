@@ -187,7 +187,7 @@ type nudgeResult struct {
 // nudgeToCalendarUnit rounds a duration whose smallest unit is a year, a month,
 // a week, or a day in a time zone -- the units whose length has to be looked up
 // rather than known.
-func (rt *Runtime) nudgeToCalendarUnit(sign int, d internalDuration, destNs *big.Int,
+func (rt *Runtime) nudgeToCalendarUnit(sign int, d internalDuration, originNs, destNs *big.Int,
 	dt isoDateTimeRec, tz, calendar string, increment int64, unit int,
 	mode string) (nudgeResult, *ThrowError) {
 	var r1, r2 int64
@@ -221,19 +221,11 @@ func (rt *Runtime) nudgeToCalendarUnit(sign int, d internalDuration, destNs *big
 		startDur = adjustDays(d.date, r1)
 		endDur = adjustDays(d.date, r2)
 	}
-	start, err := calendarDateAdd(calendar, dt.date, startDur, "constrain")
-	if err != nil {
-		return nudgeResult{}, rt.throwFor(err)
-	}
-	end, err := calendarDateAdd(calendar, dt.date, endDur, "constrain")
-	if err != nil {
-		return nudgeResult{}, rt.throwFor(err)
-	}
-	startNs, e := rt.epochNsOf(isoDateTimeRec{start, dt.time}, tz)
+	startNs, e := rt.anchorNs(originNs, dt, startDur, tz, calendar)
 	if e != nil {
 		return nudgeResult{}, e
 	}
-	endNs, e := rt.epochNsOf(isoDateTimeRec{end, dt.time}, tz)
+	endNs, e := rt.anchorNs(originNs, dt, endDur, tz, calendar)
 	if e != nil {
 		return nudgeResult{}, e
 	}
@@ -327,9 +319,27 @@ func (rt *Runtime) nudgeToDayOrTime(d internalDuration, destNs *big.Int, largest
 	return nudgeResult{newInternal(adjustDays(d.date, days), remainder), nudged, didExpand, nil}, nil
 }
 
+// anchorNs is the instant a date duration reaches from a starting instant.
+// Without a zone the reading is its own instant. With one, the addition goes
+// through AddZonedDateTime, whose first move is to hand back the instant it was
+// given when the duration has no date part -- which is what keeps the origin on
+// the side of a fall-back transition it was on. Re-reading the wall clock and
+// resolving it again would silently take the first of the two one o'clocks.
+func (rt *Runtime) anchorNs(originNs *big.Int, dt isoDateTimeRec, dur dateDuration,
+	tz, calendar string) (*big.Int, *ThrowError) {
+	if tz == "" || originNs == nil {
+		added, err := calendarDateAdd(calendar, dt.date, dur, "constrain")
+		if err != nil {
+			return nil, rt.throwFor(err)
+		}
+		return rt.epochNsOf(isoDateTimeRec{added, dt.time}, tz)
+	}
+	return rt.addZonedDateTime(originNs, tz, calendar, newInternal(dur, new(big.Int)), "constrain")
+}
+
 // bubbleRelativeDuration carries an expansion upwards: rounding the days up may
 // have filled a month, which fills a year.
-func (rt *Runtime) bubbleRelativeDuration(sign int, d internalDuration, nudgedNs *big.Int,
+func (rt *Runtime) bubbleRelativeDuration(sign int, d internalDuration, originNs, nudgedNs *big.Int,
 	dt isoDateTimeRec, tz, calendar string, largestUnit, smallestUnit int) (internalDuration, *ThrowError) {
 	if smallestUnit == largestUnit {
 		return d, nil
@@ -350,11 +360,7 @@ func (rt *Runtime) bubbleRelativeDuration(sign int, d internalDuration, nudgedNs
 		default:
 			continue
 		}
-		end, err := calendarDateAdd(calendar, dt.date, endDur, "constrain")
-		if err != nil {
-			return d, rt.throwFor(err)
-		}
-		endNs, e := rt.epochNsOf(isoDateTimeRec{end, dt.time}, tz)
+		endNs, e := rt.anchorNs(originNs, dt, endDur, tz, calendar)
 		if e != nil {
 			return d, e
 		}
@@ -370,7 +376,7 @@ func (rt *Runtime) bubbleRelativeDuration(sign int, d internalDuration, nudgedNs
 
 // roundRelativeDuration is the whole of it: nudge to the smallest unit, then
 // carry any expansion up as far as the largest.
-func (rt *Runtime) roundRelativeDuration(d internalDuration, destNs *big.Int,
+func (rt *Runtime) roundRelativeDuration(d internalDuration, originNs, destNs *big.Int,
 	dt isoDateTimeRec, tz, calendar string, largestUnit int, increment int64,
 	smallestUnit int, mode string) (durationRec, *ThrowError) {
 	irregular := isCalendarUnit(smallestUnit) || (tz != "" && smallestUnit == unitDay)
@@ -382,7 +388,7 @@ func (rt *Runtime) roundRelativeDuration(d internalDuration, destNs *big.Int,
 	var e *ThrowError
 	switch {
 	case irregular:
-		nr, e = rt.nudgeToCalendarUnit(sign, d, destNs, dt, tz, calendar, increment, smallestUnit, mode)
+		nr, e = rt.nudgeToCalendarUnit(sign, d, originNs, destNs, dt, tz, calendar, increment, smallestUnit, mode)
 	case tz != "":
 		nr, e = rt.nudgeToZonedTime(sign, d, dt, tz, calendar, increment, smallestUnit, mode)
 	default:
@@ -394,7 +400,7 @@ func (rt *Runtime) roundRelativeDuration(d internalDuration, destNs *big.Int,
 	d = nr.duration
 	if nr.didExpand && smallestUnit != unitWeek {
 		start := largerUnit(smallestUnit, unitDay)
-		d, e = rt.bubbleRelativeDuration(sign, d, nr.nudgedNs, dt, tz, calendar, largestUnit, start)
+		d, e = rt.bubbleRelativeDuration(sign, d, originNs, nr.nudgedNs, dt, tz, calendar, largestUnit, start)
 		if e != nil {
 			return durationRec{}, e
 		}
@@ -449,7 +455,7 @@ func (rt *Runtime) differencePlainDateTimeWithRounding(a, b isoDateTimeRec,
 		return out, nil
 	}
 	destNs := isoDateTimeToEpochNanoseconds(b, 0)
-	return rt.roundRelativeDuration(diff, destNs, a, "", calendar, s.largest,
+	return rt.roundRelativeDuration(diff, nil, destNs, a, "", calendar, s.largest,
 		s.increment, s.smallest, s.mode)
 }
 
@@ -466,6 +472,14 @@ func (rt *Runtime) differenceZonedDateTime(ns1, ns2 *big.Int, tz, calendar strin
 	}
 	startDT := z.dateTimeFor(ns1)
 	endDT := z.dateTimeFor(ns2)
+	if compareISODate(startDT.date, endDT.date) == 0 {
+		// Two readings on the same day differ by the time between them and by
+		// nothing else. Saying so outright matters in the hour a zone repeats,
+		// where the wall clock can run forwards over an instant that went back:
+		// one o'clock daylight time comes after one minute past one standard
+		// time, and the difference is minus fifty-nine minutes, not plus one.
+		return newInternal(dateDuration{}, new(big.Int).Sub(ns2, ns1)), nil
+	}
 	sign := -compareISODateTime(startDT, endDT)
 	maxCorrection := 1
 	if sign == 1 {
@@ -509,14 +523,18 @@ func (rt *Runtime) differenceZonedDateTimeWithRounding(ns1, ns2 *big.Int, tz,
 		return durationRec{}, e
 	}
 	if s.smallest == unitNanosecond && s.increment == 1 {
-		out, ok := durationFromInternal(diff, s.largest)
+		// The hour is as large as the time part gets in a zone, because a day
+		// there is whatever the zone made it: the twenty-four hours between
+		// midnight and eleven at night on a twenty-five-hour day are not a
+		// day. Days come from the calendar difference and from nowhere else.
+		out, ok := durationFromInternal(diff, unitHour)
 		if !ok {
 			return out, rt.rangeError("duration is out of range")
 		}
 		return out, nil
 	}
 	z, _ := temporalZoneFor(tz)
-	return rt.roundRelativeDuration(diff, ns2, z.dateTimeFor(ns1), tz, calendar,
+	return rt.roundRelativeDuration(diff, ns1, ns2, z.dateTimeFor(ns1), tz, calendar,
 		s.largest, s.increment, s.smallest, s.mode)
 }
 

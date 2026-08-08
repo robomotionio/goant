@@ -485,6 +485,6 @@ func (rt *Runtime) differenceDate(a, b isoDateRec, cal string, s differenceSetti
 		return out, nil
 	}
 	destNs := isoDateTimeToEpochNanoseconds(isoDateTimeRec{b, midnightTime()}, 0)
-	return rt.roundRelativeDuration(newInternal(diff, nil), destNs,
+	return rt.roundRelativeDuration(newInternal(diff, nil), nil, destNs,
 		isoDateTimeRec{a, midnightTime()}, "", cal, s.largest, s.increment, s.smallest, s.mode)
 }
