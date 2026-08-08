@@ -36,7 +36,14 @@ func (rt *Runtime) initIntl() {
 		proto := rt.newObject(rt.objectProto)
 		po := rt.objPtr(proto)
 		var ctorSelf Value
-		ctor := rt.newNativeFunc(name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		// The declared length is the number of arguments before the first
+		// optional one, which for DisplayNames is both of them: it cannot name
+		// anything without a type, and the type lives in the options.
+		length := 0
+		if name == "DisplayNames" {
+			length = 2
+		}
+		ctor := rt.newNativeFunc(name, length, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			if requireNew && !rt.constructing() {
 				return mkundef(), rt.typeError("Constructor Intl." + name + " requires 'new'")
 			}

@@ -45,8 +45,10 @@ var dateTimeFields = []string{
 func canonicalDisplayCode(kind, code string) (string, bool) {
 	switch kind {
 	case "language":
+		// A language code is a unicode_language_id, which is the tag WITHOUT
+		// its extensions: "en-u-ca-gregory" names a locale, not a language.
 		t, ok := parseLangTag(code)
-		if !ok {
+		if !ok || len(t.exts) > 0 || len(t.private) > 0 {
 			return "", false
 		}
 		t.canonicalize()

@@ -132,11 +132,19 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	if ok {
 		n.style = style
 	}
+	// The style's own requirement is checked HERE, where the option is read,
+	// not after the whole bag: {style: "currency", unit: "test"} is a missing
+	// currency before it is a malformed unit, because the unit has not been
+	// read yet.
 	currency, hasCurrency, e := rt.intlStringOption(options, "currency", nil)
 	if e != nil {
 		return n, e
 	}
-	if hasCurrency {
+	if !hasCurrency {
+		if n.style == "currency" {
+			return n, rt.typeError("style is currency but no currency was given")
+		}
+	} else {
 		if !isWellFormedCurrency(currency) {
 			return n, rt.rangeError("Invalid currency code: " + currency)
 		}
@@ -156,7 +164,11 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	if e != nil {
 		return n, e
 	}
-	if hasUnit {
+	if !hasUnit {
+		if n.style == "unit" {
+			return n, rt.typeError("style is unit but no unit was given")
+		}
+	} else {
 		if !isWellFormedUnit(unit) {
 			return n, rt.rangeError("Invalid unit: " + unit)
 		}
@@ -169,9 +181,6 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	}
 
 	if n.style == "currency" {
-		if !hasCurrency {
-			return n, rt.typeError("style is currency but no currency was given")
-		}
 		n.currencyDisplay, n.currencySign = "symbol", "standard"
 		if hasCD {
 			n.currencyDisplay = currencyDisplay
@@ -181,9 +190,6 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 		}
 	}
 	if n.style == "unit" {
-		if !hasUnit {
-			return n, rt.typeError("style is unit but no unit was given")
-		}
 		n.unitDisplay = "short"
 		if hasUD {
 			n.unitDisplay = unitDisplay
