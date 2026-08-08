@@ -28,8 +28,8 @@ type numberOptions struct {
 	compactDisplay   string
 	signDisplay      string
 	numbering        string
-	roundingPriority string
-	compactAuto      bool // compact notation choosing its own digits
+	roundingPriority string // as COMPUTED, which is what resolvedOptions reports
+	roundingType     string
 	roundingMode     string
 	roundingIncr     int
 	trailingZero     string
@@ -40,8 +40,8 @@ func defaultNumberOptions() numberOptions {
 	return numberOptions{tag: defaultLocale, style: "decimal", useGrouping: "auto", numbering: "latn",
 		notation: "standard", signDisplay: "auto",
 		roundingMode: "halfExpand", roundingIncr: 1, trailingZero: "auto",
-		roundingPriority: "auto",
-		digits:           pluralOptions{minInt: 1, minFrac: 0, maxFrac: 3}}
+		roundingPriority: "auto", roundingType: "fractionDigits",
+		digits: pluralOptions{minInt: 1, minFrac: 0, maxFrac: 3}}
 }
 
 // String and parseNumberOptions round the resolved state through a slot, which
@@ -51,7 +51,7 @@ func (n numberOptions) String() string {
 	return strings.Join([]string{
 		n.tag, n.style, n.currency, n.currencyDisplay, n.currencySign, n.unit,
 		n.unitDisplay, n.useGrouping, n.notation, n.compactDisplay, n.signDisplay,
-		n.numbering, n.roundingPriority, boolKeyword(n.compactAuto), n.roundingMode, strconv.Itoa(n.roundingIncr), n.trailingZero,
+		n.numbering, n.roundingPriority, n.roundingType, n.roundingMode, strconv.Itoa(n.roundingIncr), n.trailingZero,
 		strconv.Itoa(n.digits.minInt), strconv.Itoa(n.digits.minFrac),
 		strconv.Itoa(n.digits.maxFrac), strconv.Itoa(n.digits.minSig),
 		strconv.Itoa(n.digits.maxSig),
@@ -67,7 +67,7 @@ func parseNumberOptions(s string) numberOptions {
 	return numberOptions{tag: f[0], style: f[1], currency: f[2], currencyDisplay: f[3],
 		currencySign: f[4], unit: f[5], unitDisplay: f[6], useGrouping: f[7],
 		notation: f[8], compactDisplay: f[9], signDisplay: f[10],
-		numbering: f[11], roundingPriority: f[12], compactAuto: f[13] == "true",
+		numbering: f[11], roundingPriority: f[12], roundingType: f[13],
 		roundingMode: f[14], roundingIncr: i(15), trailingZero: f[16],
 		digits: pluralOptions{minInt: i(17), minFrac: i(18), maxFrac: i(19),
 			minSig: i(20), maxSig: i(21)}}
@@ -201,15 +201,6 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 		}
 	}
 
-	// The default fraction digits are the style's: money has the currency's
-	// minor-unit count, percentages have none, everything else has up to three.
-	minFrac, maxFrac := 0, 3
-	switch n.style {
-	case "percent":
-		maxFrac = 0
-	case "currency":
-		minFrac, maxFrac = currencyDigits(n.currency), currencyDigits(n.currency)
-	}
 	notation, hasNotation, e := rt.intlStringOption(options, "notation",
 		[]string{"standard", "scientific", "engineering", "compact"})
 	if e != nil {
@@ -218,77 +209,29 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	if hasNotation {
 		n.notation = notation
 	}
-	d, e := rt.intlDigitOptions(options, minFrac, maxFrac)
+	// The default fraction digits are the style's: money has the currency's
+	// minor-unit count, percentages have none, everything else has up to three.
+	// The currency's count is a rule about writing an AMOUNT, though, so it
+	// only applies to a number written as one: ¥1.2E3 is not a sum of money
+	// with no minor units, it is a number in engineering notation.
+	minFrac, maxFrac := 0, 3
+	switch {
+	case n.style == "percent":
+		maxFrac = 0
+	case n.style == "currency" && n.notation == "standard":
+		minFrac, maxFrac = currencyDigits(n.currency), currencyDigits(n.currency)
+	}
+	d, e := rt.intlDigitOptions(options, minFrac, maxFrac, n.notation)
 	if e != nil {
 		return n, e
 	}
 	n.digits = d
-	// The four rounding options are read AFTER the digit options, which is
-	// where SetNumberFormatDigitOptions reads them and is observable through
-	// getters on the bag.
-	roundingIncrement, hasIncr, e := rt.intlNumberOption(options, "roundingIncrement", 1, 5000, 1)
-	if e != nil {
-		return n, e
-	}
-	if hasIncr && !intContains(validRoundingIncrements, roundingIncrement) {
-		return n, rt.rangeError("Invalid roundingIncrement")
-	}
-	n.roundingIncr = roundingIncrement
-	roundingMode, hasMode, e := rt.intlStringOption(options, "roundingMode", roundingModes)
-	if e != nil {
-		return n, e
-	}
-	if hasMode {
-		n.roundingMode = roundingMode
-	}
-	priority, hasPriority, e := rt.intlStringOption(options, "roundingPriority",
-		[]string{"auto", "morePrecision", "lessPrecision"})
-	if e != nil {
-		return n, e
-	}
-	if hasPriority {
-		n.roundingPriority = priority
-	}
-	trailing, hasTrailing, e := rt.intlStringOption(options, "trailingZeroDisplay",
-		[]string{"auto", "stripIfInteger"})
-	if e != nil {
-		return n, e
-	}
-	if hasTrailing {
-		n.trailingZero = trailing
-	}
-	if n.roundingPriority != "auto" && n.digits.maxSig > 0 {
-		// Both kinds of digit option were given and the priority says which
-		// wins per value rather than outright: run both and compare.
-		n.compactAuto = true
-		if n.digits.maxFrac == 0 && n.digits.minFrac == 0 {
-			n.digits.maxFrac = 3
-		}
-	}
-	if n.notation == "compact" && !digitOptionsGiven(rt, options) {
-		// Compact's default is "morePrecision" between no fraction digits and
-		// two significant ones -- whichever KEEPS more of the number. 1234 is
-		// "1.2K" because two significant digits say more than none, and
-		// 987654321 is "988M" because no fraction digits say more than two
-		// significant ones. Neither rule alone gets both right.
-		n.compactAuto = true
-		n.digits.minSig, n.digits.maxSig = 1, 2
-		n.digits.minFrac, n.digits.maxFrac = 0, 0
-	}
-	// A rounding increment only makes sense at a fixed number of fraction
-	// digits: it says what the last place steps by, and with significant
-	// digits or an open-ended maximum there is no last place.
-	if n.roundingIncr != 1 {
-		// An increment names the last place, so it needs there to BE one: not
-		// with significant digits, not with a priority that picks between two
-		// roundings, and not with an open-ended maximum.
-		if n.digits.maxSig > 0 || n.roundingPriority != "auto" {
-			return n, rt.typeError("roundingIncrement cannot be combined with significant digits or a rounding priority")
-		}
-		if n.digits.minFrac != n.digits.maxFrac {
-			return n, rt.rangeError("roundingIncrement requires minimumFractionDigits to equal maximumFractionDigits")
-		}
-	}
+	n.roundingIncr, n.roundingMode = d.roundingIncr, d.roundingMode
+	n.trailingZero, n.roundingType = d.trailingZero, d.roundingType
+	// resolvedOptions reports the priority the digits ENDED UP with, which is
+	// not always the one that was asked for: compact notation with no digit
+	// options picks "morePrecision" for itself.
+	n.roundingPriority = d.computed
 
 	compactDisplay, hasCompact, e := rt.intlStringOption(options, "compactDisplay",
 		[]string{"short", "long"})
@@ -300,6 +243,11 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 		if hasCompact {
 			n.compactDisplay = compactDisplay
 		}
+	}
+	// Compact notation groups only from five digits up, because "12 345" as
+	// "12,345" beside "12K" is a distinction without a difference.
+	if n.notation == "compact" {
+		n.useGrouping = "min2"
 	}
 	// useGrouping is the one option whose type changed: it takes a boolean for
 	// compatibility and a string for what it now means, and false is the only
@@ -341,22 +289,6 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	return n, nil
 }
 
-// digitOptionsGiven reports whether the caller named any digit option, which is
-// what decides whether compact notation gets to pick its own.
-func digitOptionsGiven(rt *Runtime, options Value) bool {
-	if options.IsUndefined() {
-		return false
-	}
-	for _, name := range []string{"minimumIntegerDigits", "minimumFractionDigits",
-		"maximumFractionDigits", "minimumSignificantDigits", "maximumSignificantDigits"} {
-		v, e := rt.getField(options, name)
-		if e == nil && !v.IsUndefined() {
-			return true
-		}
-	}
-	return false
-}
-
 // currencyDigits is the minor-unit count of an ISO 4217 code. Two is the rule;
 // the exceptions are the currencies with no minor unit at all and the three
 // with a thousandth.
@@ -393,6 +325,11 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 	}
 	if n.style == "percent" && v == v {
 		v *= 100
+		// The exact digits have to move too, or the number would be formatted
+		// from a spelling a hundred times smaller than the value it came from.
+		if digits != "" {
+			digits = shiftDecimal(digits, 2)
+		}
 	}
 
 	neg := math.Signbit(v)
@@ -428,23 +365,38 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 	if !infinite && !nan {
 		intPart, frac = expandDecimal(strings.TrimPrefix(numberToString(math.Abs(v)), "-"))
 		if digits != "" {
-			// A BigInt arrives as its exact decimal digits rather than as a
-			// float, because above 2^53 the float has already lost them.
-			intPart, frac, neg = strings.TrimPrefix(digits, "-"), "", strings.HasPrefix(digits, "-")
+			// A BigInt or a string arrives as its exact decimal digits rather
+			// than as a float, because past 2^53 the float has already lost
+			// them. Compact and the exponent notations still work from the
+			// float: they divide the value, and dividing the digits is a
+			// different job that no test asks for.
+			neg = strings.HasPrefix(digits, "-")
+			intPart, frac, _ = strings.Cut(strings.TrimPrefix(digits, "-"), ".")
 		}
-		if n.compactAuto {
-			// Both roundings, and the one that keeps more significant digits
-			// wins. "More precision" is exactly that comparison.
+		if n.roundingType == "morePrecision" || n.roundingType == "lessPrecision" {
+			// Both roundings are computed and one of them is kept, chosen by
+			// the PLACE each rounded to rather than by the result: significant
+			// digits round to the (e - p + 1)th place, fraction digits to the
+			// -maxFrac'th, and the lower place is the more precise. That is why
+			// 1234 compacts to "1.2K" -- two significant digits reach further
+			// down than no fraction digits do -- and 987654321 to "988M", where
+			// they do not.
 			si, sf := roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig, n.roundingMode, neg)
 			fi, ff := roundDecimal(intPart, frac, n.digits.maxFrac, n.roundingMode, 1, neg)
 			ff = strings.TrimRight(ff, "0")
-			// "More precision" is the one that moved the number less; "less
-			// precision" is the other one.
-			less := n.roundingPriority == "lessPrecision"
-			if (decimalError(fi, ff, v) <= decimalError(si, sf, v)) != less {
-				intPart, frac = fi, ff
-			} else {
+			for len(ff) < n.digits.minFrac {
+				ff += "0"
+			}
+			sigPlace := decimalExponent(intPart, frac) - n.digits.maxSig + 1
+			fracPlace := -n.digits.maxFrac
+			keepSig := sigPlace <= fracPlace
+			if n.roundingType == "lessPrecision" {
+				keepSig = !keepSig
+			}
+			if keepSig {
 				intPart, frac = si, sf
+			} else {
+				intPart, frac = fi, ff
 			}
 		} else if n.digits.maxSig > 0 {
 			intPart, frac = roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig, n.roundingMode, neg)
@@ -517,6 +469,11 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 		add("fraction", frac)
 	}
 	if compactSuffix != "" {
+		// The long names are words, and a word is written apart from the
+		// number: "988 million", but "988M".
+		if n.compactDisplay == "long" {
+			add("literal", " ")
+		}
 		add("compact", compactSuffix)
 	}
 	if n.notation == "scientific" || n.notation == "engineering" {
@@ -697,6 +654,14 @@ func unitText(unit, display string, plural bool) (string, bool) {
 		}
 		return names[idx][0]
 	}
+	// A unit written as a sign rather than a word is set against the number:
+	// "3%", not "3 %". Only the long form spells it out.
+	if unit == "percent" {
+		if idx == 0 {
+			return "percent", true
+		}
+		return "%", false
+	}
 	if num, den, ok := strings.Cut(unit, "-per-"); ok {
 		if idx == 0 {
 			return one(num, plural) + " per " + one(den, false), true
@@ -763,11 +728,13 @@ func (rt *Runtime) intlNumberOption(options Value, name string, lo, hi, fallback
 	if e != nil {
 		return 0, false, e
 	}
-	f := math.Floor(num)
-	if math.IsNaN(f) || f < float64(lo) || f > float64(hi) {
+	// The range is checked before the value is floored, so 3.000001 is out of
+	// range for a maximum of 3 rather than rounding down into it: the option
+	// was written as a number of digits and 3.000001 is not one.
+	if math.IsNaN(num) || num < float64(lo) || num > float64(hi) {
 		return 0, false, rt.rangeError("Value " + numberToString(num) + " out of range for " + name)
 	}
-	return int(f), true, nil
+	return int(math.Floor(num)), true, nil
 }
 
 func intContains(xs []int, x int) bool {
@@ -779,31 +746,103 @@ func intContains(xs []int, x int) bool {
 	return false
 }
 
-// rangeParts is CreatePartsFromRange: the two ends formatted, marked with
-// which end each span came from. When both ends format identically the range
-// is the single value with every span "shared", which is what makes
-// formatRange(1, 1) read as "1" rather than "1 – 1".
-func rangeParts(start, end []numberPart) []sourcedPart {
-	same := len(start) == len(end)
-	if same {
-		for i := range start {
-			if start[i] != end[i] {
-				same = false
-				break
-			}
+// isNumberPart reports whether a span is part of the number itself rather than
+// something written around it. What is written around it -- a currency symbol,
+// a sign, a unit and the space before it -- is a "modifier", and the modifiers
+// are what a range may or may not repeat.
+func isNumberPart(typ string) bool {
+	switch typ {
+	case "integer", "group", "decimal", "fraction", "compact", "nan", "infinity",
+		"exponentSeparator", "exponentMinusSign", "exponentInteger":
+		return true
+	}
+	return false
+}
+
+// splitModifiers reports where the number itself begins and ends: everything
+// before lead and from mid on is written around it.
+func splitModifiers(parts []numberPart) (lead, mid int) {
+	for lead < len(parts) && !isNumberPart(parts[lead].typ) {
+		lead++
+	}
+	mid = len(parts)
+	for mid > lead && !isNumberPart(parts[mid-1].typ) {
+		mid--
+	}
+	return lead, mid
+}
+
+func partsRunes(parts []numberPart) int {
+	n := 0
+	for _, p := range parts {
+		n += len([]rune(p.val))
+	}
+	return n
+}
+
+func samePartRun(a, b []numberPart) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
 		}
 	}
-	var out []sourcedPart
-	if same {
+	return true
+}
+
+// rangeParts is CreatePartsFromRange: the two ends formatted, marked with which
+// end each span came from.
+//
+// What is written around the two ends decides how the range reads. Repeated,
+// the ends need holding apart -- "$3 - $5" with spaces. Written once, they do
+// not, and the dash closes up: "-$3.00-5.00", "3-5 m", "3-5". The line between
+// the two is where ICU draws it, and it is a strange place: a modifier of a
+// SINGLE code point is repeated and anything longer is shared, so "$3 - $5"
+// and "-$3.00-5.00" differ only by the minus sign that made the prefix two
+// characters long.
+func rangeParts(start, end []numberPart) []sourcedPart {
+	if samePartRun(start, end) {
+		// The same number at both ends is not a range, it is one value the
+		// rounding reached from two directions: "~$3".
+		out := []sourcedPart{{numberPart{"approximatelySign", "~"}, "shared"}}
 		for _, p := range start {
 			out = append(out, sourcedPart{p, "shared"})
 		}
 		return out
 	}
+	sLead, sMid := splitModifiers(start)
+	eLead, eMid := splitModifiers(end)
+	shared := samePartRun(start[:sLead], end[:eLead]) &&
+		samePartRun(start[sMid:], end[eMid:])
+	width := partsRunes(start[:sLead]) + partsRunes(start[sMid:])
+
+	var out []sourcedPart
+	if shared && width > 1 {
+		for _, p := range start[:sLead] {
+			out = append(out, sourcedPart{p, "shared"})
+		}
+		for _, p := range start[sLead:sMid] {
+			out = append(out, sourcedPart{p, "startRange"})
+		}
+		out = append(out, sourcedPart{numberPart{"literal", "–"}, "shared"})
+		for _, p := range end[eLead:eMid] {
+			out = append(out, sourcedPart{p, "endRange"})
+		}
+		for _, p := range end[eMid:] {
+			out = append(out, sourcedPart{p, "shared"})
+		}
+		return out
+	}
+	sep := "–"
+	if width > 0 {
+		sep = " – "
+	}
 	for _, p := range start {
 		out = append(out, sourcedPart{p, "startRange"})
 	}
-	out = append(out, sourcedPart{numberPart{"literal", "\u2009\u2013\u2009"}, "shared"})
+	out = append(out, sourcedPart{numberPart{"literal", sep}, "shared"})
 	for _, p := range end {
 		out = append(out, sourcedPart{p, "endRange"})
 	}
@@ -843,7 +882,7 @@ func sourcedString(parts []sourcedPart) string {
 // locale and per plural category.
 func compactName(mag int, display string) string {
 	short := []string{"", "K", "M", "B", "T"}
-	long := []string{"", " thousand", " million", " billion", " trillion"}
+	long := []string{"", "thousand", "million", "billion", "trillion"}
 	if mag < 1 || mag > 4 {
 		return ""
 	}
@@ -853,28 +892,119 @@ func compactName(mag int, display string) string {
 	return short[mag]
 }
 
-// decimalError is how far a rounded spelling moved the value it came from.
-func decimalError(intPart, frac string, v float64) float64 {
-	s := intPart
-	if frac != "" {
-		s += "." + frac
-	}
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return math.Inf(1)
-	}
-	return math.Abs(f - math.Abs(v))
-}
-
 // intlNumericArg is ToIntlMathematicalValue as far as this engine needs it: a
 // Number, or a BigInt with its exact decimal digits alongside, because a
 // BigInt above 2^53 has more of them than the float can hold.
 func (rt *Runtime) intlNumericArg(v Value) (float64, string, *ThrowError) {
-	if b := rt.bigIntVal(v); b != nil {
+	prim, e := rt.toPrimitive(v, "number")
+	if e != nil {
+		return 0, "", e
+	}
+	if b := rt.bigIntVal(prim); b != nil {
 		digits := bigIntToString(b, 10)
 		f, _ := new(big.Float).SetInt(b).Float64()
 		return f, digits, nil
 	}
-	n, e := rt.toNumber(v)
+	if prim.IsString() {
+		// A string argument is read as an exact decimal rather than through a
+		// float, which is the whole point of being allowed to pass one:
+		// "1.0000000000000001" is a number the double cannot hold and the
+		// string can.
+		s := rt.strGo(prim)
+		n, e := rt.toNumber(prim)
+		if e != nil {
+			return 0, "", e
+		}
+		if exact, ok := parseExactDecimal(s); ok {
+			return n, exact, nil
+		}
+		return n, "", nil
+	}
+	n, e := rt.toNumber(prim)
 	return n, "", e
+}
+
+// parseExactDecimal spells a StringNumericLiteral as a plain decimal, keeping
+// every digit: "1e3" is "1000" and "1.0000000000000001" is itself. It reports
+// false for the forms that have no digits to keep -- NaN, the infinities, and
+// the non-decimal radixes, which are exact as floats anyway up to 2^53 and are
+// not what a caller passing a string is after.
+func parseExactDecimal(s string) (string, bool) {
+	s = strings.TrimFunc(s, jsStrWhitespace)
+	neg := false
+	if rest, ok := strings.CutPrefix(s, "-"); ok {
+		neg, s = true, rest
+	} else if rest, ok := strings.CutPrefix(s, "+"); ok {
+		s = rest
+	}
+	if s == "" || strings.ContainsAny(s, "xXoObBnN") {
+		return "", false
+	}
+	mant, expPart, hasExp := strings.Cut(s, "e")
+	if !hasExp {
+		mant, expPart, hasExp = strings.Cut(s, "E")
+	}
+	exp := 0
+	if hasExp {
+		v, err := strconv.Atoi(expPart)
+		if err != nil {
+			return "", false
+		}
+		exp = v
+	}
+	intPart, frac, _ := strings.Cut(mant, ".")
+	if intPart == "" && frac == "" {
+		return "", false
+	}
+	for _, d := range intPart + frac {
+		if d < '0' || d > '9' {
+			return "", false
+		}
+	}
+	// Applying the exponent is moving the point, which is padding with zeros
+	// on whichever side runs out first.
+	digits := intPart + frac
+	point := len(intPart) + exp
+	for point < 0 {
+		digits, point = "0"+digits, point+1
+	}
+	for point > len(digits) {
+		digits += "0"
+	}
+	out := strings.TrimLeft(digits[:point], "0")
+	if out == "" {
+		out = "0"
+	}
+	if tail := strings.TrimRight(digits[point:], "0"); tail != "" {
+		out += "." + tail
+	}
+	if neg {
+		out = "-" + out
+	}
+	return out, true
+}
+
+// shiftDecimal moves an exact decimal's point right by n places, which is what
+// a percentage does to the number it is written from.
+func shiftDecimal(s string, n int) string {
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	intPart, frac, _ := strings.Cut(s, ".")
+	for len(frac) < n {
+		frac += "0"
+	}
+	intPart, frac = intPart+frac[:n], frac[n:]
+	if t := strings.TrimLeft(intPart, "0"); t != "" {
+		intPart = t
+	} else {
+		intPart = "0"
+	}
+	out := intPart
+	if frac = strings.TrimRight(frac, "0"); frac != "" {
+		out += "." + frac
+	}
+	if neg {
+		out = "-" + out
+	}
+	return out
 }

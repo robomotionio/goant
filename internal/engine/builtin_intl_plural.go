@@ -35,7 +35,15 @@ type pluralOptions struct {
 	roundingMode string
 	roundingIncr int
 	trailingZero string
-	priority     string
+	priority     string // the option as written
+	// roundingType is which digit counts actually decide the rounding:
+	// "fractionDigits", "significantDigits", or -- when both are in play and
+	// the value picks between them -- "morePrecision"/"lessPrecision".
+	roundingType string
+	// computed is [[ComputedRoundingPriority]], which is what resolvedOptions
+	// reports: it is the option unless the digit counts overrode it, which is
+	// what compact notation choosing its own does.
+	computed string
 }
 
 func (p pluralOptions) String() string {
@@ -47,111 +55,96 @@ func (p pluralOptions) String() string {
 		"," + strconv.Itoa(p.maxFrac) + "," + strconv.Itoa(p.minSig) + "," +
 		strconv.Itoa(p.maxSig) + "," + p.notation + "," + p.compact + "," +
 		p.roundingMode + "," + strconv.Itoa(p.roundingIncr) + "," +
-		p.trailingZero + "," + p.priority + "," + p.tag
+		p.trailingZero + "," + p.priority + "," + p.roundingType + "," +
+		p.computed + "," + p.tag
 }
 
 func parsePluralOptions(s string) pluralOptions {
 	f := strings.Split(s, ",")
-	if len(f) != 13 {
+	if len(f) != 15 {
 		return defaultPluralOptions()
 	}
 	n := func(i int) int { v, _ := strconv.Atoi(f[i]); return v }
 	return pluralOptions{ordinal: f[0] == "ordinal", minInt: n(1), minFrac: n(2),
 		maxFrac: n(3), minSig: n(4), maxSig: n(5), notation: f[6], compact: f[7],
 		roundingMode: f[8], roundingIncr: n(9), trailingZero: f[10], priority: f[11],
-		tag: f[12]}
+		roundingType: f[12], computed: f[13], tag: f[14]}
 }
 
 func defaultPluralOptions() pluralOptions {
 	return pluralOptions{minInt: 1, maxFrac: 3, notation: "standard", tag: defaultLocale,
-		roundingMode: "halfExpand", roundingIncr: 1, trailingZero: "auto", priority: "auto"}
+		roundingMode: "halfExpand", roundingIncr: 1, trailingZero: "auto", priority: "auto",
+		roundingType: "fractionDigits", computed: "auto"}
 }
 
-// intlDigitOptions is SetNumberFormatDigitOptions, shared by PluralRules and --
-// when it grows options -- NumberFormat. The defaults differ per caller, which
-// is why they are arguments rather than constants.
-func (rt *Runtime) intlDigitOptions(options Value, defMinFrac, defMaxFrac int) (pluralOptions, *ThrowError) {
+// intlDigitOptions is SetNumberFormatDigitOptions, shared by PluralRules and
+// NumberFormat. The two fraction defaults differ per caller -- money carries
+// the currency's minor units -- which is why they are arguments.
+//
+// The five digit counts are READ before roundingPriority and CONVERTED after
+// it. That is not a detail: which of them are consulted at all depends on the
+// priority and on whether the notation is compact, and a getter on the options
+// bag can see both the order of the reads and the fact that a count nobody
+// needs is never converted.
+func (rt *Runtime) intlDigitOptions(options Value, defMinFrac, defMaxFrac int, notation string) (pluralOptions, *ThrowError) {
 	p := defaultPluralOptions()
 	p.minFrac, p.maxFrac = defMinFrac, defMaxFrac
-	get := func(name string, lo, hi, fallback int) (int, bool, *ThrowError) {
+	raw := func(name string) (Value, *ThrowError) {
 		if options.IsUndefined() {
-			return fallback, false, nil
+			return mkundef(), nil
 		}
-		v, e := rt.getField(options, name)
-		if e != nil {
-			return 0, false, e
-		}
+		return rt.getField(options, name)
+	}
+	// DefaultNumberOption. The range is checked before the value is floored, so
+	// 3.000001 is out of range for a maximum of three rather than rounding down
+	// into it: the option was written as a number of digits and that is not one.
+	def := func(v Value, name string, lo, hi, fallback int) (int, *ThrowError) {
 		if v.IsUndefined() {
-			return fallback, false, nil
+			return fallback, nil
 		}
 		num, e := rt.toNumber(v)
 		if e != nil {
-			return 0, false, e
+			return 0, e
 		}
-		f := math.Floor(num)
-		if math.IsNaN(f) || f < float64(lo) || f > float64(hi) {
-			return 0, false, rt.rangeError("Value " + numberToString(num) + " out of range for " + name)
+		if math.IsNaN(num) || num < float64(lo) || num > float64(hi) {
+			return 0, rt.rangeError("Value " + numberToString(num) + " out of range for " + name)
 		}
-		return int(f), true, nil
+		return int(math.Floor(num)), nil
 	}
-	var e *ThrowError
-	if p.minInt, _, e = get("minimumIntegerDigits", 1, 21, 1); e != nil {
-		return p, e
-	}
-	// The read order is the specification's -- integer, then fraction, then
-	// significant -- and it is observable through getters on the options bag.
-	minFrac, hasMinFrac, e := get("minimumFractionDigits", 0, 100, defMinFrac)
+	mnid, e := raw("minimumIntegerDigits")
 	if e != nil {
 		return p, e
 	}
-	maxFrac, hasMaxFrac, e := get("maximumFractionDigits", 0, 100, defMaxFrac)
+	if p.minInt, e = def(mnid, "minimumIntegerDigits", 1, 21, 1); e != nil {
+		return p, e
+	}
+	mnfdV, e := raw("minimumFractionDigits")
 	if e != nil {
 		return p, e
 	}
-	minSig, hasMinSig, e := get("minimumSignificantDigits", 1, 21, 1)
+	mxfdV, e := raw("maximumFractionDigits")
 	if e != nil {
 		return p, e
 	}
-	maxSig, hasMaxSig, e := get("maximumSignificantDigits", 1, 21, 21)
+	mnsdV, e := raw("minimumSignificantDigits")
 	if e != nil {
 		return p, e
 	}
-	if hasMinSig || hasMaxSig {
-		p.minSig, p.maxSig = minSig, maxSig
-		if p.minSig > p.maxSig {
-			return p, rt.rangeError("minimumSignificantDigits is greater than maximumSignificantDigits")
-		}
-		return p, nil
+	mxsdV, e := raw("maximumSignificantDigits")
+	if e != nil {
+		return p, e
 	}
-	p.minFrac, p.maxFrac = minFrac, maxFrac
-	if hasMinFrac && !hasMaxFrac && p.maxFrac < p.minFrac {
-		p.maxFrac = p.minFrac
-	}
-	// The other way round too: a currency's default minimum is two digits, and
-	// asking for at most one is a narrowing rather than a contradiction.
-	if hasMaxFrac && !hasMinFrac && p.minFrac > p.maxFrac {
-		p.minFrac = p.maxFrac
-	}
-	if p.minFrac > p.maxFrac {
-		return p, rt.rangeError("minimumFractionDigits is greater than maximumFractionDigits")
-	}
-	return p, nil
-}
-
-// intlRoundingOptions is the tail of SetNumberFormatDigitOptions: the four
-// options read after the digits, in that order, which a getter can observe.
-func (rt *Runtime) intlRoundingOptions(p *pluralOptions, options Value) *ThrowError {
 	incr, hasIncr, e := rt.intlNumberOption(options, "roundingIncrement", 1, 5000, 1)
 	if e != nil {
-		return e
+		return p, e
 	}
 	if hasIncr && !intContains(validRoundingIncrements, incr) {
-		return rt.rangeError("Invalid roundingIncrement")
+		return p, rt.rangeError("Invalid roundingIncrement")
 	}
 	p.roundingIncr = incr
 	mode, ok, e := rt.intlStringOption(options, "roundingMode", roundingModes)
 	if e != nil {
-		return e
+		return p, e
 	}
 	if ok {
 		p.roundingMode = mode
@@ -159,7 +152,7 @@ func (rt *Runtime) intlRoundingOptions(p *pluralOptions, options Value) *ThrowEr
 	priority, ok, e := rt.intlStringOption(options, "roundingPriority",
 		[]string{"auto", "morePrecision", "lessPrecision"})
 	if e != nil {
-		return e
+		return p, e
 	}
 	if ok {
 		p.priority = priority
@@ -167,12 +160,95 @@ func (rt *Runtime) intlRoundingOptions(p *pluralOptions, options Value) *ThrowEr
 	trailing, ok, e := rt.intlStringOption(options, "trailingZeroDisplay",
 		[]string{"auto", "stripIfInteger"})
 	if e != nil {
-		return e
+		return p, e
 	}
 	if ok {
 		p.trailingZero = trailing
 	}
-	return nil
+
+	hasSd := !mnsdV.IsUndefined() || !mxsdV.IsUndefined()
+	hasFd := !mnfdV.IsUndefined() || !mxfdV.IsUndefined()
+	needSd, needFd := true, true
+	if p.priority == "auto" {
+		// Without a priority the significant digits win outright where they
+		// were asked for, and compact notation with no digit options at all
+		// asks for neither: it chooses for itself, below.
+		needSd = hasSd
+		if hasSd || (!hasFd && notation == "compact") {
+			needFd = false
+		}
+	}
+	if needSd {
+		if hasSd {
+			mnsd, e := def(mnsdV, "minimumSignificantDigits", 1, 21, 1)
+			if e != nil {
+				return p, e
+			}
+			mxsd, e := def(mxsdV, "maximumSignificantDigits", mnsd, 21, 21)
+			if e != nil {
+				return p, e
+			}
+			p.minSig, p.maxSig = mnsd, mxsd
+		} else {
+			p.minSig, p.maxSig = 1, 21
+		}
+	}
+	if needFd {
+		if hasFd {
+			// Whichever end was left out takes its default against the end that
+			// was given, so asking for at most one fraction digit of a currency
+			// narrows its two-digit minimum rather than contradicting it.
+			mnfd, mxfd := -1, -1
+			if !mnfdV.IsUndefined() {
+				if mnfd, e = def(mnfdV, "minimumFractionDigits", 0, 100, 0); e != nil {
+					return p, e
+				}
+			}
+			if !mxfdV.IsUndefined() {
+				if mxfd, e = def(mxfdV, "maximumFractionDigits", 0, 100, 0); e != nil {
+					return p, e
+				}
+			}
+			switch {
+			case mnfd < 0:
+				mnfd = min(defMinFrac, mxfd)
+			case mxfd < 0:
+				mxfd = max(defMaxFrac, mnfd)
+			case mnfd > mxfd:
+				return p, rt.rangeError("minimumFractionDigits is greater than maximumFractionDigits")
+			}
+			p.minFrac, p.maxFrac = mnfd, mxfd
+		} else {
+			p.minFrac, p.maxFrac = defMinFrac, defMaxFrac
+		}
+	}
+	switch {
+	case !needSd && !needFd:
+		// Compact notation deciding for itself: at most two significant digits
+		// and no fraction digits, whichever of the two says more. That is what
+		// makes 1234 "1.2K" and 987654321 "988M".
+		p.minFrac, p.maxFrac = 0, 0
+		p.minSig, p.maxSig = 1, 2
+		p.roundingType, p.computed = "morePrecision", "morePrecision"
+	case p.priority == "morePrecision", p.priority == "lessPrecision":
+		p.roundingType, p.computed = p.priority, p.priority
+	case hasSd:
+		p.roundingType, p.computed = "significantDigits", "auto"
+	default:
+		p.roundingType, p.computed = "fractionDigits", "auto"
+	}
+	// An increment names the last place, so there has to BE one: not with
+	// significant digits, not with a priority that picks between two roundings,
+	// and not with an open-ended maximum.
+	if p.roundingIncr != 1 {
+		if p.roundingType != "fractionDigits" {
+			return p, rt.typeError("roundingIncrement cannot be combined with significant digits or a rounding priority")
+		}
+		if p.minFrac != p.maxFrac {
+			return p, rt.rangeError("roundingIncrement requires minimumFractionDigits to equal maximumFractionDigits")
+		}
+	}
+	return p, nil
 }
 
 // pluralOperands is the (i, v, w, f, t) of the plural rules, computed from the
@@ -270,10 +346,10 @@ func roundToSignificant(intPart, frac string, maxSig, minSig int, mode string, n
 			sig = 0
 		}
 	}
-	// Zero has one significant digit and it is already written: padding it out
-	// to the minimum would make "0" into "0.0", which says no more than "0".
+	// Zero counts as one significant digit -- the one that is written -- so it
+	// pads out like any other number: three significant digits of 0 is "0.00".
 	if sig == 0 {
-		return intPart, strings.TrimRight(frac, "0")
+		return intPart, strings.Repeat("0", max(minSig-1, 0))
 	}
 	for sig < minSig {
 		frac += "0"
@@ -354,4 +430,19 @@ func pluralTag(tag string) language.Tag {
 		return language.Und
 	}
 	return t
+}
+
+// decimalExponent is the power of ten of a number's leading digit: 1 for 12.3,
+// -3 for 0.00456, and 0 for a zero, which is the exponent ToRawPrecision gives
+// it. It is what turns a count of significant digits into the PLACE they round
+// to, which is how the two roundings are compared.
+func decimalExponent(intPart, frac string) int {
+	if d := strings.TrimLeft(intPart, "0"); d != "" {
+		return len(d) - 1
+	}
+	zeros := len(frac) - len(strings.TrimLeft(frac, "0"))
+	if zeros == len(frac) {
+		return 0 // the number is zero
+	}
+	return -zeros - 1
 }
