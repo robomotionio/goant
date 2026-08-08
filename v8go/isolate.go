@@ -7,9 +7,10 @@
 //   - An Isolate is a goant Runtime. A Context is a realm on it — fresh
 //     globals and prototypes, shared string interning and object pools — which
 //     is the same isolate/context split V8 has.
-//   - There is no JIT and no separately-managed V8 heap, so the heap and flag
-//     controls exist to keep call sites compiling and are documented
-//     individually as no-ops. They are not silently ignored: each says so.
+//   - There is a compiled tier, off unless IsolateOptions.JIT asks for it, and
+//     no separately-managed V8 heap, so the heap and flag controls exist to
+//     keep call sites compiling and are documented individually as no-ops. They
+//     are not silently ignored: each says so.
 //   - Go is garbage collected, so Dispose only drops references.
 //
 // Anything not needed by a caller is absent rather than stubbed, so a missing
@@ -33,6 +34,20 @@ type IsolateOptions struct {
 	InitialOldSpaceBytes uint64
 	MaxOldSpaceBytes     uint64
 	MaxYoungSpaceBytes   uint64
+
+	// JIT turns the compiled tier on for this isolate. It has no V8
+	// counterpart — V8 is always jitting — and exists because here it is a
+	// decision: off, a script runs on the interpreter; on, a function entered
+	// often enough is compiled to machine code and run natively thereafter.
+	//
+	// Worth it for a node that processes many messages, worth nothing for one
+	// that runs a script once, so it belongs per isolate rather than per
+	// process. See github.com/robomotionio/goant.WithJIT.
+	//
+	// Setting it false does not turn the tier off — it leaves the process
+	// default alone, so GOANT_JIT=1 still means what it says. A caller that
+	// wants it off regardless asks for that with Isolate.SetJIT.
+	JIT bool
 }
 
 // HeapStatistics reports memory use. The field set matches the binding this
@@ -89,7 +104,38 @@ func NewIsolateWithOptions(opts IsolateOptions) *Isolate {
 	// load, which was a defence against Windows denying the growth. Go's
 	// allocator has no equivalent failure to pre-empt.
 	rt.SetHeapLimit(opts.MaxOldSpaceBytes)
+	if opts.JIT {
+		rt.SetJITEnabled(true)
+	}
 	return &Isolate{rt: rt, opts: opts}
+}
+
+// SetJIT turns the compiled tier on or off for this isolate, including for code
+// it has already compiled: off, the next call interprets. Unlike the JIT option
+// this goes both ways, so it is the switch to reach for when a host sees
+// trouble and wants a live isolate back on the interpreter without a restart.
+//
+// It affects this isolate and no other.
+func (i *Isolate) SetJIT(on bool) {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.disposed || i.rt == nil {
+		return
+	}
+	i.rt.SetJITEnabled(on)
+}
+
+// JITEnabled reports whether the compiled tier is on for this isolate.
+func (i *Isolate) JITEnabled() bool {
+	if i == nil {
+		return false
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return !i.disposed && i.rt != nil && i.rt.JITEnabled()
 }
 
 // Dispose drops the isolate's engine reference. Memory is reclaimed by the Go
