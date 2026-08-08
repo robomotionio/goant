@@ -288,6 +288,15 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 		}
 		return strconv.Itoa(t.Day())
 	case "dayPeriod":
+		// AM/PM is what follows an hour on a 12-hour clock, and it is a
+		// different field from the dayPeriod component even though both end up
+		// in a part of that name.
+		if style == "ampm" {
+			if t.Hour() < 12 {
+				return "AM"
+			}
+			return "PM"
+		}
 		// The standalone dayPeriod component is not AM/PM: CLDR names the
 		// parts of the day, and English has six of them plus the two exact
 		// moments. AM/PM is what goes after an hour, and that is emitted
@@ -297,6 +306,9 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 		// which this option is not, ever says "midnight".
 		h, m, sec := t.Hour(), t.Minute(), t.Second()
 		if h == 12 && m == 0 && sec == 0 && t.Nanosecond() == 0 {
+			if style == "narrow" {
+				return "n"
+			}
 			return "noon"
 		}
 		switch {
@@ -366,14 +378,29 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 // paddedTimeField reports whether a field is preceded by another time field,
 // in which case it is written to two digits whatever its option said.
 func (d dateTimeOptions) paddedTimeField(comp string) bool {
-	order := []string{"hour", "minute", "second"}
-	for _, c := range order {
-		if c == comp {
-			return false
-		}
+	n := 0
+	for _, c := range []string{"hour", "minute", "second"} {
 		if _, ok := d.comps[c]; ok {
-			return true
+			n++
 		}
+	}
+	if n < 2 {
+		// A field on its own is written the way it was asked for; the padding
+		// is what keeps a clock reading aligned, and one field is not one.
+		return false
+	}
+	for _, c := range []string{"hour", "minute", "second"} {
+		if _, ok := d.comps[c]; !ok {
+			continue
+		}
+		// The first time field is written as asked only when it is the hour:
+		// English writes "2:03" for an hour and a minute and "02:03" for a
+		// minute and a second, because the minute is not the leading field of
+		// a clock reading.
+		if c == comp {
+			return c != "hour"
+		}
+		return true
 	}
 	return false
 }
@@ -502,7 +529,7 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 			out = append(out, numberPart{"dayPeriod", d.dtFieldText("dayPeriod", style, t)})
 		} else if hc := d.resolvedHourCycle(); hasHour && (hc == "h11" || hc == "h12") {
 			lit(" ")
-			out = append(out, numberPart{"dayPeriod", d.dtFieldText("dayPeriod", "short", t)})
+			out = append(out, numberPart{"dayPeriod", d.dtFieldText("dayPeriod", "ampm", t)})
 		}
 	} else if _, ok := d.comps["dayPeriod"]; ok {
 		if wroteDate {
