@@ -12,6 +12,7 @@ package engine
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +118,26 @@ func gmtOffsetName(t time.Time) string {
 	}
 	h, m := off/3600, (off%3600)/60
 	return "GMT" + sign + twoDigits(h) + ":" + twoDigits(m)
+}
+
+// gmtOffsetShortName is the offset written the way a clock reading is: no
+// leading zero on the hour and no minutes unless there are some. Zero is
+// "GMT", with nothing after it to be plus or minus about.
+func gmtOffsetShortName(t time.Time) string {
+	_, off := t.Zone()
+	if off == 0 {
+		return "GMT"
+	}
+	sign := "+"
+	if off < 0 {
+		sign, off = "-", -off
+	}
+	h, m := off/3600, (off%3600)/60
+	out := "GMT" + sign + strconv.Itoa(h)
+	if m != 0 {
+		out += ":" + twoDigits(m)
+	}
+	return out
 }
 
 func twoDigits(n int) string {

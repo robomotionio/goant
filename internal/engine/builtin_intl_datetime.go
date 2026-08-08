@@ -486,11 +486,18 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 		switch style {
 		case "long", "longGeneric":
 			return zoneDisplayNameIn(t)
-		case "shortOffset", "longOffset":
+		case "longOffset":
 			return gmtOffsetName(t)
+		case "shortOffset":
+			return gmtOffsetShortName(t)
 		}
-		abbr, _ := t.Zone()
-		return abbr
+		// A zone that is only an offset has no abbreviation to give -- Go
+		// reports the identifier it was built with -- so it is written the
+		// short way round the offset instead: "GMT+1", not "+01:00".
+		if abbr, _ := t.Zone(); abbr != "" && abbr[0] != '+' && abbr[0] != '-' {
+			return abbr
+		}
+		return gmtOffsetShortName(t)
 	}
 	return ""
 }
@@ -899,7 +906,7 @@ func (d dateTimeOptions) rangeParts(start, end []numberPart) []sourcedPart {
 	case "short", "long", "narrow":
 		named = true
 	}
-	if !named || len(start) != len(end) {
+	if len(start) != len(end) {
 		return whole()
 	}
 	first, last, greatest := -1, -1, len(dtSignificance)
@@ -916,8 +923,15 @@ func (d dateTimeOptions) rangeParts(start, end []numberPart) []sourcedPart {
 		}
 	}
 	// A range that spans a year or an era is not two points in one of them, so
-	// there is nothing outside the difference to say once.
+	// there is nothing outside the difference to say once. A numeric date
+	// repeats whole when the date itself changed -- "1/3/2019 – 1/5/2019" is
+	// how en writes that, and sharing the slashes would not read -- but when
+	// only the clock moved the date is still said once, whichever way it is
+	// written: "8/4/2021, 12:30:45 AM – 11:30:45 PM".
 	if first < 0 || greatest <= dtSignificance["year"] {
+		return whole()
+	}
+	if !named && greatest < dtSignificance["dayPeriod"] {
 		return whole()
 	}
 	var out []sourcedPart

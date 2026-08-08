@@ -80,9 +80,11 @@ func withTemporalDefaults(d dateTimeOptions, kind temporalKind) dateTimeOptions 
 	case "all":
 		set("year", "month", "day", "hour", "minute", "second")
 	}
-	if kind == kindZonedDateTime {
+	if _, named := out.comps["timeZoneName"]; kind == kindZonedDateTime && !named {
 		// A zoned reading says where it was read, or it says nothing that
-		// distinguishes it from a plain one.
+		// distinguishes it from a plain one. Naming a style is not naming a
+		// date field, so a formatter given only that one still gets the
+		// defaults -- but it keeps the style it was given.
 		out.comps["timeZoneName"] = "short"
 	}
 	return out
