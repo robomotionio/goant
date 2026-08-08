@@ -26,12 +26,16 @@ type numberOptions struct {
 	notation        string
 	compactDisplay  string
 	signDisplay     string
+	roundingMode    string
+	roundingIncr    int
+	trailingZero    string
 	digits          pluralOptions
 }
 
 func defaultNumberOptions() numberOptions {
 	return numberOptions{tag: defaultLocale, style: "decimal", useGrouping: "auto",
 		notation: "standard", signDisplay: "auto",
+		roundingMode: "halfExpand", roundingIncr: 1, trailingZero: "auto",
 		digits: pluralOptions{minInt: 1, minFrac: 0, maxFrac: 3}}
 }
 
@@ -42,6 +46,7 @@ func (n numberOptions) String() string {
 	return strings.Join([]string{
 		n.tag, n.style, n.currency, n.currencyDisplay, n.currencySign, n.unit,
 		n.unitDisplay, n.useGrouping, n.notation, n.compactDisplay, n.signDisplay,
+		n.roundingMode, strconv.Itoa(n.roundingIncr), n.trailingZero,
 		strconv.Itoa(n.digits.minInt), strconv.Itoa(n.digits.minFrac),
 		strconv.Itoa(n.digits.maxFrac), strconv.Itoa(n.digits.minSig),
 		strconv.Itoa(n.digits.maxSig),
@@ -50,15 +55,16 @@ func (n numberOptions) String() string {
 
 func parseNumberOptions(s string) numberOptions {
 	f := strings.Split(s, "\t")
-	if len(f) != 16 {
+	if len(f) != 19 {
 		return defaultNumberOptions()
 	}
 	i := func(k int) int { v, _ := strconv.Atoi(f[k]); return v }
 	return numberOptions{tag: f[0], style: f[1], currency: f[2], currencyDisplay: f[3],
 		currencySign: f[4], unit: f[5], unitDisplay: f[6], useGrouping: f[7],
 		notation: f[8], compactDisplay: f[9], signDisplay: f[10],
-		digits: pluralOptions{minInt: i(11), minFrac: i(12), maxFrac: i(13),
-			minSig: i(14), maxSig: i(15)}}
+		roundingMode: f[11], roundingIncr: i(12), trailingZero: f[13],
+		digits: pluralOptions{minInt: i(14), minFrac: i(15), maxFrac: i(16),
+			minSig: i(17), maxSig: i(18)}}
 }
 
 // requireNumberFormat is RequireInternalSlot([[InitializedNumberFormat]]).
@@ -193,11 +199,45 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 		// significant-digit rule takes over.
 		maxFrac = 0
 	}
+	roundingIncrement, hasIncr, e := rt.intlNumberOption(options, "roundingIncrement", 1, 5000, 1)
+	if e != nil {
+		return n, e
+	}
+	if hasIncr && !intContains(validRoundingIncrements, roundingIncrement) {
+		return n, rt.rangeError("Invalid roundingIncrement")
+	}
+	n.roundingIncr = roundingIncrement
+	roundingMode, hasMode, e := rt.intlStringOption(options, "roundingMode", roundingModes)
+	if e != nil {
+		return n, e
+	}
+	if hasMode {
+		n.roundingMode = roundingMode
+	}
+	trailing, hasTrailing, e := rt.intlStringOption(options, "trailingZeroDisplay",
+		[]string{"auto", "stripIfInteger"})
+	if e != nil {
+		return n, e
+	}
+	if hasTrailing {
+		n.trailingZero = trailing
+	}
 	d, e := rt.intlDigitOptions(options, minFrac, maxFrac)
 	if e != nil {
 		return n, e
 	}
 	n.digits = d
+	// A rounding increment only makes sense at a fixed number of fraction
+	// digits: it says what the last place steps by, and with significant
+	// digits or an open-ended maximum there is no last place.
+	if n.roundingIncr != 1 {
+		if n.digits.maxSig > 0 {
+			return n, rt.typeError("roundingIncrement cannot be used with significant digits")
+		}
+		if n.digits.minFrac != n.digits.maxFrac {
+			return n, rt.rangeError("roundingIncrement requires minimumFractionDigits to equal maximumFractionDigits")
+		}
+	}
 
 	compactDisplay, hasCompact, e := rt.intlStringOption(options, "compactDisplay",
 		[]string{"short", "long"})
@@ -296,10 +336,15 @@ func numberParts(n numberOptions, li localeInfo, v float64) []numberPart {
 		if n.digits.maxSig > 0 {
 			intPart, frac = roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig)
 		} else {
-			intPart, frac = roundFraction(intPart, frac, n.digits.maxFrac)
+			intPart, frac = roundDecimal(intPart, frac, n.digits.maxFrac,
+				n.roundingMode, n.roundingIncr, neg)
+			// Trailing zeros beyond the minimum are not written; the minimum
+			// itself is, which is what minimumFractionDigits means.
+			frac = strings.TrimRight(frac, "0")
 			for len(frac) < n.digits.minFrac {
 				frac += "0"
 			}
+			frac = trimTrailingZeros(frac, n.trailingZero)
 		}
 		for len(intPart) < n.digits.minInt {
 			intPart = "0" + intPart
@@ -394,4 +439,36 @@ func (rt *Runtime) formatNumberParts(n numberOptions, li localeInfo, v float64) 
 		rt.arraySet(ao, uint32(i), o)
 	}
 	return arr
+}
+
+// intlNumberOption is GetNumberOption: a Number in [lo, hi], floored.
+func (rt *Runtime) intlNumberOption(options Value, name string, lo, hi, fallback int) (int, bool, *ThrowError) {
+	if options.IsUndefined() {
+		return fallback, false, nil
+	}
+	v, e := rt.getField(options, name)
+	if e != nil {
+		return 0, false, e
+	}
+	if v.IsUndefined() {
+		return fallback, false, nil
+	}
+	num, e := rt.toNumber(v)
+	if e != nil {
+		return 0, false, e
+	}
+	f := math.Floor(num)
+	if math.IsNaN(f) || f < float64(lo) || f > float64(hi) {
+		return 0, false, rt.rangeError("Value " + numberToString(num) + " out of range for " + name)
+	}
+	return int(f), true, nil
+}
+
+func intContains(xs []int, x int) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
 }
