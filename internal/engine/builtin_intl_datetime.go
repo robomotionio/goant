@@ -106,10 +106,10 @@ func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, req
 	d := dateTimeOptions{tag: defaultLocale, numbering: "latn", calendar: "gregory", comps: map[string]string{}}
 	tagHC := ""
 	if len(requested) > 0 {
-		d.tag = requested[0]
-		if t, ok := parseLangTag(requested[0]); ok {
+		d.tag = lookupMatcher(requested)
+		if t, ok := parseLangTag(d.tag); ok {
 			if v, has := t.uKeyword("ca"); has && v != "" {
-				d.calendar = v
+				d.calendar = canonicalCalendar(v)
 			}
 			if v, has := t.uKeyword("hc"); has && tagContains([]string{"h11", "h12", "h23", "h24"}, v) {
 				d.hourCycle, tagHC = v, v
@@ -130,7 +130,7 @@ func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, req
 		if !isUnicodeType(cal) {
 			return d, rt.rangeError("Invalid calendar: " + cal)
 		}
-		d.calendar = asciiLower(cal)
+		d.calendar = canonicalCalendar(asciiLower(cal))
 	}
 	ns, hasNS, e := rt.intlStringOption(options, "numberingSystem", nil)
 	if e != nil {
@@ -296,6 +296,18 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 		}
 		return name
 	case "era":
+		// The proleptic Gregorian calendar has no year zero: ISO year 0 is
+		// 1 BC, ISO -1 is 2 BC, and the era says which side of that the date
+		// falls on.
+		if t.Year() <= 0 {
+			switch style {
+			case "long":
+				return "Before Christ"
+			case "narrow":
+				return "B"
+			}
+			return "BC"
+		}
 		switch style {
 		case "long":
 			return "Anno Domini"
@@ -305,6 +317,12 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 		return "AD"
 	case "year":
 		y := t.Year()
+		// Counted from the era's own first year, so 1 BC is year 1 and not
+		// year 0 -- unless the calendar is ISO 8601, which has no eras and
+		// numbers straight through zero into the negatives.
+		if y <= 0 && d.calendar != "iso8601" {
+			y = 1 - y
+		}
 		if style == "2-digit" {
 			return two(((y % 100) + 100) % 100)
 		}
@@ -479,6 +497,9 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 	if d.dateStyle != "" || d.timeStyle != "" {
 		return d.styleParts(t)
 	}
+	if parts, ok := d.patternParts(t); ok {
+		return parts
+	}
 
 	wroteDate := false
 	if field("weekday") {
@@ -614,4 +635,122 @@ func (d dateTimeOptions) styleParts(t time.Time) []numberPart {
 		sub.comps["hour"], sub.comps["minute"] = "numeric", "2-digit"
 	}
 	return sub.dateTimeParts(t)
+}
+
+// patternParts renders the locale's own date and time patterns, and reports
+// whether they applied. They apply when the caller asked for exactly what
+// toLocaleDateString and toLocaleTimeString ask for by default -- a numeric
+// date, a numeric time, or both -- because that is the case the patterns are
+// FOR: every locale writes that date its own way, and building it out of
+// components would write all of them the American way.
+//
+// Anything else -- a named month, a weekday, a zone name, an hour cycle the
+// caller chose -- is assembled from the components instead.
+func (d dateTimeOptions) patternParts(t time.Time) ([]numberPart, bool) {
+	if d.dateStyle != "" || d.timeStyle != "" || d.calendar != "gregory" {
+		return nil, false
+	}
+	li, _ := lookupLocale(d.tag)
+	if d.hour12Set || (d.hourCycle != "" && d.hourCycle != li.hourCycle) {
+		return nil, false
+	}
+	want := func(names ...string) bool {
+		if len(d.comps) != len(names) {
+			return false
+		}
+		for _, n := range names {
+			if d.comps[n] != "numeric" {
+				return false
+			}
+		}
+		return true
+	}
+	switch {
+	case want("year", "month", "day"):
+		return d.expandParts(li, li.date, t), true
+	case want("hour", "minute", "second"):
+		return d.expandParts(li, li.time, t), true
+	case want("year", "month", "day", "hour", "minute", "second"):
+		date, clock := d.expandParts(li, li.date, t), d.expandParts(li, li.time, t)
+		var out []numberPart
+		for _, piece := range splitGlue(li.glue) {
+			switch piece {
+			case "{d}":
+				out = append(out, date...)
+			case "{t}":
+				out = append(out, clock...)
+			default:
+				out = append(out, numberPart{"literal", piece})
+			}
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// splitGlue cuts the date-time glue pattern into its two placeholders and the
+// literals around them.
+func splitGlue(glue string) []string {
+	var out []string
+	rest := glue
+	for rest != "" {
+		i := strings.IndexAny(rest, "{")
+		if i < 0 || i+3 > len(rest) {
+			out = append(out, rest)
+			break
+		}
+		if i > 0 {
+			out = append(out, rest[:i])
+		}
+		out = append(out, rest[i:i+3])
+		rest = rest[i+3:]
+	}
+	return out
+}
+
+// patternFields maps a pattern token to the part type it produces.
+var patternFields = map[string]string{
+	"Y": "year", "M": "month", "MM": "month", "D": "day", "DD": "day",
+	"H": "hour", "HH": "hour", "m": "minute", "mm": "minute",
+	"s": "second", "ss": "second", "P": "dayPeriod",
+}
+
+// expandParts is localeInfo.expand with the spans kept apart, so that
+// formatToParts can say which is which.
+func (d dateTimeOptions) expandParts(li localeInfo, pattern string, t time.Time) []numberPart {
+	var out []numberPart
+	lit := func(s string) {
+		if s != "" {
+			out = append(out, numberPart{"literal", s})
+		}
+	}
+	for i := 0; i < len(pattern); {
+		if pattern[i] != '{' {
+			j := strings.IndexByte(pattern[i:], '{')
+			if j < 0 {
+				lit(pattern[i:])
+				break
+			}
+			lit(pattern[i : i+j])
+			i += j
+			continue
+		}
+		j := strings.IndexByte(pattern[i:], '}')
+		if j < 0 {
+			lit(pattern[i:])
+			break
+		}
+		tok := pattern[i+1 : i+j]
+		text := li.token(tok, t)
+		if typ, ok := patternFields[tok]; ok && text != "" {
+			if typ != "dayPeriod" {
+				text = mapDigits(text, d.numbering)
+			}
+			out = append(out, numberPart{typ, text})
+		} else {
+			lit(text)
+		}
+		i += j + 1
+	}
+	return out
 }

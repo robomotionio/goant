@@ -82,7 +82,13 @@ func (rt *Runtime) initIntl() {
 					return mkundef(), e
 				}
 			}
-			if !requireNew && !rt.constructing() && this.IsObjectType() {
+			// The legacy chain -- `Intl.X.call(obj)` hanging the new instance
+			// off obj and answering obj -- belongs to NumberFormat and
+			// DateTimeFormat alone. Collator is callable as a function too, but
+			// its constructor has no such step: it always answers the new
+			// collator.
+			if tagContains([]string{"NumberFormat", "DateTimeFormat"}, name) &&
+				!rt.constructing() && this.IsObjectType() {
 				if has, _ := rt.ordinaryHasInstance(ctorSelf, this); has {
 					if o := rt.objPtr(this); o != nil {
 						o.defineOwnSymbol(legacySym.handle(), inst, 0)
@@ -250,11 +256,11 @@ func (rt *Runtime) initIntl() {
 			// Both sets are reported when both are in use, which is what a
 			// rounding priority other than "auto" means -- including the one
 			// compact notation picks for itself.
-			if n.digits.maxSig == 0 || n.compactAuto {
+			if n.roundingType != "significantDigits" {
 				oo.defineOwn("minimumFractionDigits", mknum(float64(n.digits.minFrac)), attrDefault)
 				oo.defineOwn("maximumFractionDigits", mknum(float64(n.digits.maxFrac)), attrDefault)
 			}
-			if n.digits.maxSig > 0 {
+			if n.roundingType != "fractionDigits" {
 				oo.defineOwn("minimumSignificantDigits", mknum(float64(n.digits.minSig)), attrDefault)
 				oo.defineOwn("maximumSignificantDigits", mknum(float64(n.digits.maxSig)), attrDefault)
 			}
@@ -428,11 +434,8 @@ func (rt *Runtime) initIntl() {
 		if e != nil {
 			return e
 		}
-		p, e := rt.intlDigitOptions(options, 0, 3)
+		p, e := rt.intlDigitOptions(options, 0, 3, notation)
 		if e != nil {
-			return e
-		}
-		if e := rt.intlRoundingOptions(&p, options); e != nil {
 			return e
 		}
 		p.ordinal = kind == "ordinal"
@@ -514,18 +517,21 @@ func (rt *Runtime) initIntl() {
 			oo.defineOwn("type", rt.newString(kind), attrDefault)
 			oo.defineOwn("notation", rt.newString(p.notation), attrDefault)
 			oo.defineOwn("minimumIntegerDigits", mknum(float64(p.minInt)), attrDefault)
-			if p.maxSig > 0 {
-				oo.defineOwn("minimumSignificantDigits", mknum(float64(p.minSig)), attrDefault)
-				oo.defineOwn("maximumSignificantDigits", mknum(float64(p.maxSig)), attrDefault)
-			} else {
+			// Both sets are reported when both are in use, which is what a
+			// rounding type other than one of the two plain ones means.
+			if p.roundingType != "significantDigits" {
 				oo.defineOwn("minimumFractionDigits", mknum(float64(p.minFrac)), attrDefault)
 				oo.defineOwn("maximumFractionDigits", mknum(float64(p.maxFrac)), attrDefault)
+			}
+			if p.roundingType != "fractionDigits" {
+				oo.defineOwn("minimumSignificantDigits", mknum(float64(p.minSig)), attrDefault)
+				oo.defineOwn("maximumSignificantDigits", mknum(float64(p.maxSig)), attrDefault)
 			}
 			oo.defineOwn("pluralCategories",
 				rt.newArrayOfStrings(p.categories(pluralTag(p.tag))), attrDefault)
 			oo.defineOwn("roundingIncrement", mknum(float64(p.roundingIncr)), attrDefault)
 			oo.defineOwn("roundingMode", rt.newString(p.roundingMode), attrDefault)
-			oo.defineOwn("roundingPriority", rt.newString(p.priority), attrDefault)
+			oo.defineOwn("roundingPriority", rt.newString(p.computed), attrDefault)
 			oo.defineOwn("trailingZeroDisplay", rt.newString(p.trailingZero), attrDefault)
 			if p.notation == "compact" {
 				oo.defineOwn("compactDisplay", rt.newString(p.compact), attrDefault)
@@ -652,7 +658,14 @@ func (rt *Runtime) initIntl() {
 			if !ok {
 				return mkundef(), rt.rangeError("Invalid " + d.kind + " code: " + rt.strGo(s))
 			}
-			// No name data, so every lookup misses and fallback decides.
+			// The calendars are the one kind this engine can name, because
+			// it is the one kind whose set it fixes. Everything else misses
+			// -- there is no per-locale name data -- and fallback decides.
+			if d.kind == "calendar" {
+				if name, has := calendarDisplayNames[code]; has {
+					return rt.newString(name), nil
+				}
+			}
 			if d.fallback == "none" {
 				return mkundef(), nil
 			}
