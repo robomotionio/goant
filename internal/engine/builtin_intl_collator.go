@@ -107,7 +107,7 @@ func stripPunctuation(s string) string {
 
 // requireCollator is RequireInternalSlot([[InitializedCollator]]).
 func (rt *Runtime) requireCollator(this Value) (collatorOptions, *ThrowError) {
-	this = rt.unwrapLegacyIntl(this)
+	this = rt.unwrapLegacyIntl(this, slotIntlCollatorOpts)
 	if o := rt.objPtr(this); o != nil {
 		if v := o.getSlot(slotIntlCollatorOpts); v.IsString() {
 			return parseCollatorOptions(rt.strGo(v)), nil
@@ -119,12 +119,20 @@ func (rt *Runtime) requireCollator(this Value) (collatorOptions, *ThrowError) {
 // unwrapLegacyIntl follows %IntlLegacyConstructedSymbol% when it is there:
 // an object the constructor was CALLED on carries the real formatter under it,
 // and every method has to look through.
-func (rt *Runtime) unwrapLegacyIntl(this Value) Value {
+//
+// The read is an ordinary [[Get]] rather than an own-property lookup, because
+// the specification says so and a Proxy can see the difference -- a test wraps
+// the object and asserts the symbol went through its trap.
+func (rt *Runtime) unwrapLegacyIntl(this Value, brand internalSlot) Value {
 	o := rt.objPtr(this)
 	if o == nil || rt.intlLegacySym == 0 {
 		return this
 	}
-	if v, ok := o.getOwnSymbol(rt.intlLegacySym.handle()); ok && v.IsObjectType() {
+	if o.getSlot(brand).IsString() {
+		return this // already the formatter itself
+	}
+	v, e := rt.getFieldSymbol(this, rt.intlLegacySym.handle())
+	if e == nil && v.IsObjectType() {
 		return v
 	}
 	return this

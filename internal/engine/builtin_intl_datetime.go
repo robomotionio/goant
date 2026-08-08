@@ -84,7 +84,7 @@ func parseDateTimeOptions(s string) dateTimeOptions {
 }
 
 func (rt *Runtime) requireDateTimeFormat(this Value) (dateTimeOptions, *ThrowError) {
-	this = rt.unwrapLegacyIntl(this)
+	this = rt.unwrapLegacyIntl(this, slotIntlDateTimeOpts)
 	if o := rt.objPtr(this); o != nil {
 		if v := o.getSlot(slotIntlDateTimeOpts); v.IsString() {
 			return parseDateTimeOptions(rt.strGo(v)), nil
