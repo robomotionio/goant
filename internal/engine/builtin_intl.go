@@ -19,13 +19,24 @@ func (rt *Runtime) initIntl() {
 	// `new` (both yield an instance), resolving its locales argument, with the
 	// given prototype methods. initOpts, where a service reads anything out of
 	// the options bag, runs after the locale is resolved and may throw.
-	defineService := func(name string, initOpts func(inst *object, options Value) *ThrowError, methods func(po *object)) {
+	//
+	// requireNew separates the three constructors that predate ES2015 -- which
+	// are specified to work without `new`, and cannot stop doing so -- from the
+	// ones added since, which throw.
+	defineService := func(name string, requireNew bool, initOpts func(inst *object, options Value, requested []string) *ThrowError, methods func(po *object)) {
 		proto := rt.newObject(rt.objectProto)
 		po := rt.objPtr(proto)
 		ctor := rt.newNativeFunc(name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			_, tag, e := rt.resolveLocaleArgTag(arg(args, 0))
+			if requireNew && !rt.constructing() {
+				return mkundef(), rt.typeError("Constructor Intl." + name + " requires 'new'")
+			}
+			requested, e := rt.canonicalizeLocaleList(arg(args, 0))
 			if e != nil {
 				return mkundef(), e
+			}
+			tag := defaultLocale
+			if len(requested) > 0 {
+				_, tag = lookupLocale(requested[0])
 			}
 			// A fresh instance whose [[Prototype]] honours new.target (both `new
 			// Intl.X()` and `Intl.X()` return an instance). The tag it resolved to
@@ -34,7 +45,7 @@ func (rt *Runtime) initIntl() {
 			insto := rt.objPtr(inst)
 			insto.setSlot(slotIntlLocale, rt.newString(tag))
 			if initOpts != nil {
-				if e := initOpts(insto, arg(args, 1)); e != nil {
+				if e := initOpts(insto, arg(args, 1), requested); e != nil {
 					return mkundef(), e
 				}
 			}
@@ -56,7 +67,7 @@ func (rt *Runtime) initIntl() {
 		io.defineOwn(name, ctor, attrWritable|attrConfigurable)
 	}
 
-	defineService("Collator", nil, func(po *object) {
+	defineService("Collator", false, nil, func(po *object) {
 		// compare is an accessor returning a bound comparison function.
 		getter := rt.newNativeFunc("get compare", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			return rt.newNativeFunc("", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -67,7 +78,7 @@ func (rt *Runtime) initIntl() {
 		})
 		po.defineAccessor("compare", getter, mkundef(), true, false, attrConfigurable)
 	})
-	defineService("NumberFormat", nil, func(po *object) {
+	defineService("NumberFormat", false, nil, func(po *object) {
 		getter := rt.newNativeFunc("get format", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			li := rt.intlLocaleOf(this)
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -80,7 +91,7 @@ func (rt *Runtime) initIntl() {
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
 	})
-	defineService("DateTimeFormat", func(inst *object, options Value) *ThrowError {
+	defineService("DateTimeFormat", false, func(inst *object, options Value, _ []string) *ThrowError {
 		// [[TimeZone]] is fixed at construction: an unknown zone is a RangeError
 		// here rather than on some later format() call in another file.
 		id, e := rt.optionTimeZone(options)
@@ -110,6 +121,128 @@ func (rt *Runtime) initIntl() {
 			}), nil
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
+	})
+
+	defineService("PluralRules", true, func(inst *object, options Value, requested []string) *ThrowError {
+		// localeMatcher is read and discarded: both matchers answer the same
+		// here, but reading it is observable through a getter on the bag.
+		if _, _, e := rt.intlStringOption(options, "localeMatcher", []string{"lookup", "best fit"}); e != nil {
+			return e
+		}
+		kind, _, e := rt.intlStringOption(options, "type", []string{"cardinal", "ordinal"})
+		if e != nil {
+			return e
+		}
+		notation, _, e := rt.intlStringOption(options, "notation",
+			[]string{"standard", "scientific", "engineering", "compact"})
+		if e != nil {
+			return e
+		}
+		p, e := rt.intlDigitOptions(options, 0, 3)
+		if e != nil {
+			return e
+		}
+		compact, _, e := rt.intlStringOption(options, "compactDisplay", []string{"short", "long"})
+		if e != nil {
+			return e
+		}
+		p.ordinal = kind == "ordinal"
+		if notation != "" {
+			p.notation = notation
+		}
+		if p.notation == "compact" {
+			p.compact = "short"
+			if compact != "" {
+				p.compact = compact
+			}
+		}
+		// The plural rules cover every CLDR locale, so the tag they match on is
+		// the one that was asked for -- not the one localeTable fell back to,
+		// which knows only about the locales this engine can FORMAT. Arabic has
+		// six plural categories and no entry in that table.
+		if len(requested) > 0 {
+			p.tag = requested[0]
+		}
+		inst.setSlot(slotIntlPluralOpts, rt.newString(p.String()))
+		return nil
+	}, func(po *object) {
+		rt.defMethod(po, "select", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			n, e := rt.toNumber(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			p, e2 := rt.requirePluralRules(this)
+			if e2 != nil {
+				return mkundef(), e2
+			}
+			return rt.newString(p.selectForm(pluralTag(p.tag), n)), nil
+		})
+		rt.defMethod(po, "selectRange", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			if arg(args, 0).IsUndefined() || arg(args, 1).IsUndefined() {
+				return mkundef(), rt.typeError("selectRange requires two numbers")
+			}
+			lo, e := rt.toNumber(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			hi, e := rt.toNumber(arg(args, 1))
+			if e != nil {
+				return mkundef(), e
+			}
+			if math.IsNaN(lo) || math.IsNaN(hi) {
+				return mkundef(), rt.rangeError("selectRange bounds must not be NaN")
+			}
+			// CLDR carries a separate table of range rules that x/text does not
+			// expose. Where both ends agree the range agrees with them, which is
+			// what the range rules say for most locales; where they differ this
+			// answers "other", which is the fallback the rules themselves use.
+			p, e2 := rt.requirePluralRules(this)
+			if e2 != nil {
+				return mkundef(), e2
+			}
+			tag := pluralTag(p.tag)
+			a, b := p.selectForm(tag, lo), p.selectForm(tag, hi)
+			if a == b {
+				return rt.newString(a), nil
+			}
+			return rt.newString("other"), nil
+		})
+		// The key order is the specification's and a test reads it back with
+		// Reflect.ownKeys. Note there is no numberingSystem here, which is why
+		// this does not go through intlResolvedOptions.
+		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			p, e := rt.requirePluralRules(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			o := rt.newPlainObject()
+			oo := rt.objPtr(o)
+			kind := "cardinal"
+			if p.ordinal {
+				kind = "ordinal"
+			}
+			oo.defineOwn("locale", rt.newString(p.tag), attrDefault)
+			oo.defineOwn("type", rt.newString(kind), attrDefault)
+			oo.defineOwn("notation", rt.newString(p.notation), attrDefault)
+			oo.defineOwn("minimumIntegerDigits", mknum(float64(p.minInt)), attrDefault)
+			if p.maxSig > 0 {
+				oo.defineOwn("minimumSignificantDigits", mknum(float64(p.minSig)), attrDefault)
+				oo.defineOwn("maximumSignificantDigits", mknum(float64(p.maxSig)), attrDefault)
+			} else {
+				oo.defineOwn("minimumFractionDigits", mknum(float64(p.minFrac)), attrDefault)
+				oo.defineOwn("maximumFractionDigits", mknum(float64(p.maxFrac)), attrDefault)
+			}
+			oo.defineOwn("pluralCategories",
+				rt.newArrayOfStrings(p.categories(pluralTag(p.tag))), attrDefault)
+			oo.defineOwn("roundingIncrement", mknum(1), attrDefault)
+			oo.defineOwn("roundingMode", rt.newString("halfExpand"), attrDefault)
+			oo.defineOwn("roundingPriority", rt.newString("auto"), attrDefault)
+			oo.defineOwn("trailingZeroDisplay", rt.newString("auto"), attrDefault)
+			if p.notation == "compact" {
+				oo.defineOwn("compactDisplay", rt.newString(p.compact), attrDefault)
+			}
+			return o, nil
+		})
 	})
 
 	rt.defMethod(io, "getCanonicalLocales", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -161,4 +294,15 @@ func (rt *Runtime) intlResolvedOptions(this Value, service string) Value {
 		oo.defineOwn("hourCycle", rt.newString(li.hourCycle), attrDefault)
 	}
 	return o
+}
+
+// intlLocaleTag is the raw tag an instance resolved to, for the services whose
+// data comes from somewhere other than localeTable.
+func (rt *Runtime) intlLocaleTag(this Value) string {
+	if o := rt.objPtr(this); o != nil {
+		if v := o.getSlot(slotIntlLocale); v.IsString() {
+			return rt.strGo(v)
+		}
+	}
+	return defaultLocale
 }

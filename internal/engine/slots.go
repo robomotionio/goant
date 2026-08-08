@@ -55,6 +55,7 @@ const (
 	slotIntlLocale      // an Intl service's resolved locale tag (a String)
 	slotIntlTimeZone    // a DateTimeFormat's [[TimeZone]] identifier (a String)
 	slotLocaleTag       // an Intl.Locale's [[Locale]] tag (a String), also its brand
+	slotIntlPluralOpts  // a PluralRules' type and digit options (a String; see builtin_intl_plural.go)
 	slotMax             = 255
 )
 
