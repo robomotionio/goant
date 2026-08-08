@@ -350,3 +350,22 @@ Each stage is finished when:
    move ECMA-262;
 3. the unit suite passes with the tier off, on, and on at threshold 1;
 4. the differential fuzzer finds no disagreement.
+
+---
+
+## Running the suite
+
+Two environment settings, for the same reason: a conformance run must not
+depend on the machine it happens to be on.
+
+- `TZ=UTC`, as `conformance/README` already says, so the host's zone does not
+  reach `Date`.
+- `ZONEINFO` pointing at a full IANA build. Distributions differ in *how* they
+  build tzdata, not just in which release: Ubuntu ships the legacy zone names
+  unmerged, so `CET` is its own zone rather than a link to `Europe/Brussels`,
+  and `intl402/Temporal/ZonedDateTime/links.js` asks the two to be equal. Go's
+  bundled `$GOROOT/lib/time/zoneinfo.zip` merges `CET` and separates
+  `Africa/Asmera`; a distribution that merges both — Arch's, at time of
+  writing — passes the file whole. goant itself follows the host, which is the
+  ordinary Go behaviour and the right one for a program whose zone data should
+  age with the machine.
