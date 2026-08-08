@@ -115,11 +115,15 @@ func isWordChar(r rune) bool {
 func segmentEnd(units []rune, i int, granularity string) (int, bool) {
 	switch granularity {
 	case "word":
-		r, w := codePointAt(units, i)
+		// A word is made of grapheme clusters, not code points: a skin tone
+		// or a combining mark belongs to whatever it follows, word or not.
+		r, _ := codePointAt(units, i)
+		w := graphemeEnd(units, i) - i
 		if isWordChar(r) {
 			j, prev := i+w, r
 			for j < len(units) {
-				r2, w2 := codePointAt(units, j)
+				r2, _ := codePointAt(units, j)
+				w2 := graphemeEnd(units, j) - j
 				if isWordChar(r2) {
 					j, prev = j+w2, r2
 					continue
@@ -147,11 +151,11 @@ func segmentEnd(units []rune, i int, granularity string) (int, bool) {
 		if unicode.IsSpace(r) {
 			j := i + w
 			for j < len(units) {
-				r2, w2 := codePointAt(units, j)
+				r2, _ := codePointAt(units, j)
 				if !unicode.IsSpace(r2) {
 					break
 				}
-				j += w2
+				j = graphemeEnd(units, j)
 			}
 			return j, false
 		}
@@ -180,42 +184,47 @@ func segmentEnd(units []rune, i int, granularity string) (int, bool) {
 		return j, false
 
 	default: // grapheme
-		r, w := codePointAt(units, i)
-		j := i + w
-		if r == '\r' && j < len(units) && units[j] == '\n' {
-			return j + 1, false
-		}
-		if isRegionalIndicator(r) && j < len(units) {
-			if r2, w2 := codePointAt(units, j); isRegionalIndicator(r2) {
-				j += w2
-			}
-		}
-		// A Hangul syllable written as jamo is one grapheme: leading
-		// consonants, then vowels, then trailing consonants, in that order.
-		for state := hangulClass(r); state != hangulNone && j < len(units); {
-			r2, w2 := codePointAt(units, j)
-			next := hangulClass(r2)
-			if !hangulJoins(state, next) {
-				break
-			}
-			j += w2
-			state = next
-		}
-		for j < len(units) {
-			r2, w2 := codePointAt(units, j)
-			if !isExtender(r2) {
-				break
-			}
-			j += w2
-			// A ZWJ joins whatever follows it, however unrelated it looks:
-			// that is how a family emoji is one grapheme.
-			if r2 == 0x200D && j < len(units) {
-				_, w3 := codePointAt(units, j)
-				j += w3
-			}
-		}
-		return j, false
+		return graphemeEnd(units, i), false
 	}
+}
+
+// graphemeEnd is the index one past the grapheme cluster that starts at i.
+func graphemeEnd(units []rune, i int) int {
+	r, w := codePointAt(units, i)
+	j := i + w
+	if r == '\r' && j < len(units) && units[j] == '\n' {
+		return j + 1
+	}
+	if isRegionalIndicator(r) && j < len(units) {
+		if r2, w2 := codePointAt(units, j); isRegionalIndicator(r2) {
+			j += w2
+		}
+	}
+	// A Hangul syllable written as jamo is one grapheme: leading consonants,
+	// then vowels, then trailing consonants, in that order.
+	for state := hangulClass(r); state != hangulNone && j < len(units); {
+		r2, w2 := codePointAt(units, j)
+		next := hangulClass(r2)
+		if !hangulJoins(state, next) {
+			break
+		}
+		j += w2
+		state = next
+	}
+	for j < len(units) {
+		r2, w2 := codePointAt(units, j)
+		if !isExtender(r2) {
+			break
+		}
+		j += w2
+		// A ZWJ joins whatever follows it, however unrelated it looks: that is
+		// how a family emoji is one grapheme.
+		if r2 == 0x200D && j < len(units) {
+			_, w3 := codePointAt(units, j)
+			j += w3
+		}
+	}
+	return j
 }
 
 // segmentAt finds the segment containing the code-unit index n, by walking the

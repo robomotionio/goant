@@ -255,15 +255,18 @@ func (rt *Runtime) supportedValuesOf(keyv Value) (Value, *ThrowError) {
 	return mkundef(), rt.rangeError("Invalid key: " + rt.strGo(s))
 }
 
+// zeroOffsetLinks are the spellings of UTC that are not UTC.
+var zeroOffsetLinks = []string{"Etc/GMT", "Etc/GMT0", "Etc/UTC", "GMT", "GMT0"}
+
 // availableTimeZones is the identifier set of intl_timezone.go, sorted.
 var availableTimeZones = sync.OnceValue(func() []string {
 	out := make([]string, 0, len(zoneDisplayNames))
 	for id := range zoneDisplayNames {
-		// Etc/GMT, Etc/UTC and GMT are the three non-canonical spellings of
-		// UTC. A formatter asked for one of them keeps it -- the identifier
-		// is the one that was requested, here as everywhere -- but a list of
-		// CANONICAL identifiers carries the zone once, as UTC.
-		if id == "Etc/UTC" || id == "Etc/GMT" || id == "GMT" {
+		// The zero-offset links are all the same zone as UTC, and a list of
+		// CANONICAL identifiers carries it once. A formatter asked for one of
+		// them still keeps it: the identifier reported is the one that was
+		// requested, here as everywhere.
+		if tagContains(zeroOffsetLinks, id) {
 			continue
 		}
 		out = append(out, id)
