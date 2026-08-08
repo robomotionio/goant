@@ -52,10 +52,22 @@ func leapMonthFallback(id, code string) (string, bool) {
 	if !ok || !leap {
 		return "", false
 	}
-	if id == "hebrew" {
+	switch id {
+	case "hebrew":
+		// The only leap month the Hebrew calendar has is Adar I.
+		if base != 5 {
+			return "", false
+		}
 		return simpleMonthCode(base + 1), true
+	case "chinese", "dangi":
+		if base < 1 || base > 12 {
+			return "", false
+		}
+		return simpleMonthCode(base), true
 	}
-	return simpleMonthCode(base), true
+	// Every other calendar has the same months every year, so a leap month
+	// code names nothing at all rather than something to constrain.
+	return "", false
 }
 
 // calendarHasEras reports whether a calendar counts its years from named eras,
