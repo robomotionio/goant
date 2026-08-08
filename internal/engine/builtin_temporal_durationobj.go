@@ -5,6 +5,7 @@ package engine
 import (
 	"math"
 	"math/big"
+	"strings"
 )
 
 // defaultLargestUnit is the largest unit a duration actually uses, which is
@@ -341,12 +342,35 @@ func (rt *Runtime) initTemporalDuration(ns *object) {
 		return rt.newString(formatTemporalDuration(tDuration(o), -1)), nil
 	})
 
+	// A duration reads in words rather than in ISO 8601, which is what
+	// Intl.DurationFormat is for.
 	rt.defMethod(po, "toLocaleString", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o, e := rt.requireTemporal(this, kindDuration)
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(formatTemporalDuration(tDuration(o), -1)), nil
+		requested, e := rt.canonicalizeLocaleList(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		opts := arg(args, 1)
+		if !opts.IsUndefined() && !opts.IsObjectType() {
+			return mkundef(), rt.typeError("options must be an object")
+		}
+		df, e := rt.initDurationOptions(opts, requested)
+		if e != nil {
+			return mkundef(), e
+		}
+		tag := defaultLocale
+		if len(requested) > 0 {
+			_, tag = lookupLocale(requested[0])
+		}
+		li, _ := lookupLocale(tag)
+		var b strings.Builder
+		for _, p := range rt.durationParts(df, li, tDuration(o).fields()) {
+			b.WriteString(p.val)
+		}
+		return rt.newString(b.String()), nil
 	})
 }
 
