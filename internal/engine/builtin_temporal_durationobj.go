@@ -412,6 +412,9 @@ func (rt *Runtime) roundDuration(d durationRec, rel relativeToRec, s differenceS
 		}
 		from := isoDateTimeRec{rel.date, midnightTime()}
 		to := isoDateTimeRec{target, t}
+		if e := rt.checkMeasurable(from, to); e != nil {
+			return durationRec{}, e
+		}
 		return rt.differencePlainDateTimeWithRounding(from, to, rel.calendar, s)
 	}
 	if isCalendarUnit(defaultLargestUnit(d)) || isCalendarUnit(s.largest) || isCalendarUnit(s.smallest) {
@@ -459,6 +462,9 @@ func (rt *Runtime) totalDuration(d durationRec, rel relativeToRec, unit int) (*b
 		}
 		from := isoDateTimeRec{rel.date, midnightTime()}
 		to := isoDateTimeRec{target, t}
+		if e := rt.checkMeasurable(from, to); e != nil {
+			return nil, e
+		}
 		diff := rt.differenceISODateTime(from, to, rel.calendar, unit)
 		return rt.totalRelativeDuration(diff, nil, isoDateTimeToEpochNanoseconds(to, 0), from,
 			"", rel.calendar, unit)
@@ -522,4 +528,20 @@ func (rt *Runtime) durationTotalNs(d durationRec, rel relativeToRec) (*big.Int, 
 		}
 	}
 	return d.toInternal24().time, nil
+}
+
+// checkMeasurable reports whether a stretch between two local date-times can be
+// measured at all. Measuring it means reading both ends as instants, and
+// midnight on the earliest date there is falls a day before the earliest
+// instant -- so a perfectly good PlainDate is not always a place to measure
+// from. A stretch of no length is never measured, so it is never refused: that
+// is the early return a zero duration takes.
+func (rt *Runtime) checkMeasurable(from, to isoDateTimeRec) *ThrowError {
+	if compareISODateTime(from, to) == 0 {
+		return nil
+	}
+	if !isoDateTimeWithinLimits(from) || !isoDateTimeWithinLimits(to) {
+		return rt.rangeError("date is outside the representable range")
+	}
+	return nil
 }

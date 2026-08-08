@@ -687,6 +687,22 @@ func parseDateTimeUTCOffset(s string) (int64, bool) {
 // offset: whether to believe the offset, the zone, or neither.
 func (rt *Runtime) interpretISODateTimeOffset(dt isoDateTimeRec, hasOffset bool,
 	offsetNs int64, tz, disambiguation, offsetOpt string, matchMinutes bool) (*big.Int, *ThrowError) {
+	ns, e := rt.interpretISODateTimeOffsetRaw(dt, hasOffset, offsetNs, tz,
+		disambiguation, offsetOpt, matchMinutes)
+	if e != nil {
+		return nil, e
+	}
+	// Whatever route it came by, the answer has to be an instant that exists.
+	// A wall clock an hour past the last one, read at an offset of fifty-nine
+	// minutes, lands a minute beyond the end of time.
+	if !epochNsWithinLimits(ns) {
+		return nil, rt.rangeError("instant is outside the representable range")
+	}
+	return ns, nil
+}
+
+func (rt *Runtime) interpretISODateTimeOffsetRaw(dt isoDateTimeRec, hasOffset bool,
+	offsetNs int64, tz, disambiguation, offsetOpt string, matchMinutes bool) (*big.Int, *ThrowError) {
 	z, ok := temporalZoneFor(tz)
 	if !ok {
 		return nil, rt.rangeError("unknown time zone: " + tz)
@@ -705,7 +721,17 @@ func (rt *Runtime) interpretISODateTimeOffset(dt isoDateTimeRec, hasOffset bool,
 		}
 		return ns, nil
 	}
-	// "prefer" and "reject" both look for an instant whose offset matches.
+	// "prefer" and "reject" both look for an instant whose offset matches,
+	// which means reading the wall clock as an instant in its own right in
+	// order to ask the zone what it was at. A wall clock before the first
+	// representable instant cannot be read that way, even where the offset
+	// would carry the result back inside: "-271821-04-19T23:00-01:00" names
+	// the earliest instant there is and still asks a question about an hour
+	// that does not exist. The far end stays as it is, because the suite takes
+	// a wall clock most of a day past the last instant and expects an answer.
+	if isoDateTimeToEpochNanoseconds(dt, 0).Cmp(nsMinInstant) < 0 {
+		return nil, rt.rangeError("this wall clock is before the representable range")
+	}
 	for _, cand := range z.possibleInstants(dt) {
 		candOffset := z.offsetNs(cand)
 		if candOffset == offsetNs {
@@ -887,6 +913,9 @@ func (rt *Runtime) getRelativeTo(opts Value) (relativeToRec, *ThrowError) {
 		return r, rt.rangeError("unknown calendar in " + s)
 	}
 	iso := isoDateRec{p.year, p.month, p.day}
+	if !isoDateWithinLimits(iso) {
+		return r, rt.rangeError("date is outside the representable range")
+	}
 	if !p.hasTZ {
 		if p.z {
 			return r, rt.rangeError("relativeTo may not carry a UTC designator without a zone")
