@@ -381,8 +381,35 @@ goant's remaining cost is the per-match glue rather than the matcher itself.
 Against the JIT engines the gap runs from 23× (Splay, which is dominated by
 allocation and GC) to 430× (DeltaBlue, which is polymorphic dispatch a JIT can
 inline and an interpreter cannot). That is the honest shape of an interpreter
-against a tiered JIT, and it is why the compute-bound case is the one place
-goant should not be chosen today.
+against a tiered JIT.
+
+#### With the compiled tier on
+
+The table above is the interpreter, which is what runs unless a host asks for
+[the tier](#the-compiled-tier). Turned on, measured as a within-machine A/B on
+one idle 8-core VM — so these are ratios against the same binary on the same
+box, not entries in the table above, which was measured elsewhere:
+
+| | tier on vs off |
+| --- | ---: |
+| asm.js-shaped (zlib, mandreel, gbemu) | **6.5×** |
+| the other twelve | **2.6×** |
+| all fifteen | **3.1×** |
+
+Reported split because the three asm.js workloads are emscripten output over
+typed arrays, which is the shape a template JIT does best on and not what most
+hand-written JavaScript looks like. `code-load` is 0.93× — the tier makes it
+slightly worse, which is what a benchmark that measures parsing and compiling
+rather than running should do.
+
+On the workload this engine was actually built for — short flows on a pooled
+`Runtime`, with an `Invocation` per run — it measured **2.9×**, and the default
+threshold needed no tuning.
+
+Multiply through and the distance to the JIT engines becomes roughly 8× to 140×
+rather than 23× to 430×. Still an order of magnitude, and still the reason to
+reach for a JIT engine when the work is genuinely compute-bound — but no longer
+the two orders it was.
 
 On tight-loop microbenchmarks (`./goant-bench`, our own workloads rather than a
 neutral suite) goja is ahead of goant on most, by roughly 1.3–1.8×. Octane is
@@ -488,6 +515,44 @@ Compile once, run many:
 prog, err := rt.Compile("transform.js", src)
 v, err := rt.RunProgram(prog)
 ```
+
+### The compiled tier
+
+Off by default. A function entered often enough is compiled to machine code and
+run natively from then on; everything the compiler declines keeps interpreting,
+so this changes how fast a program runs and not what it computes.
+
+```go
+rt := goant.New(goant.WithJIT(true))
+
+rt.SetJIT(false)   // stops compiling AND stops entering compiled code
+rt.SetJIT(true)    // and back
+rt.JITEnabled()
+```
+
+It is per `Runtime`, not per process. A host does not have one workload — the
+tier is worth having for a long numeric flow and worth nothing for a script that
+runs once — and both usually run in the same binary. `GOANT_JIT=1` sets the
+default for Runtimes created afterwards, which is a convenience for benchmarking
+rather than the way a program should decide.
+
+`SetJIT(false)` is a kill switch rather than a preference: it stops this Runtime
+entering code it has **already** compiled, so a host that sees trouble can turn
+the tier off on a live Runtime and have the next call interpret. No restart, and
+no effect on any other Runtime.
+
+Executable memory is reported apart from the heap, because the memory limit does
+not cover it:
+
+```go
+s := rt.Stats()
+s.Bytes                    // the JavaScript heap — what WithMemoryLimit bounds
+s.CodeBytes, s.CodeBlocks  // executable memory, process-wide, bounded by nothing
+```
+
+Compiled code is released when the function that owns it is collected, so this
+tracks how much distinct code is live rather than how long the process has been
+up. It is still worth watching: a limit set on the heap says nothing about it.
 
 ### Values
 
@@ -784,12 +849,23 @@ can move in one commit and modernise afterwards.
 
 Working, and in production for Function-node scripts. What is not there yet:
 
-- **JIT.** There is a compiled tier, on amd64 and arm64, and it is not on by
-  default: `GOANT_JIT=1` turns it on. It is a baseline compiler — one template
-  per bytecode, inline caches, no type feedback and no inlining — and on Octane
-  it is worth between nothing and a factor of two depending on the workload.
-  What it does not have is the optimising tier the JIT engines in the
-  [Octane table](#octane-20) are, which is most of the distance to them.
+- **JIT.** There is a [compiled tier](#the-compiled-tier), on amd64 and arm64,
+  and it is not on by default — `goant.WithJIT(true)` turns it on per Runtime.
+  It is a baseline compiler: one template per bytecode, inline caches, per-site
+  type feedback for element access, compiled calls, and no inlining. Measured at
+  3.1× on Octane and 2.9× on pooled short flows. What it does not have is the
+  optimising tier the JIT engines in the [Octane table](#octane-20) are, which is
+  most of the remaining distance to them.
+
+  It is off by default because "safe for a host that opts in and watches it" is
+  a different claim from "safe for everyone on upgrade". What it has been put
+  through: differential fuzzing against the interpreter on four platforms, with
+  every generated program run interpreted, compiled, and compiled-with-a-deopt
+  and the three answers compared; Test262 and mjsunit with the tier on, which
+  produce no failure the interpreter does not also produce; a concurrency suite
+  under the race detector; and a multi-million-invocation soak on a pooled
+  Runtime. What it has not had is a soak on `darwin/amd64`, the one supported
+  platform with no hardware behind it.
 - **Per-function `[[Realm]]`.** The one remaining Test262 core failure: a
   revoked Proxy must report the TypeError of the realm its function came from,
   and goant has a single realm's worth of intrinsics to reach for.

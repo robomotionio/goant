@@ -168,9 +168,9 @@ func TestJITStopsCheckingParametersItKeepsTurningAway(t *testing.T) {
 // TestJITFrameEntryDoesNotAllocate guards the cost of entering compiled code.
 //
 // The context compiled code shares with the runtime is 160 bytes, and building
-// one per call is most of what compiling a small function saved: `dist` in
-// docs/jit-plan.md pays it two million times and comes out behind the
-// interpreter with a cache serving every one of its reads. The root stack it
+// one per call is most of what compiling a small function saved: a small
+// function called two million times pays it two million times, and came out
+// BEHIND the interpreter with a cache serving every one of its reads. The root stack it
 // lives on is LIFO, so it is its own free list — and an allocation reappearing
 // here is that regression, which nothing else would show.
 func TestJITFrameEntryDoesNotAllocate(t *testing.T) {

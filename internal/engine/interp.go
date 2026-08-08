@@ -151,7 +151,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 
 	// A compiled frame needs almost none of what the interpreter's frame entry
 	// builds, so it gets its own way in. See runCompiledFrame.
-	if jitEnabled && fn.jit.code != nil {
+	if rt.jitEnabled && fn.jit.code != nil {
 		if v, e, ok := rt.runCompiledFrame(fn, cl, fnVal, thisVal, args); ok {
 			return v, e
 		}
@@ -691,7 +691,7 @@ restart:
 	// The compiled tier, if this function has earned one. It returns only when
 	// it produced the answer; anything else falls through to the interpreter
 	// below, which is what makes declining free.
-	if jitEnabled {
+	if rt.jitEnabled {
 		if v, e, ok := jitTry(rt, fn, cl, fnVal, args, locals, thisVal); ok {
 			return v, e
 		}
@@ -1803,7 +1803,7 @@ running:
 				// backward jump is offered: it is the one the compiler emits
 				// with an empty operand stack, so there is nothing here that
 				// would have to be carried across.
-				if jitEnabled && sp == 0 && !bailed {
+				if rt.jitEnabled && sp == 0 && !bailed {
 					syncFrame()
 					if v, e, ok := jitTryLoop(rt, fn, cl, fnVal, args, locals, thisVal, t); ok {
 						return v, e

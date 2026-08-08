@@ -12,6 +12,4 @@
 // the arithmetic itself, compares, conditional branches and calls. Anything
 // outside that goes to a helper, which measures at 7.6ns — cheap enough for a
 // slow path and far too expensive for a fast one.
-//
-// See docs/jit-plan.md.
 package jitasm

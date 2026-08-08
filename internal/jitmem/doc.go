@@ -11,6 +11,4 @@
 // Nothing in this package uses cgo. On Unix that is syscall.Mmap and
 // syscall.Mprotect; on Windows it is kernel32 reached through syscall.LazyDLL,
 // which is how the standard library itself calls Win32.
-//
-// See docs/jit-plan.md.
 package jitmem

@@ -110,6 +110,27 @@ func WithGC(on bool) Option {
 	return func(rt *Runtime) { rt.e.SetGCEnabled(on) }
 }
 
+// WithJIT turns the compiled tier on or off for this Runtime.
+//
+// Off by default. The tier compiles a function once it has been entered often
+// enough and runs machine code for it thereafter, which on the workload this
+// engine was built for — short flows on a pooled Runtime — measured 2.9x the
+// throughput of the interpreter. It is worth nothing for a script that runs
+// once, and a host with both kinds of work can have it per Runtime rather than
+// per process.
+//
+// Without this the only control was the GOANT_JIT environment variable, read
+// once when the package loaded: not something a host could decide per workload,
+// per tenant, or at all after start-up.
+//
+// The interpreter remains the fallback on every path the compiler declines, so
+// this changes how fast a program runs and not what it computes. If that is ever
+// untrue it is a bug, and the way it is tested is by running every program both
+// ways and comparing — see internal/engine/jit_fuzz_test.go.
+func WithJIT(on bool) Option {
+	return func(rt *Runtime) { rt.e.SetJITEnabled(on) }
+}
+
 // New creates a Runtime with the standard globals installed.
 func New(opts ...Option) *Runtime {
 	rt := &Runtime{e: engine.New(), namer: JSONFieldNamer}
@@ -511,6 +532,23 @@ type Stats struct {
 
 	// Limit is the memory limit in bytes, or 0 if there is none.
 	Limit uint64
+
+	// CodeBytes and CodeBlocks are the executable memory the compiled tier holds,
+	// PROCESS-wide rather than per Runtime — compiled code belongs to a function,
+	// and a Program can be shared.
+	//
+	// Separate from Bytes because the memory limit does not cover it. A host that
+	// sets a limit and watches Bytes is watching the JavaScript heap only, and
+	// the tier maps its code outside that entirely: a worker running new flows
+	// under a 64 MB limit reached 1.79 GB resident and was killed, with its
+	// JavaScript heap flat at 8 MB the whole time. Code is reclaimed with the
+	// function that owns it now, so this rises with the amount of distinct code
+	// currently live rather than with how long the process has been up — but it
+	// is a number a host should have, because nothing else reports it.
+	//
+	// Zero when the tier has never compiled anything, including when it is off.
+	CodeBytes  uint64
+	CodeBlocks int
 }
 
 // Stats reports this Runtime's memory use.
@@ -520,13 +558,39 @@ func (rt *Runtime) Stats() Stats {
 		return Stats{}
 	}
 	cells, bytes := e.HeapUsage()
+	blocks, codeBytes, _ := engine.JITCodeMemory()
 	return Stats{
 		Cells:       cells,
 		Bytes:       bytes,
 		Interned:    e.InternedCount(),
 		Collections: e.GCCycles(),
 		Limit:       e.HeapLimit(),
+		CodeBytes:   uint64(codeBytes),
+		CodeBlocks:  int(blocks),
 	}
+}
+
+// SetJIT turns the compiled tier on or off after construction, and takes effect
+// on the next call.
+//
+// Both directions are immediate, which is what makes this a kill switch rather
+// than a preference. Turning it off stops this Runtime compiling anything
+// further AND stops it entering code it has already compiled, so a host that
+// sees trouble in production can disable the tier on a live Runtime and have the
+// very next call interpret — without restarting, and without touching any other
+// Runtime in the process.
+//
+// See WithJIT for what the tier is and what it is worth.
+func (rt *Runtime) SetJIT(on bool) {
+	if e, err := rt.engineOf(); err == nil {
+		e.SetJITEnabled(on)
+	}
+}
+
+// JITEnabled reports whether the compiled tier is on for this Runtime.
+func (rt *Runtime) JITEnabled() bool {
+	e, err := rt.engineOf()
+	return err == nil && e.JITEnabled()
 }
 
 // SetMemoryLimit changes the live-heap budget after construction. See

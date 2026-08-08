@@ -373,6 +373,17 @@ type Runtime struct {
 	// rather than what it allocates. See SetHeapLimit.
 	heapLimit uint64
 
+	// jitEnabled is whether this Runtime compiles and enters compiled code. Its
+	// initial value is the process default — GOANT_JIT — and a host may change
+	// it at any time through SetJITEnabled.
+	//
+	// A field here rather than the package global the interpreter used to read,
+	// because a host does not have one workload: the tier is worth having for a
+	// long numeric flow and worth nothing for a one-shot script, and both run in
+	// the same process. It costs nothing on the hot path — every site that
+	// consults it already had rt in a register.
+	jitEnabled bool
+
 	// blobResolver fetches the bytes behind an envelope encountered by a lazy
 	// parse, and blobErr holds the failure that stopped a script when one
 	// could not be fetched. See SetBlobResolver.
@@ -507,6 +518,9 @@ func New() *Runtime {
 		interned: make(map[string]Handle),
 
 		interrupt: &interruptState{},
+
+		// The process default, which a host overrides per Runtime.
+		jitEnabled: jitEnabled,
 	}
 	rt.agent.realms = append(rt.agent.realms, rt)
 	rt.initRealm()

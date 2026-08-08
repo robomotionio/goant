@@ -150,25 +150,52 @@ func JITStats() (compiled, declined, interpreted uint64) {
 	return jitStats.compiled, jitStats.declined, jitStats.interp
 }
 
-// JITIsEnabled reports whether the tier is on for this process.
+// JITIsEnabled reports the process-wide DEFAULT for new Runtimes.
 //
 // Exported so a harness can say which tier it measured rather than assume it —
 // GOANT_JIT=0 used to read as ON, and weeks of "the tier changes nothing" were
 // measured that way. A run that cannot state what it ran is not a measurement.
+// What a particular Runtime is doing is Runtime.JITEnabled.
 func JITIsEnabled() bool { return jitEnabled }
 
-// JITSetEnabled turns the tier on or off and returns what it was.
+// JITSetEnabled changes the default for Runtimes created AFTER it returns, and
+// returns what the default was.
 //
 // For a harness that needs both tiers in one process — computing an answer key
 // with the interpreter before measuring the compiler against it, which is the
-// only way to have an oracle that is not the thing under test. Not for a host:
-// switching mid-flight leaves already-compiled functions compiled, so this
-// turns COMPILING off rather than compiled code.
+// only way to have an oracle that is not the thing under test. A host wanting to
+// control one Runtime should use Runtime.SetJITEnabled, which is per-Runtime and
+// takes effect immediately.
 func JITSetEnabled(on bool) bool {
 	was := jitEnabled
 	jitEnabled = on
 	return was
 }
+
+// JITEnabled reports whether this Runtime will compile and will enter compiled
+// code.
+func (rt *Runtime) JITEnabled() bool { return rt.jitEnabled }
+
+// SetJITEnabled turns the compiled tier on or off for this Runtime alone.
+//
+// Per-Runtime rather than per-process because a host does not have one workload.
+// An embedder that runs long numeric flows alongside short one-shot scripts
+// wants the tier for the former and has no use for it in the latter, and a host
+// rolling the tier out wants it on for a fraction of its traffic — neither of
+// which a process-wide switch or an environment variable can express.
+//
+// It takes effect immediately and in both directions. Turning it OFF stops this
+// Runtime compiling anything further AND stops it entering code it has already
+// compiled, so it is a genuine kill switch rather than a decision that only
+// applies to functions not yet hot: a host that sees trouble can turn the tier
+// off on a live Runtime and have the next call interpret. What it does not do is
+// unmap the code — that goes when the function does, see jit_reclaim.go.
+//
+// Compiled code is attached to the FUNCTION, and a Program can be shared between
+// Runtimes. That is sound here precisely because the gate is per-Runtime: a
+// Runtime with the tier off skips the entry check regardless of what some other
+// Runtime compiled the same function into.
+func (rt *Runtime) SetJITEnabled(on bool) { rt.jitEnabled = on }
 
 // JITPropertyStats reports compiled property reads served by the emitted
 // inline-cache probe, and those that fell through to the runtime.
