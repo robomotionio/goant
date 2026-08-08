@@ -24,6 +24,9 @@ func (rt *Runtime) toBoolean(v Value) bool {
 	case TSymbol:
 		return true // symbols are always truthy
 	default:
+		if o := rt.objPtr(v); o != nil && o.isHTMLDDA {
+			return false // document.all is the one falsy object
+		}
 		return true // all objects are truthy
 	}
 }

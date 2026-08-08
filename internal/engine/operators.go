@@ -5,6 +5,11 @@ package engine
 
 // typeofString implements the ECMAScript typeof operator.
 func (rt *Runtime) typeofString(v Value) string {
+	// Asked before the type is, because document.all is CALLABLE and would
+	// otherwise answer "function" on its way past.
+	if o := rt.objPtr(v); o != nil && o.isHTMLDDA {
+		return "undefined"
+	}
 	switch v.Type() {
 	case TUndef:
 		return "undefined"

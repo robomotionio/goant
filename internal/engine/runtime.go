@@ -317,6 +317,11 @@ type Runtime struct {
 	// are stored as accessors so reads see the live binding, but they must be
 	// REPORTED as data properties, so descriptor queries consult this set.
 	moduleNamespaces map[*object]bool
+	// htmlDDA is this realm's document.all, once something has asked for it.
+	// Held so the second ask gives the same object as the first. The bool is not
+	// redundant: the zero Value decodes as the number 0, not as undefined.
+	htmlDDA    Value
+	hasHTMLDDA bool
 	// deferredNamespaces maps a deferred namespace to the module it will run.
 	// Nil until an `import defer` appears, which is what keeps the trigger off
 	// every property path that never meets one.

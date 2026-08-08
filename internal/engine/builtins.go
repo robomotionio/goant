@@ -91,6 +91,44 @@ func (rt *Runtime) initBuiltins() {
 			ho.defineOwn(name, v, attrWritable|attrEnumerable|attrConfigurable)
 		}
 	}
+	// IsHTMLDDA: document.all, the [[IsHTMLDDA]] exotic object. The one object
+	// the language pretends is undefined -- typeof says so, it is falsy, and it
+	// is loosely equal to both null and undefined -- while staying an ordinary
+	// Object to everything else, which is what these tests exist to check. It is
+	// callable and answers null when called with nothing or with "", so that an
+	// algorithm which calls document.all can be told apart from one that does not.
+	//
+	// Handing one out turns the compiled tier OFF for this realm, and the reason
+	// is worth saying plainly. The tier decides truthiness from the Value's tag
+	// alone -- an object is truthy, no load, no branch -- and emits `x == null`
+	// the same way. Neither can represent an object that is falsy and loosely
+	// null, so with one in play the tier and the interpreter give different
+	// answers, which is the worst kind of wrong. Teaching them would cost a load
+	// and a test on the hottest branch shape in the engine, for an object that
+	// exists in a legacy DOM and nowhere else.
+	//
+	// So it is a getter: a realm that never asks keeps its tier, and a realm that
+	// asks has said it cares more about document.all than about speed.
+	ho.defineAccessor("IsHTMLDDA", rt.newNativeFunc("get IsHTMLDDA", 0,
+		func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			if rt.hasHTMLDDA {
+				return rt.htmlDDA, nil
+			}
+			dda := rt.newNativeFunc("", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+				if len(args) == 0 {
+					return mknull(), nil
+				}
+				if a := args[0]; a.IsString() && len(rt.strBytes(a)) == 0 {
+					return mknull(), nil
+				}
+				return mkundef(), nil
+			})
+			rt.objPtr(dda).isHTMLDDA = true
+			rt.htmlDDA, rt.hasHTMLDDA = dda, true
+			rt.SetJITEnabled(false)
+			return dda, nil
+		}), mkundef(), true, false, attrEnumerable|attrConfigurable)
+
 	// detachArrayBuffer(buffer): the suite's way of reaching DetachArrayBuffer,
 	// which JavaScript itself can only do by transferring the bytes away.
 	ho.defineOwn("detachArrayBuffer", rt.newNativeFunc("detachArrayBuffer", 1,

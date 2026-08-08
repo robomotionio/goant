@@ -3028,6 +3028,18 @@ func (rt *Runtime) abstractEquals(a, b Value) (bool, *ThrowError) {
 	if (ta == TNull && tb == TUndef) || (ta == TUndef && tb == TNull) {
 		return true, nil
 	}
+	// document.all == null and == undefined, though it is neither and is not
+	// strictly equal to either.
+	if ta == TNull || ta == TUndef {
+		if o := rt.objPtr(b); o != nil && o.isHTMLDDA {
+			return true, nil
+		}
+	}
+	if tb == TNull || tb == TUndef {
+		if o := rt.objPtr(a); o != nil && o.isHTMLDDA {
+			return true, nil
+		}
+	}
 	// number == string
 	if ta == TNum && tb == TStr {
 		return a.Number() == stringToNumber(rt.strGo(b)), nil

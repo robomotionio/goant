@@ -120,6 +120,11 @@ type object struct {
 	// staying true after detach so the prototype getters can require the slot on
 	// their receiver while still distinguishing a detached buffer from a non-buffer.
 	abObj bool
+	// isHTMLDDA marks the [[IsHTMLDDA]] exotic object -- document.all, the one
+	// object the language pretends is undefined. It is still an Object: only
+	// typeof, ToBoolean and loose equality against null/undefined are lied to,
+	// and === is not, which is why a switch on it matches its own case.
+	isHTMLDDA bool
 	// abShared marks a SharedArrayBuffer. It is an ArrayBuffer as far as anything
 	// that VIEWS one is concerned -- a TypedArray or a DataView over it is the
 	// point of it existing -- and not one at all to the methods that would detach,
