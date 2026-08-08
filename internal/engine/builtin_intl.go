@@ -455,6 +455,145 @@ func (rt *Runtime) initIntl() {
 		})
 	})
 
+	defineService("DisplayNames", true, func(inst *object, options Value, requested []string) *ThrowError {
+		d, e := rt.initDisplayOptions(options, requested)
+		if e != nil {
+			return e
+		}
+		inst.setSlot(slotIntlDisplayOpts, rt.newString(d.String()))
+		return nil
+	}, func(po *object) {
+		rt.defMethod(po, "of", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			d, e := rt.requireDisplayNames(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			s, e := rt.toStringValue(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			code, ok := canonicalDisplayCode(d.kind, rt.strGo(s))
+			if !ok {
+				return mkundef(), rt.rangeError("Invalid " + d.kind + " code: " + rt.strGo(s))
+			}
+			// No name data, so every lookup misses and fallback decides.
+			if d.fallback == "none" {
+				return mkundef(), nil
+			}
+			return rt.newString(code), nil
+		})
+		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			d, e := rt.requireDisplayNames(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			o := rt.newPlainObject()
+			oo := rt.objPtr(o)
+			oo.defineOwn("locale", rt.newString(d.tag), attrDefault)
+			oo.defineOwn("style", rt.newString(d.style), attrDefault)
+			oo.defineOwn("type", rt.newString(d.kind), attrDefault)
+			oo.defineOwn("fallback", rt.newString(d.fallback), attrDefault)
+			if d.kind == "language" {
+				oo.defineOwn("languageDisplay", rt.newString(d.langStyle), attrDefault)
+			}
+			return o, nil
+		})
+	})
+
+	// Segments and its iterator are ordinary objects with their own
+	// prototypes, built once and shared: `segment()` hands back an object
+	// whose state is three slots and whose behaviour is all here.
+	segIterProto := rt.newObject(rt.iteratorProto)
+	rt.setStringTag(segIterProto, "Segmenter String Iterator")
+	rt.defMethod(rt.objPtr(segIterProto), "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || !o.getSlot(slotSegmentsOpts).IsString() {
+			return mkundef(), rt.typeError("not a Segment Iterator")
+		}
+		opts := parseSegmenterOptions(rt.strGo(o.getSlot(slotSegmentsOpts)))
+		input := o.getSlot(slotSegmentsInput)
+		units := rt.strUTF16(input)
+		pos := int(o.getSlot(slotSegIterPos).Number())
+		if pos >= len(units) {
+			return rt.genResult(mkundef(), true), nil
+		}
+		end, wordLike := segmentEnd(units, pos, opts.granularity)
+		o.setSlot(slotSegIterPos, mknum(float64(end)))
+		return rt.genResult(rt.segmentData(input, units, pos, end, wordLike, opts.granularity), false), nil
+	})
+
+	segmentsProto := rt.newObject(rt.objectProto)
+	spo := rt.objPtr(segmentsProto)
+	rt.defMethod(spo, "containing", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || !o.getSlot(slotSegmentsOpts).IsString() {
+			return mkundef(), rt.typeError("not a Segments object")
+		}
+		opts := parseSegmenterOptions(rt.strGo(o.getSlot(slotSegmentsOpts)))
+		input := o.getSlot(slotSegmentsInput)
+		units := rt.strUTF16(input)
+		n, e := rt.toIntegerOrInfinity(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		if n < 0 || n >= float64(len(units)) {
+			return mkundef(), nil
+		}
+		start, end, wordLike := segmentAt(units, int(n), opts.granularity)
+		return rt.segmentData(input, units, start, end, wordLike, opts.granularity), nil
+	})
+	iterFn := rt.newNativeFunc("[Symbol.iterator]", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := rt.objPtr(this)
+		if o == nil || !o.getSlot(slotSegmentsOpts).IsString() {
+			return mkundef(), rt.typeError("not a Segments object")
+		}
+		it := rt.newObject(segIterProto)
+		ito := rt.objPtr(it)
+		ito.setSlot(slotSegmentsOpts, o.getSlot(slotSegmentsOpts))
+		ito.setSlot(slotSegmentsInput, o.getSlot(slotSegmentsInput))
+		ito.setSlot(slotSegIterPos, mknum(0))
+		return it, nil
+	})
+	if rt.symIterator != 0 {
+		spo.defineOwnSymbol(rt.symIterator.handle(), iterFn, attrWritable|attrConfigurable)
+	}
+
+	defineService("Segmenter", true, func(inst *object, options Value, requested []string) *ThrowError {
+		sg, e := rt.initSegmenterOptions(options, requested)
+		if e != nil {
+			return e
+		}
+		inst.setSlot(slotIntlSegmenterOpts, rt.newString(sg.String()))
+		return nil
+	}, func(po *object) {
+		rt.defMethod(po, "segment", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			sg, e := rt.requireSegmenter(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			s, e := rt.toStringValue(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			seg := rt.newObject(segmentsProto)
+			so := rt.objPtr(seg)
+			so.setSlot(slotSegmentsOpts, rt.newString(sg.String()))
+			so.setSlot(slotSegmentsInput, s)
+			return seg, nil
+		})
+		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			sg, e := rt.requireSegmenter(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			o := rt.newPlainObject()
+			oo := rt.objPtr(o)
+			oo.defineOwn("locale", rt.newString(sg.tag), attrDefault)
+			oo.defineOwn("granularity", rt.newString(sg.granularity), attrDefault)
+			return o, nil
+		})
+	})
+
 	rt.defMethod(io, "getCanonicalLocales", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		tags, e := rt.canonicalizeLocaleList(arg(args, 0))
 		if e != nil {
