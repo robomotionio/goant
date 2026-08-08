@@ -371,7 +371,7 @@ func calendarDateAdd(id string, iso isoDateRec, dur dateDuration, overflow strin
 			if !good || !leap {
 				return isoDateRec{}, errCalendarFields
 			}
-			if overflow == "reject" {
+			if overflow == "reject" || overflow == "reject-month" {
 				return isoDateRec{}, errCalendarOverflow
 			}
 			m, ok = cal.monthFromCode(ys, simpleMonthCode(base))
@@ -491,15 +491,33 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 		overshot = pastISO
 	}
 
-	years := int64(c2.year - c1.year)
-	for years != 0 && overshot(years, 0) {
-		years -= int64(sign)
-	}
-	var months int64
-	for !overshot(years, months+int64(sign)) {
-		months += int64(sign)
-		if months > 10000 || months < -10000 {
-			break
+	var years, months int64
+	if largestUnit == unitMonth {
+		// Counting in months alone, a year is not twelve of them everywhere,
+		// so twelve is only where the search starts.
+		months = int64(c2.year-c1.year) * 12
+		if sign > 0 && months < 0 || sign < 0 && months > 0 {
+			months = 0
+		}
+		for months != 0 && overshot(0, months) {
+			months -= int64(sign)
+		}
+		for !overshot(0, months+int64(sign)) {
+			months += int64(sign)
+			if months > 1000000 || months < -1000000 {
+				break
+			}
+		}
+	} else {
+		years = int64(c2.year - c1.year)
+		for years != 0 && overshot(years, 0) {
+			years -= int64(sign)
+		}
+		for !overshot(years, months+int64(sign)) {
+			months += int64(sign)
+			if months > 10000 || months < -10000 {
+				break
+			}
 		}
 	}
 	mid, err := calendarDateAdd(id, one, dateDuration{years: years, months: months}, "constrain")
@@ -507,17 +525,5 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 		return dateDuration{}
 	}
 	days := int64(two.epochDays() - mid.epochDays())
-	if largestUnit == unitMonth && years != 0 {
-		// Count the months the years covered, which is not twelve everywhere.
-		step := int(sign)
-		for y := c1.year; y != c1.year+int(years); y += step {
-			if step > 0 {
-				months += int64(cal.monthsInYear(y))
-			} else {
-				months -= int64(cal.monthsInYear(y - 1))
-			}
-		}
-		years = 0
-	}
 	return dateDuration{years: years, months: months, days: days}
 }

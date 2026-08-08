@@ -257,9 +257,13 @@ func (rt *Runtime) initTemporalPlainYearMonth(ns *object) {
 			days, _ := balanceTime(internal.time)
 			dd := adjustDays(internal.date, days.Int64())
 			// The day was put there by this algorithm rather than by the
-			// caller, so it is constrained whatever the caller asked for; the
-			// overflow rule applies to the year and month it lands on.
-			added, err := calendarDateAdd(cal, start, dd, "constrain")
+			// caller, so it is constrained whatever the caller asked for. A
+			// month the target year has not got is still a rejection.
+			addOverflow := "constrain"
+			if overflow == "reject" {
+				addOverflow = "reject-month"
+			}
+			added, err := calendarDateAdd(cal, start, dd, addOverflow)
 			if err != nil {
 				return mkundef(), rt.throwFor(err)
 			}
