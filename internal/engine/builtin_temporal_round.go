@@ -51,7 +51,11 @@ type differenceSettings struct {
 func (rt *Runtime) differenceSettings(opts Value, since bool, minUnit, maxUnit int,
 	fallbackSmallest, defaultLargest int) (differenceSettings, *ThrowError) {
 	var s differenceSettings
-	largest, e := rt.getTemporalUnit(opts, "largestUnit", minUnit, maxUnit, unitAuto, "auto")
+	// All four options are read and coerced before any of them is judged. A
+	// largestUnit this type has no use for is still read, and so are the three
+	// that follow it, because a script can watch every one of those getters and
+	// the order it sees them in is part of the answer.
+	largest, e := rt.getTemporalUnit(opts, "largestUnit", unitYear, unitNanosecond, unitAuto, "auto")
 	if e != nil {
 		return s, e
 	}
@@ -66,9 +70,18 @@ func (rt *Runtime) differenceSettings(opts Value, since bool, minUnit, maxUnit i
 	if since {
 		mode = negateRoundingMode(mode)
 	}
-	smallest, e := rt.getTemporalUnit(opts, "smallestUnit", minUnit, maxUnit, fallbackSmallest)
+	smallest, e := rt.getTemporalUnit(opts, "smallestUnit", unitYear, unitNanosecond, fallbackSmallest)
 	if e != nil {
 		return s, e
+	}
+	outside := func(u int) bool { return u >= 0 && u < unitCount && (u < minUnit || u > maxUnit) }
+	if outside(largest) {
+		return s, rt.rangeError("largestUnit must be between " +
+			temporalUnitNames[minUnit] + " and " + temporalUnitNames[maxUnit])
+	}
+	if outside(smallest) {
+		return s, rt.rangeError("smallestUnit must be between " +
+			temporalUnitNames[minUnit] + " and " + temporalUnitNames[maxUnit])
 	}
 	defLargest := largerUnit(defaultLargest, smallest)
 	if largest == unitAuto {
