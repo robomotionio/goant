@@ -382,6 +382,25 @@ func (rt *Runtime) getTemporalUnit(opts Value, name string, min, max int, def in
 	return unitAuto, nil // "auto", or one of the extra words
 }
 
+// getTemporalUnitIn reads a smallestUnit that only some units are allowed for,
+// and keeps the two halves apart: the unit is READ against every unit there is,
+// and judged against the ones this caller can use afterwards. A toString that
+// throws where the unit is read never gets as far as the options after it, and
+// a script can watch it not get there. The pending value is returned as-is so
+// the caller can spot an absent option.
+func (rt *Runtime) getTemporalUnitIn(opts Value, name string, min, max int) (int, *ThrowError) {
+	return rt.getTemporalUnit(opts, name, unitYear, unitNanosecond, unitAuto-1)
+}
+
+// checkUnitRange is the judging half, called once every option has been read.
+func (rt *Runtime) checkUnitRange(u int, name string, min, max int) *ThrowError {
+	if u < 0 || u >= unitCount || (u >= min && u <= max) {
+		return nil
+	}
+	return rt.rangeError(name + " must be between " +
+		temporalUnitNames[min] + " and " + temporalUnitNames[max])
+}
+
 // getFractionalSecondDigits reads fractionalSecondDigits: "auto", or a count
 // from none to nine.
 func (rt *Runtime) getFractionalSecondDigits(opts Value) (int, *ThrowError) {

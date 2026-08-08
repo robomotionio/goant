@@ -485,16 +485,16 @@ func (rt *Runtime) initTemporalZonedDateTime(ns *object) {
 		if e != nil {
 			return mkundef(), e
 		}
+		smallest, e := rt.getTemporalUnitIn(opts, "smallestUnit", unitMinute, unitNanosecond)
+		if e != nil {
+			return mkundef(), e
+		}
 		showZone, e := rt.temporalStringOption(opts, "timeZoneName", showTimeZoneValues, "auto")
 		if e != nil {
 			return mkundef(), e
 		}
-		smallest, e := rt.getTemporalUnit(opts, "smallestUnit", unitMinute, unitNanosecond, unitAuto-1)
-		if e != nil {
+		if e := rt.checkUnitRange(smallest, "smallestUnit", unitMinute, unitNanosecond); e != nil {
 			return mkundef(), e
-		}
-		if smallest == unitHour {
-			return mkundef(), rt.rangeError("smallestUnit cannot be hour here")
 		}
 		precision, unit, increment, e := rt.secondsStringPrecision(smallest, digits)
 		if e != nil {

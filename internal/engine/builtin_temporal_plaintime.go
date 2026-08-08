@@ -214,12 +214,12 @@ func (rt *Runtime) initTemporalPlainTime(ns *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		smallest, e := rt.getTemporalUnit(opts, "smallestUnit", unitMinute, unitNanosecond, unitAuto-1)
+		smallest, e := rt.getTemporalUnitIn(opts, "smallestUnit", unitMinute, unitNanosecond)
 		if e != nil {
 			return mkundef(), e
 		}
-		if smallest == unitHour {
-			return mkundef(), rt.rangeError("smallestUnit cannot be hour here")
+		if e := rt.checkUnitRange(smallest, "smallestUnit", unitMinute, unitNanosecond); e != nil {
+			return mkundef(), e
 		}
 		precision, unit, increment, e := rt.secondsStringPrecision(smallest, digits)
 		if e != nil {

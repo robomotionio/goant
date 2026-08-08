@@ -311,12 +311,12 @@ func (rt *Runtime) initTemporalDuration(ns *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		smallest, e := rt.getTemporalUnit(opts, "smallestUnit", unitSecond, unitNanosecond, unitAuto-1)
+		smallest, e := rt.getTemporalUnitIn(opts, "smallestUnit", unitSecond, unitNanosecond)
 		if e != nil {
 			return mkundef(), e
 		}
-		if smallest == unitMinute {
-			return mkundef(), rt.rangeError("smallestUnit cannot be minute here")
+		if e := rt.checkUnitRange(smallest, "smallestUnit", unitSecond, unitNanosecond); e != nil {
+			return mkundef(), e
 		}
 		precision, unit, increment, e := rt.secondsStringPrecision(smallest, digits)
 		if e != nil {
