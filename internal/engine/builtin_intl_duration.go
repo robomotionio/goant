@@ -10,6 +10,7 @@ package engine
 // because there are thirty of them.
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 	"strconv"
@@ -112,20 +113,19 @@ func (rt *Runtime) initDurationOptions(options Value, requested []string) (durat
 	base := d.style
 	prevNumeric := false
 	for _, unit := range durationUnits {
-		// Which spellings this unit accepts. Only hours, minutes and seconds
-		// can be written as digits, and only they can be "2-digit".
+		// Which spellings this unit accepts, and which one the digital style
+		// gives it. Only hours, minutes and seconds can be written as digits
+		// and only they can be "2-digit"; the sub-second units can be numeric,
+		// which for them means being someone else's fraction.
 		allowed := []string{"long", "short", "narrow"}
-		digital := ""
+		digitalBase := "short"
 		switch unit {
-		case "hours":
+		case "hours", "minutes", "seconds":
 			allowed = append(allowed, "numeric", "2-digit")
-			digital = "numeric"
-		case "minutes", "seconds":
-			allowed = append(allowed, "numeric", "2-digit")
-			digital = "2-digit"
+			digitalBase = "numeric"
 		case "milliseconds", "microseconds", "nanoseconds":
 			allowed = append(allowed, "numeric")
-			digital = "numeric"
+			digitalBase = "numeric"
 		}
 		got, present, e := rt.intlStringOption(options, unit, allowed)
 		if e != nil {
@@ -137,33 +137,36 @@ func (rt *Runtime) initDurationOptions(options Value, requested []string) (durat
 		if present && prevNumeric && !isNumericStyle(got) {
 			return d, rt.rangeError("Invalid " + unit + " style after a numeric unit")
 		}
-		displayDefault := "auto"
+		// A unit the caller named is written whether or not it is zero -- they
+		// asked for it. Only a unit that was defaulted into existence is
+		// dropped when it has nothing to say.
+		displayDefault := "always"
 		unitStyle := got
 		if !present {
-			if base == "digital" {
-				if digital != "" && (unit == "hours" || unit == "minutes" || unit == "seconds") {
-					unitStyle = digital
-					if unit != "seconds" {
-						displayDefault = "always"
-					}
-					if unit == "hours" {
-						displayDefault = "always"
-					}
-				} else {
-					unitStyle = "short"
+			switch {
+			case base == "digital":
+				if unit != "hours" && unit != "minutes" && unit != "seconds" {
+					displayDefault = "auto"
 				}
-			} else {
+				unitStyle = digitalBase
+			case prevNumeric:
+				if unit != "minutes" && unit != "seconds" {
+					displayDefault = "auto"
+				}
+				unitStyle = "numeric"
+			default:
+				displayDefault = "auto"
 				unitStyle = base
 			}
-			// A numeric unit forces every later one to be numeric: a duration
-			// cannot be "1 hr, 2:03". The sub-second units follow that rule but
-			// keep display "auto", because they are written as a fraction of
-			// the seconds rather than as another colon-separated field.
-			if prevNumeric && digital != "" {
-				unitStyle = digital
-				if !tagContains(subSecondUnits, unit) {
-					displayDefault = "always"
-				}
+		}
+		if unitStyle == "numeric" {
+			if tagContains(subSecondUnits, unit) {
+				// Numeric here means "part of the seconds", and a fraction
+				// nobody asked for is not written on its own.
+				displayDefault = "auto"
+			} else if prevNumeric && (unit == "minutes" || unit == "seconds") {
+				// Second and later in a colon run: "1:02:03", not "1:2:3".
+				unitStyle = "2-digit"
 			}
 		}
 		disp, dpresent, e := rt.intlStringOption(options, unit+"Display", []string{"auto", "always"})
@@ -295,69 +298,88 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 	// part inside its number -- not as a literal in front of the whole thing.
 	// "-1 hr, 30 min" is one negative duration, not a minus and a duration.
 	signPending := neg
-	subSecondsFolded := false
 	for i, unit := range durationUnits {
-		if subSecondsFolded && tagContains(subSecondUnits, unit) {
-			continue
-		}
 		v := math.Abs(rec[i])
 		style := d.unitStyle[i]
-		if v == 0 && d.display[i] == "auto" {
-			// A zero unit is written only to keep a colon run contiguous --
-			// "1:00:03" needs its minutes. The sub-second units are never part
-			// of that run: they belong after the decimal point, not after
-			// another colon.
-			if !isNumericStyle(style) || len(numericRun) == 0 || tagContains(subSecondUnits, unit) {
-				continue
+		exact := ""
+		done := false
+		// Seconds, milliseconds and microseconds each absorb everything below
+		// them when the unit below is written as digits: those are not more
+		// colon-separated fields, they are this one's fraction. "3 sec,
+		// 444.055006 ms" is one millisecond count, not three.
+		if i >= 6 && i <= 8 && d.unitStyle[i+1] == "numeric" {
+			exact = fractionalDuration(rec, i)
+			v = math.Abs(parseFloatDefault(exact))
+			done = true
+		}
+		// A zero minute is written when it sits between something already
+		// written and a second that will be: "1:00:03" needs it. Nothing else
+		// is written for the sake of the colons.
+		displayRequired := false
+		if unit == "minutes" && len(numericRun) > 0 {
+			displayRequired = d.display[6] == "always" ||
+				rec[6] != 0 || rec[7] != 0 || rec[8] != 0 || rec[9] != 0
+		}
+		if v == 0 && d.display[i] == "auto" && !displayRequired {
+			if done {
+				break
 			}
+			continue
 		}
 		singular := strings.TrimSuffix(unit, "s")
 		signed := v
 		if signPending {
+			// The sign belongs to the first unit written even when its value
+			// is zero, which a negative zero is how a formatter is told.
 			signed = -v
+			if exact != "" && !strings.HasPrefix(exact, "-") {
+				exact = "-" + exact
+			}
 			signPending = false
+		} else if exact != "" {
+			exact = strings.TrimPrefix(exact, "-")
+		}
+		n := defaultNumberOptions()
+		n.tag, n.numbering = d.tag, d.numbering
+		if done {
+			// fractionalDigits says how many places to show; without it, as
+			// many as are there and no more. Truncated, never rounded up: a
+			// duration that reads longer than it was would be a lie about
+			// time.
+			n.digits.minFrac, n.digits.maxFrac = 0, 9
+			if d.fracDigits >= 0 {
+				n.digits.minFrac, n.digits.maxFrac = d.fracDigits, d.fracDigits
+			}
+			n.roundingMode = "trunc"
 		}
 		if isNumericStyle(style) {
-			n := defaultNumberOptions()
-			n.tag, n.numbering = d.tag, d.numbering
 			n.useGrouping = ""
-			// Two digits for every field after the first in a run: "1:02:03",
-			// not "1:2:3". The leading field is written as it was asked for.
-			if style == "2-digit" || len(numericRun) > 0 {
+			if style == "2-digit" {
 				n.digits.minInt = 2
-			}
-			if unit == "seconds" {
-				// The sub-second units are the seconds' fraction, not more
-				// colon-separated fields. fractionalDigits says how many to
-				// show; without it, as many as are there.
-				signed += sign(signed) * (math.Abs(rec[7])/1e3 + math.Abs(rec[8])/1e6 + math.Abs(rec[9])/1e9)
-				if d.fracDigits >= 0 {
-					n.digits.minFrac, n.digits.maxFrac = d.fracDigits, d.fracDigits
-				} else {
-					n.digits.maxFrac = 9
-				}
-				n.roundingMode = "trunc"
-				subSecondsFolded = true
 			}
 			if len(numericRun) > 0 {
 				numericRun = append(numericRun, relPart{numberPart{"literal", ":"}, ""})
 			}
-			for _, p := range numberParts(n, li, signed) {
+			for _, p := range numberPartsOf(n, li, signed, exact) {
 				numericRun = append(numericRun, relPart{p, singular})
+			}
+			if done {
+				break
 			}
 			continue
 		}
 		flushNumeric()
-		n := defaultNumberOptions()
-		n.tag, n.numbering = d.tag, d.numbering
 		n.style = "unit"
 		n.unit = singular
 		n.unitDisplay = style
 		var group []relPart
-		for _, p := range numberParts(n, li, signed) {
+		for _, p := range numberPartsOf(n, li, signed, exact) {
 			group = append(group, relPart{p, singular})
 		}
 		groups = append(groups, group)
+		if done {
+			break
+		}
 	}
 	flushNumeric()
 
@@ -410,4 +432,43 @@ func sign(v float64) float64 {
 		return -1
 	}
 	return 1
+}
+
+// fractionalDuration is the value of the unit at index i with every smaller
+// unit folded into its fraction, as an exact decimal string. Exact because a
+// double cannot hold it: ten million seconds and one nanosecond is seventeen
+// significant digits, and rounding them is the difference between
+// 10000000.000000001 and 10000000.000000002.
+func fractionalDuration(rec [10]float64, i int) string {
+	// Everything from i down, counted in the smallest unit present.
+	scale := []int{9, 6, 3}[i-6]
+	ns := new(big.Int)
+	for j, mul := range map[int]int64{6: 1e9, 7: 1e6, 8: 1e3, 9: 1} {
+		if j < i {
+			continue
+		}
+		// Through big.Float, because a duration field may be any integral
+		// double and int64 stops at 2^63.
+		term, _ := new(big.Float).SetFloat64(rec[j]).Int(nil)
+		ns.Add(ns, term.Mul(term, big.NewInt(mul)))
+	}
+	unit := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scale)), nil)
+	q, r := new(big.Int).QuoRem(ns, unit, new(big.Int))
+	neg := q.Sign() < 0 || r.Sign() < 0
+	r.Abs(r)
+	out := q.Abs(q).String() + "." + fmt.Sprintf("%0*s", scale, r.String())
+	if neg {
+		out = "-" + out
+	}
+	return out
+}
+
+// parseFloatDefault is the decimal read back as a double, for the sign and
+// zero tests that do not need every digit.
+func parseFloatDefault(s string) float64 {
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
