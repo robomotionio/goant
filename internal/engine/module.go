@@ -869,7 +869,7 @@ func (rt *Runtime) validateImportOptions(options Value) (string, *ThrowError) {
 		// key is one the host does not support, which the spec has it ignore.
 		if k == "type" {
 			typ = rt.strGo(v)
-			if typ != "json" {
+			if typ != "json" && typ != "text" {
 				return "", rt.typeError("import attribute type '" + typ + "' is not supported")
 			}
 		}
@@ -1000,11 +1000,24 @@ func (rt *Runtime) namespaceDefineProperty(ns, key, descVal Value) *ThrowError {
 // syntheticModule builds a module record whose exports come from a host-parsed
 // resource rather than from JavaScript source. A JSON module has the single
 // export "default" holding JSON.parse of its text (ParseJSONModule /
-// CreateDefaultExportSyntheticModule); no other attribute type is supported.
+// CreateDefaultExportSyntheticModule); a text module has the text itself, and
+// no other attribute type is supported.
 //
 // It has no *svFunc: nothing to link, nothing to evaluate. The record holds the
 // value directly in its locals slice, which is what exportValue reads.
 func (rt *Runtime) syntheticModule(key, typ, src string) (*moduleRecord, *SyntaxError, *ThrowError) {
+	if typ == "text" {
+		// CreateTextModule is the file, unread: whatever a text module holds is
+		// already a string, so there is no parse here and nothing that could
+		// fail as an early error. A .js file imported this way is its own
+		// source, and a different module from the same file imported to run.
+		return &moduleRecord{
+			path:    key,
+			exports: map[string]int{"default": 0},
+			locals:  []Value{rt.newString(src)},
+			status:  modEvaluated,
+		}, nil, nil
+	}
 	if typ != "json" {
 		return nil, nil, rt.typeError("import attribute type '" + typ + "' is not supported")
 	}
