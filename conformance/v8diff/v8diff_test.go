@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -16,7 +17,15 @@ import (
 // the process starts, so a single test binary cannot cover several zones.
 func buildRunner(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "goant")
+	// .exe on Windows, or exec cannot find what go build just wrote: Go names
+	// the output exactly what -o says, and Windows will only run a file with an
+	// executable extension. This test had never run on Windows before there was
+	// a Windows runner to run it on.
+	name := "goant"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	bin := filepath.Join(t.TempDir(), name)
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/goant")
 	cmd.Dir = "../.."
 	if out, err := cmd.CombinedOutput(); err != nil {
