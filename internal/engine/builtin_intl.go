@@ -2,6 +2,7 @@ package engine
 
 import (
 	"math"
+	"strings"
 	"time"
 )
 
@@ -340,6 +341,116 @@ func (rt *Runtime) initIntl() {
 			if p.notation == "compact" {
 				oo.defineOwn("compactDisplay", rt.newString(p.compact), attrDefault)
 			}
+			return o, nil
+		})
+	})
+
+	defineService("ListFormat", true, func(inst *object, options Value, requested []string) *ThrowError {
+		l, e := rt.initListOptions(options, requested)
+		if e != nil {
+			return e
+		}
+		inst.setSlot(slotIntlListOpts, rt.newString(l.String()))
+		return nil
+	}, func(po *object) {
+		rt.defMethod(po, "format", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			l, e := rt.requireListFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			items, e := rt.listStrings(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			var b strings.Builder
+			for _, p := range l.listParts(items) {
+				b.WriteString(p.val)
+			}
+			return rt.newString(b.String()), nil
+		})
+		rt.defMethod(po, "formatToParts", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			l, e := rt.requireListFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			items, e := rt.listStrings(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.partsArray(l.listParts(items)), nil
+		})
+		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			l, e := rt.requireListFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			o := rt.newPlainObject()
+			oo := rt.objPtr(o)
+			oo.defineOwn("locale", rt.newString(l.tag), attrDefault)
+			oo.defineOwn("type", rt.newString(l.kind), attrDefault)
+			oo.defineOwn("style", rt.newString(l.style), attrDefault)
+			return o, nil
+		})
+	})
+
+	defineService("RelativeTimeFormat", true, func(inst *object, options Value, requested []string) *ThrowError {
+		r, e := rt.initRelTimeOptions(options, requested)
+		if e != nil {
+			return e
+		}
+		inst.setSlot(slotIntlRelTimeOpts, rt.newString(r.String()))
+		return nil
+	}, func(po *object) {
+		rt.defMethod(po, "format", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			r, e := rt.requireRelTimeFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			v, unit, e := rt.relTimeArgs(args)
+			if e != nil {
+				return mkundef(), e
+			}
+			var b strings.Builder
+			for _, p := range r.relTimeParts(v, unit, rt.intlLocaleOf(this)) {
+				b.WriteString(p.val)
+			}
+			return rt.newString(b.String()), nil
+		})
+		rt.defMethod(po, "formatToParts", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			r, e := rt.requireRelTimeFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			v, unit, e := rt.relTimeArgs(args)
+			if e != nil {
+				return mkundef(), e
+			}
+			parts := r.relTimeParts(v, unit, rt.intlLocaleOf(this))
+			arr := rt.newArray()
+			ao := rt.objPtr(arr)
+			for i, p := range parts {
+				o := rt.newPlainObject()
+				oo := rt.objPtr(o)
+				oo.defineOwn("type", rt.newString(p.typ), attrDefault)
+				oo.defineOwn("value", rt.newString(p.val), attrDefault)
+				if p.unit != "" {
+					oo.defineOwn("unit", rt.newString(p.unit), attrDefault)
+				}
+				rt.arraySet(ao, uint32(i), o)
+			}
+			return arr, nil
+		})
+		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			r, e := rt.requireRelTimeFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			o := rt.newPlainObject()
+			oo := rt.objPtr(o)
+			oo.defineOwn("locale", rt.newString(r.tag), attrDefault)
+			oo.defineOwn("style", rt.newString(r.style), attrDefault)
+			oo.defineOwn("numeric", rt.newString(r.numeric), attrDefault)
+			oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
 			return o, nil
 		})
 	})

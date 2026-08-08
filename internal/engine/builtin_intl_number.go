@@ -429,9 +429,15 @@ func (rt *Runtime) formatNumberWith(n numberOptions, li localeInfo, v float64) s
 
 // formatNumberParts is formatToParts: the same spans, as objects.
 func (rt *Runtime) formatNumberParts(n numberOptions, li localeInfo, v float64) Value {
+	return rt.partsArray(numberParts(n, li, v))
+}
+
+// partsArray turns spans into the {type, value} objects every formatToParts
+// returns.
+func (rt *Runtime) partsArray(parts []numberPart) Value {
 	arr := rt.newArray()
 	ao := rt.objPtr(arr)
-	for i, p := range numberParts(n, li, v) {
+	for i, p := range parts {
 		o := rt.newPlainObject()
 		oo := rt.objPtr(o)
 		oo.defineOwn("type", rt.newString(p.typ), attrDefault)
