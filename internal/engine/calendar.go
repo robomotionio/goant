@@ -337,11 +337,14 @@ var japaneseEras = []struct {
 	{"heisei", 0, 1989}, // 1989-01-08
 	{"showa", 0, 1926},  // 1926-12-25
 	{"taisho", 0, 1912}, // 1912-07-30
-	{"meiji", 0, 1868},  // 1868-09-08
+	// Temporal's Japanese calendar begins at Meiji 6, the first day of 1873:
+	// that is when Japan adopted the Gregorian calendar, and dates before it
+	// are named in the common era rather than in a Japanese one.
+	{"meiji", 0, 1868}, // from 1873-01-01, which is Meiji 6
 }
 
 func init() {
-	starts := [][3]int{{2019, 5, 1}, {1989, 1, 8}, {1926, 12, 25}, {1912, 7, 30}, {1868, 9, 8}}
+	starts := [][3]int{{2019, 5, 1}, {1989, 1, 8}, {1926, 12, 25}, {1912, 7, 30}, {1873, 1, 1}}
 	for i := range japaneseEras {
 		japaneseEras[i].start = isoDay(starts[i][0], starts[i][1], starts[i][2])
 	}

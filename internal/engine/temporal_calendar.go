@@ -380,16 +380,16 @@ func calendarDateAdd(id string, iso isoDateRec, dur dateDuration, overflow strin
 		ys := strconv.Itoa(y)
 		m, ok := cal.monthFromCode(ys, cd.code)
 		if !ok {
-			// A leap month in a year that has none constrains to the month it
-			// would have followed.
-			base, leap, good := parseMonthCode(cd.code)
-			if !good || !leap {
+			// A leap month in a year that has none constrains to the month
+			// that stands in its place.
+			fallback, good := leapMonthFallback(id, cd.code)
+			if !good {
 				return isoDateRec{}, errCalendarFields
 			}
 			if overflow == "reject" || overflow == "reject-month" {
 				return isoDateRec{}, errCalendarOverflow
 			}
-			m, ok = cal.monthFromCode(ys, simpleMonthCode(base))
+			m, ok = cal.monthFromCode(ys, fallback)
 			if !ok {
 				return isoDateRec{}, errCalendarFields
 			}

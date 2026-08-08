@@ -279,8 +279,8 @@ func (p *tparse) utcOffset(subMinute bool) (ns int64, text string, ok bool) {
 // ---- the bracketed parts ----
 
 func isTZChar(b byte) bool {
-	return b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' || b == '.' || b == '_' ||
-		b == '-' || b == '+'
+	return b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' || isDigit(b) ||
+		b == '.' || b == '_' || b == '-' || b == '+'
 }
 
 func isTZLead(b byte) bool {
