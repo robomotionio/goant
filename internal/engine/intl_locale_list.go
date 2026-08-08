@@ -262,11 +262,16 @@ var zeroOffsetLinks = []string{"Etc/GMT", "Etc/GMT0", "Etc/UTC", "GMT", "GMT0"}
 var availableTimeZones = sync.OnceValue(func() []string {
 	out := make([]string, 0, len(zoneDisplayNames))
 	for id := range zoneDisplayNames {
-		// The zero-offset links are all the same zone as UTC, and a list of
-		// CANONICAL identifiers carries it once. A formatter asked for one of
-		// them still keeps it: the identifier reported is the one that was
-		// requested, here as everywhere.
+		// The list is of CANONICAL identifiers, so every link is dropped and
+		// the zone it links to is kept: Egypt and US/Aleutian are spellings of
+		// Africa/Cairo and America/Adak, and the zero-offset ones are all
+		// spellings of UTC. A formatter asked for a link still keeps it: the
+		// identifier reported is the one that was requested, here as
+		// everywhere.
 		if tagContains(zeroOffsetLinks, id) {
+			continue
+		}
+		if primary, ok := primaryTimeZone(id); ok && primary != id {
 			continue
 		}
 		out = append(out, id)

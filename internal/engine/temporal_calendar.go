@@ -179,7 +179,14 @@ func calendarDateFromFields(id string, f calFieldSet, overflow string) (isoDateR
 func calendarYearMonthFromFields(id string, f calFieldSet, overflow string) (isoDateRec, error) {
 	f.has |= fDay
 	f.day = 1
-	return calendarDateFromFields(id, f, overflow)
+	out, err := calendarDateFromFields(id, f, overflow)
+	// The reference day is out of range more often than the month is: April of
+	// -271821 begins nineteen days before the earliest instant, and the month
+	// is still one a PlainYearMonth may name.
+	if err == errCalendarRange && isoYearMonthWithinLimits(out) {
+		return out, nil
+	}
+	return out, err
 }
 
 // monthNumberNeedsYear is true wherever the number of a month says nothing
@@ -356,7 +363,9 @@ func calendarViewOf(id string, iso isoDateRec) calendarView {
 	v := calendarView{
 		era: cd.era, eraYear: cd.eraYear, hasEra: cd.era != "",
 		year: cd.year, month: cd.month, monthCode: cd.code, day: cd.day,
-		dayOfWeek:   floorMod(day+4, 7) + 1, // 1970-01-01 was a Thursday
+		// Monday is 1 and Sunday is 7, and 1970-01-01 was a Thursday, so day
+		// zero has to come out as 4.
+		dayOfWeek:   floorMod(day+3, 7) + 1,
 		daysInWeek:  7,
 		daysInMonth: cal.daysInMonth(cd.year, cd.month),
 		daysInYear:  cal.daysInYear(cd.year),
