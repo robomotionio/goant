@@ -540,7 +540,7 @@ func parseTemporalYearMonthString(s string) (temporalParse, bool) {
 					// any other calendar the two do not settle which month it
 					// is, because the years do not line up, so the string has
 					// to carry a whole date for the calendar to convert.
-					if cal != "" && cal != "iso8601" {
+					if c, ok := canonicalCalendarID(cal); cal != "" && (!ok || c != "iso8601") {
 						return r, false
 					}
 					r.hasDate, r.year, r.month, r.day = true, y, m, 1
@@ -721,8 +721,9 @@ func parseTemporalDurationString(s string) (fields [10]float64, ok bool) {
 			tidx = matched + 1
 			tany = true
 			if hasFrac {
-				// The fraction spills into the smaller units, and nothing may
-				// follow it.
+				// The fraction spills into the smaller units one at a time,
+				// and nothing may follow it: half an hour is thirty minutes,
+				// not eighteen hundred seconds.
 				spill := int64(frac) // nanoseconds of one second
 				switch matched {
 				case 0:
@@ -730,11 +731,17 @@ func parseTemporalDurationString(s string) (fields [10]float64, ok bool) {
 				case 1:
 					spill *= 60
 				}
-				fields[6] += float64(spill / nsPerSecond)
-				rest := spill % nsPerSecond
-				fields[7] += float64(rest / nsPerMilli)
-				fields[8] += float64((rest / nsPerMicro) % 1000)
-				fields[9] += float64(rest % 1000)
+				if matched == 0 {
+					fields[5] += float64(spill / nsPerMinute)
+					spill %= nsPerMinute
+				}
+				if matched <= 1 {
+					fields[6] += float64(spill / nsPerSecond)
+					spill %= nsPerSecond
+				}
+				fields[7] += float64(spill / nsPerMilli)
+				fields[8] += float64((spill / nsPerMicro) % 1000)
+				fields[9] += float64(spill % 1000)
 				break
 			}
 		}

@@ -135,6 +135,11 @@ func (rt *Runtime) readCalendarFields(item Value, want, required int, requireAny
 			if e != nil {
 				return f, e
 			}
+			// As with a month code, the SHAPE of an offset is settled here, as
+			// it is read, and before the fields after it are even looked at.
+			if _, ok := parseDateTimeUTCOffset(s); !ok {
+				return f, rt.rangeError("offset is not a UTC offset: " + s)
+			}
 			f.offset, f.hasOffset = s, true
 		case keyTimeZone:
 			f.timeZone, f.hasTimeZone = v, true

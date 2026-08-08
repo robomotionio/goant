@@ -323,9 +323,15 @@ func (rt *Runtime) initTemporalDuration(ns *object) {
 			return mkundef(), e
 		}
 		if unit != unitNanosecond || increment != 1 {
+			// Only the seconds and what is under them are rounded. The hours
+			// and minutes are written as they stand, so the largest unit the
+			// answer is spread over is the largest one the duration already
+			// had: "PT30M0S", not the same half hour counted out as
+			// "PT1800S".
 			internal := d.toInternal()
 			rounded := roundNumberToIncrement(internal.time, incrementNs(unit, increment), mode)
-			out, ok := durationFromInternal(newInternal(internal.date, rounded), unitSecond)
+			largest := largerUnit(defaultLargestUnit(d), unitSecond)
+			out, ok := durationFromInternal(newInternal(internal.date, rounded), largest)
 			if !ok {
 				return mkundef(), rt.rangeError("duration is out of range")
 			}
