@@ -89,9 +89,16 @@ func (rt *Runtime) canonicalizeLocaleList(v Value) ([]string, *ThrowError) {
 // sorted. Negotiation is only honest about a locale if resolvedOptions will
 // then report it, so this is the same table lookupLocale resolves against.
 var availableLocales = sync.OnceValue(func() []string {
-	out := make([]string, 0, len(localeTable))
+	out := make([]string, 0, len(localeTable)+len(languageDefaults))
 	for tag := range localeTable {
 		out = append(out, tag)
+	}
+	// A bare language counts as available when lookupLocale resolves it: "en"
+	// is not a key of the table and "en-US" is, and answering "no data for
+	// en" while formatting en perfectly well would be the dishonest half of
+	// the pair.
+	for lang := range languageDefaults {
+		out = append(out, lang)
 	}
 	sort.Strings(out)
 	return out

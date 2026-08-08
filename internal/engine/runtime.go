@@ -180,6 +180,10 @@ type Runtime struct {
 	// itself, and the outer job's roots have to survive that.
 	inFlight []Value
 
+	// intlLegacySym is %IntlLegacyConstructedSymbol%: the key an Intl service
+	// constructor called as a function hangs its formatter off. See initIntl.
+	intlLegacySym Value
+
 	// macrotasks is the timer queue (setTimeout/setInterval). goant has no real
 	// clock: tasks run in (delay, insertion) order after microtasks drain.
 	macrotasks []macrotask

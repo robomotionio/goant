@@ -24,9 +24,18 @@ func (rt *Runtime) initIntl() {
 	// requireNew separates the three constructors that predate ES2015 -- which
 	// are specified to work without `new`, and cannot stop doing so -- from the
 	// ones added since, which throw.
+	// The three constructors that predate ES2015 have a normative-optional
+	// legacy behaviour: called as a function on an object that is already an
+	// instance, they hang the new formatter off it under this symbol and hand
+	// the object back. Web content depends on it, which is why it is still
+	// specified at all.
+	legacySym := rt.newSymbol(rt.newString("IntlLegacyConstructedSymbol"))
+	rt.intlLegacySym = legacySym
+
 	defineService := func(name string, requireNew bool, initOpts func(inst *object, options Value, requested []string) *ThrowError, methods func(po *object)) {
 		proto := rt.newObject(rt.objectProto)
 		po := rt.objPtr(proto)
+		var ctorSelf Value
 		ctor := rt.newNativeFunc(name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			if requireNew && !rt.constructing() {
 				return mkundef(), rt.typeError("Constructor Intl." + name + " requires 'new'")
@@ -50,8 +59,17 @@ func (rt *Runtime) initIntl() {
 					return mkundef(), e
 				}
 			}
+			if !requireNew && !rt.constructing() && this.IsObjectType() {
+				if has, _ := rt.ordinaryHasInstance(ctorSelf, this); has {
+					if o := rt.objPtr(this); o != nil {
+						o.defineOwnSymbol(legacySym.handle(), inst, 0)
+						return this, nil
+					}
+				}
+			}
 			return inst, nil
 		})
+		ctorSelf = ctor
 		co := rt.objPtr(ctor)
 		co.defineOwn("prototype", proto, 0)
 		po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)

@@ -107,12 +107,27 @@ func stripPunctuation(s string) string {
 
 // requireCollator is RequireInternalSlot([[InitializedCollator]]).
 func (rt *Runtime) requireCollator(this Value) (collatorOptions, *ThrowError) {
+	this = rt.unwrapLegacyIntl(this)
 	if o := rt.objPtr(this); o != nil {
 		if v := o.getSlot(slotIntlCollatorOpts); v.IsString() {
 			return parseCollatorOptions(rt.strGo(v)), nil
 		}
 	}
 	return collatorOptions{}, rt.typeError("not an Intl.Collator")
+}
+
+// unwrapLegacyIntl follows %IntlLegacyConstructedSymbol% when it is there:
+// an object the constructor was CALLED on carries the real formatter under it,
+// and every method has to look through.
+func (rt *Runtime) unwrapLegacyIntl(this Value) Value {
+	o := rt.objPtr(this)
+	if o == nil || rt.intlLegacySym == 0 {
+		return this
+	}
+	if v, ok := o.getOwnSymbol(rt.intlLegacySym.handle()); ok && v.IsObjectType() {
+		return v
+	}
+	return this
 }
 
 // initCollatorOptions reads the options bag in the order the specification

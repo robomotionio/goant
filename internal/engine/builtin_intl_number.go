@@ -73,6 +73,7 @@ func parseNumberOptions(s string) numberOptions {
 
 // requireNumberFormat is RequireInternalSlot([[InitializedNumberFormat]]).
 func (rt *Runtime) requireNumberFormat(this Value) (numberOptions, *ThrowError) {
+	this = rt.unwrapLegacyIntl(this)
 	if o := rt.objPtr(this); o != nil {
 		if v := o.getSlot(slotIntlNumberOpts); v.IsString() {
 			return parseNumberOptions(rt.strGo(v)), nil
