@@ -413,6 +413,53 @@ func (rt *Runtime) initIteratorHelpers() {
 			return mkundef(), nil
 		}), attrWritable|attrConfigurable)
 	}
+	// join(separator): the separator is coerced BEFORE "next" is read, and an
+	// abrupt coercion closes the iterator -- so a receiver whose `next` getter
+	// throws never has it looked at, and its `return` is still called. Nothing
+	// after that closes anything: an exhausted iterator is already done, and an
+	// error out of `next` has closed itself.
+	rt.defMethod(proto, "join", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		if !this.IsObjectType() {
+			return mkundef(), rt.typeError("Iterator.prototype.join called on a non-object")
+		}
+		sep := ","
+		if sv := arg(args, 0); !sv.IsUndefined() {
+			s, e := rt.toStringValue(sv)
+			if e != nil {
+				rt.iteratorClose(this)
+				return mkundef(), e
+			}
+			sep = rt.strGo(s)
+		}
+		next, e := rt.getField(this, "next")
+		if e != nil {
+			return mkundef(), e
+		}
+		var b []byte
+		for first := true; ; first = false {
+			v, done, e := rt.iterStepValue(this, next)
+			if e != nil {
+				return mkundef(), e
+			}
+			if done {
+				return rt.newString(string(b)), nil
+			}
+			if !first {
+				b = append(b, sep...)
+			}
+			// null and undefined join as nothing at all, the way Array.prototype
+			// .join treats a hole.
+			if v.IsNullish() {
+				continue
+			}
+			sv, e := rt.toStringValue(v)
+			if e != nil {
+				rt.iteratorClose(this)
+				return mkundef(), e
+			}
+			b = append(b, rt.strBytes(sv)...)
+		}
+	})
 	rt.defMethod(proto, "toArray", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		vs, e := drain(this)
 		if e != nil {
