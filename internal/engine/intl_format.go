@@ -71,35 +71,20 @@ func (rt *Runtime) resolveLocaleArg(v Value) (localeInfo, *ThrowError) {
 
 // resolveLocaleArgTag also reports the tag it resolved to, which
 // Intl.*.prototype.resolvedOptions() has to echo back.
+//
+// The whole list is canonicalised even though only the first entry can be
+// resolved, because the validation is observable: a RangeError for the third
+// tag in an array has to be thrown whether or not the first one already
+// decided the answer.
 func (rt *Runtime) resolveLocaleArgTag(v Value) (localeInfo, string, *ThrowError) {
-	if e := rt.validateLocales(v); e != nil {
+	tags, e := rt.canonicalizeLocaleList(v)
+	if e != nil {
 		return localeInfo{}, "", e
 	}
-	tag := ""
-	switch {
-	case v.IsString():
-		tag = rt.strGo(v)
-	case v.IsObjectType():
-		n, e := rt.lengthOf(v)
-		if e != nil {
-			return localeInfo{}, "", e
-		}
-		if n > 0 {
-			el, e := rt.getElement(v, mknum(0))
-			if e != nil {
-				return localeInfo{}, "", e
-			}
-			s, e := rt.toStringValue(el)
-			if e != nil {
-				return localeInfo{}, "", e
-			}
-			tag = rt.strGo(s)
-		}
-	}
-	if tag == "" {
+	if len(tags) == 0 {
 		return localeTable[defaultLocale], defaultLocale, nil
 	}
-	li, resolved := lookupLocale(tag)
+	li, resolved := lookupLocale(tags[0])
 	return li, resolved, nil
 }
 

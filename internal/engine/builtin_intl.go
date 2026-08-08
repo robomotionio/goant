@@ -2,65 +2,13 @@ package engine
 
 import (
 	"math"
-	"regexp"
 	"time"
 )
 
 // Minimal Intl: the constructors exist, work with and without `new`, expose the
-// expected prototype methods, and validate BCP 47 language tags. Actual
-// locale-sensitive formatting/collation is host-locale-agnostic (adequate for
-// the conformance surface, which only exercises shape and tag validation).
-
-// langtagRe matches a structurally valid BCP 47 `langtag` (RFC 5646) — which
-// excludes privateuse-only ("x-…") and irregular grandfathered ("i-…") tags, so
-// those are rejected as invalid language tags.
-var langtagRe = regexp.MustCompile(`(?i)^` +
-	`([a-z]{2,3}(-[a-z]{3}){0,3}|[a-z]{4,8})` + // language (+ up to 3 extlang)
-	`(-[a-z]{4})?` + // script
-	`(-([a-z]{2}|[0-9]{3}))?` + // region
-	`(-([a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*` + // variant
-	`(-[a-wy-z0-9](-[a-z0-9]{2,8})+)*` + // extension (singleton != x)
-	`(-x(-[a-z0-9]{1,8})+)?` + // optional privateuse
-	`$`)
-
-// validateLocales implements CanonicalizeLocaleList's structural check: a single
-// tag string, or each element of a list, must be a structurally valid language
-// tag. undefined is accepted (empty list).
-func (rt *Runtime) validateLocales(v Value) *ThrowError {
-	check := func(tag Value) *ThrowError {
-		s, e := rt.toStringValue(tag)
-		if e != nil {
-			return e
-		}
-		str := rt.strGo(s)
-		if !langtagRe.MatchString(str) {
-			return &ThrowError{Value: rt.makeError(rt.errors.rangeProto, "RangeError", "Invalid language tag: "+str), rt: rt}
-		}
-		return nil
-	}
-	if v.IsUndefined() {
-		return nil
-	}
-	if v.IsString() {
-		return check(v)
-	}
-	if v.IsObjectType() {
-		n, e := rt.lengthOf(v)
-		if e != nil {
-			return e
-		}
-		for i := 0; i < n; i++ {
-			el, e := rt.getElement(v, mknum(float64(i)))
-			if e != nil {
-				return e
-			}
-			if e := check(el); e != nil {
-				return e
-			}
-		}
-	}
-	return nil
-}
+// expected prototype methods, and validate and canonicalise language tags per
+// UTS 35 (see intl_langtag.go). Actual locale-sensitive formatting and
+// collation still comes from the tables in intl_data.go rather than from CLDR.
 
 func (rt *Runtime) initIntl() {
 	intl := rt.newObject(rt.objectProto)
@@ -103,7 +51,7 @@ func (rt *Runtime) initIntl() {
 			methods(po)
 		}
 		co.defineOwn("supportedLocalesOf", rt.newNativeFunc("supportedLocalesOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			return rt.newArray(), nil
+			return rt.supportedLocalesOf(arg(args, 0), arg(args, 1))
 		}), attrWritable|attrConfigurable)
 		io.defineOwn(name, ctor, attrWritable|attrConfigurable)
 	}
@@ -163,6 +111,18 @@ func (rt *Runtime) initIntl() {
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
 	})
+
+	rt.defMethod(io, "getCanonicalLocales", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		tags, e := rt.canonicalizeLocaleList(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		return rt.newArrayOfStrings(tags), nil
+	})
+	rt.defMethod(io, "supportedValuesOf", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.supportedValuesOf(arg(args, 0))
+	})
+	rt.initIntlLocale(io)
 
 	rt.defGlobal("Intl", intl)
 }
