@@ -271,8 +271,12 @@ var availableTimeZones = sync.OnceValue(func() []string {
 		if tagContains(zeroOffsetLinks, id) {
 			continue
 		}
-		if primary, ok := primaryTimeZone(id); ok && primary != id {
-			continue
+		// UTC is the canonical name of the zone at zero, whatever order the
+		// alias table happens to list its spellings in.
+		if id != "UTC" {
+			if primary, ok := primaryTimeZone(id); ok && primary != asciiLower(id) {
+				continue
+			}
 		}
 		out = append(out, id)
 	}

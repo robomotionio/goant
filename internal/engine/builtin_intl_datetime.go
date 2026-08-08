@@ -931,8 +931,18 @@ func (d dateTimeOptions) rangeParts(start, end []numberPart) []sourcedPart {
 	if first < 0 || greatest <= dtSignificance["year"] {
 		return whole()
 	}
-	if !named && greatest < dtSignificance["dayPeriod"] {
-		return whole()
+	if !named {
+		// A numeric date is shared only when what is shared is the whole date:
+		// "8/4/2021, 12:30:45 AM - 11:30:45 PM" reads, and "02:03 - 13" does
+		// not, because half a clock reading is not a reading.
+		for _, p := range start[:first] {
+			if s, ok := dtSignificance[p.typ]; ok && s >= dtSignificance["dayPeriod"] {
+				return whole()
+			}
+		}
+		if greatest < dtSignificance["dayPeriod"] {
+			return whole()
+		}
 	}
 	var out []sourcedPart
 	for _, p := range start[:first] {
