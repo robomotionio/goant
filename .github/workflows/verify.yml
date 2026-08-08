@@ -35,9 +35,13 @@ on:
     # nightly run is the only one whose corpus is not competing with a push.
     - cron: "0 3 * * *"
 
+# Not cancel-in-progress. This reports on what is already on main, so a run is
+# the record for one commit; cancelling it because a later commit arrived
+# discards the answer for the earlier one and leaves a gap nobody notices. Two
+# runs overlapping costs minutes, which are free on a public repository.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CGO_ENABLED: "0"
@@ -86,8 +90,21 @@ jobs:
             echo "  ok $t"
           done
 
+      # unsafeptr is off for internal/jitmem and nowhere else. Turning the
+      # address VirtualAlloc returned into a slice is what that package is for,
+      # and vet cannot see through syscall.LazyProc.Call to know the memory came
+      # from the OS rather than the Go heap — so it cannot move, and the
+      # conversion is the legal one. The unix side never trips this because
+      # syscall.Mmap hands back a []byte already.
+      #
+      # This failed the first Windows run there has ever been, on a line that
+      # predates this workflow by months. `go test` does not run unsafeptr, so
+      # nothing else would have said so.
       - name: Vet
-        run: go vet ./...
+        shell: bash
+        run: |
+          go vet $(go list ./... | grep -v '/internal/jitmem$')
+          go vet -unsafeptr=false ./internal/jitmem/
 
       - name: Test, tier off
         run: go test ./...
