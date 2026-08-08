@@ -200,8 +200,13 @@ func moduleRequestList(stmts []*Node) []moduleRequest {
 		}
 		if s.Kind == NImportDecl || (s.Kind == NExport && s.Flags&exFrom != 0) {
 			out = append(out, moduleRequest{
-				key:      joinModuleKey(s.Right.Str, s.Str),
-				deferred: s.Flags&importPhaseDefer != 0,
+				key: joinModuleKey(s.Right.Str, s.Str),
+				// Only an IMPORT can name a phase. The test has to say so out
+				// loud, because import flags and export flags are two numberings
+				// of one Flags field -- importPhaseDefer and exFrom are the same
+				// bit -- and without the kind check every `export … from` read as
+				// a deferred request and its module was linked and never run.
+				deferred: s.Kind == NImportDecl && s.Flags&importPhaseDefer != 0,
 			})
 		}
 	}

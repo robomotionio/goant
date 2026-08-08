@@ -2928,7 +2928,11 @@ const (
 	// linked with the rest of the graph but not evaluated until the namespace is
 	// touched. It sits on the DECLARATION, not on a binding, because the phase
 	// is a property of the request.
-	importPhaseDefer = 1 << 3
+	//
+	// The bit is chosen clear of the EXPORT flags (ast.h EX_*, bits 0..5), which
+	// share this one Flags field. It was 1<<3 -- exFrom -- and every
+	// `export … from` in the tree read as a deferred request.
+	importPhaseDefer = 1 << 6
 	// exportNameFromString marks a ModuleExportName written as a StringLiteral
 	// rather than an IdentifierName.
 	exportNameFromString = 1 << 2
