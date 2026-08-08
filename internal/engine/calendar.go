@@ -632,42 +632,32 @@ func (c indianCalendar) yearFromEra(era string, eraYear int) (int, bool) {
 
 type persianCalendar struct{}
 
-// persianEpoch is the first day of year 1, 19 March 622 in the Julian
-// calendar, anchored on Nowruz 1403 falling on 2024-03-20.
-const persianEpoch = -492267
+// The Solar Hijri calendar as the Iranian standard fixes it: six months of
+// thirty-one days, five of thirty, and a last of twenty-nine or thirty. The
+// leap years come in a repeating pattern of 33, which is the rule ICU uses and
+// the one the published calendars follow -- 1403 is a leap year and the older
+// 2820-year cycle says it is not.
+const persianEpoch = -492268
 
-// cycleYear is the year's place in the 2820-year cycle the arithmetic Persian
-// calendar repeats on. There is no year zero, so a year before the epoch
-// counts from one further back.
-func persianCycleYear(y int) (y0, year1 int) {
-	y0 = y - 474
-	if y <= 0 {
-		y0 = y - 473
-	}
-	return y0, floorMod(y0, 2820) + 474
-}
+// persianMonthStart is the day of the year each month begins on, counting from
+// zero.
+var persianMonthStart = [13]int{0, 31, 62, 93, 124, 155, 186, 216, 246, 276, 306, 336, 366}
 
-// inLeapYear uses the arithmetic 2820-year cycle, which is the rule ICU and
-// Temporal use: it agrees with the astronomical calendar for every year in the
-// range a script can reach.
-func (c persianCalendar) inLeapYear(y int) bool {
-	_, year1 := persianCycleYear(y)
-	return floorMod((year1+38)*31, 128) < 31
-}
+func (c persianCalendar) inLeapYear(y int) bool { return floorMod(25*y+11, 33) < 8 }
 
 func (c persianCalendar) daysInMonth(y, m int) int {
 	switch {
+	case m < 1 || m > 12:
+		return 0
 	case m <= 6:
 		return 31
 	case m <= 11:
 		return 30
-	case m == 12:
-		if c.inLeapYear(y) {
-			return 30
-		}
-		return 29
 	}
-	return 30
+	if c.inLeapYear(y) {
+		return 30
+	}
+	return 29
 }
 
 func (c persianCalendar) daysInYear(y int) int {
@@ -677,34 +667,35 @@ func (c persianCalendar) daysInYear(y int) int {
 	return 365
 }
 
+func (c persianCalendar) yearStart(y int) int {
+	return persianEpoch + 365*(y-1) + floorDiv(8*y+21, 33)
+}
+
 func (c persianCalendar) dayFromDate(y, m, d int) int {
-	y0, year1 := persianCycleYear(y)
-	days := persianEpoch + 1029983*floorDiv(y0, 2820) + 365*(year1-1) +
-		floorDiv(31*year1-5, 128)
-	for i := 1; i < m; i++ {
-		days += c.daysInMonth(y, i)
+	if m < 1 {
+		m = 1
 	}
-	return days + d - 1
+	if m > 12 {
+		m = 12
+	}
+	return c.yearStart(y) + persianMonthStart[m-1] + d - 1
 }
 
 func (c persianCalendar) dateFromDay(day int) calendarDate {
-	// A first guess from the average year length, then walked into place. The
-	// walk is at most a step or two.
-	y := 474 + floorDiv(day-persianEpoch, 366)
-	for c.dayFromDate(y+1, 1, 1) <= day {
-		y++
-	}
-	for c.dayFromDate(y, 1, 1) > day {
+	y := floorDiv(day-persianEpoch, 365) + 1
+	for c.yearStart(y) > day {
 		y--
 	}
-	rest := day - c.dayFromDate(y, 1, 1)
+	for c.yearStart(y+1) <= day {
+		y++
+	}
+	doy := day - c.yearStart(y)
 	m := 1
-	for rest >= c.daysInMonth(y, m) {
-		rest -= c.daysInMonth(y, m)
+	for m < 12 && doy >= persianMonthStart[m] {
 		m++
 	}
-	return calendarDate{era: "ap", eraYear: y, year: y, month: m, day: rest + 1,
-		code: simpleMonthCode(m)}
+	return calendarDate{era: "ap", eraYear: y, year: y, month: m,
+		day: doy - persianMonthStart[m-1] + 1, code: simpleMonthCode(m)}
 }
 
 func (c persianCalendar) monthsInYear(int) int      { return 12 }
