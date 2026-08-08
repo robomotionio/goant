@@ -295,7 +295,6 @@ var skipFeatures = map[string]bool{
 	"Atomics":                    true, // agent/SharedArrayBuffer host model
 	"SharedArrayBuffer":          true,
 	"Atomics.waitAsync":          true,
-	"Temporal":                   true, // staged proposal, not implemented
 	"decorators":                 true,
 	"import-assertions":          true, // the withdrawn `assert {…}` spelling
 	"IsHTMLDDA":                  true,
@@ -321,10 +320,9 @@ var skipNothing bool
 // when a proposal graduates it moves below it, and the tests stop being
 // skippable and start being work. (iterator-chunking and iterator-includes
 // crossed it in July 2026 and cost 109 failures until they were implemented.)
-// Temporal and the Atomics/SharedArrayBuffer group sit below the header and are
-// excluded on scope, not on staging — they are deliberately not in goant.
+// The Atomics/SharedArrayBuffer group sits below the header and is excluded on
+// scope, not on staging: it needs an agent model goant does not have.
 var coreSkipFeatures = map[string]bool{
-	"Temporal":                   true,
 	"decorators":                 true,
 	"source-phase-imports":       true,
 	"source-phase-imports-typed": true,

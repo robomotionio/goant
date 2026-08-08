@@ -184,6 +184,11 @@ type Runtime struct {
 	// constructor called as a function hangs its formatter off. See initIntl.
 	intlLegacySym Value
 
+	// temporalProto holds the prototype of each of the eight Temporal types,
+	// indexed by its kind, so that a method returning a new object of some
+	// other type can build one without reaching through the global.
+	temporalProto [kindCount]Value
+
 	// macrotasks is the timer queue (setTimeout/setInterval). goant has no real
 	// clock: tasks run in (delay, insertion) order after microtasks drain.
 	macrotasks []macrotask
@@ -662,6 +667,7 @@ func (rt *Runtime) initRealm() {
 	rt.initSharedArrayBuffer()
 	rt.initAtomics()
 	rt.initIntl()
+	rt.initTemporal()
 	rt.initAnnexB()
 	rt.markNativeConstructors()
 }
@@ -695,8 +701,10 @@ func (rt *Runtime) markNativeConstructors() {
 		}
 	}
 	markMembers(rt.global)
-	if intlV, ok := rt.objPtr(rt.global).getOwn("Intl"); ok {
-		markMembers(intlV)
+	for _, ns := range []string{"Intl", "Temporal"} {
+		if v, ok := rt.objPtr(rt.global).getOwn(ns); ok {
+			markMembers(v)
+		}
 	}
 }
 

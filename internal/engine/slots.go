@@ -67,7 +67,23 @@ const (
 	slotSegIterPos        // a Segment iterator's position, in code units
 	slotIntlDurationOpts  // a DurationFormat's resolved options (a String)
 	slotIntlDateTimeOpts  // a DateTimeFormat's resolved options (a String)
-	slotMax               = 255
+	// A Temporal object's payload. slotTemporalKind is its brand and says which
+	// of the eight it is; the numbered slots hold whatever that one needs (see
+	// builtin_temporal.go), which is at most a duration's ten fields.
+	slotTemporalKind
+	slotTemporalCalendar
+	slotTemporalTimeZone
+	slotTemporal0
+	slotTemporal1
+	slotTemporal2
+	slotTemporal3
+	slotTemporal4
+	slotTemporal5
+	slotTemporal6
+	slotTemporal7
+	slotTemporal8
+	slotTemporal9
+	slotMax = 255
 )
 
 // brand ids for object internal-class checks (ant BRAND_*).
