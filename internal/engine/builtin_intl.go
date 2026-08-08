@@ -47,10 +47,12 @@ func (rt *Runtime) initIntl() {
 			if requireNew && !rt.constructing() {
 				return mkundef(), rt.typeError("Constructor Intl." + name + " requires 'new'")
 			}
-			// GetOptionsObject: the constructors added since ES2015 take an
-			// object or nothing. A primitive is a mistake rather than a bag
-			// with no properties, and they say so.
-			if requireNew {
+			// GetOptionsObject: some constructors take an object or nothing,
+			// and a primitive is a mistake rather than a bag with no
+			// properties. The others use CoerceOptionsToObject and wrap it --
+			// which is not a matter of age, RelativeTimeFormat and PluralRules
+			// coerce and Segmenter does not, so the list is written out.
+			if tagContains([]string{"ListFormat", "DisplayNames", "Segmenter", "DurationFormat"}, name) {
 				if o := arg(args, 1); !o.IsUndefined() && !o.IsObjectType() {
 					return mkundef(), rt.typeError("Options must be an object")
 				}
