@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync"
 
+	"golang.org/x/text/collate"
 	"golang.org/x/text/language"
 )
 
@@ -102,6 +103,18 @@ var availableLocales = sync.OnceValue(func() []string {
 	for lang := range languageDefaults {
 		out = append(out, lang)
 	}
+	// The same goes for the languages that have collation and plural rules but
+	// no pattern table: Arabic sorts and pluralises correctly here, so
+	// answering "no data for ar" would be the same dishonesty the other way.
+	seen := map[string]bool{}
+	for _, t := range collate.Supported() {
+		if b, c := t.Base(); c > language.No {
+			if lang := b.String(); !seen[lang] {
+				seen[lang] = true
+				out = append(out, lang)
+			}
+		}
+	}
 	sort.Strings(out)
 	return out
 })
@@ -138,22 +151,17 @@ func lastHyphen(s string) int {
 	return -1
 }
 
-// localeIsAvailable says whether this engine has anything for a tag. Two
-// different kinds of data qualify: the formatting tables, which cover a fixed
-// list, and the collation and plural rules, which cover every language CLDR
-// knows -- so a tag whose language x/text recognises counts even when no
-// pattern table names it. "xyz" is well formed and no language at all, and
-// does not.
+// localeIsAvailable says whether this engine has anything for a tag, which is
+// the one question both lookupMatcher and supportedLocalesOf ask. Asking it
+// twice, differently, is what makes resolvedOptions and supportedLocalesOf
+// disagree -- and the pair is how a script finds out what there is.
 func localeIsAvailable(tag string) bool {
 	t, ok := parseLangTag(tag)
 	if !ok {
 		return false
 	}
-	if _, ok := bestAvailableLocale(availableLocales(), t.languageID()); ok {
-		return true
-	}
-	_, err := language.Parse(t.lang)
-	return err == nil
+	_, ok = bestAvailableLocale(availableLocales(), t.languageID())
+	return ok
 }
 
 // lookupMatcher is ECMA-402 9.2.3: the first requested locale there is data
@@ -173,11 +181,9 @@ func lookupMatcher(requested []string) string {
 // than the prefix it matched on -- that is what supportedLocalesOf returns.
 func lookupSupportedLocales(requested []string) []string {
 	var out []string
+	avail := availableLocales()
 	for _, tag := range requested {
-		// The same question lookupMatcher asks. Answering it differently here
-		// is what makes resolvedOptions and supportedLocalesOf disagree, and
-		// the pair is how a script finds out what there is.
-		if localeIsAvailable(tag) {
+		if _, ok := bestAvailableLocale(avail, tagNoExtensions(tag)); ok {
 			out = append(out, tag)
 		}
 	}

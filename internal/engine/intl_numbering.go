@@ -141,10 +141,24 @@ func collationAvailable(tag, collation string) bool {
 // collationNames is every collation type, sorted -- what
 // Intl.supportedValuesOf("collation") answers.
 var collationNames = sync.OnceValue(func() []string {
-	m := cldrCollations()
-	out := make([]string, 0, len(m))
-	for name := range m {
-		out = append(out, name)
+	// Only the orderings a Collator will actually accept, which is the ones
+	// some locale has: listing a collation nothing can be asked for would be
+	// the same dishonesty as listing a locale with no data.
+	seen := map[string]bool{}
+	out := make([]string, 0, 16)
+	add := func(name string) {
+		if _, ok := cldrCollations()[name]; ok && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	for _, name := range universalCollations {
+		add(name)
+	}
+	for _, names := range languageCollations {
+		for _, name := range names {
+			add(name)
+		}
 	}
 	sort.Strings(out)
 	return out

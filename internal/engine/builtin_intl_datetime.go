@@ -381,11 +381,16 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 				}
 			}
 		}
-		switch style {
-		case "2-digit":
-			return two(m) + marker
-		case "numeric":
-			return strconv.Itoa(m) + marker
+		// A Hebrew month is never written as a number, because its number is
+		// not stable: the sixth is Adar in a common year and Adar I in a leap
+		// one, and CLDR spells it out for that reason.
+		if d.calendar != "hebrew" {
+			switch style {
+			case "2-digit":
+				return two(m) + marker
+			case "numeric":
+				return strconv.Itoa(m) + marker
+			}
 		}
 		name := d.monthName(cd)
 		if name == "" {
@@ -643,7 +648,9 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 			wroteDate = true
 		}
 	}
-	if _, ok := d.comps["era"]; ok {
+	// A calendar with no eras has no era part to write, whatever was asked
+	// for: the Chinese and Korean years are named, not counted from an epoch.
+	if _, ok := d.comps["era"]; ok && d.calendarDate(t).era != "" {
 		if wroteDate {
 			lit(" ")
 		}
