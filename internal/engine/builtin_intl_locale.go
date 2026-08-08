@@ -257,8 +257,7 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 	list("getCollations", func(t *langTag) []string { return preferred(t, "co", []string{"emoji", "eor"}) })
 	list("getNumberingSystems", func(t *langTag) []string { return preferred(t, "nu", []string{"latn"}) })
 	list("getHourCycles", func(t *langTag) []string {
-		li, _ := lookupLocale(t.String())
-		return preferred(t, "hc", []string{li.hourCycle})
+		return preferred(t, "hc", []string{hourCycleForRegion(effectiveRegion(t))})
 	})
 	rt.defMethod(po, "getTimeZones", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		t, e := rt.requireLocale(this)
@@ -287,7 +286,13 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		first, weekend, minimal := weekInfo(t.region)
+		first, weekend, minimal := weekInfo(effectiveRegion(t))
+		// -u-fw names the first day outright, whatever the region would say.
+		if v, has := t.uKeyword("fw"); has {
+			if d := weekdayNumber(v); d != 0 {
+				first = d
+			}
+		}
 		o := rt.newPlainObject()
 		oo := rt.objPtr(o)
 		oo.defineOwn("firstDay", mknum(float64(first)), attrDefault)
@@ -393,6 +398,49 @@ func weekdayKeyword(s string) string {
 		return "sun"
 	}
 	return ""
+}
+
+// effectiveRegion is the region a locale's calendar and week data comes from.
+// The -u-rg keyword overrides it outright, a -u-sd subdivision names it in its
+// first two letters, and otherwise it is the tag's own region or, failing
+// that, the one likely subtags infers.
+func effectiveRegion(t *langTag) string {
+	if v, has := t.uKeyword("rg"); has && len(v) >= 2 {
+		return asciiUpper(v[:2])
+	}
+	if v, has := t.uKeyword("sd"); has && len(v) >= 2 {
+		return asciiUpper(v[:2])
+	}
+	if t.region != "" {
+		return t.region
+	}
+	if m, ok := t.maximized(); ok {
+		return m.region
+	}
+	return ""
+}
+
+// weekdayNumber maps a -u-fw type to its ISO weekday number, 0 for a value
+// that is not a weekday at all.
+func weekdayNumber(s string) int {
+	for i, d := range []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"} {
+		if s == d {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// hourCycleForRegion is the clock a region reads. Twelve hours is the
+// English-speaking world and a scattering of others; twenty-four is the rest,
+// which is why the twelve-hour list is the one written out.
+func hourCycleForRegion(region string) string {
+	switch region {
+	case "US", "GB", "CA", "AU", "NZ", "IE", "IN", "PH", "PK", "BD", "EG",
+		"MX", "CO", "SA", "MY", "NG", "KE", "ZA", "GR", "KR", "JP":
+		return "h12"
+	}
+	return "h23"
 }
 
 // textDirection is the writing direction of a language. The right-to-left
