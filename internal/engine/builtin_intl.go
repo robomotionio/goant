@@ -191,36 +191,101 @@ func (rt *Runtime) initIntl() {
 			return o, nil
 		})
 	})
-	defineService("DateTimeFormat", false, func(inst *object, options Value, _ []string) *ThrowError {
-		// [[TimeZone]] is fixed at construction: an unknown zone is a RangeError
-		// here rather than on some later format() call in another file.
-		id, e := rt.optionTimeZone(options)
+	defineService("DateTimeFormat", false, func(inst *object, options Value, requested []string) *ThrowError {
+		// Everything is fixed at construction: an unknown zone or an illegal
+		// combination of options is reported here rather than on some later
+		// format() call in another file.
+		d, e := rt.initDateTimeOptions(options, requested)
 		if e != nil {
 			return e
 		}
-		inst.setSlot(slotIntlTimeZone, rt.newString(id))
+		inst.setSlot(slotIntlTimeZone, rt.newString(d.timeZone))
+		inst.setSlot(slotIntlDateTimeOpts, rt.newString(d.String()))
 		return nil
 	}, func(po *object) {
+		instant := func(rt *Runtime, args []Value) (float64, *ThrowError) {
+			// With no argument the spec formats the current time.
+			ms := float64(time.Now().UnixMilli())
+			if a := arg(args, 0); !a.IsUndefined() {
+				n, e := rt.toNumber(a)
+				if e != nil {
+					return 0, e
+				}
+				ms = timeClip(n)
+			}
+			if math.IsNaN(ms) {
+				return 0, rt.rangeError("Invalid time value")
+			}
+			return ms, nil
+		}
 		getter := rt.newNativeFunc("get format", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			li := rt.intlLocaleOf(this)
-			loc := zoneFor(rt.intlZoneID(this))
+			d, e := rt.requireDateTimeFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			loc := zoneFor(d.timeZone)
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-				// With no argument the spec formats the current time.
-				ms := float64(time.Now().UnixMilli())
-				if a := arg(args, 0); !a.IsUndefined() {
-					n, e := rt.toNumber(a)
-					if e != nil {
-						return mkundef(), e
-					}
-					ms = timeClip(n)
+				ms, e := instant(rt, args)
+				if e != nil {
+					return mkundef(), e
 				}
-				if math.IsNaN(ms) {
-					return mkundef(), rt.rangeError("Invalid time value")
+				var b strings.Builder
+				for _, p := range d.dateTimeParts(msInZone(ms, loc)) {
+					b.WriteString(p.val)
 				}
-				return rt.newString(li.formatDateTime(dtDate, msInZone(ms, loc))), nil
+				return rt.newString(b.String()), nil
 			}), nil
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
+		rt.defMethod(po, "formatToParts", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			d, e := rt.requireDateTimeFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			ms, e := instant(rt, args)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.partsArray(d.dateTimeParts(msInZone(ms, zoneFor(d.timeZone)))), nil
+		})
+		// The key order is the specification's and a test reads it back.
+		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			d, e := rt.requireDateTimeFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			o := rt.newPlainObject()
+			oo := rt.objPtr(o)
+			oo.defineOwn("locale", rt.newString(d.tag), attrDefault)
+			oo.defineOwn("calendar", rt.newString(d.calendar), attrDefault)
+			oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
+			oo.defineOwn("timeZone", rt.newString(d.timeZone), attrDefault)
+			// hourCycle and hour12 are reported only by a formatter that shows
+			// an hour: they say nothing about a date.
+			if _, hasHour := d.comps["hour"]; hasHour || d.timeStyle != "" {
+				hc := d.resolvedHourCycle()
+				oo.defineOwn("hourCycle", rt.newString(hc), attrDefault)
+				oo.defineOwn("hour12", mkbool(hc == "h11" || hc == "h12"), attrDefault)
+			}
+			if d.dateStyle != "" {
+				oo.defineOwn("dateStyle", rt.newString(d.dateStyle), attrDefault)
+			}
+			if d.timeStyle != "" {
+				oo.defineOwn("timeStyle", rt.newString(d.timeStyle), attrDefault)
+			}
+			for _, c := range dtComponents {
+				v, ok := d.comps[c]
+				if !ok {
+					continue
+				}
+				if c == "fractionalSecondDigits" {
+					oo.defineOwn(c, mknum(float64(d.fracDigits)), attrDefault)
+					continue
+				}
+				oo.defineOwn(c, rt.newString(v), attrDefault)
+			}
+			return o, nil
+		})
 	})
 
 	defineService("PluralRules", true, func(inst *object, options Value, requested []string) *ThrowError {

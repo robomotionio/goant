@@ -66,6 +66,7 @@ const (
 	slotSegmentsOpts      // a Segments/Segment-iterator's segmenter options
 	slotSegIterPos        // a Segment iterator's position, in code units
 	slotIntlDurationOpts  // a DurationFormat's resolved options (a String)
+	slotIntlDateTimeOpts  // a DateTimeFormat's resolved options (a String)
 	slotMax               = 255
 )
 
