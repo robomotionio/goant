@@ -402,12 +402,17 @@ func (rt *Runtime) initIntl() {
 		if e != nil {
 			return e
 		}
+		// compactDisplay is read before the digit options here, which is the
+		// order PluralRules lists and a getter can see.
+		compact, _, e := rt.intlStringOption(options, "compactDisplay", []string{"short", "long"})
+		if e != nil {
+			return e
+		}
 		p, e := rt.intlDigitOptions(options, 0, 3)
 		if e != nil {
 			return e
 		}
-		compact, _, e := rt.intlStringOption(options, "compactDisplay", []string{"short", "long"})
-		if e != nil {
+		if e := rt.intlRoundingOptions(&p, options); e != nil {
 			return e
 		}
 		p.ordinal = kind == "ordinal"
@@ -498,10 +503,10 @@ func (rt *Runtime) initIntl() {
 			}
 			oo.defineOwn("pluralCategories",
 				rt.newArrayOfStrings(p.categories(pluralTag(p.tag))), attrDefault)
-			oo.defineOwn("roundingIncrement", mknum(1), attrDefault)
-			oo.defineOwn("roundingMode", rt.newString("halfExpand"), attrDefault)
-			oo.defineOwn("roundingPriority", rt.newString("auto"), attrDefault)
-			oo.defineOwn("trailingZeroDisplay", rt.newString("auto"), attrDefault)
+			oo.defineOwn("roundingIncrement", mknum(float64(p.roundingIncr)), attrDefault)
+			oo.defineOwn("roundingMode", rt.newString(p.roundingMode), attrDefault)
+			oo.defineOwn("roundingPriority", rt.newString(p.priority), attrDefault)
+			oo.defineOwn("trailingZeroDisplay", rt.newString(p.trailingZero), attrDefault)
 			if p.notation == "compact" {
 				oo.defineOwn("compactDisplay", rt.newString(p.compact), attrDefault)
 			}

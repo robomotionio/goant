@@ -213,6 +213,14 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	if hasNotation {
 		n.notation = notation
 	}
+	d, e := rt.intlDigitOptions(options, minFrac, maxFrac)
+	if e != nil {
+		return n, e
+	}
+	n.digits = d
+	// The four rounding options are read AFTER the digit options, which is
+	// where SetNumberFormatDigitOptions reads them and is observable through
+	// getters on the bag.
 	roundingIncrement, hasIncr, e := rt.intlNumberOption(options, "roundingIncrement", 1, 5000, 1)
 	if e != nil {
 		return n, e
@@ -244,11 +252,6 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	if hasTrailing {
 		n.trailingZero = trailing
 	}
-	d, e := rt.intlDigitOptions(options, minFrac, maxFrac)
-	if e != nil {
-		return n, e
-	}
-	n.digits = d
 	if n.roundingPriority != "auto" && n.digits.maxSig > 0 {
 		// Both kinds of digit option were given and the priority says which
 		// wins per value rather than outright: run both and compare.

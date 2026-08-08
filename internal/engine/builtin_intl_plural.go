@@ -31,6 +31,11 @@ type pluralOptions struct {
 	maxFrac  int
 	minSig   int // 0 when significant digits were not asked for
 	maxSig   int
+
+	roundingMode string
+	roundingIncr int
+	trailingZero string
+	priority     string
 }
 
 func (p pluralOptions) String() string {
@@ -40,21 +45,26 @@ func (p pluralOptions) String() string {
 	}
 	return kind + "," + strconv.Itoa(p.minInt) + "," + strconv.Itoa(p.minFrac) +
 		"," + strconv.Itoa(p.maxFrac) + "," + strconv.Itoa(p.minSig) + "," +
-		strconv.Itoa(p.maxSig) + "," + p.notation + "," + p.compact + "," + p.tag
+		strconv.Itoa(p.maxSig) + "," + p.notation + "," + p.compact + "," +
+		p.roundingMode + "," + strconv.Itoa(p.roundingIncr) + "," +
+		p.trailingZero + "," + p.priority + "," + p.tag
 }
 
 func parsePluralOptions(s string) pluralOptions {
 	f := strings.Split(s, ",")
-	if len(f) != 9 {
+	if len(f) != 13 {
 		return defaultPluralOptions()
 	}
 	n := func(i int) int { v, _ := strconv.Atoi(f[i]); return v }
 	return pluralOptions{ordinal: f[0] == "ordinal", minInt: n(1), minFrac: n(2),
-		maxFrac: n(3), minSig: n(4), maxSig: n(5), notation: f[6], compact: f[7], tag: f[8]}
+		maxFrac: n(3), minSig: n(4), maxSig: n(5), notation: f[6], compact: f[7],
+		roundingMode: f[8], roundingIncr: n(9), trailingZero: f[10], priority: f[11],
+		tag: f[12]}
 }
 
 func defaultPluralOptions() pluralOptions {
-	return pluralOptions{minInt: 1, maxFrac: 3, notation: "standard", tag: defaultLocale}
+	return pluralOptions{minInt: 1, maxFrac: 3, notation: "standard", tag: defaultLocale,
+		roundingMode: "halfExpand", roundingIncr: 1, trailingZero: "auto", priority: "auto"}
 }
 
 // intlDigitOptions is SetNumberFormatDigitOptions, shared by PluralRules and --
@@ -126,6 +136,43 @@ func (rt *Runtime) intlDigitOptions(options Value, defMinFrac, defMaxFrac int) (
 		return p, rt.rangeError("minimumFractionDigits is greater than maximumFractionDigits")
 	}
 	return p, nil
+}
+
+// intlRoundingOptions is the tail of SetNumberFormatDigitOptions: the four
+// options read after the digits, in that order, which a getter can observe.
+func (rt *Runtime) intlRoundingOptions(p *pluralOptions, options Value) *ThrowError {
+	incr, hasIncr, e := rt.intlNumberOption(options, "roundingIncrement", 1, 5000, 1)
+	if e != nil {
+		return e
+	}
+	if hasIncr && !intContains(validRoundingIncrements, incr) {
+		return rt.rangeError("Invalid roundingIncrement")
+	}
+	p.roundingIncr = incr
+	mode, ok, e := rt.intlStringOption(options, "roundingMode", roundingModes)
+	if e != nil {
+		return e
+	}
+	if ok {
+		p.roundingMode = mode
+	}
+	priority, ok, e := rt.intlStringOption(options, "roundingPriority",
+		[]string{"auto", "morePrecision", "lessPrecision"})
+	if e != nil {
+		return e
+	}
+	if ok {
+		p.priority = priority
+	}
+	trailing, ok, e := rt.intlStringOption(options, "trailingZeroDisplay",
+		[]string{"auto", "stripIfInteger"})
+	if e != nil {
+		return e
+	}
+	if ok {
+		p.trailingZero = trailing
+	}
+	return nil
 }
 
 // pluralOperands is the (i, v, w, f, t) of the plural rules, computed from the
