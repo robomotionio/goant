@@ -147,7 +147,7 @@ func (c *compiler) compileFor(n *Node) {
 	// CreatePerIterationEnvironment runs once BEFORE the loop too: the values are
 	// copied out of the initializer's environment, so a closure created by the
 	// initializer keeps what it captured there and never sees the loop advance.
-	c.closeForHeadBindings(lexSlots)
+	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
 
 	l := c.pushLoop(c.consumeLabel(), false)
 	condStart := len(c.fn.code)
@@ -167,7 +167,7 @@ func (c *compiler) compileFor(n *Node) {
 	c.patchContinues(l)
 	// Per-iteration lexical binding: close the loop var's captures before the
 	// update mutates it for the next iteration.
-	c.closeForHeadBindings(lexSlots)
+	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
 	if n.Update != nil {
 		c.compileExpr(n.Update)
 		c.emit(OpPop)
@@ -231,7 +231,7 @@ func (c *compiler) compileForOf(n *Node) {
 	// per-iteration bindings use fresh cells (see compileForArray).
 	c.seedForHeadHoles(lexSlots)
 	c.compileExpr(n.Right)
-	c.closeForHeadBindings(lexSlots)
+	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
 	c.emit(OpIterCall) // source -> iterator
 	c.emitByte(0)      // Size-2 opcode: unused inline operand
 	iterSlot := c.addLocal("*foi*", false)
@@ -299,7 +299,7 @@ func (c *compiler) compileForOf(n *Node) {
 
 	l.continueTarget = len(c.fn.code)
 	c.patchContinues(l)
-	c.closeForHeadBindings(lexSlots)
+	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
 	c.emit(OpJmp)
 	c.emitU32(uint32(condStart))
 
@@ -348,7 +348,7 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	// iter = GetAsyncIterator(source); the head binding(s) are in TDZ during it.
 	c.seedForHeadHoles(lexSlots)
 	c.compileExpr(n.Right)
-	c.closeForHeadBindings(lexSlots)
+	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
 	c.emit(OpForAwaitOf) // source -> asyncIter
 	iterSlot := c.addLocal("*fai*", false)
 	c.emitOpU16(OpPutLocal, uint16(iterSlot))
@@ -394,7 +394,7 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 
 	l.continueTarget = len(c.fn.code)
 	c.patchContinues(l)
-	c.closeForHeadBindings(lexSlots)
+	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
 	c.emit(OpJmp)
 	c.emitU32(uint32(condStart))
 
@@ -458,7 +458,7 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	// Detach the head binding that a closure in the RHS captured (in its dead
 	// zone) so the per-iteration assignments below use a fresh cell — the
 	// RHS-scope binding stays permanently uninitialized, so such a closure throws.
-	c.closeForHeadBindings(lexSlots)
+	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
 	// for-in keeps the source object so each key can be re-checked just before it
 	// is visited: the key list is a snapshot, but a property deleted during the
 	// loop must not be enumerated.
@@ -512,7 +512,7 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	}
 	// Per-iteration lexical binding: close any closure capture of the loop var
 	// before the next iteration reuses its slot.
-	c.closeForHeadBindings(lexSlots)
+	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
 	c.emitOpU16(OpGetLocal, uint16(iSlot))
 	c.emit(OpInc)
 	c.emitOpU16(OpPutLocal, uint16(iSlot))
@@ -592,7 +592,13 @@ func (c *compiler) seedForHeadHoles(slots []int) {
 
 // closeForHeadBindings detaches the loop-head lexical bindings so each new
 // iteration (and the iterable evaluation) captures fresh cells.
-func (c *compiler) closeForHeadBindings(slots []int) {
+func (c *compiler) closeForHeadBindings(slots []int, mayCapture bool) {
+	// Nothing in the loop can open an upvalue over these slots, so there is
+	// never anything to detach. See compile_periter.go for why the opcode is
+	// worth not emitting rather than merely cheap.
+	if !mayCapture {
+		return
+	}
 	for _, s := range slots {
 		c.emitOpU16(OpCloseUpval, uint16(s))
 	}
