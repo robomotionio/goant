@@ -10,6 +10,7 @@ package engine
 
 import (
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -827,4 +828,17 @@ func decimalError(intPart, frac string, v float64) float64 {
 		return math.Inf(1)
 	}
 	return math.Abs(f - math.Abs(v))
+}
+
+// intlNumericArg is ToIntlMathematicalValue as far as this engine needs it: a
+// Number, or a BigInt with its exact decimal digits alongside, because a
+// BigInt above 2^53 has more of them than the float can hold.
+func (rt *Runtime) intlNumericArg(v Value) (float64, string, *ThrowError) {
+	if b := rt.bigIntVal(v); b != nil {
+		digits := bigIntToString(b, 10)
+		f, _ := new(big.Float).SetInt(b).Float64()
+		return f, digits, nil
+	}
+	n, e := rt.toNumber(v)
+	return n, "", e
 }

@@ -127,11 +127,11 @@ func (rt *Runtime) initIntl() {
 				return mkundef(), e
 			}
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-				n, e := rt.toNumber(arg(args, 0))
+				n, digits, e := rt.intlNumericArg(arg(args, 0))
 				if e != nil {
 					return mkundef(), e
 				}
-				return rt.newString(rt.formatNumberWith(opts, li, n)), nil
+				return rt.newString(rt.formatNumberOf(opts, li, n, digits)), nil
 			}), nil
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
@@ -140,11 +140,11 @@ func (rt *Runtime) initIntl() {
 			if e != nil {
 				return mkundef(), e
 			}
-			v, e := rt.toNumber(arg(args, 0))
+			v, digits, e := rt.intlNumericArg(arg(args, 0))
 			if e != nil {
 				return mkundef(), e
 			}
-			return rt.formatNumberParts(opts, rt.intlLocaleOf(this), v), nil
+			return rt.partsArray(numberPartsOf(opts, rt.intlLocaleOf(this), v, digits)), nil
 		})
 		numberRange := func(rt *Runtime, this Value, args []Value) ([]sourcedPart, *ThrowError) {
 			opts, e := rt.requireNumberFormat(this)

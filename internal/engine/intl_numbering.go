@@ -81,13 +81,18 @@ func resolveNumberingSystem(tag, option string) (resolvedTag, system string) {
 	}
 	kept := &langTag{lang: t.lang, script: t.script, region: t.region, variants: t.variants}
 	system = "latn"
+	// The tag's value is used unless the option names a system we have and a
+	// different one -- an option we cannot honour is not an override. And the
+	// keyword survives into the resolved locale exactly when its value is the
+	// one being used, which is ResolveLocale's rule.
+	usable := option != "" && isNumberingSystem(option)
 	if v, has := t.uKeyword("nu"); has && isNumberingSystem(v) {
-		if option == "" || option == v {
+		if !usable || option == v {
 			system = v
 			kept.setUKeyword("nu", v)
 		}
 	}
-	if option != "" && isNumberingSystem(option) {
+	if usable {
 		system = option
 	}
 	return kept.String(), system
