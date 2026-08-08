@@ -79,6 +79,31 @@ func (rt *Runtime) initBuiltins() {
 		return out, nil
 	}), attrWritable|attrConfigurable)
 
+	// $262: the object Test262 expects a host to provide. Every capability it
+	// names already exists on the global here; this gathers them under the name
+	// the suite looks for, which is what makes the cross-realm tests runnable
+	// rather than skippable.
+	h262 := rt.newObject(rt.objectProto)
+	ho := rt.objPtr(h262)
+	ho.defineOwn("global", rt.global, attrWritable|attrEnumerable|attrConfigurable)
+	for _, name := range []string{"createRealm", "evalScript", "gc"} {
+		if v, ok := g.getOwn(name); ok {
+			ho.defineOwn(name, v, attrWritable|attrEnumerable|attrConfigurable)
+		}
+	}
+	// detachArrayBuffer(buffer): the suite's way of reaching DetachArrayBuffer,
+	// which JavaScript itself can only do by transferring the bytes away.
+	ho.defineOwn("detachArrayBuffer", rt.newNativeFunc("detachArrayBuffer", 1,
+		func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			o := rt.objPtr(arg(args, 0))
+			if o == nil || o.ta != nil || o.dv != nil {
+				return mkundef(), rt.typeError("detachArrayBuffer takes an ArrayBuffer")
+			}
+			o.abuf = nil
+			return mkundef(), nil
+		}), attrWritable|attrEnumerable|attrConfigurable)
+	g.defineOwn("$262", h262, attrWritable|attrConfigurable)
+
 	// Timers (HTML setTimeout/setInterval). goant runs a virtual clock: callbacks
 	// fire from the host event loop in (delay, scheduling-order), after the
 	// microtask queue drains. The delay only orders tasks; no time actually
