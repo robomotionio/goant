@@ -370,6 +370,11 @@ func (c lunisolarCalendar) suiFrom(solstice int) lunisolarYear {
 	nextSolstice := c.localDay(solarLongitudeAfter(270, float64(solstice)+10))
 	m11next := c.solsticeMonth(nextSolstice)
 	months, leapAt, hasLeap := c.suiMonths(m11, m11next)
+	if len(months) == 0 {
+		// Beyond the range where the astronomy is computable the solstices can
+		// come out in the wrong order. There is no year there to describe.
+		months = []int{m11}
+	}
 
 	// Month 1 is two months after month 11, or three when the leap falls in
 	// between.
@@ -379,6 +384,9 @@ func (c lunisolarCalendar) suiFrom(solstice int) lunisolarYear {
 	}
 	if first >= len(months) {
 		first = len(months) - 1
+	}
+	if first < 0 {
+		first = 0
 	}
 	// The year runs from month 1 for twelve or thirteen moons, whichever the
 	// leap month decides.

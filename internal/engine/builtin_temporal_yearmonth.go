@@ -628,7 +628,7 @@ func (rt *Runtime) initTemporalPlainMonthDay(ns *object) {
 // formatMonthDay writes "--12-31", keeping the reference year where the
 // calendar is not the ISO one and the year is part of what fixes the date.
 func formatMonthDay(iso isoDateRec, cal, show string) string {
-	s := "--" + pad(iso.month, 2) + "-" + pad(iso.day, 2)
+	s := pad(iso.month, 2) + "-" + pad(iso.day, 2)
 	if cal != "iso8601" || show == "always" || show == "critical" {
 		s = formatISOYear(iso.year) + "-" + pad(iso.month, 2) + "-" + pad(iso.day, 2)
 	}

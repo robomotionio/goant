@@ -34,9 +34,9 @@ var temporalFieldSets = [kindCount]temporalFieldSet{
 		[]string{"weekday", "era", "year", "month", "day", "dayPeriod",
 			"hour", "minute", "second", "fractionalSecondDigits"}, true, true},
 	kindPlainYearMonth: {"year-month", "year-month",
-		[]string{"era", "year", "month"}, false, false},
+		[]string{"era", "year", "month"}, true, false},
 	kindPlainMonthDay: {"month-day", "month-day",
-		[]string{"month", "day"}, false, false},
+		[]string{"month", "day"}, true, false},
 	kindZonedDateTime: {"any", "all", dtComponents, true, true},
 }
 
@@ -86,11 +86,11 @@ func withTemporalDefaults(d dateTimeOptions, kind temporalKind) dateTimeOptions 
 // left, which is the case a TypeError is for -- a formatter asked only for an
 // hour cannot show a year-month at all.
 func temporalEffective(d dateTimeOptions, kind temporalKind) (dateTimeOptions, bool) {
+	set := temporalFieldSets[kind]
 	d = withTemporalDefaults(d, kind)
 	if d.dateStyle != "" || d.timeStyle != "" {
 		d = d.styleComponents()
 	}
-	set := temporalFieldSets[kind]
 	out := d
 	out.comps = map[string]string{}
 	for c, v := range d.comps {
@@ -117,8 +117,15 @@ func (rt *Runtime) temporalFormatEpochMs(v Value, d dateTimeOptions) (float64, *
 	}
 	// A value in a calendar the formatter does not use cannot be shown in it.
 	switch kind {
-	case kindPlainDate, kindPlainDateTime, kindPlainYearMonth, kindPlainMonthDay:
+	case kindPlainDate, kindPlainDateTime:
 		if cal := rt.tCalendar(o); cal != "iso8601" && cal != d.calendar {
+			return 0, rt.rangeError("this value is in the " + cal +
+				" calendar and the formatter is in the " + d.calendar + " one")
+		}
+	case kindPlainYearMonth, kindPlainMonthDay:
+		// Part of a date only means anything in the calendar it is part of, so
+		// here the two must agree outright.
+		if cal := rt.tCalendar(o); cal != d.calendar {
 			return 0, rt.rangeError("this value is in the " + cal +
 				" calendar and the formatter is in the " + d.calendar + " one")
 		}

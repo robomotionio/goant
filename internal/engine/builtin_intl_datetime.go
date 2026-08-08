@@ -253,6 +253,13 @@ func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, req
 			return d, rt.typeError("dateStyle and timeStyle cannot be mixed with component options")
 		}
 		d.dateStyle, d.timeStyle = dateStyle, timeStyle
+		// A caller who asked for only a date and also named a time style has
+		// asked for two different things.
+		if required == "date" && timeStyle != "" ||
+			required == "time" && dateStyle != "" ||
+			(required == "year-month" || required == "month-day") && timeStyle != "" {
+			return d, rt.typeError("a " + required + " formatter cannot take that style")
+		}
 		return d, nil
 	}
 	// ToDateTimeOptions: a formatter asked for no field of the required kind
