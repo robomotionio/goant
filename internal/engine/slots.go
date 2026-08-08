@@ -67,6 +67,15 @@ const (
 	slotSegIterPos        // a Segment iterator's position, in code units
 	slotIntlDurationOpts  // a DurationFormat's resolved options (a String)
 	slotIntlDateTimeOpts  // a DateTimeFormat's resolved options (a String)
+	// slotRealmGlobal marks a realm's %Function.prototype% with that realm's
+	// global object, and slotIntrinsicName marks an intrinsic prototype with the
+	// dotted path it is reachable at. Together they let
+	// GetPrototypeFromConstructor take the intrinsic from new.target's realm
+	// rather than from the running one, without a realm pointer on every
+	// function: a function's realm is the one whose %Function.prototype% it
+	// inherits from.
+	slotRealmGlobal
+	slotIntrinsicName
 	// A Temporal object's payload. slotTemporalKind is its brand and says which
 	// of the eight it is; the numbered slots hold whatever that one needs (see
 	// builtin_temporal.go), which is at most a duration's ten fields.

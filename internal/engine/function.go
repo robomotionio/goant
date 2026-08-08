@@ -1,5 +1,7 @@
 package engine
 
+import "strings"
+
 // Function objects & the call machinery (ant src/ant.c function sections +
 // engine.c call handling). A JS function is an object (T_FUNC) whose closure
 // field references a [closure] (compiled func + captured upvalues).
@@ -296,7 +298,64 @@ func (rt *Runtime) newTargetProtoE(fallback Value) (Value, *ThrowError) {
 	if rt.pendingNewTargetProto.IsObjectType() {
 		return rt.pendingNewTargetProto, nil
 	}
-	return fallback, nil
+	// A constructor with no usable "prototype" falls back to the intrinsic --
+	// but to the one belonging to new.target's realm, not to the realm running
+	// the constructor. The two differ exactly when a script reaches across
+	// realms, which is the only way to notice.
+	return rt.intrinsicInRealmOf(rt.pendingNewTarget, fallback), nil
+}
+
+// intrinsicInRealmOf answers the fallback prototype as new.target's realm knows
+// it. A function's realm is the one whose %Function.prototype% it inherits
+// from, so there is nothing to store per function.
+func (rt *Runtime) intrinsicInRealmOf(newTarget, fallback Value) Value {
+	name := ""
+	if fo := rt.objPtr(fallback); fo != nil {
+		if v := fo.getSlot(slotIntrinsicName); v.IsString() {
+			name = rt.strGo(v)
+		}
+	}
+	if name == "" {
+		return fallback
+	}
+	global := rt.realmGlobalOf(newTarget)
+	if global.IsUndefined() || global == rt.global {
+		return fallback
+	}
+	// Walk the dotted path in the other realm's global; anything missing means
+	// that realm does not have the intrinsic, and ours stands.
+	cur := global
+	for _, part := range strings.Split(name+".prototype", ".") {
+		o := rt.objPtr(cur)
+		if o == nil {
+			return fallback
+		}
+		v, ok := o.getOwn(part)
+		if !ok {
+			return fallback
+		}
+		cur = v
+	}
+	if !cur.IsObjectType() {
+		return fallback
+	}
+	return cur
+}
+
+// realmGlobalOf is the global of the realm a function belongs to, found by
+// walking to the %Function.prototype% it inherits from.
+func (rt *Runtime) realmGlobalOf(fn Value) Value {
+	for i := 0; i < 32; i++ {
+		o := rt.objPtr(fn)
+		if o == nil {
+			return mkundef()
+		}
+		if v := o.getSlot(slotRealmGlobal); v.IsObjectType() {
+			return v
+		}
+		fn = o.proto
+	}
+	return mkundef()
 }
 
 // constructing reports whether the current native builtin was invoked via

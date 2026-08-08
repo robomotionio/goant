@@ -679,32 +679,45 @@ func (rt *Runtime) initRealm() {
 // (Symbol and BigInt also own a "prototype" and DO have [[Construct]] per
 // IsConstructor — it simply throws when actually invoked — so they are flagged.)
 func (rt *Runtime) markNativeConstructors() {
-	mark := func(v Value, name string) {
+	mark := func(v Value, path string) {
 		o := rt.objPtr(v)
 		if o == nil || o.native == nil || !o.flags.isCallable {
 			return
 		}
 		// Proxy is the one standard constructor with no own "prototype" property.
-		if _, ok := o.getOwn("prototype"); ok || name == "Proxy" {
+		p, ok := o.getOwn("prototype")
+		if ok || path == "Proxy" {
 			o.flags.isConstructor = true
 		}
+		// Name the prototype, so that a constructor reached from another realm
+		// can find that realm's copy of it. See intrinsicInRealmOf.
+		if ok {
+			if po := rt.objPtr(p); po != nil {
+				po.setSlot(slotIntrinsicName, rt.newString(path))
+			}
+		}
 	}
-	markMembers := func(container Value) {
+	markMembers := func(container Value, prefix string) {
 		co := rt.objPtr(container)
 		if co == nil {
 			return
 		}
 		for _, k := range co.ownKeys() {
 			if v, ok := co.getOwn(k); ok {
-				mark(v, k)
+				mark(v, prefix+k)
 			}
 		}
 	}
-	markMembers(rt.global)
+	markMembers(rt.global, "")
 	for _, ns := range []string{"Intl", "Temporal"} {
 		if v, ok := rt.objPtr(rt.global).getOwn(ns); ok {
-			markMembers(v)
+			markMembers(v, ns+".")
 		}
+	}
+	// A function's realm is the one whose %Function.prototype% it inherits
+	// from, so marking that one object marks every function in the realm.
+	if fp := rt.objPtr(rt.functionProto); fp != nil {
+		fp.setSlot(slotRealmGlobal, rt.global)
 	}
 }
 

@@ -291,7 +291,6 @@ func parseList(val string, lines []string, i *int) []string {
 // reported SKIP rather than FAIL so the pass rate reflects the language subset
 // goant targets, not missing host glue.
 var skipFeatures = map[string]bool{
-	"cross-realm":                true, // needs $262.createRealm
 	"Atomics":                    true, // agent/SharedArrayBuffer host model
 	"SharedArrayBuffer":          true,
 	"Atomics.waitAsync":          true,
