@@ -153,6 +153,33 @@ func roundRatToIncrement(x *big.Rat, increment *big.Int, mode string) *big.Int {
 	return r1
 }
 
+// roundAsIfPositive is RoundNumberToIncrementAsIfPositive: rounding an INSTANT
+// down means towards the Big Bang, not towards the epoch. The sign of the
+// nanosecond count is an accident of where the epoch was put, so the two modes
+// that are defined by that sign are read as the two that are defined by
+// direction instead.
+func roundAsIfPositive(x, increment *big.Int, mode string) *big.Int {
+	switch mode {
+	case "trunc":
+		mode = "floor"
+	case "expand":
+		mode = "ceil"
+	case "halfTrunc":
+		mode = "halfFloor"
+	case "halfExpand":
+		mode = "halfCeil"
+	}
+	return roundNumberToIncrement(x, increment, mode)
+}
+
+// incrementNs is a rounding increment counted in nanoseconds. It is computed as
+// a big integer because it need not fit in a small one: a rounding increment
+// may be a thousand million, and a thousand million days is eighty-six
+// quintillion nanoseconds, which an int64 does not hold.
+func incrementNs(unit int, increment int64) *big.Int {
+	return new(big.Int).Mul(bigInt(nsPerUnit[unit]), bigInt(increment))
+}
+
 // ---- the pieces the nudges are built from ----
 
 func add24HourDays(t *big.Int, days int64) *big.Int {
@@ -292,8 +319,8 @@ func (rt *Runtime) nudgeToZonedTime(sign int, d internalDuration, dt isoDateTime
 	if daySpan.Sign() != sign {
 		return nudgeResult{}, rt.rangeError("the day runs the wrong way in this zone")
 	}
-	unitNs := nsPerUnit[unit] * increment
-	rounded := roundNumberToIncrement(d.time, bigInt(unitNs), mode)
+	unitNs := incrementNs(unit, increment)
+	rounded := roundNumberToIncrement(d.time, unitNs, mode)
 	beyond := new(big.Int).Sub(rounded, daySpan)
 	var dayDelta int64
 	var nudged *big.Int
@@ -301,7 +328,7 @@ func (rt *Runtime) nudgeToZonedTime(sign int, d internalDuration, dt isoDateTime
 	if beyond.Sign() == 0 || beyond.Sign() == sign {
 		didExpand = true
 		dayDelta = int64(sign)
-		rounded = roundNumberToIncrement(beyond, bigInt(unitNs), mode)
+		rounded = roundNumberToIncrement(beyond, unitNs, mode)
 		nudged = epochNsPlus(endNs, rounded)
 	} else {
 		nudged = epochNsPlus(startNs, rounded)
@@ -315,8 +342,8 @@ func (rt *Runtime) nudgeToZonedTime(sign int, d internalDuration, dt isoDateTime
 func (rt *Runtime) nudgeToDayOrTime(d internalDuration, destNs *big.Int, largestUnit int,
 	increment int64, unit int, mode string) (nudgeResult, *ThrowError) {
 	t := add24HourDays(d.time, d.date.days)
-	unitNs := nsPerUnit[unit] * increment
-	rounded := roundNumberToIncrement(t, bigInt(unitNs), mode)
+	unitNs := incrementNs(unit, increment)
+	rounded := roundNumberToIncrement(t, unitNs, mode)
 	diff := new(big.Int).Sub(rounded, t)
 	wholeDays := new(big.Int).Quo(t, bigNsPerDay).Int64()
 	roundedWholeDays := new(big.Int).Quo(rounded, bigNsPerDay).Int64()
@@ -560,7 +587,7 @@ func (rt *Runtime) differenceZonedDateTimeWithRounding(ns1, ns2 *big.Int, tz,
 // and no zone.
 func (rt *Runtime) differenceInstant(ns1, ns2 *big.Int, s differenceSettings) (durationRec, *ThrowError) {
 	t := new(big.Int).Sub(ns2, ns1)
-	t = roundNumberToIncrement(t, bigInt(nsPerUnit[s.smallest]*s.increment), s.mode)
+	t = roundNumberToIncrement(t, incrementNs(s.smallest, s.increment), s.mode)
 	out, ok := durationFromInternal(newInternal(dateDuration{}, t), s.largest)
 	if !ok {
 		return out, rt.rangeError("duration is out of range")

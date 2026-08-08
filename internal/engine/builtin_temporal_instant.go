@@ -165,7 +165,7 @@ func (rt *Runtime) initTemporalInstant(ns *object) {
 		if e := rt.validateRoundingIncrement(increment, nsPerDay/nsPerUnit[unit], true); e != nil {
 			return mkundef(), e
 		}
-		rounded := roundNumberToIncrement(tEpochNs(o), bigInt(nsPerUnit[unit]*increment), mode)
+		rounded := roundAsIfPositive(tEpochNs(o), incrementNs(unit, increment), mode)
 		return rt.createTemporalInstant(rounded)
 	})
 
@@ -221,7 +221,7 @@ func (rt *Runtime) initTemporalInstant(ns *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		ns := roundNumberToIncrement(tEpochNs(o), bigInt(nsPerUnit[unit]*increment), mode)
+		ns := roundAsIfPositive(tEpochNs(o), incrementNs(unit, increment), mode)
 		if !epochNsWithinLimits(ns) {
 			return mkundef(), rt.rangeError("rounding took the instant out of range")
 		}

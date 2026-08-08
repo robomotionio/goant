@@ -324,7 +324,7 @@ func (rt *Runtime) initTemporalDuration(ns *object) {
 		}
 		if unit != unitNanosecond || increment != 1 {
 			internal := d.toInternal()
-			rounded := roundNumberToIncrement(internal.time, bigInt(nsPerUnit[unit]*increment), mode)
+			rounded := roundNumberToIncrement(internal.time, incrementNs(unit, increment), mode)
 			out, ok := durationFromInternal(newInternal(internal.date, rounded), unitSecond)
 			if !ok {
 				return mkundef(), rt.rangeError("duration is out of range")
@@ -419,7 +419,7 @@ func (rt *Runtime) roundDuration(d durationRec, rel relativeToRec, s differenceS
 	}
 	internal := d.toInternal24()
 	rounded := roundNumberToIncrement(internal.time,
-		bigInt(nsPerUnit[s.smallest]*s.increment), s.mode)
+		incrementNs(s.smallest, s.increment), s.mode)
 	out, ok := durationFromInternal(newInternal(internal.date, rounded), s.largest)
 	if !ok {
 		return out, rt.rangeError("duration is out of range")

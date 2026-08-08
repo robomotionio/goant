@@ -16,7 +16,7 @@ func addTimeToTime(t isoTimeRec, ns *big.Int) (*big.Int, isoTimeRec) {
 // rolled over into.
 func roundTimeRec(t isoTimeRec, increment int64, unit int, mode string) (int64, isoTimeRec) {
 	rounded := roundNumberToIncrement(bigInt(t.nanosecond()),
-		bigInt(nsPerUnit[unit]*increment), mode)
+		incrementNs(unit, increment), mode)
 	days, out := balanceTime(rounded)
 	return days.Int64(), out
 }

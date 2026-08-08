@@ -500,7 +500,7 @@ func (rt *Runtime) initTemporalZonedDateTime(ns *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		ns := roundNumberToIncrement(epoch, bigInt(nsPerUnit[unit]*increment), mode)
+		ns := roundAsIfPositive(epoch, incrementNs(unit, increment), mode)
 		if !epochNsWithinLimits(ns) {
 			return mkundef(), rt.rangeError("rounding took the date-time out of range")
 		}

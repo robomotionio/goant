@@ -139,7 +139,7 @@ func (rt *Runtime) initTemporalPlainTime(ns *object) {
 			}
 			a, b := tTime(o), other
 			t := differenceTime(a, b)
-			t = roundNumberToIncrement(t, bigInt(nsPerUnit[s.smallest]*s.increment), s.mode)
+			t = roundNumberToIncrement(t, incrementNs(s.smallest, s.increment), s.mode)
 			out, ok := durationFromInternal(newInternal(dateDuration{}, t), s.largest)
 			if !ok {
 				return mkundef(), rt.rangeError("duration is out of range")
