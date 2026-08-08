@@ -20,19 +20,37 @@ Temporal's 2,029, so Track B below is no longer a decision — it is scheduled.
 | A4a — DateTimeFormat options | 940 | unchanged |
 | formatRange on both formatters | 976 | unchanged |
 | locale-sensitive casing, BigInt | 985 | unchanged |
+| scientific notation, currency symbols | 1,000 | unchanged |
+| unit spellings, DurationFormat via NumberFormat | 1,019 | unchanged |
 
-**Where the remaining 2,372 are.** 2,029 of them are Temporal and 343 are
-classic Intl:
+**Where the remaining 2,338 are, and what the ceiling actually is.** Counted by
+what each failure needs rather than by which directory it sits in:
+
+| | files | |
+|---|---:|---|
+| in `intl402/Temporal` | 2,029 | needs Temporal |
+| **elsewhere, but needs Temporal** | **66** | 62 in DateTimeFormat, 4 in DurationFormat: they format a Temporal object |
+| genuinely classic Intl | 243 | |
+
+So **the ceiling without Temporal is 1,262, and 1,019 of it is reached — 81%.**
+The 66 is the number worth knowing: more than half of what is left in
+`DateTimeFormat` is not a date-formatting problem at all.
+
+The 243:
 
 | block | failing | needs |
 |---|---:|---|
-| **Temporal** | 2,029 | the proposal, and `built-ins/Temporal` under it |
-| NumberFormat | 105 | currency symbols and placement, compact/scientific |
-| DurationFormat | 57 | per-locale unit patterns, `fractionalDigits` |
-| DateTimeFormat | 104 | CLDR date patterns and field names — A4 |
+| NumberFormat | 90 | compact notation, per-locale currency placement |
+| DurationFormat | 35 | `fractionalDigits`, duration strings as an argument |
+| DateTimeFormat | 42 | CLDR date patterns and field names — A4 |
 | ListFormat, RelativeTimeFormat, Segmenter, DisplayNames | 34 | per-locale wording |
 | `Locale.prototype.get*` | 19 | per-locale week and calendar data |
-| the rest | 24 | `supportedValuesOf`, per-locale collation availability |
+| the rest | 23 | `supportedValuesOf`, per-locale collation availability |
+
+One finding worth carrying forward: `DurationFormat.prototype.format` accepts a
+**duration string** (`"P1Y2M"`) as well as a record, and rejects a malformed one
+with a RangeError rather than a TypeError. That is ISO 8601 duration parsing —
+the same grammar `Temporal.Duration` needs, so it is worth writing once, there.
 
 Every one of the classic-Intl blocks except the last two is the same missing
 thing: **CLDR locale data**. `tools/gencldr` already reads the supplemental

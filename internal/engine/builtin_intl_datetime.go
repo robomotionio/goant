@@ -306,12 +306,15 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 		}
 		return strconv.Itoa(h)
 	case "minute":
-		if style == "numeric" {
+		// Minutes and seconds are two digits wherever an hour or a minute
+		// precedes them: "2:03", not "2:3". Only a lone minute or second field
+		// is written the way it was asked for.
+		if style == "numeric" && !d.paddedTimeField("minute") {
 			return strconv.Itoa(t.Minute())
 		}
 		return two(t.Minute())
 	case "second":
-		if style == "numeric" {
+		if style == "numeric" && !d.paddedTimeField("second") {
 			return strconv.Itoa(t.Second())
 		}
 		return two(t.Second())
@@ -334,6 +337,21 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 		return abbr
 	}
 	return ""
+}
+
+// paddedTimeField reports whether a field is preceded by another time field,
+// in which case it is written to two digits whatever its option said.
+func (d dateTimeOptions) paddedTimeField(comp string) bool {
+	order := []string{"hour", "minute", "second"}
+	for _, c := range order {
+		if c == comp {
+			return false
+		}
+		if _, ok := d.comps[c]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // zoneDisplayNameIn is zoneDisplayName for an instant already in the zone being
@@ -430,6 +448,7 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 			hasTime = true
 		}
 	}
+	_, hasHour := d.comps["hour"]
 	if hasTime {
 		if wroteDate {
 			lit(", ")
@@ -450,7 +469,9 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 			out = append(out, numberPart{"fractionalSecond",
 				d.dtFieldText("fractionalSecondDigits", d.comps["fractionalSecondDigits"], t)})
 		}
-		if hc := d.resolvedHourCycle(); hc == "h11" || hc == "h12" {
+		// The day period says which half of the day the HOUR is in. A pattern
+		// with no hour in it has nothing for it to qualify.
+		if hc := d.resolvedHourCycle(); hasHour && (hc == "h11" || hc == "h12") {
 			lit(" ")
 			out = append(out, numberPart{"dayPeriod", d.dtFieldText("dayPeriod", "short", t)})
 		}
