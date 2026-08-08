@@ -3,13 +3,37 @@
 **Branch:** `feat/intl402-and-temporal`
 **Baseline measured 2026-08-08 against test262 `b363f29d`:** `intl402` **216 / 3,357 (6.4%)**
 
+**Goal: `intl402` 3,357 / 3,357.** Set 2026-08-08. That number includes
+Temporal's 2,029, so Track B below is no longer a decision — it is scheduled.
+
 | stage | `intl402` | `-core` |
 |---|---:|---|
 | baseline | 216 / 3,357 | 42,739 / 42,740 |
-| A0 — `timeZone` | 226 / 3,357 | unchanged |
-| A1 — locales, `Intl.Locale` | 389 / 3,357 | unchanged |
-| A3 — Collator, PluralRules | 470 / 3,357 | unchanged |
-| A2 — NumberFormat, part 1 | (measuring) | unchanged |
+| A0 — `timeZone` | 226 | unchanged |
+| A1 — locales, `Intl.Locale` | 389 | unchanged |
+| A3 — Collator, PluralRules | 470 | unchanged |
+| A2 — NumberFormat, part 1 | 545 | unchanged |
+| A5a — ListFormat, RelativeTimeFormat | 687 | unchanged |
+| A5b — DisplayNames, Segmenter | 806 | unchanged |
+| A5c — DurationFormat | 859 | unchanged |
+
+**Where the remaining 2,498 are.** 2,029 of them are Temporal and 469 are
+classic Intl:
+
+| block | failing | needs |
+|---|---:|---|
+| **Temporal** | 2,029 | the proposal, and `built-ins/Temporal` under it |
+| DateTimeFormat | 172 | CLDR date patterns and field names — A4 |
+| NumberFormat | 117 | currency symbols, compact/scientific, `formatRange` |
+| DurationFormat | 57 | per-locale unit patterns, `fractionalDigits` |
+| `Locale.prototype.get*` | 52 | CLDR week/calendar/zone-per-region data |
+| ListFormat, RelativeTimeFormat, Segmenter, DisplayNames | 34 | per-locale wording |
+| the rest | 37 | `supportedValuesOf`, per-locale collation availability |
+
+Every one of the classic-Intl blocks except the last two is the same missing
+thing: **CLDR locale data**. `tools/gencldr` already reads the supplemental
+files; extending it to `common/main/<locale>.xml` is the single change that
+unblocks A4 and most of what is left everywhere else.
 
 Companion to [TODO.md](../TODO.md) (the master port plan) and
 [docs/ecma-262-core-tests.md](./ecma-262-core-tests.md) (what `-core` excludes and why).
@@ -220,22 +244,28 @@ completeness, not scheduled.
 
 ---
 
-## Track B — Temporal
+## Track B — Temporal  ▸ **scheduled** by the 3,357 / 3,357 goal
 
-**6,632 tests.** This is not "the rest of Intl"; it is a second date/time API
-alongside `Date`, with its own arithmetic, its own calendar and timezone model,
-and its own string formats.
+**6,632 tests**, 2,029 of them inside `intl402`. This is not "the rest of
+Intl"; it is a second date/time API alongside `Date`, with its own arithmetic,
+its own calendar and timezone model, and its own string formats.
 
 Before any of `intl402/Temporal` can pass, `built-ins/Temporal` has to exist:
 `Instant`, `ZonedDateTime`, `PlainDate`, `PlainTime`, `PlainDateTime`,
 `PlainYearMonth`, `PlainMonthDay`, `Duration`, plus `Temporal.Now`.
 
-- [ ] **Decide whether to do this at all.** It is the single largest remaining
-      item in the whole engine — larger than the JIT was — and no Robomotion
-      flow has ever asked for it. The honest default is: not until a customer
-      needs it, and then scoped to what they need.
-- [ ] If yes: `Duration` and `Instant` first, since everything else is defined
-      in terms of them
+- [x] **Decided: yes.** The goal is 3,357 / 3,357 and 2,029 of those are
+      Temporal, so it cannot be reached without it. It remains the single
+      largest item in the engine — larger than the JIT was.
+- [ ] `Duration` and `Instant` first, since everything else is defined in terms
+      of them. Then `PlainDate`, `PlainTime`, `PlainDateTime`, `PlainYearMonth`,
+      `PlainMonthDay`, `ZonedDateTime`, `Temporal.Now`.
+- [ ] The `intl402/Temporal` tests are the LAST step, not the first: they format
+      Temporal objects through `DateTimeFormat`, so they need both
+      `built-ins/Temporal` (4,603) and A4 finished before any of them can pass.
+      Ordered by what unblocks the most: ZonedDateTime 583, PlainDate 493,
+      PlainDateTime 483, PlainYearMonth 327, PlainMonthDay 90, Duration 21,
+      Instant 17, PlainTime 12, Now 3.
 - [ ] Nail the ISO 8601 grammar early; a large fraction of the suite is parsing
 - [ ] Go's `time` package gives the arithmetic and the zone database; the
       calendar model is the part with no Go equivalent
