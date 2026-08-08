@@ -328,60 +328,83 @@ func (c lunisolarCalendar) yearContaining(day int) lunisolarYear {
 	}
 }
 
-// suiFrom builds the calendar year whose eleventh month contains the solstice
-// on the given day.
-func (c lunisolarCalendar) suiFrom(solstice int) lunisolarYear {
-	m11 := c.localDay(newMoonBefore(float64(solstice) + 1 - c.offsetDays(float64(solstice))))
-	// The next year's eleventh month, to count the months between.
-	nextSolstice := c.localDay(solarLongitudeAfter(270, float64(solstice)+10))
-	m11next := c.localDay(newMoonBefore(float64(nextSolstice) + 1 - c.offsetDays(float64(nextSolstice))))
-
-	var months []int
+// suiMonths is the months of one sui -- the stretch from the moon-month holding
+// one December solstice to the one holding the next -- and which of them, if
+// any, is the leap month. Thirteen months means one of them is, and it is the
+// first that contains no major solar term.
+func (c lunisolarCalendar) suiMonths(m11, m11next int) (months []int, leapAt int, hasLeap bool) {
 	for d := m11; d < m11next; {
 		months = append(months, d)
 		d = c.localDay(newMoonAtOrAfter(float64(d) + 1 - c.offsetDays(float64(d))))
 	}
-	leapSui := len(months) == 13
-	// The leap month is the first without a major term, counting from the
-	// month after the eleventh.
-	leapAt := 0
-	if leapSui {
-		for i := 0; i < len(months); i++ {
-			next := m11next
-			if i+1 < len(months) {
-				next = months[i+1]
-			}
-			if !c.hasMajorTerm(months[i], next) {
-				leapAt = i
-				break
-			}
+	if len(months) != 13 {
+		return months, 0, false
+	}
+	for i := range months {
+		next := m11next
+		if i+1 < len(months) {
+			next = months[i+1]
+		}
+		if !c.hasMajorTerm(months[i], next) {
+			return months, i, true
 		}
 	}
+	return months, 0, false
+}
+
+// solsticeMonth is the month holding the December solstice on the given day.
+func (c lunisolarCalendar) solsticeMonth(solstice int) int {
+	return c.localDay(newMoonBefore(float64(solstice) + 1 - c.offsetDays(float64(solstice))))
+}
+
+// suiFrom builds the calendar year whose eleventh month contains the solstice
+// on the given day.
+//
+// A calendar year is not a sui: it starts two months after the solstice month
+// and runs past the next solstice, so its last months belong to the following
+// sui. A leap month in either of them is a leap month of this year -- which is
+// what makes 2033 a leap year, with its leap eleventh month falling in the
+// December after the year began.
+func (c lunisolarCalendar) suiFrom(solstice int) lunisolarYear {
+	m11 := c.solsticeMonth(solstice)
+	nextSolstice := c.localDay(solarLongitudeAfter(270, float64(solstice)+10))
+	m11next := c.solsticeMonth(nextSolstice)
+	months, leapAt, hasLeap := c.suiMonths(m11, m11next)
+
 	// Month 1 is two months after month 11, or three when the leap falls in
-	// between. Its index in `months`:
+	// between.
 	first := 2
-	if leapSui && leapAt <= 2 && leapAt != 0 {
+	if hasLeap && leapAt <= 2 && leapAt != 0 {
 		first = 3
 	}
 	if first >= len(months) {
 		first = len(months) - 1
 	}
-	// The year runs from month 1 to the month before the NEXT year's month 1,
-	// which is the next sui's. Its months are the tail of this sui plus the
-	// head of the next, so it is built by walking new moons from month 1.
+	// The year runs from month 1 for twelve or thirteen moons, whichever the
+	// leap month decides.
 	starts := []int{months[first]}
 	for len(starts) < 13 {
-		d := c.localDay(newMoonAtOrAfter(float64(starts[len(starts)-1]) + 1 -
-			c.offsetDays(float64(starts[len(starts)-1]))))
-		starts = append(starts, d)
+		last := starts[len(starts)-1]
+		starts = append(starts, c.localDay(newMoonAtOrAfter(float64(last)+1-c.offsetDays(float64(last)))))
 	}
-	// Where the leap month falls inside the calendar year, if it does.
 	leapIndex := 0
-	if leapSui && leapAt >= first {
+	switch {
+	case hasLeap && leapAt >= first:
 		leapIndex = leapAt - first + 1
+	case !hasLeap || leapAt < first:
+		// Look into the following sui: its leap month may still fall inside
+		// this calendar year.
+		solstice2 := c.localDay(solarLongitudeAfter(270, float64(nextSolstice)+10))
+		months2, leapAt2, hasLeap2 := c.suiMonths(m11next, c.solsticeMonth(solstice2))
+		if hasLeap2 {
+			for i, d := range starts {
+				if d == months2[leapAt2] {
+					leapIndex = i + 1
+					break
+				}
+			}
+		}
 	}
-	// A leap month before month 1 belongs to the previous calendar year, and
-	// this year then has twelve months.
 	count := 12
 	if leapIndex > 0 {
 		count = 13
