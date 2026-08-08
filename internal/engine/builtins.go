@@ -161,12 +161,20 @@ func (rt *Runtime) initBuiltins() {
 	// which always evaluates in global scope and sloppy mode. A *direct* eval —
 	// `eval(s)` with the intrinsic still bound — is compiled to OpEval and never
 	// reaches here; it inherits the caller's scope, strictness, and context.
-	evalFn := rt.newNativeFunc("eval", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+	//
+	// The global scope it evaluates in is the one this eval BELONGS to, not the
+	// one it was called from: `$262.createRealm().global.eval("var x = 23")`
+	// declares x over there. A native is otherwise handed the calling runtime,
+	// which is the same trap createRealm's own evalScript notes above -- and the
+	// reason a foreign eval is no candidate for direct eval either, since it is
+	// a different function from this realm's %eval%.
+	realm := rt
+	evalFn := rt.newNativeFunc("eval", 1, func(caller *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		v := arg(args, 0)
 		if !v.IsString() {
 			return v, nil // eval of a non-string returns it unchanged
 		}
-		return rt.performIndirectEval(rt.strGo(v))
+		return realm.performIndirectEval(string(caller.strBytes(v)))
 	})
 	rt.evalFn = evalFn
 	g.defineOwn("eval", evalFn, attrWritable|attrConfigurable)

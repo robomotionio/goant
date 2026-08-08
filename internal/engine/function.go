@@ -442,7 +442,7 @@ func (rt *Runtime) constructWithTarget(fnVal Value, args []Value, newTarget Valu
 		if rerr := rt.checkFunctionRealm(newTarget); rerr != nil {
 			return mkundef(), rerr
 		}
-		thisProto = rt.objectProto
+		thisProto = rt.intrinsicInRealmOf(newTarget, rt.objectProto)
 	}
 	thisObj := rt.newObject(thisProto)
 	rt.pendingNewTarget = newTarget
