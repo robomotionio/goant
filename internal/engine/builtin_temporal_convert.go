@@ -449,9 +449,10 @@ func (rt *Runtime) toTemporalTime(item, options Value) (isoTimeRec, *ThrowError)
 	if !ok || !p.hasTime {
 		return zero, rt.rangeError("cannot parse " + rt.strGo(item) + " as a time")
 	}
-	if p.calendar != "" && p.calendar != "iso8601" {
-		return zero, rt.rangeError("a time string may not name a calendar")
-	}
+	// A calendar annotation on a time is ignored, not refused: a time has no
+	// date for a calendar to have an opinion about, so naming one -- even a
+	// calendar this engine has never heard of, even marked critical -- says
+	// nothing that could be honoured differently.
 	opts, e := rt.temporalOptions(options)
 	if e != nil {
 		return zero, e

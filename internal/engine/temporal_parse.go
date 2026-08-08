@@ -475,22 +475,9 @@ func parseTemporalTimeString(s string) (temporalParse, bool) {
 		p.i++
 		designated = true
 	}
-	t, fields, sep, ok := p.timeSpec()
+	t, _, _, ok := p.timeSpec()
 	if !ok {
 		return r, false
-	}
-	// Without the T, a bare HHMM or HHMMSS could as easily have been a date,
-	// and Temporal will not guess: it rejects the ones that read both ways.
-	if !designated && !sep {
-		if fields == 2 && isValidISODate(2000, t.hour, t.minute) {
-			return r, false
-		}
-		if fields == 3 && t.hour >= 1 && t.hour <= 12 {
-			// HHMMSS could be MMDD with a two-digit tail only in the
-			// four-digit case, which is already covered; six digits are never
-			// a date.
-			_ = t
-		}
 	}
 	if p.peek() == 'Z' || p.peek() == 'z' {
 		// A time with a Z is an instant, not a plain time.
@@ -498,6 +485,13 @@ func parseTemporalTimeString(s string) (temporalParse, bool) {
 	}
 	if ns, text, has := p.utcOffset(true); has {
 		r.hasOffset, r.offsetNs, r.offsetStr = true, ns, text
+	}
+	// Without the T, the same characters may read as a date. Temporal does not
+	// guess: the grammar takes a time "but not one of ValidMonthDay or
+	// DateSpecYearMonth", so "12-14" is December the fourteenth and not twelve
+	// o'clock fourteen hours west, and neither reading wins.
+	if !designated && (isDateSpecMonthDay(s[:p.i]) || isDateSpecYearMonth(s[:p.i])) {
+		return r, false
 	}
 	if tz, has := p.timeZoneAnnotation(); has {
 		r.hasTZ, r.tzName = true, tz
@@ -778,4 +772,37 @@ func formatTemporalDuration(d durationRec, precision int) string {
 // formatIntegralFloat writes a whole number that may be larger than an int64.
 func formatIntegralFloat(f float64) string {
 	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// isDateSpecMonthDay reports whether the whole string is a month and a day and
+// nothing else: "--12-14", "12-14", "1214".
+func isDateSpecMonthDay(s string) bool {
+	p := &tparse{s: s}
+	if strings.HasPrefix(s, "--") {
+		p.i += 2
+	}
+	m, ok := p.digits(2)
+	if !ok {
+		return false
+	}
+	p.accept('-')
+	d, ok := p.digits(2)
+	if !ok || !p.eof() {
+		return false
+	}
+	// A day the month can never hold is not a month-day, whatever it looks
+	// like: "0230" is half past two in the morning and nothing else.
+	return m >= 1 && m <= 12 && d >= 1 && d <= isoDaysInMonth(1972, m)
+}
+
+// isDateSpecYearMonth reports whether the whole string is a year and a month
+// and nothing else: "2021-12", "202112".
+func isDateSpecYearMonth(s string) bool {
+	p := &tparse{s: s}
+	if _, ok := p.year(); !ok {
+		return false
+	}
+	p.accept('-')
+	m, ok := p.digits(2)
+	return ok && p.eof() && m >= 1 && m <= 12
 }
