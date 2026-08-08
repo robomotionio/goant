@@ -16,8 +16,9 @@ Temporal's 2,029, so Track B below is no longer a decision — it is scheduled.
 | A5a — ListFormat, RelativeTimeFormat | 687 | unchanged |
 | A5b — DisplayNames, Segmenter | 806 | unchanged |
 | A5c — DurationFormat | 859 | unchanged |
+| A1b — the Locale-info methods | 895 | unchanged |
 
-**Where the remaining 2,498 are.** 2,029 of them are Temporal and 469 are
+**Where the remaining 2,462 are.** 2,029 of them are Temporal and 433 are
 classic Intl:
 
 | block | failing | needs |
@@ -26,7 +27,7 @@ classic Intl:
 | DateTimeFormat | 172 | CLDR date patterns and field names — A4 |
 | NumberFormat | 117 | currency symbols, compact/scientific, `formatRange` |
 | DurationFormat | 57 | per-locale unit patterns, `fractionalDigits` |
-| `Locale.prototype.get*` | 52 | CLDR week/calendar/zone-per-region data |
+| `Locale.prototype.get*` | 19 | per-locale calendar and collation availability |
 | ListFormat, RelativeTimeFormat, Segmenter, DisplayNames | 34 | per-locale wording |
 | the rest | 37 | `supportedValuesOf`, per-locale collation availability |
 
