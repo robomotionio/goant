@@ -51,6 +51,8 @@ func isExtender(r rune) bool {
 		return true
 	case r >= 0xFE00 && r <= 0xFE0F: // variation selectors
 		return true
+	case r >= 0x1F3FB && r <= 0x1F3FF: // emoji skin-tone modifiers
+		return true
 	case r >= 0xE0100 && r <= 0xE01EF: // variation selectors supplement
 		return true
 	}
@@ -80,7 +82,9 @@ func segmentEnd(units []rune, i int, granularity string) (int, bool) {
 					j += w2
 					continue
 				}
-				if r2 == '\'' || r2 == 0x2019 {
+				// An apostrophe or a decimal point inside a run keeps it one
+				// word: "don't" and "1.23" are each one thing.
+				if r2 == '\'' || r2 == 0x2019 || r2 == '.' || r2 == ',' {
 					if k := j + w2; k < len(units) {
 						if r3, _ := codePointAt(units, k); isWordChar(r3) {
 							j += w2

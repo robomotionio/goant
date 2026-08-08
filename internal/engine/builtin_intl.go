@@ -172,11 +172,11 @@ func (rt *Runtime) initIntl() {
 			if arg(args, 0).IsUndefined() || arg(args, 1).IsUndefined() {
 				return nil, rt.typeError("formatRange requires two numbers")
 			}
-			lo, e := rt.toNumber(arg(args, 0))
+			lo, loDigits, e := rt.intlNumericArg(arg(args, 0))
 			if e != nil {
 				return nil, e
 			}
-			hi, e := rt.toNumber(arg(args, 1))
+			hi, hiDigits, e := rt.intlNumericArg(arg(args, 1))
 			if e != nil {
 				return nil, e
 			}
@@ -184,7 +184,8 @@ func (rt *Runtime) initIntl() {
 				return nil, rt.rangeError("Range bounds must not be NaN")
 			}
 			li := rt.intlLocaleOf(this)
-			return rangeParts(numberParts(opts, li, lo), numberParts(opts, li, hi)), nil
+			return rangeParts(numberPartsOf(opts, li, lo, loDigits),
+				numberPartsOf(opts, li, hi, hiDigits)), nil
 		}
 		rt.defMethod(po, "formatRange", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			parts, e := numberRange(rt, this, args)
@@ -238,10 +239,10 @@ func (rt *Runtime) initIntl() {
 			oo.defineOwn("notation", rt.newString(n.notation), attrDefault)
 			str("compactDisplay", n.compactDisplay)
 			oo.defineOwn("signDisplay", rt.newString(n.signDisplay), attrDefault)
-			oo.defineOwn("roundingIncrement", mknum(1), attrDefault)
-			oo.defineOwn("roundingMode", rt.newString("halfExpand"), attrDefault)
-			oo.defineOwn("roundingPriority", rt.newString("auto"), attrDefault)
-			oo.defineOwn("trailingZeroDisplay", rt.newString("auto"), attrDefault)
+			oo.defineOwn("roundingIncrement", mknum(float64(n.roundingIncr)), attrDefault)
+			oo.defineOwn("roundingMode", rt.newString(n.roundingMode), attrDefault)
+			oo.defineOwn("roundingPriority", rt.newString(n.roundingPriority), attrDefault)
+			oo.defineOwn("trailingZeroDisplay", rt.newString(n.trailingZero), attrDefault)
 			return o, nil
 		})
 	})

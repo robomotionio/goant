@@ -16,30 +16,32 @@ import (
 )
 
 type numberOptions struct {
-	tag             string
-	style           string // "decimal", "percent", "currency", "unit"
-	currency        string
-	currencyDisplay string
-	currencySign    string
-	unit            string
-	unitDisplay     string
-	useGrouping     string // "auto", "always", "min2", or "" for false
-	notation        string
-	compactDisplay  string
-	signDisplay     string
-	numbering       string
-	compactAuto     bool // compact notation choosing its own digits
-	roundingMode    string
-	roundingIncr    int
-	trailingZero    string
-	digits          pluralOptions
+	tag              string
+	style            string // "decimal", "percent", "currency", "unit"
+	currency         string
+	currencyDisplay  string
+	currencySign     string
+	unit             string
+	unitDisplay      string
+	useGrouping      string // "auto", "always", "min2", or "" for false
+	notation         string
+	compactDisplay   string
+	signDisplay      string
+	numbering        string
+	roundingPriority string
+	compactAuto      bool // compact notation choosing its own digits
+	roundingMode     string
+	roundingIncr     int
+	trailingZero     string
+	digits           pluralOptions
 }
 
 func defaultNumberOptions() numberOptions {
 	return numberOptions{tag: defaultLocale, style: "decimal", useGrouping: "auto", numbering: "latn",
 		notation: "standard", signDisplay: "auto",
 		roundingMode: "halfExpand", roundingIncr: 1, trailingZero: "auto",
-		digits: pluralOptions{minInt: 1, minFrac: 0, maxFrac: 3}}
+		roundingPriority: "auto",
+		digits:           pluralOptions{minInt: 1, minFrac: 0, maxFrac: 3}}
 }
 
 // String and parseNumberOptions round the resolved state through a slot, which
@@ -49,7 +51,7 @@ func (n numberOptions) String() string {
 	return strings.Join([]string{
 		n.tag, n.style, n.currency, n.currencyDisplay, n.currencySign, n.unit,
 		n.unitDisplay, n.useGrouping, n.notation, n.compactDisplay, n.signDisplay,
-		n.numbering, boolKeyword(n.compactAuto), n.roundingMode, strconv.Itoa(n.roundingIncr), n.trailingZero,
+		n.numbering, n.roundingPriority, boolKeyword(n.compactAuto), n.roundingMode, strconv.Itoa(n.roundingIncr), n.trailingZero,
 		strconv.Itoa(n.digits.minInt), strconv.Itoa(n.digits.minFrac),
 		strconv.Itoa(n.digits.maxFrac), strconv.Itoa(n.digits.minSig),
 		strconv.Itoa(n.digits.maxSig),
@@ -58,17 +60,17 @@ func (n numberOptions) String() string {
 
 func parseNumberOptions(s string) numberOptions {
 	f := strings.Split(s, "\t")
-	if len(f) != 21 {
+	if len(f) != 22 {
 		return defaultNumberOptions()
 	}
 	i := func(k int) int { v, _ := strconv.Atoi(f[k]); return v }
 	return numberOptions{tag: f[0], style: f[1], currency: f[2], currencyDisplay: f[3],
 		currencySign: f[4], unit: f[5], unitDisplay: f[6], useGrouping: f[7],
 		notation: f[8], compactDisplay: f[9], signDisplay: f[10],
-		numbering: f[11], compactAuto: f[12] == "true",
-		roundingMode: f[13], roundingIncr: i(14), trailingZero: f[15],
-		digits: pluralOptions{minInt: i(16), minFrac: i(17), maxFrac: i(18),
-			minSig: i(19), maxSig: i(20)}}
+		numbering: f[11], roundingPriority: f[12], compactAuto: f[13] == "true",
+		roundingMode: f[14], roundingIncr: i(15), trailingZero: f[16],
+		digits: pluralOptions{minInt: i(17), minFrac: i(18), maxFrac: i(19),
+			minSig: i(20), maxSig: i(21)}}
 }
 
 // requireNumberFormat is RequireInternalSlot([[InitializedNumberFormat]]).
@@ -220,6 +222,14 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	if hasMode {
 		n.roundingMode = roundingMode
 	}
+	priority, hasPriority, e := rt.intlStringOption(options, "roundingPriority",
+		[]string{"auto", "morePrecision", "lessPrecision"})
+	if e != nil {
+		return n, e
+	}
+	if hasPriority {
+		n.roundingPriority = priority
+	}
 	trailing, hasTrailing, e := rt.intlStringOption(options, "trailingZeroDisplay",
 		[]string{"auto", "stripIfInteger"})
 	if e != nil {
@@ -233,6 +243,14 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 		return n, e
 	}
 	n.digits = d
+	if n.roundingPriority != "auto" && n.digits.maxSig > 0 {
+		// Both kinds of digit option were given and the priority says which
+		// wins per value rather than outright: run both and compare.
+		n.compactAuto = true
+		if n.digits.maxFrac == 0 && n.digits.minFrac == 0 {
+			n.digits.maxFrac = 3
+		}
+	}
 	if n.notation == "compact" && !digitOptionsGiven(rt, options) {
 		// Compact's default is "morePrecision" between no fraction digits and
 		// two significant ones -- whichever KEEPS more of the number. 1234 is
@@ -276,6 +294,9 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 		}
 		if !v.IsUndefined() {
 			switch {
+			case v.IsNull():
+				// null and false are the same answer here: no grouping.
+				n.useGrouping = ""
 			case v.Type() == TBool:
 				if rt.toBoolean(v) {
 					n.useGrouping = "always"
@@ -405,8 +426,10 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 			si, sf := roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig, n.roundingMode, neg)
 			fi, ff := roundDecimal(intPart, frac, n.digits.maxFrac, n.roundingMode, 1, neg)
 			ff = strings.TrimRight(ff, "0")
-			// "More precision" is the one that moved the number less.
-			if decimalError(fi, ff, v) <= decimalError(si, sf, v) {
+			// "More precision" is the one that moved the number less; "less
+			// precision" is the other one.
+			less := n.roundingPriority == "lessPrecision"
+			if (decimalError(fi, ff, v) <= decimalError(si, sf, v)) != less {
 				intPart, frac = fi, ff
 			} else {
 				intPart, frac = si, sf
