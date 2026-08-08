@@ -732,7 +732,7 @@ func (c persianCalendar) yearFromEra(era string, eraYear int) (int, bool) {
 // islamicCivilEpoch is the first day of year 1, 16 July 622 in the Julian
 // calendar, anchored on 1 Muharram 1446 falling on 2024-07-07. The
 // astronomical variant (tbla) starts a day earlier.
-const islamicCivilEpoch = -492149
+const islamicCivilEpoch = -492148
 
 type islamicCalendar struct {
 	epoch int

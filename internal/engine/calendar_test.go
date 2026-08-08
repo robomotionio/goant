@@ -40,8 +40,8 @@ func TestCalendarConversions(t *testing.T) {
 		{"persian", [3]int{2023, 3, 21}, 1402, 1, 1, "ap", 1402},
 
 		// The tabular Islamic calendars differ by exactly one day.
-		{"islamic-civil", [3]int{2024, 7, 8}, 1446, 1, 2, "ah", 1446},
-		{"islamic-tbla", [3]int{2024, 7, 8}, 1446, 1, 3, "ah", 1446},
+		{"islamic-civil", [3]int{2024, 7, 8}, 1446, 1, 1, "ah", 1446},
+		{"islamic-tbla", [3]int{2024, 7, 8}, 1446, 1, 2, "ah", 1446},
 		// Umm al-Qura put 1 Muharram 1446 on 2024-07-07.
 		{"islamic-umalqura", [3]int{2024, 7, 7}, 1446, 1, 1, "ah", 1446},
 

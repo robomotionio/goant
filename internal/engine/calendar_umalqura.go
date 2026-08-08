@@ -21,7 +21,7 @@ const umalquraFirstYear = 1300
 // the civil epoch as 460322 days. The day it lands on is anchored the same way
 // as the other epochs here: 1 Muharram 1446 fell on 2024-07-07, and walking the
 // table back from there gives this.
-var umalquraEpoch = islamicCivilEpoch + 460323
+var umalquraEpoch = islamicCivilEpoch + 460322
 
 var umalquraMonthLengths = [...]uint16{
 	0xAAA, 0xD54, 0xEC9, 0x6D4, 0x6EA, 0x36C, 0xAAD, 0x555, 0x6A9, 0x792, 0xBA9, 0x5D4,
