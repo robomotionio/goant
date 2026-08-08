@@ -133,12 +133,12 @@ func (rt *Runtime) toTemporalMonthDay(item, options Value) (isoDateRec, string, 
 	if _, e := rt.getOverflow(opts); e != nil {
 		return isoDateRec{}, "", e
 	}
-	// The year in a month-day string is a reference year, and what it is worth
-	// depends on the calendar that reads it. The ISO calendar has a reference
-	// year of its own -- 1972, where every ISO month-day is dated -- and throws
-	// the string's away, which is why "-999999-10-01" is a fine month-day.
-	// Every other calendar reads its month and day OFF the reference date, so a
-	// string that names one has to carry a date to read them off: without a
+	// The year in a month-day string says which month-day is meant, not which
+	// one is kept: the answer is dated back to 1972 either way. In the ISO
+	// calendar the month and the day are written down already, so the year is
+	// worth nothing and is discarded unread -- which is why "-999999-10-01" is
+	// a fine month-day. Every other calendar has to read them OFF the date the
+	// year names, so a string naming one has to carry a date to read: without a
 	// year it does not say which month-day it means, and outside the
 	// representable range there is no date there to look at.
 	if cal == "iso8601" {
@@ -152,7 +152,13 @@ func (rt *Runtime) toTemporalMonthDay(item, options Value) (isoDateRec, string, 
 	if !isoDateWithinLimits(iso) {
 		return isoDateRec{}, "", rt.rangeError(s + " is outside the range a month-day can be read from")
 	}
-	return iso, cal, nil
+	f := fieldsOfDate(cal, iso)
+	f.has &^= fYear | fEra | fEraYear | fMonth
+	out, err := calendarMonthDayFromFields(cal, f, "constrain")
+	if err != nil {
+		return isoDateRec{}, "", rt.throwFor(err)
+	}
+	return out, cal, nil
 }
 
 // ---- PlainYearMonth ----
