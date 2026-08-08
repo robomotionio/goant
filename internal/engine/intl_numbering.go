@@ -2,29 +2,31 @@ package engine
 
 // Numbering systems.
 //
-// A numbering system with a "simple digit mapping" is exactly that: its ten
-// digits are ten consecutive code points, so rendering a number in it is a
-// translation of the ASCII digits and nothing more. That is every system CLDR
-// carries except the four algorithmic ones (Roman numerals and the like),
-// which is why this is a table of one code point each rather than a formatter.
+// A numbering system with a "simple digit mapping" is exactly that: it has ten
+// digits and a number is spelled one digit at a time, so rendering a number in
+// it is a translation of the ASCII digits and nothing more. That is every
+// system CLDR carries except the four algorithmic ones (Roman numerals and the
+// like), which is why this is a table of digits rather than a formatter.
+//
+// The digits are usually consecutive code points, but hanidec's are not --
+// 〇 is U+3007 and 一 is U+4E00 -- so all ten are carried.
 
 import (
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
 )
 
-// numberingZero maps a numbering system to the code point of its zero.
-var numberingZero = sync.OnceValue(func() map[string]rune {
-	m := map[string]rune{}
+// numberingDigits maps a numbering system to its ten digits, zero first.
+var numberingDigits = sync.OnceValue(func() map[string][]rune {
+	m := map[string][]rune{}
 	for name, v := range parseAliasTable(cldrNumberingSystemsData) {
-		n, err := strconv.Atoi(v)
-		if err != nil {
+		d := []rune(v)
+		if len(d) != 10 {
 			continue
 		}
-		m[name] = rune(n)
+		m[name] = d
 	}
 	return m
 })
@@ -32,7 +34,7 @@ var numberingZero = sync.OnceValue(func() map[string]rune {
 // numberingSystemNames is every system with a simple digit mapping, sorted --
 // what Intl.supportedValuesOf("numberingSystem") answers.
 var numberingSystemNames = sync.OnceValue(func() []string {
-	m := numberingZero()
+	m := numberingDigits()
 	out := make([]string, 0, len(m))
 	for name := range m {
 		out = append(out, name)
@@ -43,7 +45,7 @@ var numberingSystemNames = sync.OnceValue(func() []string {
 
 // isNumberingSystem reports whether a name is one this engine can render in.
 func isNumberingSystem(name string) bool {
-	_, ok := numberingZero()[name]
+	_, ok := numberingDigits()[name]
 	return ok
 }
 
@@ -51,8 +53,8 @@ func isNumberingSystem(name string) bool {
 // else in the string -- separators, signs, letters -- is left alone, because a
 // numbering system is about digits and not about anything else.
 func mapDigits(s, system string) string {
-	zero, ok := numberingZero()[system]
-	if !ok || zero == '0' {
+	digits, ok := numberingDigits()[system]
+	if !ok || digits[0] == '0' {
 		return s
 	}
 	if !strings.ContainsFunc(s, func(r rune) bool { return r >= '0' && r <= '9' }) {
@@ -62,7 +64,7 @@ func mapDigits(s, system string) string {
 	b.Grow(len(s) + utf8.UTFMax)
 	for _, r := range s {
 		if r >= '0' && r <= '9' {
-			b.WriteRune(zero + (r - '0'))
+			b.WriteRune(digits[r-'0'])
 			continue
 		}
 		b.WriteRune(r)

@@ -29,7 +29,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -127,9 +126,6 @@ package engine
 		"IANA zones per ISO 3166 region, from zone.tab, space-separated.",
 		regionZones(filepath.Join(*dir, "zone.tab")))
 
-	// The numbering systems whose digits are ten consecutive code points --
-	// which is all of them except the four algorithmic ones. The value is the
-	// zero digit; the rest follow it.
 	// The collation types a -u-co keyword may name. Without this list any
 	// well-formed type would be accepted, and "en-US-u-co-invalid" would
 	// resolve to a collation that does not exist.
@@ -137,7 +133,7 @@ package engine
 		"collation types, name -> \"\" (a set).", collationTypes(filepath.Join(*dir, "bcp47", "collation.xml")))
 
 	emit(&b, "cldrNumberingSystemsData",
-		"numbering systems with a simple digit mapping: name -> the code point of its zero.",
+		"numbering systems with a simple digit mapping: name -> its ten digits.",
 		numberingSystems(filepath.Join(*dir, "numberingSystems.xml")))
 
 	// The likely-subtags value is written as a script+region pair whenever the
@@ -367,8 +363,11 @@ type numberingDoc struct {
 	} `xml:"numberingSystems>numberingSystem"`
 }
 
-// numberingSystems keeps the systems whose ten digits are consecutive code
-// points, which is what makes them a mapping rather than a rule.
+// numberingSystems keeps the systems that spell a number one digit at a time,
+// which is what makes them a mapping rather than a rule. Their digits are
+// usually ten consecutive code points, but not always: hanidec's zero is
+// U+3007 and its one is U+4E00, half the Unicode range away, so the ten are
+// written out rather than derived from the first.
 func numberingSystems(path string) [][2]string {
 	var doc numberingDoc
 	read(path, &doc)
@@ -377,20 +376,10 @@ func numberingSystems(path string) [][2]string {
 		if s.Type != "numeric" {
 			continue
 		}
-		runes := []rune(s.Digits)
-		if len(runes) != 10 {
+		if len([]rune(s.Digits)) != 10 {
 			continue
 		}
-		ok := true
-		for i, r := range runes {
-			if r != runes[0]+rune(i) {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			out = append(out, [2]string{s.ID, strconv.Itoa(int(runes[0]))})
-		}
+		out = append(out, [2]string{s.ID, s.Digits})
 	}
 	return out
 }
