@@ -133,8 +133,13 @@ func (rt *Runtime) toTemporalMonthDay(item, options Value) (isoDateRec, string, 
 	if _, e := rt.getOverflow(opts); e != nil {
 		return isoDateRec{}, "", e
 	}
-	if p.yearAbsent && cal != "iso8601" {
-		return isoDateRec{}, "", rt.rangeError("a month-day without a year needs the ISO calendar")
+	// The year in a month-day string is a reference year, and a reference year
+	// only means anything in the calendar that defines it. A string may name
+	// the ISO calendar and no other, whether or not it carries a year --
+	// "-999999-10-01" is a fine month-day and "-999999-01-01[u-ca=gregory]" is
+	// not, and the only difference is the annotation.
+	if cal != "iso8601" {
+		return isoDateRec{}, "", rt.rangeError("a month-day string needs the ISO calendar")
 	}
 	iso := isoDateRec{p.year, p.month, p.day}
 	if p.yearAbsent {
@@ -235,6 +240,15 @@ func (rt *Runtime) initTemporalPlainYearMonth(ns *object) {
 			overflow, e := rt.getOverflow(opts)
 			if e != nil {
 				return mkundef(), e
+			}
+			// A year-month has no day for a smaller unit to land on, so a
+			// duration carrying one is refused rather than quietly ignored --
+			// even where it would not have changed the month.
+			for _, v := range []float64{d.days, d.hours, d.minutes, d.seconds, d.ms, d.us, d.ns} {
+				if v != 0 {
+					return mkundef(), rt.rangeError(
+						"a year-month cannot be moved by a unit smaller than a week")
+				}
 			}
 			// Going backwards, the duration is measured from the end of the
 			// month rather than its start: a month minus a day is the day
