@@ -43,6 +43,21 @@ const (
 
 func (f calFieldSet) got(bit uint16) bool { return f.has&bit != 0 }
 
+// leapMonthFallback is the month a leap month becomes in a year that has none.
+// Everywhere but the Hebrew calendar a leap month repeats the one before it, so
+// it falls back to that; Adar I falls forward to Adar, which is the month a
+// common year has in its place.
+func leapMonthFallback(id, code string) (string, bool) {
+	base, leap, ok := parseMonthCode(code)
+	if !ok || !leap {
+		return "", false
+	}
+	if id == "hebrew" {
+		return simpleMonthCode(base + 1), true
+	}
+	return simpleMonthCode(base), true
+}
+
 // calendarHasEras reports whether a calendar counts its years from named eras,
 // which decides whether era and eraYear are fields it accepts at all.
 func calendarHasEras(id string) bool { return len(calendarFor(id).eras()) > 0 }
@@ -75,7 +90,7 @@ func resolveCalendarYear(id string, cal calendar, f calFieldSet) (int, error) {
 
 // resolveCalendarMonth turns a month code, or an ordinal month, into the
 // ordinal the calendar uses -- checking that the two agree where both are given.
-func resolveCalendarMonth(cal calendar, year int, f calFieldSet, overflow string) (int, error) {
+func resolveCalendarMonth(id string, cal calendar, year int, f calFieldSet, overflow string) (int, error) {
 	if !f.got(fMonth) && !f.got(fMonthCode) {
 		return 0, errCalendarFields
 	}
@@ -88,11 +103,11 @@ func resolveCalendarMonth(cal calendar, year int, f calFieldSet, overflow string
 			if overflow == "reject" {
 				return 0, errCalendarOverflow
 			}
-			base, leap, good := parseMonthCode(f.monthCode)
-			if !good || !leap {
+			fallback, good := leapMonthFallback(id, f.monthCode)
+			if !good {
 				return 0, errCalendarValue
 			}
-			m, ok = cal.monthFromCode(ys, simpleMonthCode(base))
+			m, ok = cal.monthFromCode(ys, fallback)
 			if !ok {
 				return 0, errCalendarValue
 			}
@@ -126,7 +141,7 @@ func calendarDateFromFields(id string, f calFieldSet, overflow string) (isoDateR
 	if err != nil {
 		return isoDateRec{}, err
 	}
-	month, err := resolveCalendarMonth(cal, year, f, overflow)
+	month, err := resolveCalendarMonth(id, cal, year, f, overflow)
 	if err != nil {
 		return isoDateRec{}, err
 	}
@@ -252,11 +267,11 @@ func calendarMonthDayFromFields(id string, f calFieldSet, overflow string) (isoD
 	if overflow == "reject" {
 		return isoDateRec{}, errCalendarOverflow
 	}
-	base, leap, ok := parseMonthCode(code)
-	if !ok || !leap {
+	fallback, ok := leapMonthFallback(id, code)
+	if !ok {
 		return isoDateRec{}, errCalendarValue
 	}
-	if iso, ok := searchMonthDayReference(cal, simpleMonthCode(base), day); ok {
+	if iso, ok := searchMonthDayReference(cal, fallback, day); ok {
 		return iso, nil
 	}
 	return isoDateRec{}, errCalendarValue
@@ -441,12 +456,8 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 		y := c1.year + int(years)
 		m, ok := cal.monthFromCode(strconv.Itoa(y), c1.code)
 		if !ok {
-			base, leap, good := parseMonthCode(c1.code)
-			if !good {
-				return y, c1.month, c1.day
-			}
-			if leap {
-				m, ok = cal.monthFromCode(strconv.Itoa(y), simpleMonthCode(base))
+			if fallback, good := leapMonthFallback(id, c1.code); good {
+				m, ok = cal.monthFromCode(strconv.Itoa(y), fallback)
 			}
 			if !ok {
 				m = c1.month

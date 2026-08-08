@@ -572,7 +572,7 @@ func (rt *Runtime) toTemporalZonedDateTime(item, options Value) (*big.Int, strin
 			return nil, "", "", e
 		}
 		ns, e := rt.interpretISODateTimeOffset(isoDateTimeRec{iso, t}, hasOffset, offsetNs,
-			tz, disambiguation, offsetOpt, true)
+			tz, disambiguation, offsetOpt, false)
 		if e != nil {
 			return nil, "", "", e
 		}
@@ -619,7 +619,7 @@ func (rt *Runtime) toTemporalZonedDateTime(item, options Value) (*big.Int, strin
 		offsetOpt = "use"
 	}
 	ns, e := rt.interpretISODateTimeOffset(dt, p.hasOffset || p.z, p.offsetNs, z.id,
-		disambiguation, offsetOpt, !p.z)
+		disambiguation, offsetOpt, !p.z && !offsetHasSubMinute(p.offsetStr))
 	if e != nil {
 		return nil, "", "", e
 	}
@@ -627,6 +627,20 @@ func (rt *Runtime) toTemporalZonedDateTime(item, options Value) (*big.Int, strin
 }
 
 // parseDateTimeUTCOffset reads an offset string as a count of nanoseconds.
+// offsetHasSubMinute reports whether an offset was written finer than a
+// minute. It decides whether the offset may be matched against a zone's own
+// after rounding: "+01:00" may stand for a zone at +00:59:30, but "+01:00:00"
+// says otherwise.
+func offsetHasSubMinute(s string) bool {
+	digits := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] >= '0' && s[i] <= '9' {
+			digits++
+		}
+	}
+	return digits > 4
+}
+
 func parseDateTimeUTCOffset(s string) (int64, bool) {
 	p := &tparse{s: s}
 	ns, _, ok := p.utcOffset(true)
@@ -820,7 +834,7 @@ func (rt *Runtime) getRelativeTo(opts Value) (relativeToRec, *ThrowError) {
 			offsetNs = ns
 		}
 		ns, e := rt.interpretISODateTimeOffset(isoDateTimeRec{iso, t}, f.hasOffset,
-			offsetNs, tz, "compatible", "reject", true)
+			offsetNs, tz, "compatible", "reject", false)
 		if e != nil {
 			return r, e
 		}
@@ -859,7 +873,7 @@ func (rt *Runtime) getRelativeTo(opts Value) (relativeToRec, *ThrowError) {
 		offsetOpt = "use"
 	}
 	ns, e := rt.interpretISODateTimeOffset(isoDateTimeRec{iso, t}, p.hasOffset || p.z,
-		p.offsetNs, z.id, "compatible", offsetOpt, !p.z)
+		p.offsetNs, z.id, "compatible", offsetOpt, !p.z && !offsetHasSubMinute(p.offsetStr))
 	if e != nil {
 		return r, e
 	}
