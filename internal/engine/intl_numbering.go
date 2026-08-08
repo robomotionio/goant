@@ -82,7 +82,7 @@ func resolveNumberingSystem(tag, option string) (resolvedTag, system string) {
 		return tag, "latn"
 	}
 	kept := &langTag{lang: t.lang, script: t.script, region: t.region, variants: t.variants}
-	system = "latn"
+	system = defaultNumberingSystem(t)
 	// The tag's value is used unless the option names a system we have and a
 	// different one -- an option we cannot honour is not an override. And the
 	// keyword survives into the resolved locale exactly when its value is the
@@ -98,6 +98,44 @@ func resolveNumberingSystem(tag, option string) (resolvedTag, system string) {
 		system = option
 	}
 	return kept.String(), system
+}
+
+// nonLatinDefaults are the languages CLDR counts in something other than
+// Western digits by default. Everything absent counts in "latn", which is every
+// locale internal/engine/intl_data.go carries a pattern table for -- so this
+// changes nothing for them and is the honest answer for the rest.
+var nonLatinDefaults = map[string]string{
+	"ar": "arab", "bo": "tibt", "ckb": "arabext", "dz": "tibt", "fa": "arabext",
+	"ks": "arabext", "lrc": "arabext", "mzn": "arabext", "my": "mymr",
+	"ne": "deva", "ps": "arabext", "sat": "olck", "sd": "arab", "uz": "latn",
+}
+
+// latinArabicRegions are the Arabic-speaking countries that write their numbers
+// in Western digits: the Maghreb, in short.
+var latinArabicRegions = []string{"DZ", "EH", "LY", "MA", "MR", "TN"}
+
+// defaultNumberingSystem is the system a locale counts in when nothing asked
+// for one.
+func defaultNumberingSystem(t *langTag) string {
+	system, ok := nonLatinDefaults[t.lang]
+	if !ok {
+		return "latn"
+	}
+	switch t.lang {
+	case "ar":
+		if tagContains(latinArabicRegions, t.region) {
+			return "latn"
+		}
+	case "pa", "uz":
+		if t.script != "Arab" {
+			return "latn"
+		}
+		return "arabext"
+	}
+	if !isNumberingSystem(system) {
+		return "latn"
+	}
+	return system
 }
 
 // cldrCollations is the set of collation types a -u-co keyword may name. A

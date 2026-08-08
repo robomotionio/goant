@@ -10,8 +10,12 @@ package engine
 // default path in builtin_string.go.
 
 import (
+	"strings"
+	"unicode/utf8"
+
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+	"golang.org/x/text/unicode/norm"
 )
 
 // localeCaseLanguages are the languages whose case mapping differs from the
@@ -52,7 +56,57 @@ func localeCaseBytes(b []byte, tags []string, upper bool) []byte {
 	if upper {
 		c = cases.Upper(tag)
 	}
+	if !upper && lang == "lt" {
+		return []byte(lithuanianLower(string(b), c))
+	}
 	return []byte(c.String(string(b)))
+}
+
+// lithuanianLower is the one rule x/text puts in the wrong place. Lowercasing
+// I, J or I-with-ogonek in Lithuanian adds a COMBINING DOT ABOVE when an
+// accent above follows, and the dot goes immediately after the letter, ahead of
+// any marks below it: "I\u0325\u0300" is "i\u0307\u0325\u0300". Everything
+// else is x/text's, run over the stretches between such letters.
+func lithuanianLower(s string, c cases.Caser) string {
+	var b strings.Builder
+	start := 0
+	for i, r := range s {
+		lower := ""
+		switch r {
+		case 'I':
+			lower = "i"
+		case 'J':
+			lower = "j"
+		case 0x012E:
+			lower = "\u012F"
+		default:
+			continue
+		}
+		if !moreAbove(s[i+utf8.RuneLen(r):]) {
+			continue
+		}
+		b.WriteString(c.String(s[start:i]))
+		b.WriteString(lower)
+		b.WriteRune(0x0307)
+		start = i + utf8.RuneLen(r)
+	}
+	b.WriteString(c.String(s[start:]))
+	return b.String()
+}
+
+// moreAbove is the SpecialCasing condition of that name: an accent above
+// follows, with nothing between it and the letter that is a base character or
+// another accent above.
+func moreAbove(s string) bool {
+	for _, r := range s {
+		switch norm.NFC.PropertiesString(string(r)).CCC() {
+		case 230:
+			return true
+		case 0:
+			return false
+		}
+	}
+	return false
 }
 
 // validWTF8ForCasing reports whether the bytes decode without an unpaired

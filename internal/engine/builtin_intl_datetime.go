@@ -563,6 +563,40 @@ func zoneDisplayNameIn(t time.Time) string {
 // weekday, then the date read largest-unit-last where the month is a word and
 // month-first where it is a number, then the time.
 func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
+	return mapDatePartDigits(d.datePartsLatin(t), d.numbering)
+}
+
+// mapDatePartDigits rewrites the spans that are numbers into the locale's own
+// digits. A month written as a word is not a number and does not change.
+func mapDatePartDigits(parts []numberPart, system string) []numberPart {
+	if system == "" || system == "latn" {
+		return parts
+	}
+	for i, p := range parts {
+		switch p.typ {
+		case "year", "month", "day", "hour", "minute", "second",
+			"fractionalSecond", "relatedYear":
+			if isASCIIDigits(p.val) {
+				parts[i].val = mapDigits(p.val, system)
+			}
+		}
+	}
+	return parts
+}
+
+func isASCIIDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func (d dateTimeOptions) datePartsLatin(t time.Time) []numberPart {
 	var out []numberPart
 	lit := func(s string) {
 		if s != "" {
