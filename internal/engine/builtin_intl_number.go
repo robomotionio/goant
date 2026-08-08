@@ -26,6 +26,7 @@ type numberOptions struct {
 	notation        string
 	compactDisplay  string
 	signDisplay     string
+	compactAuto     bool // compact notation choosing its own digits
 	roundingMode    string
 	roundingIncr    int
 	trailingZero    string
@@ -46,7 +47,7 @@ func (n numberOptions) String() string {
 	return strings.Join([]string{
 		n.tag, n.style, n.currency, n.currencyDisplay, n.currencySign, n.unit,
 		n.unitDisplay, n.useGrouping, n.notation, n.compactDisplay, n.signDisplay,
-		n.roundingMode, strconv.Itoa(n.roundingIncr), n.trailingZero,
+		boolKeyword(n.compactAuto), n.roundingMode, strconv.Itoa(n.roundingIncr), n.trailingZero,
 		strconv.Itoa(n.digits.minInt), strconv.Itoa(n.digits.minFrac),
 		strconv.Itoa(n.digits.maxFrac), strconv.Itoa(n.digits.minSig),
 		strconv.Itoa(n.digits.maxSig),
@@ -55,16 +56,17 @@ func (n numberOptions) String() string {
 
 func parseNumberOptions(s string) numberOptions {
 	f := strings.Split(s, "\t")
-	if len(f) != 19 {
+	if len(f) != 20 {
 		return defaultNumberOptions()
 	}
 	i := func(k int) int { v, _ := strconv.Atoi(f[k]); return v }
 	return numberOptions{tag: f[0], style: f[1], currency: f[2], currencyDisplay: f[3],
 		currencySign: f[4], unit: f[5], unitDisplay: f[6], useGrouping: f[7],
 		notation: f[8], compactDisplay: f[9], signDisplay: f[10],
-		roundingMode: f[11], roundingIncr: i(12), trailingZero: f[13],
-		digits: pluralOptions{minInt: i(14), minFrac: i(15), maxFrac: i(16),
-			minSig: i(17), maxSig: i(18)}}
+		compactAuto:  f[11] == "true",
+		roundingMode: f[12], roundingIncr: i(13), trailingZero: f[14],
+		digits: pluralOptions{minInt: i(15), minFrac: i(16), maxFrac: i(17),
+			minSig: i(18), maxSig: i(19)}}
 }
 
 // requireNumberFormat is RequireInternalSlot([[InitializedNumberFormat]]).
@@ -194,11 +196,6 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	if hasNotation {
 		n.notation = notation
 	}
-	if n.notation == "compact" {
-		// Compact notation has no default fraction digits at all; the
-		// significant-digit rule takes over.
-		maxFrac = 0
-	}
 	roundingIncrement, hasIncr, e := rt.intlNumberOption(options, "roundingIncrement", 1, 5000, 1)
 	if e != nil {
 		return n, e
@@ -227,6 +224,16 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 		return n, e
 	}
 	n.digits = d
+	if n.notation == "compact" && !digitOptionsGiven(rt, options) {
+		// Compact's default is "morePrecision" between no fraction digits and
+		// two significant ones -- whichever KEEPS more of the number. 1234 is
+		// "1.2K" because two significant digits say more than none, and
+		// 987654321 is "988M" because no fraction digits say more than two
+		// significant ones. Neither rule alone gets both right.
+		n.compactAuto = true
+		n.digits.minSig, n.digits.maxSig = 1, 2
+		n.digits.minFrac, n.digits.maxFrac = 0, 0
+	}
 	// A rounding increment only makes sense at a fixed number of fraction
 	// digits: it says what the last place steps by, and with significant
 	// digits or an open-ended maximum there is no last place.
@@ -292,6 +299,22 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	return n, nil
 }
 
+// digitOptionsGiven reports whether the caller named any digit option, which is
+// what decides whether compact notation gets to pick its own.
+func digitOptionsGiven(rt *Runtime, options Value) bool {
+	if options.IsUndefined() {
+		return false
+	}
+	for _, name := range []string{"minimumIntegerDigits", "minimumFractionDigits",
+		"maximumFractionDigits", "minimumSignificantDigits", "maximumSignificantDigits"} {
+		v, e := rt.getField(options, name)
+		if e == nil && !v.IsUndefined() {
+			return true
+		}
+	}
+	return false
+}
+
 // currencyDigits is the minor-unit count of an ISO 4217 code. Two is the rule;
 // the exceptions are the currencies with no minor unit at all and the three
 // with a thousandth.
@@ -335,6 +358,19 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 	var intPart, frac string
 	var exponent int
 	infinite := math.IsInf(v, 0)
+	compactSuffix := ""
+	if !nan && !infinite && n.notation == "compact" && v != 0 {
+		// The compact patterns divide by a power of a thousand and name what
+		// is left. Below a thousand there is nothing to compact.
+		mag := 0
+		for a := math.Abs(v); a >= 1000 && mag < 4; a /= 1000 {
+			mag++
+		}
+		if mag > 0 {
+			v /= math.Pow(1000, float64(mag))
+			compactSuffix = compactName(mag, n.compactDisplay)
+		}
+	}
 	if !nan && !infinite && (n.notation == "scientific" || n.notation == "engineering") {
 		// The mantissa is what gets formatted; the exponent is written after
 		// it. Engineering keeps the exponent a multiple of three, which is what
@@ -354,7 +390,19 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 			// float, because above 2^53 the float has already lost them.
 			intPart, frac, neg = strings.TrimPrefix(digits, "-"), "", strings.HasPrefix(digits, "-")
 		}
-		if n.digits.maxSig > 0 {
+		if n.compactAuto {
+			// Both roundings, and the one that keeps more significant digits
+			// wins. "More precision" is exactly that comparison.
+			si, sf := roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig)
+			fi, ff := roundDecimal(intPart, frac, n.digits.maxFrac, n.roundingMode, 1, neg)
+			ff = strings.TrimRight(ff, "0")
+			// "More precision" is the one that moved the number less.
+			if decimalError(fi, ff, v) <= decimalError(si, sf, v) {
+				intPart, frac = fi, ff
+			} else {
+				intPart, frac = si, sf
+			}
+		} else if n.digits.maxSig > 0 {
 			intPart, frac = roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig)
 		} else {
 			intPart, frac = roundDecimal(intPart, frac, n.digits.maxFrac,
@@ -421,6 +469,9 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 	if frac != "" {
 		add("decimal", li.decimal)
 		add("fraction", frac)
+	}
+	if compactSuffix != "" {
+		add("compact", compactSuffix)
 	}
 	if n.notation == "scientific" || n.notation == "engineering" {
 		add("exponentSeparator", "E")
@@ -721,4 +772,32 @@ func sourcedString(parts []sourcedPart) string {
 		b.WriteString(p.val)
 	}
 	return b.String()
+}
+
+// compactName is what a compact pattern writes after the number, for a
+// magnitude counted in powers of a thousand. English's; CLDR carries a set per
+// locale and per plural category.
+func compactName(mag int, display string) string {
+	short := []string{"", "K", "M", "B", "T"}
+	long := []string{"", " thousand", " million", " billion", " trillion"}
+	if mag < 1 || mag > 4 {
+		return ""
+	}
+	if display == "long" {
+		return long[mag]
+	}
+	return short[mag]
+}
+
+// decimalError is how far a rounded spelling moved the value it came from.
+func decimalError(intPart, frac string, v float64) float64 {
+	s := intPart
+	if frac != "" {
+		s += "." + frac
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return math.Inf(1)
+	}
+	return math.Abs(f - math.Abs(v))
 }
