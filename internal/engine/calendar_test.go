@@ -73,11 +73,11 @@ func TestCalendarConversions(t *testing.T) {
 // The lunisolar calendars, on the one date a year everyone knows.
 func TestChineseNewYear(t *testing.T) {
 	for iso, want := range map[[3]int]int{
-		{2024, 2, 10}: 4661, // the year of the dragon
-		{2023, 1, 22}: 4660,
-		{2025, 1, 29}: 4662,
-		{2000, 2, 5}:  4637,
-		{1900, 1, 31}: 4537,
+		{2024, 2, 10}: 2024, // the year of the dragon
+		{2023, 1, 22}: 2023,
+		{2025, 1, 29}: 2025,
+		{2000, 2, 5}:  2000,
+		{1900, 1, 31}: 1900,
 	} {
 		c := calendarFor("chinese")
 		day := isoDay(iso[0], iso[1], iso[2])

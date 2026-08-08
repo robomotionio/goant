@@ -346,7 +346,11 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 		if tag, ok := parseLangTag(d.tag); ok {
 			lang = tag.lang
 		}
-		return sexagenaryName(d.calendarDate(t).year, lang)
+		cy := d.calendarDate(t).year
+		if c, ok := calendarFor(d.calendar).(lunisolarCalendar); ok {
+			cy = c.cyclicYear(cy)
+		}
+		return sexagenaryName(cy, lang)
 	case "month":
 		cd := d.calendarDate(t)
 		m := cd.month

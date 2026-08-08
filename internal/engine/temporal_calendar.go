@@ -411,6 +411,14 @@ func calendarDateAdd(id string, iso isoDateRec, dur dateDuration, overflow strin
 
 // calendarDateUntil is CalendarDateUntil: the difference between two dates,
 // expressed in the largest unit asked for and everything under it.
+//
+// The ISO calendar and the other fifteen answer this differently, and the
+// difference is where the day gets constrained. In the ISO calendar, adding a
+// year to the 29th of February and landing on the 28th counts as a whole year.
+// Everywhere else the day is compared before it is constrained, so the same
+// step counts as one short of a year -- which is why the last day of a Coptic
+// leap year is twelve months and twenty-nine days from the last day of the
+// next.
 func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDuration {
 	sign := -compareISODate(one, two)
 	if sign == 0 {
@@ -427,26 +435,70 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 	c1 := cal.dateFromDay(one.epochDays())
 	c2 := cal.dateFromDay(two.epochDays())
 
-	years := int64(c2.year - c1.year)
-	// Overshooting by a year is normal when the months are the other way round.
-	for years != 0 {
-		mid, err := calendarDateAdd(id, one, dateDuration{years: years}, "constrain")
-		if err != nil || sign*compareISODate(mid, two) > 0 {
-			years -= int64(sign)
-			continue
+	// candidate is where the start lands after so many years and months, with
+	// the day left as it was however long the month turns out to be.
+	candidate := func(years, months int64) (int, int, int) {
+		y := c1.year + int(years)
+		m, ok := cal.monthFromCode(strconv.Itoa(y), c1.code)
+		if !ok {
+			base, leap, good := parseMonthCode(c1.code)
+			if !good {
+				return y, c1.month, c1.day
+			}
+			if leap {
+				m, ok = cal.monthFromCode(strconv.Itoa(y), simpleMonthCode(base))
+			}
+			if !ok {
+				m = c1.month
+			}
 		}
-		break
+		m += int(months)
+		for {
+			n := cal.monthsInYear(y)
+			if m <= n {
+				break
+			}
+			m -= n
+			y++
+		}
+		for m < 1 {
+			y--
+			m += cal.monthsInYear(y)
+		}
+		return y, m, c1.day
 	}
-	// Then months, one at a time: after the year step there are never many.
-	var months int64
-	for {
-		mid, err := calendarDateAdd(id, one,
-			dateDuration{years: years, months: months + int64(sign)}, "constrain")
-		if err != nil || sign*compareISODate(mid, two) > 0 {
-			break
+	// past reports whether a candidate has gone beyond the far end.
+	past := func(years, months int64) bool {
+		y, m, d := candidate(years, months)
+		c := 0
+		switch {
+		case y != c2.year:
+			c = sign64(int64(y - c2.year))
+		case m != c2.month:
+			c = sign64(int64(m - c2.month))
+		default:
+			c = sign64(int64(d - c2.day))
 		}
+		return sign*c > 0
+	}
+	isoLike := id == "iso8601"
+	pastISO := func(years, months int64) bool {
+		mid, err := calendarDateAdd(id, one, dateDuration{years: years, months: months}, "constrain")
+		return err != nil || sign*compareISODate(mid, two) > 0
+	}
+	overshot := past
+	if isoLike {
+		overshot = pastISO
+	}
+
+	years := int64(c2.year - c1.year)
+	for years != 0 && overshot(years, 0) {
+		years -= int64(sign)
+	}
+	var months int64
+	for !overshot(years, months+int64(sign)) {
 		months += int64(sign)
-		if months > 1000 || months < -1000 {
+		if months > 10000 || months < -10000 {
 			break
 		}
 	}
@@ -457,8 +509,8 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 	days := int64(two.epochDays() - mid.epochDays())
 	if largestUnit == unitMonth && years != 0 {
 		// Count the months the years covered, which is not twelve everywhere.
-		step := int64(sign)
-		for y := c1.year; y != c1.year+int(years); y += int(step) {
+		step := int(sign)
+		for y := c1.year; y != c1.year+int(years); y += step {
 			if step > 0 {
 				months += int64(cal.monthsInYear(y))
 			} else {

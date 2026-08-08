@@ -391,20 +391,22 @@ func (c lunisolarCalendar) suiFrom(solstice int) lunisolarYear {
 	return lunisolarYear{starts: starts, leap: leapIndex, year: c.yearNumber(gy)}
 }
 
-// yearNumber is the calendar's own count. The Chinese calendar numbers from
-// 2637 BC and the Korean from 2333 BC, which are the epochs ICU reports.
-func (c lunisolarCalendar) yearNumber(gregorianYear int) int {
-	if c.id == "dangi" {
-		return gregorianYear + 2333
-	}
-	return gregorianYear + 2637
-}
+// yearNumber is what the year is called. The Chinese and Korean calendars have
+// epochs of their own -- 2637 BC and 2333 BC -- but a year is named by the
+// Gregorian year it begins in, which is what a caller writing
+// {year: 2020, monthCode: "M04L"} means and what the sexagenary cycle is
+// derived from rather than reported as.
+func (c lunisolarCalendar) yearNumber(gregorianYear int) int { return gregorianYear }
 
-func (c lunisolarCalendar) gregorianYear(year int) int {
+func (c lunisolarCalendar) gregorianYear(year int) int { return year }
+
+// cyclicYear is the year in the calendar's own count, from which the stem and
+// branch that name it are taken.
+func (c lunisolarCalendar) cyclicYear(year int) int {
 	if c.id == "dangi" {
-		return year - 2333
+		return year + 2333
 	}
-	return year - 2637
+	return year + 2637
 }
 
 // lunisolarCache memoises the years, which are expensive: each one is a dozen

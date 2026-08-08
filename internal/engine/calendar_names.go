@@ -118,10 +118,5 @@ func sexagenaryName(year int, lang string) string {
 // relatedGregorianYear is the Gregorian year a lunisolar year began in, which
 // is what a formatter writes beside the year's name: "2024(jia-chen)".
 func relatedGregorianYear(cal calendar, id string, year int) string {
-	c, ok := cal.(lunisolarCalendar)
-	if !ok {
-		return strconv.Itoa(year)
-	}
-	y, _, _ := isoDate(c.year(year).starts[0])
-	return strconv.Itoa(y)
+	return strconv.Itoa(year)
 }
