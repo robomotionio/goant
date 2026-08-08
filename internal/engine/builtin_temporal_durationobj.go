@@ -256,6 +256,17 @@ func (rt *Runtime) initTemporalDuration(ns *object) {
 				return mkundef(), e
 			}
 		}
+		// Rounding to several of a unit no fixed length answers for, and
+		// balancing up to a larger one, are two different answers to the same
+		// question: eight months rounded up is sixteen months, and sixteen
+		// months balanced up is a year and four, which is not a multiple of
+		// eight of anything. Asking for both is asking for a contradiction,
+		// and days are in it because a day is such a unit once a calendar or a
+		// zone is involved.
+		if increment > 1 && smallest <= unitDay && largest != smallest {
+			return mkundef(), rt.rangeError(
+				"a rounding increment above one cannot be used while balancing to a larger unit")
+		}
 		s := differenceSettings{largest, smallest, increment, mode}
 		out, e := rt.roundDuration(d, rel, s)
 		if e != nil {

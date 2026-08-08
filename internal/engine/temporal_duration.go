@@ -233,11 +233,17 @@ func durationFromInternal(d internalDuration, largestUnit int) (durationRec, boo
 	sign := int64(d.time.Sign())
 	n := new(big.Int).Abs(d.time)
 	var days, hours, minutes, seconds, ms, us int64
+	// A count that will not fit in an int64 is a duration out of range, not a
+	// duration of however many fit: clamping it to the largest int64 turned
+	// eighteen septillion nanoseconds into a valid-looking nine thousand
+	// billion seconds.
+	overflow := false
 	divmod := func(by int64) int64 {
 		q, r := new(big.Int).QuoRem(n, bigInt(by), new(big.Int))
 		n = r
 		if !q.IsInt64() {
-			return math.MaxInt64
+			overflow = true
+			return 0
 		}
 		return q.Int64()
 	}
@@ -270,7 +276,7 @@ func durationFromInternal(d internalDuration, largestUnit int) (durationRec, boo
 	case unitMicrosecond:
 		us = divmod(nsPerMicro)
 	}
-	if !n.IsInt64() {
+	if overflow || !n.IsInt64() {
 		return durationRec{}, false
 	}
 	ns := n.Int64()
