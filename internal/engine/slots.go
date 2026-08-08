@@ -47,16 +47,17 @@ const (
 	slotMatchallRx
 	slotMatchallStr
 	slotMatchallDone
-	slotRawJSON         // a JSON.rawJSON object's [[RawJSON]] text (a String)
-	slotImmutableBuffer // marks an ArrayBuffer's [[ArrayBufferIsImmutable]] slot
-	slotWeakRefTarget   // a WeakRef's [[WeakRefTarget]] (also its brand)
-	slotErrorFrames     // an error's captured call sites (an Array of CallSite)
-	slotCallSite        // one CallSite's fields (an Array; see builtin_error_stack.go)
-	slotIntlLocale      // an Intl service's resolved locale tag (a String)
-	slotIntlTimeZone    // a DateTimeFormat's [[TimeZone]] identifier (a String)
-	slotLocaleTag       // an Intl.Locale's [[Locale]] tag (a String), also its brand
-	slotIntlPluralOpts  // a PluralRules' type and digit options (a String; see builtin_intl_plural.go)
-	slotMax             = 255
+	slotRawJSON          // a JSON.rawJSON object's [[RawJSON]] text (a String)
+	slotImmutableBuffer  // marks an ArrayBuffer's [[ArrayBufferIsImmutable]] slot
+	slotWeakRefTarget    // a WeakRef's [[WeakRefTarget]] (also its brand)
+	slotErrorFrames      // an error's captured call sites (an Array of CallSite)
+	slotCallSite         // one CallSite's fields (an Array; see builtin_error_stack.go)
+	slotIntlLocale       // an Intl service's resolved locale tag (a String)
+	slotIntlTimeZone     // a DateTimeFormat's [[TimeZone]] identifier (a String)
+	slotLocaleTag        // an Intl.Locale's [[Locale]] tag (a String), also its brand
+	slotIntlPluralOpts   // a PluralRules' type and digit options (a String; see builtin_intl_plural.go)
+	slotIntlCollatorOpts // a Collator's resolved options (a String; see builtin_intl_collator.go)
+	slotMax              = 255
 )
 
 // brand ids for object internal-class checks (ant BRAND_*).

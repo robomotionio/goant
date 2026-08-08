@@ -67,16 +67,49 @@ func (rt *Runtime) initIntl() {
 		io.defineOwn(name, ctor, attrWritable|attrConfigurable)
 	}
 
-	defineService("Collator", false, nil, func(po *object) {
+	defineService("Collator", false, func(inst *object, options Value, requested []string) *ThrowError {
+		c, e := rt.initCollatorOptions(options, requested)
+		if e != nil {
+			return e
+		}
+		inst.setSlot(slotIntlCollatorOpts, rt.newString(c.String()))
+		return nil
+	}, func(po *object) {
 		// compare is an accessor returning a bound comparison function.
 		getter := rt.newNativeFunc("get compare", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			c, e := rt.requireCollator(this)
+			if e != nil {
+				return mkundef(), e
+			}
 			return rt.newNativeFunc("", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-				a, _ := rt.toStringValue(arg(args, 0))
-				b, _ := rt.toStringValue(arg(args, 1))
-				return mknum(float64(compareStrings(rt.strBytes(a), rt.strBytes(b)))), nil
+				a, e := rt.toStringValue(arg(args, 0))
+				if e != nil {
+					return mkundef(), e
+				}
+				b, e := rt.toStringValue(arg(args, 1))
+				if e != nil {
+					return mkundef(), e
+				}
+				return mknum(float64(c.compare(rt.strGo(a), rt.strGo(b)))), nil
 			}), nil
 		})
 		po.defineAccessor("compare", getter, mkundef(), true, false, attrConfigurable)
+		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			c, e := rt.requireCollator(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			o := rt.newPlainObject()
+			oo := rt.objPtr(o)
+			oo.defineOwn("locale", rt.newString(c.tag), attrDefault)
+			oo.defineOwn("usage", rt.newString(c.usage), attrDefault)
+			oo.defineOwn("sensitivity", rt.newString(c.sensitivity), attrDefault)
+			oo.defineOwn("ignorePunctuation", mkbool(c.ignorePunct), attrDefault)
+			oo.defineOwn("collation", rt.newString(c.collation), attrDefault)
+			oo.defineOwn("numeric", mkbool(c.numeric), attrDefault)
+			oo.defineOwn("caseFirst", rt.newString(c.caseFirst), attrDefault)
+			return o, nil
+		})
 	})
 	defineService("NumberFormat", false, nil, func(po *object) {
 		getter := rt.newNativeFunc("get format", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

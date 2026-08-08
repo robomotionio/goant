@@ -621,10 +621,16 @@ func (rt *Runtime) initStringBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		// The result must be zero for canonically equivalent strings, so compare
-		// their NFC forms — 15.5.4.9_CE requires that `o` + combining diaeresis and
-		// precomposed `ö` compare equal. Everything else stays a code-unit order.
-		return mknum(float64(strings.Compare(norm.NFC.String(string(b)), norm.NFC.String(string(other))))), nil
+		// Specified as Intl.Collator's compare when ECMA-402 is present, which
+		// it is here, so this delegates rather than keeping a second ordering
+		// that would disagree with it. That is also what makes canonically
+		// equivalent strings compare equal: the collation algorithm normalises,
+		// where a code-unit order cannot.
+		c, e := rt.collatorForCompare(arg(args, 1), arg(args, 2))
+		if e != nil {
+			return mkundef(), e
+		}
+		return mknum(float64(c.compare(string(b), string(other)))), nil
 	})
 	rt.defMethod(proto, "toLocaleLowerCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		_, b, e := rt.thisString(this)
