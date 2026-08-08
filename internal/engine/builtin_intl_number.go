@@ -148,7 +148,12 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 		if !isWellFormedCurrency(currency) {
 			return n, rt.rangeError("Invalid currency code: " + currency)
 		}
-		n.currency = asciiUpper(currency)
+		// Kept only where it means something: resolvedOptions().currency is
+		// undefined for a formatter that is not formatting money, however the
+		// option was written.
+		if n.style == "currency" {
+			n.currency = asciiUpper(currency)
+		}
 	}
 	currencyDisplay, hasCD, e := rt.intlStringOption(options, "currencyDisplay",
 		[]string{"code", "symbol", "narrowSymbol", "name"})
@@ -274,8 +279,11 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 	// digits: it says what the last place steps by, and with significant
 	// digits or an open-ended maximum there is no last place.
 	if n.roundingIncr != 1 {
-		if n.digits.maxSig > 0 {
-			return n, rt.typeError("roundingIncrement cannot be used with significant digits")
+		// An increment names the last place, so it needs there to BE one: not
+		// with significant digits, not with a priority that picks between two
+		// roundings, and not with an open-ended maximum.
+		if n.digits.maxSig > 0 || n.roundingPriority != "auto" {
+			return n, rt.typeError("roundingIncrement cannot be combined with significant digits or a rounding priority")
 		}
 		if n.digits.minFrac != n.digits.maxFrac {
 			return n, rt.rangeError("roundingIncrement requires minimumFractionDigits to equal maximumFractionDigits")

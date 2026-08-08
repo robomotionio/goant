@@ -247,12 +247,16 @@ func (rt *Runtime) initIntl() {
 			str("unit", n.unit)
 			str("unitDisplay", n.unitDisplay)
 			oo.defineOwn("minimumIntegerDigits", mknum(float64(n.digits.minInt)), attrDefault)
+			// Both sets are reported when both are in use, which is what a
+			// rounding priority other than "auto" means -- including the one
+			// compact notation picks for itself.
+			if n.digits.maxSig == 0 || n.compactAuto {
+				oo.defineOwn("minimumFractionDigits", mknum(float64(n.digits.minFrac)), attrDefault)
+				oo.defineOwn("maximumFractionDigits", mknum(float64(n.digits.maxFrac)), attrDefault)
+			}
 			if n.digits.maxSig > 0 {
 				oo.defineOwn("minimumSignificantDigits", mknum(float64(n.digits.minSig)), attrDefault)
 				oo.defineOwn("maximumSignificantDigits", mknum(float64(n.digits.maxSig)), attrDefault)
-			} else {
-				oo.defineOwn("minimumFractionDigits", mknum(float64(n.digits.minFrac)), attrDefault)
-				oo.defineOwn("maximumFractionDigits", mknum(float64(n.digits.maxFrac)), attrDefault)
 			}
 			if n.useGrouping == "" {
 				oo.defineOwn("useGrouping", mkbool(false), attrDefault)

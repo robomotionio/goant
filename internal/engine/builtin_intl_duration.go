@@ -131,6 +131,12 @@ func (rt *Runtime) initDurationOptions(options Value, requested []string) (durat
 		if e != nil {
 			return d, e
 		}
+		// Once a unit is written as digits every later one must be too: a
+		// duration cannot be "1:02, 3 seconds", so asking for a word after a
+		// number is a contradiction rather than a preference.
+		if present && prevNumeric && !isNumericStyle(got) {
+			return d, rt.rangeError("Invalid " + unit + " style after a numeric unit")
+		}
 		displayDefault := "auto"
 		unitStyle := got
 		if !present {
