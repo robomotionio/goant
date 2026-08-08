@@ -69,8 +69,9 @@ func (rt *Runtime) initIntl() {
 
 	// defineService installs an Intl service constructor: callable with or without
 	// `new` (both yield an instance), resolving its locales argument, with the
-	// given prototype methods.
-	defineService := func(name string, methods func(po *object)) {
+	// given prototype methods. initOpts, where a service reads anything out of
+	// the options bag, runs after the locale is resolved and may throw.
+	defineService := func(name string, initOpts func(inst *object, options Value) *ThrowError, methods func(po *object)) {
 		proto := rt.newObject(rt.objectProto)
 		po := rt.objPtr(proto)
 		ctor := rt.newNativeFunc(name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -82,7 +83,13 @@ func (rt *Runtime) initIntl() {
 			// Intl.X()` and `Intl.X()` return an instance). The tag it resolved to
 			// rides along in a slot so format() and resolvedOptions() agree.
 			inst := rt.newObject(rt.newTargetProto(proto))
-			rt.objPtr(inst).setSlot(slotIntlLocale, rt.newString(tag))
+			insto := rt.objPtr(inst)
+			insto.setSlot(slotIntlLocale, rt.newString(tag))
+			if initOpts != nil {
+				if e := initOpts(insto, arg(args, 1)); e != nil {
+					return mkundef(), e
+				}
+			}
 			return inst, nil
 		})
 		co := rt.objPtr(ctor)
@@ -101,7 +108,7 @@ func (rt *Runtime) initIntl() {
 		io.defineOwn(name, ctor, attrWritable|attrConfigurable)
 	}
 
-	defineService("Collator", func(po *object) {
+	defineService("Collator", nil, func(po *object) {
 		// compare is an accessor returning a bound comparison function.
 		getter := rt.newNativeFunc("get compare", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			return rt.newNativeFunc("", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -112,7 +119,7 @@ func (rt *Runtime) initIntl() {
 		})
 		po.defineAccessor("compare", getter, mkundef(), true, false, attrConfigurable)
 	})
-	defineService("NumberFormat", func(po *object) {
+	defineService("NumberFormat", nil, func(po *object) {
 		getter := rt.newNativeFunc("get format", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			li := rt.intlLocaleOf(this)
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -125,9 +132,19 @@ func (rt *Runtime) initIntl() {
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
 	})
-	defineService("DateTimeFormat", func(po *object) {
+	defineService("DateTimeFormat", func(inst *object, options Value) *ThrowError {
+		// [[TimeZone]] is fixed at construction: an unknown zone is a RangeError
+		// here rather than on some later format() call in another file.
+		id, e := rt.optionTimeZone(options)
+		if e != nil {
+			return e
+		}
+		inst.setSlot(slotIntlTimeZone, rt.newString(id))
+		return nil
+	}, func(po *object) {
 		getter := rt.newNativeFunc("get format", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			li := rt.intlLocaleOf(this)
+			loc := zoneFor(rt.intlZoneID(this))
 			return rt.newNativeFunc("", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 				// With no argument the spec formats the current time.
 				ms := float64(time.Now().UnixMilli())
@@ -141,7 +158,7 @@ func (rt *Runtime) initIntl() {
 				if math.IsNaN(ms) {
 					return mkundef(), rt.rangeError("Invalid time value")
 				}
-				return rt.newString(li.formatDateTime(dtDate, msToLocal(ms))), nil
+				return rt.newString(li.formatDateTime(dtDate, msInZone(ms, loc))), nil
 			}), nil
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
@@ -180,7 +197,7 @@ func (rt *Runtime) intlResolvedOptions(this Value, service string) Value {
 	if service == "DateTimeFormat" {
 		li, _ := lookupLocale(tag)
 		oo.defineOwn("calendar", rt.newString("gregory"), attrDefault)
-		oo.defineOwn("timeZone", rt.newString(localZoneID()), attrDefault)
+		oo.defineOwn("timeZone", rt.newString(rt.intlZoneID(this)), attrDefault)
 		oo.defineOwn("hourCycle", rt.newString(li.hourCycle), attrDefault)
 	}
 	return o

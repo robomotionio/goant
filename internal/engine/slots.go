@@ -53,6 +53,7 @@ const (
 	slotErrorFrames     // an error's captured call sites (an Array of CallSite)
 	slotCallSite        // one CallSite's fields (an Array; see builtin_error_stack.go)
 	slotIntlLocale      // an Intl service's resolved locale tag (a String)
+	slotIntlTimeZone    // a DateTimeFormat's [[TimeZone]] identifier (a String)
 	slotMax             = 255
 )
 

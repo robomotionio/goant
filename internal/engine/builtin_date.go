@@ -287,21 +287,31 @@ func (rt *Runtime) initDateBuiltin() {
 		return rt.newString(t.Format("15:04:05 GMT-0700") + " (" + zoneDisplayName(t) + ")"), nil
 	})
 	// The toLocale* trio formats through the same locale data as Intl (see
-	// builtin_intl.go), against local time.
+	// builtin_intl.go), in the zone the options bag asks for and otherwise the
+	// host's.
+	//
+	// The options are read even for an Invalid Date, which returns early with a
+	// fixed string: the spec constructs the formatter before it looks at the
+	// time value, so `new Date(NaN).toLocaleString("en", {timeZone: "Nope"})`
+	// throws rather than answering "Invalid Date".
 	localeFmt := func(kind dateTimeKind) func(*Runtime, Value, []Value) (Value, *ThrowError) {
 		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			v, e := rt.dateMs(this)
 			if e != nil {
 				return mkundef(), e
 			}
-			if math.IsNaN(v.Number()) {
-				return rt.internString("Invalid Date"), nil
-			}
 			li, e := rt.resolveLocaleArg(arg(args, 0))
 			if e != nil {
 				return mkundef(), e
 			}
-			return rt.newString(li.formatDateTime(kind, msToLocal(v.Number()))), nil
+			zone, e := rt.optionTimeZone(arg(args, 1))
+			if e != nil {
+				return mkundef(), e
+			}
+			if math.IsNaN(v.Number()) {
+				return rt.internString("Invalid Date"), nil
+			}
+			return rt.newString(li.formatDateTime(kind, msInZone(v.Number(), zoneFor(zone)))), nil
 		}
 	}
 	rt.defMethod(proto, "toLocaleString", 0, localeFmt(dtDateTime))

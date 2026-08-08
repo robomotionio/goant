@@ -29,6 +29,13 @@ func msToLocal(ms float64) time.Time {
 	return time.UnixMilli(int64(ms)).In(localLoc())
 }
 
+// msInZone is msToLocal against a zone that was asked for rather than the
+// host's. Only Intl reaches it: Date's own getters are defined against local
+// time and have no zone to be told about.
+func msInZone(ms float64, loc *time.Location) time.Time {
+	return time.UnixMilli(int64(ms)).In(loc)
+}
+
 // localOffsetMs is the host zone's offset from UTC, in milliseconds, at the
 // instant denoted by the (UTC) time value ms.
 func localOffsetMs(ms float64) float64 {
