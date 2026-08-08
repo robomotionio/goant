@@ -220,15 +220,16 @@ func (rt *Runtime) durationRecord(v Value) ([10]float64, *ThrowError) {
 	return out, nil
 }
 
-// durationParts renders the duration as spans. Numeric units are joined by
-// colons into one run; worded units become their own list elements, which the
-// list patterns then join.
-func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float64) []numberPart {
-	var elements []string
-	var numericRun []string
+// durationParts renders the duration as spans, each carrying the unit it
+// belongs to. The worded units go through NumberFormat's own unit style rather
+// than being assembled here -- that is what the specification says to do, and
+// it also means the two cannot disagree about how "7 hours" is written.
+func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float64) []relPart {
+	var groups [][]relPart
+	var numericRun []relPart
 	flushNumeric := func() {
 		if len(numericRun) > 0 {
-			elements = append(elements, strings.Join(numericRun, ":"))
+			groups = append(groups, numericRun)
 			numericRun = nil
 		}
 	}
@@ -251,44 +252,33 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 				continue
 			}
 		}
+		singular := strings.TrimSuffix(unit, "s")
 		if isNumericStyle(style) {
-			s := strconv.FormatFloat(v, 'f', -1, 64)
-			if style == "2-digit" && len(s) < 2 {
-				s = "0" + s
+			n := defaultNumberOptions()
+			n.tag = d.tag
+			n.useGrouping = ""
+			if style == "2-digit" {
+				n.digits.minInt = 2
 			}
-			numericRun = append(numericRun, s)
+			if len(numericRun) > 0 {
+				numericRun = append(numericRun, relPart{numberPart{"literal", ":"}, ""})
+			}
+			for _, p := range numberParts(n, li, v) {
+				numericRun = append(numericRun, relPart{p, singular})
+			}
 			continue
 		}
 		flushNumeric()
-		names, ok := durationUnitNames[unit]
-		if !ok {
-			continue
+		n := defaultNumberOptions()
+		n.tag = d.tag
+		n.style = "unit"
+		n.unit = singular
+		n.unitDisplay = style
+		var group []relPart
+		for _, p := range numberParts(n, li, v) {
+			group = append(group, relPart{p, singular})
 		}
-		idx := 0
-		switch d.style {
-		case "short", "digital":
-			idx = 1
-		case "narrow":
-			idx = 2
-		}
-		switch style {
-		case "long":
-			idx = 0
-		case "short":
-			idx = 1
-		case "narrow":
-			idx = 2
-		}
-		word := names[idx][0]
-		if v != 1 {
-			word = names[idx][1]
-		}
-		num := li.formatNumber(v)
-		if idx == 2 {
-			elements = append(elements, num+word)
-		} else {
-			elements = append(elements, num+" "+word)
-		}
+		groups = append(groups, group)
 	}
 	flushNumeric()
 
@@ -299,9 +289,42 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 	if d.style == "narrow" {
 		l.style = "narrow"
 	}
-	parts := l.listParts(elements)
+	parts := joinDurationGroups(l, groups)
 	if neg && len(parts) > 0 {
-		parts = append([]numberPart{{"literal", li.minus}}, parts...)
+		parts = append([]relPart{{numberPart{"literal", li.minus}, ""}}, parts...)
 	}
 	return parts
+}
+
+// joinDurationGroups puts the list patterns' literals between the per-unit
+// runs. It is listParts over groups of spans rather than over strings.
+func joinDurationGroups(l listOptions, groups [][]relPart) []relPart {
+	if len(groups) == 0 {
+		return nil
+	}
+	// The literals are whatever the list patterns put between two elements, so
+	// they are read off a formatted pair rather than spelled out again here.
+	sep := func(pattern string) string {
+		_, rest, _ := strings.Cut(pattern, "{0}")
+		between, _, _ := strings.Cut(rest, "{1}")
+		return between
+	}
+	two, start, middle, end := l.patterns()
+	out := append([]relPart{}, groups[0]...)
+	for i := 1; i < len(groups); i++ {
+		p := middle
+		switch {
+		case len(groups) == 2:
+			p = two
+		case i == 1:
+			p = start
+		case i == len(groups)-1:
+			p = end
+		}
+		if s := sep(p); s != "" {
+			out = append(out, relPart{numberPart{"literal", s}, ""})
+		}
+		out = append(out, groups[i]...)
+	}
+	return out
 }

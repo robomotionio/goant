@@ -469,6 +469,17 @@ func currencyText(code, display string) string {
 // withStyleAffixes puts the style's own marker around the number: the percent
 // sign after it, the currency symbol before it, the unit after it.
 func withStyleAffixes(n numberOptions, parts []numberPart) []numberPart {
+	// English pluralises on "not one", which is what the unit spelling needs
+	// to know and the only thing it needs to know about the value.
+	plural := true
+	for _, p := range parts {
+		if p.typ == "integer" && p.val == "1" {
+			plural = false
+		}
+		if p.typ == "fraction" || p.typ == "group" {
+			plural = true
+		}
+	}
 	switch n.style {
 	case "percent":
 		return append(parts, numberPart{"percentSign", "%"})
@@ -499,9 +510,91 @@ func withStyleAffixes(n numberOptions, parts []numberPart) []numberPart {
 		}
 		return append(out, parts...)
 	case "unit":
-		return append(parts, numberPart{"literal", " "}, numberPart{"unit", n.unit})
+		text, space := unitText(n.unit, n.unitDisplay, plural)
+		if space {
+			parts = append(parts, numberPart{"literal", " "})
+		}
+		return append(parts, numberPart{"unit", text})
 	}
 	return parts
+}
+
+// unitNames is the en spelling of each sanctioned unit, singular and plural,
+// per display width. A unit not listed is written as its own name, which is
+// wrong-looking but never misleading; CLDR carries the whole table per locale.
+var unitNames = map[string][3][2]string{
+	"year":        {{"year", "years"}, {"yr", "yrs"}, {"y", "y"}},
+	"month":       {{"month", "months"}, {"mth", "mths"}, {"m", "m"}},
+	"week":        {{"week", "weeks"}, {"wk", "wks"}, {"w", "w"}},
+	"day":         {{"day", "days"}, {"day", "days"}, {"d", "d"}},
+	"hour":        {{"hour", "hours"}, {"hr", "hrs"}, {"h", "h"}},
+	"minute":      {{"minute", "minutes"}, {"min", "min"}, {"m", "m"}},
+	"second":      {{"second", "seconds"}, {"sec", "sec"}, {"s", "s"}},
+	"millisecond": {{"millisecond", "milliseconds"}, {"ms", "ms"}, {"ms", "ms"}},
+	"microsecond": {{"microsecond", "microseconds"}, {"μs", "μs"}, {"μs", "μs"}},
+	"nanosecond":  {{"nanosecond", "nanoseconds"}, {"ns", "ns"}, {"ns", "ns"}},
+	"percent":     {{"percent", "percent"}, {"%", "%"}, {"%", "%"}},
+	"meter":       {{"meter", "meters"}, {"m", "m"}, {"m", "m"}},
+	"kilometer":   {{"kilometer", "kilometers"}, {"km", "km"}, {"km", "km"}},
+	"centimeter":  {{"centimeter", "centimeters"}, {"cm", "cm"}, {"cm", "cm"}},
+	"millimeter":  {{"millimeter", "millimeters"}, {"mm", "mm"}, {"mm", "mm"}},
+	"mile":        {{"mile", "miles"}, {"mi", "mi"}, {"mi", "mi"}},
+	"foot":        {{"foot", "feet"}, {"ft", "ft"}, {"′", "′"}},
+	"inch":        {{"inch", "inches"}, {"in", "in"}, {"″", "″"}},
+	"yard":        {{"yard", "yards"}, {"yd", "yd"}, {"yd", "yd"}},
+	"gram":        {{"gram", "grams"}, {"g", "g"}, {"g", "g"}},
+	"kilogram":    {{"kilogram", "kilograms"}, {"kg", "kg"}, {"kg", "kg"}},
+	"pound":       {{"pound", "pounds"}, {"lb", "lb"}, {"#", "#"}},
+	"celsius":     {{"degree Celsius", "degrees Celsius"}, {"°C", "°C"}, {"°C", "°C"}},
+	"fahrenheit":  {{"degree Fahrenheit", "degrees Fahrenheit"}, {"°F", "°F"}, {"°", "°"}},
+	"byte":        {{"byte", "bytes"}, {"byte", "byte"}, {"B", "B"}},
+	"kilobyte":    {{"kilobyte", "kilobytes"}, {"kB", "kB"}, {"kB", "kB"}},
+	"megabyte":    {{"megabyte", "megabytes"}, {"MB", "MB"}, {"MB", "MB"}},
+	"gigabyte":    {{"gigabyte", "gigabytes"}, {"GB", "GB"}, {"GB", "GB"}},
+	"terabyte":    {{"terabyte", "terabytes"}, {"TB", "TB"}, {"TB", "TB"}},
+	"liter":       {{"liter", "liters"}, {"L", "L"}, {"L", "L"}},
+	"milliliter":  {{"milliliter", "milliliters"}, {"mL", "mL"}, {"mL", "mL"}},
+	"gallon":      {{"gallon", "gallons"}, {"gal", "gal"}, {"gal", "gal"}},
+	"degree":      {{"degree", "degrees"}, {"deg", "deg"}, {"°", "°"}},
+	"acre":        {{"acre", "acres"}, {"ac", "ac"}, {"ac", "ac"}},
+	"hectare":     {{"hectare", "hectares"}, {"ha", "ha"}, {"ha", "ha"}},
+	"bit":         {{"bit", "bits"}, {"bit", "bit"}, {"b", "b"}},
+}
+
+// unitText is the unit as written, and whether a space belongs before it. A
+// compound unit ("kilometer-per-hour") is its two halves joined by "/" in the
+// short and narrow widths and by " per " in the long one.
+func unitText(unit, display string, plural bool) (string, bool) {
+	idx := 1
+	switch display {
+	case "long":
+		idx = 0
+	case "narrow":
+		idx = 2
+	}
+	one := func(u string, p bool) string {
+		names, ok := unitNames[u]
+		if !ok {
+			return u
+		}
+		if p {
+			return names[idx][1]
+		}
+		return names[idx][0]
+	}
+	if num, den, ok := strings.Cut(unit, "-per-"); ok {
+		if idx == 0 {
+			return one(num, plural) + " per " + one(den, false), true
+		}
+		// The denominator of a compound takes its narrowest spelling whatever
+		// the numerator's is: "km/h", not "km/hr".
+		wide := idx
+		idx = 2
+		den2 := one(den, false)
+		idx = wide
+		return one(num, plural) + "/" + den2, idx == 1
+	}
+	return one(unit, plural), idx != 2
 }
 
 // formatNumberWith is the concatenation of the parts, so format() and

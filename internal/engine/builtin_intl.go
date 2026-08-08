@@ -563,20 +563,7 @@ func (rt *Runtime) initIntl() {
 			if e != nil {
 				return mkundef(), e
 			}
-			parts := r.relTimeParts(v, unit, rt.intlLocaleOf(this))
-			arr := rt.newArray()
-			ao := rt.objPtr(arr)
-			for i, p := range parts {
-				o := rt.newPlainObject()
-				oo := rt.objPtr(o)
-				oo.defineOwn("type", rt.newString(p.typ), attrDefault)
-				oo.defineOwn("value", rt.newString(p.val), attrDefault)
-				if p.unit != "" {
-					oo.defineOwn("unit", rt.newString(p.unit), attrDefault)
-				}
-				rt.arraySet(ao, uint32(i), o)
-			}
-			return arr, nil
+			return rt.unitPartsArray(r.relTimeParts(v, unit, rt.intlLocaleOf(this))), nil
 		})
 		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			r, e := rt.requireRelTimeFormat(this)
@@ -764,7 +751,7 @@ func (rt *Runtime) initIntl() {
 			if e != nil {
 				return mkundef(), e
 			}
-			return rt.partsArray(rt.durationParts(d, rt.intlLocaleOf(this), rec)), nil
+			return rt.unitPartsArray(rt.durationParts(d, rt.intlLocaleOf(this), rec)), nil
 		})
 		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			d, e := rt.requireDurationFormat(this)

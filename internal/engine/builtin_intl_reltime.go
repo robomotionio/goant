@@ -191,3 +191,22 @@ func (rt *Runtime) relTimeArgs(args []Value) (float64, string, *ThrowError) {
 	}
 	return v, unit, nil
 }
+
+// unitPartsArray is partsArray for spans that carry a unit: the property is
+// present only where there is one, which is how formatToParts distinguishes
+// the number from the words around it.
+func (rt *Runtime) unitPartsArray(parts []relPart) Value {
+	arr := rt.newArray()
+	ao := rt.objPtr(arr)
+	for i, p := range parts {
+		o := rt.newPlainObject()
+		oo := rt.objPtr(o)
+		oo.defineOwn("type", rt.newString(p.typ), attrDefault)
+		oo.defineOwn("value", rt.newString(p.val), attrDefault)
+		if p.unit != "" {
+			oo.defineOwn("unit", rt.newString(p.unit), attrDefault)
+		}
+		rt.arraySet(ao, uint32(i), o)
+	}
+	return arr
+}
