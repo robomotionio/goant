@@ -338,10 +338,14 @@ func TestJITReadsAnUpvalue(t *testing.T) {
 // TestJITCompilesAnUpvalueRead is what stops the agreement above from being the
 // interpreter agreeing with itself.
 func TestJITCompilesAnUpvalueRead(t *testing.T) {
+	// SetJITEnabled rather than the package variable, because this Runtime
+	// already exists: the tier is a per-Runtime setting captured from the
+	// process default when New returns, so flipping the global afterwards moves
+	// the default for the NEXT Runtime and leaves this one interpreting. Written
+	// the other way round it passed whenever GOANT_JIT was set in the
+	// environment and failed whenever it was not.
 	rt := New()
-	saved := jitEnabled
-	jitEnabled = true
-	defer func() { jitEnabled = saved }()
+	rt.SetJITEnabled(true)
 
 	v, err := rt.RunString("upval.js", `
 		function make(n) { var base = n; return function (a) { return base + a; }; }
