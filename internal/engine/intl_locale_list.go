@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"sync"
 
-	"golang.org/x/text/collate"
 	"golang.org/x/text/language"
 )
 
@@ -103,18 +102,7 @@ var availableLocales = sync.OnceValue(func() []string {
 	for lang := range languageDefaults {
 		out = append(out, lang)
 	}
-	// The same goes for the languages that have collation and plural rules but
-	// no pattern table: Arabic sorts and pluralises correctly here, so
-	// answering "no data for ar" would be the same dishonesty the other way.
-	seen := map[string]bool{}
-	for _, t := range collate.Supported() {
-		if b, c := t.Base(); c > language.No {
-			if lang := b.String(); !seen[lang] {
-				seen[lang] = true
-				out = append(out, lang)
-			}
-		}
-	}
+
 	sort.Strings(out)
 	return out
 })
@@ -151,17 +139,27 @@ func lastHyphen(s string) int {
 	return -1
 }
 
-// localeIsAvailable says whether this engine has anything for a tag, which is
-// the one question both lookupMatcher and supportedLocalesOf ask. Asking it
+// localeIsAvailable says whether this engine has anything for a tag. It is the
+// one question both lookupMatcher and supportedLocalesOf ask, and asking it
 // twice, differently, is what makes resolvedOptions and supportedLocalesOf
-// disagree -- and the pair is how a script finds out what there is.
+// disagree -- the pair being how a script finds out what there is.
 func localeIsAvailable(tag string) bool {
 	t, ok := parseLangTag(tag)
 	if !ok {
 		return false
 	}
-	_, ok = bestAvailableLocale(availableLocales(), t.languageID())
-	return ok
+	if _, ok := bestAvailableLocale(availableLocales(), t.languageID()); ok {
+		return true
+	}
+	// Two other kinds of data qualify: the collation and the plural rules,
+	// which cover every language CLDR knows. Manx has five plural categories
+	// here and no pattern table, and answering "no data for gv" would be
+	// wrong. The three codes that name no language are not languages.
+	if tagContains([]string{"zxx", "und", "mul"}, t.lang) {
+		return false
+	}
+	_, err := language.Parse(t.lang)
+	return err == nil
 }
 
 // lookupMatcher is ECMA-402 9.2.3: the first requested locale there is data
@@ -181,9 +179,8 @@ func lookupMatcher(requested []string) string {
 // than the prefix it matched on -- that is what supportedLocalesOf returns.
 func lookupSupportedLocales(requested []string) []string {
 	var out []string
-	avail := availableLocales()
 	for _, tag := range requested {
-		if _, ok := bestAvailableLocale(avail, tagNoExtensions(tag)); ok {
+		if localeIsAvailable(tag) {
 			out = append(out, tag)
 		}
 	}
