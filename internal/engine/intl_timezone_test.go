@@ -35,8 +35,14 @@ func TestZoneMatchingIsASCIICaseInsensitive(t *testing.T) {
 				t.Errorf("resolveTimeZone(%q) rejected it", spelling)
 				continue
 			}
-			if got != id {
-				t.Errorf("resolveTimeZone(%q) = %q, want %q", spelling, got, id)
+			// The three names for no offset at all are the one exception:
+			// they are the same identifier, and it is spelled "UTC".
+			want := id
+			if id == "Etc/UTC" || id == "Etc/GMT" || id == "GMT" {
+				want = "UTC"
+			}
+			if got != want {
+				t.Errorf("resolveTimeZone(%q) = %q, want %q", spelling, got, want)
 			}
 			if loc == nil {
 				t.Errorf("resolveTimeZone(%q) returned a nil location", spelling)
@@ -53,8 +59,8 @@ func TestLinkedZonesKeepTheIdentifierThatWasAskedFor(t *testing.T) {
 	for _, pair := range [][2]string{
 		{"Asia/Calcutta", "Asia/Kolkata"},
 		{"Europe/Bratislava", "Europe/Prague"},
-		{"Etc/UCT", "Etc/UTC"},
-		{"Etc/GMT0", "Etc/GMT"},
+		{"Etc/UCT", "Etc/Universal"},
+		{"Etc/GMT0", "Etc/Greenwich"},
 	} {
 		for _, id := range pair {
 			got, _, ok := resolveTimeZone(id)

@@ -240,7 +240,7 @@ func (rt *Runtime) supportedValuesOf(keyv Value) (Value, *ThrowError) {
 	}
 	switch rt.strGo(s) {
 	case "calendar":
-		return rt.newArrayOfStrings([]string{"gregory"}), nil
+		return rt.newArrayOfStrings(supportedCalendars), nil
 	case "collation":
 		return rt.newArrayOfStrings(collationNames()), nil
 	case "currency":
@@ -259,6 +259,11 @@ func (rt *Runtime) supportedValuesOf(keyv Value) (Value, *ThrowError) {
 var availableTimeZones = sync.OnceValue(func() []string {
 	out := make([]string, 0, len(zoneDisplayNames))
 	for id := range zoneDisplayNames {
+		// The other spellings of zero offset are links to UTC, and a list of
+		// canonical identifiers carries each zone once.
+		if id == "Etc/UTC" || id == "Etc/GMT" || id == "GMT" {
+			continue
+		}
 		out = append(out, id)
 	}
 	sort.Strings(out)

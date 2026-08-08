@@ -98,6 +98,12 @@ func resolveTimeZone(name string) (string, *time.Location, bool) {
 	if !ok {
 		return "", nil, false
 	}
+	// The three spellings of no offset at all are one identifier. This is the
+	// single canonicalisation ECMA-402 still performs by name, and it is why
+	// Etc/GMT is not among the zones supportedValuesOf answers with.
+	if id == "Etc/UTC" || id == "Etc/GMT" || id == "GMT" {
+		id = "UTC"
+	}
 	loc, ok := loadZone(id)
 	if !ok {
 		return "", nil, false
