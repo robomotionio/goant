@@ -213,7 +213,7 @@ func (rt *Runtime) initIntl() {
 				return nil, rt.rangeError("Range bounds must not be NaN")
 			}
 			li := rt.intlLocaleOf(this)
-			return rangeParts(numberPartsOf(opts, li, lo, loDigits),
+			return rangeParts(li, numberPartsOf(opts, li, lo, loDigits),
 				numberPartsOf(opts, li, hi, hiDigits)), nil
 		}
 		rt.defMethod(po, "formatRange", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

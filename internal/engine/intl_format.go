@@ -53,12 +53,17 @@ func lookupLocale(tag string) (localeInfo, string) {
 		}
 	}
 	if li, ok := localeTable[canon]; ok {
+		li.tag = canon
 		return li, canon
 	}
 	if t, ok := languageDefaults[lang]; ok {
-		return localeTable[t], t
+		li := localeTable[t]
+		li.tag = t
+		return li, t
 	}
-	return localeTable[defaultLocale], defaultLocale
+	li := localeTable[defaultLocale]
+	li.tag = defaultLocale
+	return li, defaultLocale
 }
 
 // resolveLocaleArg validates a `locales` argument the way CanonicalizeLocaleList

@@ -617,6 +617,7 @@ var zoneDisplayNames = map[string][2]string{
 // {m} {mm} {s} {ss} {P} for times, and {d}/{t} in glue; everything else is a
 // literal.
 type localeInfo struct {
+	tag              string // the canonical tag it was found under, for the CLDR tables
 	date, time, glue string
 	hourCycle        string
 	am, pm           string

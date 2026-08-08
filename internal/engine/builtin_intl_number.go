@@ -340,18 +340,18 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 	var intPart, frac string
 	var exponent int
 	infinite := math.IsInf(v, 0)
-	compactSuffix := ""
+	compactIdx := -1
 	if !nan && !infinite && n.notation == "compact" && v != 0 {
-		// The compact patterns divide by a power of a thousand and name what
-		// is left. Below a thousand there is nothing to compact.
-		mag := 0
-		for a := math.Abs(v); a >= 1000 && mag < 4; a /= 1000 {
-			mag++
+		// The compact patterns say both how far to divide and what to write
+		// after: German shortens a million to "0 Mio." and leaves ten thousand
+		// alone, Japanese counts in ten thousands and writes "0万". Which
+		// pattern applies is decided before the value is scaled, and which
+		// spelling of it once the digits are known.
+		idx, exp := compactExponent(li.tag, n.compactDisplay, v)
+		if exp > 0 {
+			v /= math.Pow(10, float64(exp))
 		}
-		if mag > 0 {
-			v /= math.Pow(1000, float64(mag))
-			compactSuffix = compactName(mag, n.compactDisplay)
-		}
+		compactIdx = idx
 	}
 	if !nan && !infinite && (n.notation == "scientific" || n.notation == "engineering") {
 		// The mantissa is what gets formatted; the exponent is written after
@@ -448,11 +448,11 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 
 	if nan {
 		add("nan", li.nan)
-		return mapPartDigits(withStyleAffixes(n, out), n.numbering)
+		return mapPartDigits(withStyleAffixes(n, li, out), n.numbering)
 	}
 	if infinite {
 		add("infinity", li.inf)
-		return mapPartDigits(withStyleAffixes(n, out), n.numbering)
+		return mapPartDigits(withStyleAffixes(n, li, out), n.numbering)
 	}
 
 	grouped := intPart
@@ -471,13 +471,31 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 		add("decimal", li.decimal)
 		add("fraction", frac)
 	}
-	if compactSuffix != "" {
-		// The long names are words, and a word is written apart from the
-		// number: "988 million", but "988M".
-		if n.compactDisplay == "long" {
-			add("literal", " ")
+	if compactIdx >= 0 {
+		// The affix is whatever the pattern says other than the zeros, and it
+		// carries its own spacing: "988 Mio.", "9.9億", "988 million". The
+		// space is not part of the name, so it is written as its own literal.
+		before, after := compactAffixes(li.tag, n.compactDisplay, compactIdx, v)
+		if before != "" {
+			name := strings.TrimRight(before, " \u00a0\u202f")
+			var head []numberPart
+			if name != "" {
+				head = append(head, numberPart{"compact", name})
+			}
+			if gap := before[len(name):]; gap != "" {
+				head = append(head, numberPart{"literal", gap})
+			}
+			out = append(head, out...)
 		}
-		add("compact", compactSuffix)
+		if after != "" {
+			name := strings.TrimLeft(after, " \u00a0\u202f")
+			if gap := after[:len(after)-len(name)]; gap != "" {
+				add("literal", gap)
+			}
+			if name != "" {
+				add("compact", name)
+			}
+		}
 	}
 	if n.notation == "scientific" || n.notation == "engineering" {
 		add("exponentSeparator", "E")
@@ -488,7 +506,7 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 		}
 		add("exponentInteger", strconv.Itoa(e))
 	}
-	return mapPartDigits(withStyleAffixes(n, out), n.numbering)
+	return mapPartDigits(withStyleAffixes(n, li, out), n.numbering)
 }
 
 // mapPartDigits rewrites the digit spans into the resolved numbering system.
@@ -524,24 +542,34 @@ var currencySymbols = map[string][2]string{
 	"VND": {"₫", "₫"}, "PHP": {"₱", "₱"}, "NGN": {"₦", "₦"},
 }
 
-// currencyText is what the currency span reads, given the display option.
-func currencyText(code, display string) string {
-	pair, ok := currencySymbols[code]
+// currencyText is what the currency span reads, given the display option and
+// the locale, which does not always spell a symbol the same way: a dollar is
+// "$" in German and "US$" in Korean, where the local dollar has the short
+// spelling.
+func currencyText(li localeInfo, code, display string) string {
+	pair, ok := cldrCurrencies()[li.tag][code]
 	if !ok {
-		return code
+		if pair, ok = currencySymbols[code]; !ok {
+			return code
+		}
 	}
 	switch display {
 	case "symbol":
-		return pair[0]
+		if pair[0] != "" {
+			return pair[0]
+		}
 	case "narrowSymbol":
-		return pair[1]
+		if pair[1] != "" {
+			return pair[1]
+		}
 	}
 	return code
 }
 
 // withStyleAffixes puts the style's own marker around the number: the percent
 // sign after it, the currency symbol before it, the unit after it.
-func withStyleAffixes(n numberOptions, parts []numberPart) []numberPart {
+func withStyleAffixes(n numberOptions, li localeInfo, parts []numberPart) []numberPart {
+	pat := cldrNumbers()[li.tag]
 	// English pluralises on "not one", which is what the unit spelling needs
 	// to know and the only thing it needs to know about the value.
 	plural := true
@@ -555,35 +583,56 @@ func withStyleAffixes(n numberOptions, parts []numberPart) []numberPart {
 	}
 	switch n.style {
 	case "percent":
+		if sep := percentSeparator(pat.percent); sep != "" {
+			parts = append(parts, numberPart{"literal", sep})
+		}
 		return append(parts, numberPart{"percentSign", "%"})
 	case "currency":
-		// English places the symbol first with no space, and the accounting
-		// sign writes a negative amount in parentheses instead of with a minus
-		// -- which means taking the minus back out. Both are en's rules; CLDR
-		// carries a pattern per locale.
+		// Where the symbol goes, what separates it from the number, and
+		// whether the accounting sign writes a negative in parentheses are all
+		// the locale's: English puts the symbol first and brackets a negative,
+		// German puts it last after a space and just writes the minus.
+		aff := readCurrencyAffix(pat.currency, pat.accounting)
 		neg, signed := false, false
 		if len(parts) > 0 && (parts[0].typ == "minusSign" || parts[0].typ == "plusSign") {
 			signed = true
 			neg = parts[0].typ == "minusSign"
 		}
-		if n.currencySign == "accounting" && neg {
+		bracket := n.currencySign == "accounting" && neg && aff.parens
+		if bracket {
 			parts, signed = parts[1:], false
 		}
-		text := currencyText(n.currency, n.currencyDisplay)
-		out := []numberPart{{"currency", text}}
+		text := currencyText(li, n.currency, n.currencyDisplay)
+		sym := []numberPart{{"currency", text}}
+		sep := aff.separator
 		if n.currencyDisplay == "code" || n.currencyDisplay == "name" || text == n.currency {
-			out = append(out, numberPart{"literal", "\u00a0"})
+			// A code is a word, not a mark, so it is set off from the number
+			// even where a symbol would not be.
+			sep = "\u00a0"
 		}
-		if n.currencySign == "accounting" && neg {
-			out = append([]numberPart{{"literal", "("}}, out...)
-			return append(append(out, parts...), numberPart{"literal", ")"})
+		var out []numberPart
+		switch {
+		case aff.after:
+			if sep != "" {
+				parts = append(parts, numberPart{"literal", sep})
+			}
+			out = append(parts, sym...)
+		default:
+			if sep != "" {
+				sym = append(sym, numberPart{"literal", sep})
+			}
+			if signed {
+				// The sign belongs outside the symbol: -$987.00 and +$0.00,
+				// not $-987.00 and $+0.00.
+				out = append(append([]numberPart{parts[0]}, sym...), parts[1:]...)
+			} else {
+				out = append(sym, parts...)
+			}
 		}
-		if signed {
-			// The sign belongs outside the symbol: -$987.00 and +$0.00, not
-			// $-987.00 and $+0.00.
-			return append(append([]numberPart{parts[0]}, out...), parts[1:]...)
+		if bracket {
+			return append(append([]numberPart{{"literal", "("}}, out...), numberPart{"literal", ")"})
 		}
-		return append(out, parts...)
+		return out
 	case "unit":
 		text, space := unitText(n.unit, n.unitDisplay, plural)
 		if space {
@@ -805,11 +854,12 @@ func samePartRun(a, b []numberPart) bool {
 // SINGLE code point is repeated and anything longer is shared, so "$3 - $5"
 // and "-$3.00-5.00" differ only by the minus sign that made the prefix two
 // characters long.
-func rangeParts(start, end []numberPart) []sourcedPart {
+func rangeParts(li localeInfo, start, end []numberPart) []sourcedPart {
+	pat := cldrNumbers()[li.tag]
 	if samePartRun(start, end) {
 		// The same number at both ends is one value the rounding reached from
 		// two directions, and says so: "~$3".
-		out := []sourcedPart{{numberPart{"approximatelySign", "~"}, "shared"}}
+		out := []sourcedPart{{numberPart{"approximatelySign", patternAround(pat.approxPat, "~")}, "shared"}}
 		for _, p := range start {
 			out = append(out, sourcedPart{p, "shared"})
 		}
@@ -829,7 +879,7 @@ func rangeParts(start, end []numberPart) []sourcedPart {
 		for _, p := range start[sLead:sMid] {
 			out = append(out, sourcedPart{p, "startRange"})
 		}
-		out = append(out, sourcedPart{numberPart{"literal", "–"}, "shared"})
+		out = append(out, sourcedPart{numberPart{"literal", rangeMiddle(pat.rangePat)}, "shared"})
 		for _, p := range end[eLead:eMid] {
 			out = append(out, sourcedPart{p, "endRange"})
 		}
@@ -838,9 +888,11 @@ func rangeParts(start, end []numberPart) []sourcedPart {
 		}
 		return out
 	}
-	sep := "–"
-	if width > 0 {
-		sep = " – "
+	// Where the ends are written out in full they need holding apart, unless
+	// the locale's own pattern already holds them apart.
+	sep := rangeMiddle(pat.rangePat)
+	if width > 0 && strings.TrimSpace(sep) == sep {
+		sep = " " + sep + " "
 	}
 	for _, p := range start {
 		out = append(out, sourcedPart{p, "startRange"})
@@ -880,19 +932,62 @@ func sourcedString(parts []sourcedPart) string {
 	return b.String()
 }
 
-// compactName is what a compact pattern writes after the number, for a
-// magnitude counted in powers of a thousand. English's; CLDR carries a set per
-// locale and per plural category.
-func compactName(mag int, display string) string {
-	short := []string{"", "K", "M", "B", "T"}
-	long := []string{"", "thousand", "million", "billion", "trillion"}
-	if mag < 1 || mag > 4 {
-		return ""
-	}
+// compactTableFor is the locale's compact patterns for a display width,
+// falling back to English, whose patterns every locale at least has a shape
+// for.
+func compactTableFor(tag, display string) (compactTable, bool) {
+	length := "s"
 	if display == "long" {
-		return long[mag]
+		length = "l"
 	}
-	return short[mag]
+	t, ok := cldrCompacts()[tag+"\t"+length]
+	if !ok {
+		t, ok = cldrCompacts()["en-US\t"+length]
+	}
+	return t, ok
+}
+
+// compactExponent is which pattern applies to a value and how far that pattern
+// divides it. The pattern for a magnitude carries as many zeros as the digits
+// it means to leave standing, so ten million against "00 Mio." divides by a
+// million and leaves two digits.
+func compactExponent(tag, display string, v float64) (idx, exp int) {
+	t, ok := compactTableFor(tag, display)
+	if !ok {
+		return -1, 0
+	}
+	mag := int(math.Floor(math.Log10(math.Abs(v))))
+	if mag < 3 {
+		return -1, 0
+	}
+	idx = mag - 3
+	if idx >= compactMagnitudes {
+		idx = compactMagnitudes - 1
+	}
+	p := unquoteCLDR(t[idx]["other"])
+	zeros := strings.Count(p, "0")
+	// A pattern that is nothing but zeros is CLDR's way of saying this
+	// magnitude has no short form: German writes ten thousand out in full.
+	if zeros == 0 || zeros == len(p) {
+		return -1, 0
+	}
+	return idx, 3 + idx - (zeros - 1)
+}
+
+// compactAffixes is what the pattern writes around the number, once the value
+// has been scaled and its plural category is known.
+func compactAffixes(tag, display string, idx int, scaled float64) (before, after string) {
+	t, ok := compactTableFor(tag, display)
+	if !ok || idx < 0 || idx >= compactMagnitudes {
+		return "", ""
+	}
+	p := unquoteCLDR(pluralPick(t[idx], tag, math.Abs(scaled)))
+	i := strings.IndexByte(p, '0')
+	if i < 0 {
+		return "", ""
+	}
+	j := strings.LastIndexByte(p, '0')
+	return p[:i], p[j+1:]
 }
 
 // intlNumericArg is ToIntlMathematicalValue as far as this engine needs it: a
@@ -1010,4 +1105,30 @@ func shiftDecimal(s string, n int) string {
 		out = "-" + out
 	}
 	return out
+}
+
+// rangeMiddle is what a locale writes between the two ends of a range, which
+// is the CLDR pattern with its two placeholders taken off.
+func rangeMiddle(pattern string) string {
+	if pattern == "" {
+		return "\u2013"
+	}
+	i := strings.Index(pattern, "{0}")
+	j := strings.Index(pattern, "{1}")
+	if i < 0 || j < 0 || j < i {
+		return "\u2013"
+	}
+	return pattern[i+3 : j]
+}
+
+// patternAround is the marker a one-placeholder pattern puts round a number:
+// "~" in English, "\u2248" in German.
+func patternAround(pattern, fallback string) string {
+	if pattern == "" {
+		return fallback
+	}
+	if s := strings.TrimSpace(strings.ReplaceAll(pattern, "{0}", "")); s != "" {
+		return s
+	}
+	return fallback
 }
