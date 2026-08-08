@@ -141,6 +141,14 @@ func (z temporalZone) startOfDay(d isoDateRec) (*big.Int, bool) {
 	if p := z.possibleInstants(dt); len(p) > 0 {
 		return p[0], true
 	}
+	// Midnight never happened, so the day begins at the moment the clocks
+	// moved -- which is not midnight and is not the round hour after it
+	// either. America/Toronto skipped 1919-03-30T23:30 to 00:30, so the
+	// thirty-first began at half past twelve.
+	local := isoDateTimeToEpochNanoseconds(dt, 0)
+	if at, ok := z.transition(new(big.Int).Sub(local, bigNsPerDay), true); ok {
+		return at, true
+	}
 	return z.disambiguate(dt, "compatible")
 }
 

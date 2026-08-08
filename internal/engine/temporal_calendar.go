@@ -464,9 +464,10 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 
 	// candidate is where the start lands after so many years and months, with
 	// the day left as it was however long the month turns out to be.
-	candidate := func(years, months int64) (int, int, int) {
+	candidate := func(years, months int64) (int, int, int, bool) {
 		y := c1.year + int(years)
 		m, ok := cal.monthFromCode(strconv.Itoa(y), c1.code)
+		exact := ok
 		if !ok {
 			if fallback, good := leapMonthFallback(id, c1.code); good {
 				m, ok = cal.monthFromCode(strconv.Itoa(y), fallback)
@@ -488,24 +489,38 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 			y--
 			m += cal.monthsInYear(y)
 		}
-		return y, m, c1.day
+		return y, m, c1.day, exact
 	}
-	// past reports whether a candidate has gone beyond the far end. A leap month
-	// the target year has not got lands on the month that stands in for it --
-	// Adar I on Adar, a Chinese leap fourth on the fourth -- which is where
-	// adding with "constrain" puts it, so the day decides from there. The day is
-	// the one the start has, not the one the month can hold: a thirtieth
-	// measured to a twenty-ninth is a month short, not a month exactly.
+	// past reports whether a candidate has gone beyond the far end.
+	//
+	// A leap month the target year has not got lands on the month that stands in
+	// for it -- Adar I on Adar, a Chinese leap fourth on the fourth -- which is
+	// where adding with "constrain" puts it, so the year, the month and the day
+	// all read as that month's. The day compared is the one the start has, not
+	// the one the month can hold: a thirtieth measured to a twenty-ninth is a
+	// month short, not a month exactly.
+	//
+	// Only when all three agree does it matter that the month was not the one
+	// asked for, and then it matters by less than a day: Adar I comes before the
+	// Adar standing in for it, a Chinese leap month after the one it repeats. So
+	// a year forward from Adar I onto Adar is a year and a year back onto it is
+	// not, and for a Chinese leap month it is the other way round.
 	past := func(years, months int64) bool {
-		y, m, d := candidate(years, months)
+		y, m, d, exact := candidate(years, months)
 		c := 0
 		switch {
 		case y != c2.year:
 			c = sign64(int64(y - c2.year))
 		case m != c2.month:
 			c = sign64(int64(m - c2.month))
-		default:
+		case d != c2.day:
 			c = sign64(int64(d - c2.day))
+		case !exact && months == 0:
+			if id == "hebrew" {
+				c = -1
+			} else {
+				c = 1
+			}
 		}
 		return sign*c > 0
 	}

@@ -614,6 +614,17 @@ func (rt *Runtime) toTemporalZonedDateTime(item, options Value) (*big.Int, strin
 		t.second = 59
 	}
 	dt := isoDateTimeRec{isoDateRec{p.year, p.month, p.day}, t}
+	if !p.hasTime {
+		// A string that named a day and no time means the day, and a day
+		// begins when its zone says it does -- which on the morning after a
+		// spring-forward across midnight is not midnight. A bag of fields is
+		// read the other way round: what it leaves out is zero.
+		ns, ok := z.startOfDay(dt.date)
+		if !ok {
+			return nil, "", "", rt.rangeError("this day does not start in " + z.id)
+		}
+		return ns, z.id, cal, nil
+	}
 	if p.z {
 		// A Z says the offset exactly; there is nothing to match against.
 		offsetOpt = "use"
