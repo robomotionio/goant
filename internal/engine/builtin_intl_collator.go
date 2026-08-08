@@ -163,8 +163,12 @@ func (rt *Runtime) initCollatorOptions(options Value, requested []string) (colla
 		if !isUnicodeType(collation) {
 			return c, rt.rangeError("Invalid value " + collation + " for option collation")
 		}
-		if isCollationType(asciiLower(collation)) {
+		// An option naming an ordering this locale has not got is not an
+		// error and does not win: what the tag asked for still stands.
+		if isCollationType(asciiLower(collation)) && collationAvailable(c.tag, asciiLower(collation)) {
 			c.collation = asciiLower(collation)
+		} else {
+			collation = ""
 		}
 	}
 	numeric, e := rt.intlBoolOption(options, "numeric")
@@ -206,7 +210,7 @@ func (rt *Runtime) initCollatorOptions(options Value, requested []string) (colla
 	// ResolveLocale keeps the keyword when the value it settled on is the one
 	// the extension asked for -- including when an option asked for the same
 	// thing. Only an option that CHANGES the value removes it.
-	if v, has := t.uKeyword("co"); has && isCollationType(v) {
+	if v, has := t.uKeyword("co"); has && isCollationType(v) && collationAvailable(c.tag, v) {
 		if collation == "" || asciiLower(collation) == v {
 			c.collation = v
 			kept.setUKeyword("co", v)

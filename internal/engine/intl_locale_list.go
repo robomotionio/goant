@@ -173,9 +173,11 @@ func lookupMatcher(requested []string) string {
 // than the prefix it matched on -- that is what supportedLocalesOf returns.
 func lookupSupportedLocales(requested []string) []string {
 	var out []string
-	avail := availableLocales()
 	for _, tag := range requested {
-		if _, ok := bestAvailableLocale(avail, tagNoExtensions(tag)); ok {
+		// The same question lookupMatcher asks. Answering it differently here
+		// is what makes resolvedOptions and supportedLocalesOf disagree, and
+		// the pair is how a script finds out what there is.
+		if localeIsAvailable(tag) {
 			out = append(out, tag)
 		}
 	}

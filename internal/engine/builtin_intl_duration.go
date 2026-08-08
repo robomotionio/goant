@@ -211,6 +211,12 @@ func (rt *Runtime) durationRecord(v Value) ([10]float64, *ThrowError) {
 	if !v.IsObjectType() {
 		return out, rt.typeError("Duration must be an object or a string")
 	}
+	if rt.temporalKindOf(v) == kindDuration {
+		// A real Temporal.Duration carries its fields in slots, and they are
+		// read from there: the getters on the prototype are the script's to
+		// replace and nothing here goes through them.
+		return tDuration(rt.objPtr(v)).fields(), nil
+	}
 	any := false
 	sign := 0
 	for i, unit := range durationUnits {

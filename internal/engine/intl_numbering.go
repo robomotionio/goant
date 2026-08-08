@@ -110,6 +110,34 @@ func isCollationType(s string) bool {
 	return ok
 }
 
+// languageCollations is the tailorings CLDR gives a language beyond the
+// standard one. A collation not listed for the locale is not one it can be
+// asked for: pinyin orders Chinese and says nothing about German.
+var languageCollations = map[string][]string{
+	"ar": {"compat"},
+	"de": {"phonebk"},
+	"es": {"trad"},
+	"ja": {"unihan"},
+	"ko": {"searchjl", "unihan"},
+	"zh": {"big5han", "gb2312han", "pinyin", "stroke", "unihan", "zhuyin"},
+}
+
+// universalCollations are the two orderings that are not a language's own and
+// may be asked for anywhere.
+var universalCollations = []string{"emoji", "eor"}
+
+// collationAvailable reports whether a locale can be ordered this way.
+func collationAvailable(tag, collation string) bool {
+	if tagContains(universalCollations, collation) {
+		return true
+	}
+	lang := tag
+	if i := strings.IndexByte(lang, '-'); i > 0 {
+		lang = lang[:i]
+	}
+	return tagContains(languageCollations[asciiLower(lang)], collation)
+}
+
 // collationNames is every collation type, sorted -- what
 // Intl.supportedValuesOf("collation") answers.
 var collationNames = sync.OnceValue(func() []string {
