@@ -357,7 +357,7 @@ func (rt *Runtime) initIntl() {
 				return nil, rt.rangeError("Invalid time value")
 			}
 			loc := zoneFor(d.timeZone)
-			return rangeParts(d.dateTimeParts(msInZone(a, loc)), d.dateTimeParts(msInZone(b, loc))), nil
+			return d.rangeParts(d.dateTimeParts(msInZone(a, loc)), d.dateTimeParts(msInZone(b, loc))), nil
 		}
 		rt.defMethod(po, "formatRange", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			parts, e := dateRange(rt, this, args)

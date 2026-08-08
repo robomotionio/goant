@@ -323,6 +323,9 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 			out = append(out, numberPart{typ, val})
 		}
 	}
+	if d, g, ok := numberingSeparators(n.numbering); ok {
+		li.decimal, li.group = d, g
+	}
 	if n.style == "percent" && v == v {
 		v *= 100
 		// The exact digits have to move too, or the number would be formatted
@@ -804,8 +807,8 @@ func samePartRun(a, b []numberPart) bool {
 // characters long.
 func rangeParts(start, end []numberPart) []sourcedPart {
 	if samePartRun(start, end) {
-		// The same number at both ends is not a range, it is one value the
-		// rounding reached from two directions: "~$3".
+		// The same number at both ends is one value the rounding reached from
+		// two directions, and says so: "~$3".
 		out := []sourcedPart{{numberPart{"approximatelySign", "~"}, "shared"}}
 		for _, p := range start {
 			out = append(out, sourcedPart{p, "shared"})

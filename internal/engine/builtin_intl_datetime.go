@@ -104,12 +104,16 @@ func (rt *Runtime) initDateTimeOptions(options Value, requested []string) (dateT
 // set for it, which is what makes toLocaleTimeString show a time.
 func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, required, defaults string) (dateTimeOptions, *ThrowError) {
 	d := dateTimeOptions{tag: defaultLocale, numbering: "latn", calendar: "gregory", comps: map[string]string{}}
-	tagHC := ""
+	tagHC, tagCal := "", ""
 	if len(requested) > 0 {
 		d.tag = lookupMatcher(requested)
 		if t, ok := parseLangTag(d.tag); ok {
 			if v, has := t.uKeyword("ca"); has && v != "" {
-				d.calendar = canonicalCalendar(v)
+				// Only a calendar we have counts as what the tag asked for.
+				// "en-u-ca-invalid" is a locale with no calendar in it.
+				if c, ok := supportedCalendar(v); ok {
+					d.calendar, tagCal = c, c
+				}
 			}
 			if v, has := t.uKeyword("hc"); has && tagContains([]string{"h11", "h12", "h23", "h24"}, v) {
 				d.hourCycle, tagHC = v, v
@@ -130,7 +134,12 @@ func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, req
 		if !isUnicodeType(cal) {
 			return d, rt.rangeError("Invalid calendar: " + cal)
 		}
-		d.calendar = canonicalCalendar(asciiLower(cal))
+		// An option naming a calendar this engine does not have is not an
+		// error and does not win: what the tag asked for still stands, and
+		// only when that is nothing too does it fall back to gregory.
+		if c, ok := supportedCalendar(cal); ok {
+			d.calendar = c
+		}
 	}
 	ns, hasNS, e := rt.intlStringOption(options, "numberingSystem", nil)
 	if e != nil {
@@ -162,8 +171,10 @@ func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, req
 		d.hour12Set = true
 		li, _ := lookupLocale(d.tag)
 		if *h12 {
+			// Every locale counts a 12-hour clock from one except Japanese,
+			// which counts from zero: midnight there is 午前0時, not 午前12時.
 			d.hourCycle = "h12"
-			if li.hourCycle == "h11" {
+			if t, ok := parseLangTag(d.tag); ok && t.lang == "ja" {
 				d.hourCycle = "h11"
 			}
 		} else {
@@ -171,6 +182,14 @@ func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, req
 			if li.hourCycle == "h24" {
 				d.hourCycle = "h24"
 			}
+		}
+	}
+	// -u-ca survives into the resolved locale when the calendar in use is
+	// the one the tag asked for -- an option that changed it takes it out.
+	if tagCal != "" && d.calendar == tagCal {
+		if t, ok := parseLangTag(d.tag); ok {
+			t.setUKeyword("ca", tagCal)
+			d.tag = t.String()
 		}
 	}
 	// -u-hc survives into the resolved locale on the same rule as -u-nu: it
@@ -577,9 +596,13 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 			wroteAny = true
 		}
 		if _, ok := d.comps["fractionalSecondDigits"]; ok {
-			lit(".")
+			point := "."
+			if sep, _, ok := numberingSeparators(d.numbering); ok {
+				point = sep
+			}
+			lit(point)
 			out = append(out, numberPart{"fractionalSecond",
-				d.dtFieldText("fractionalSecondDigits", d.comps["fractionalSecondDigits"], t)})
+				mapDigits(d.dtFieldText("fractionalSecondDigits", d.comps["fractionalSecondDigits"], t), d.numbering)})
 		}
 		// A day period that was asked for by name replaces AM/PM rather than
 		// joining it: "12 at night", not "12 AM at night". And AM/PM itself
@@ -751,6 +774,86 @@ func (d dateTimeOptions) expandParts(li localeInfo, pattern string, t time.Time)
 			lit(text)
 		}
 		i += j + 1
+	}
+	return out
+}
+
+// dtSignificance orders the fields from the one that says most about which
+// date this is to the one that says least. It decides how much of a range the
+// two ends can share.
+var dtSignificance = map[string]int{
+	"era": 0, "year": 1, "month": 2, "day": 3, "weekday": 4, "dayPeriod": 5,
+	"hour": 6, "minute": 7, "second": 8, "fractionalSecond": 9,
+}
+
+// rangeParts is the date half of FormatDateTimeRange. Where a range of numbers
+// decides what to repeat by what is written AROUND the ends, a range of dates
+// decides by which fields differ: "Jan 3 – 5, 2019" says the month and the year
+// once because only the day changed.
+//
+// How much is shared is per-locale data this engine does not carry -- CLDR
+// gives an interval pattern per skeleton and per differing field -- so the one
+// rule implemented here is the one that holds wherever the month is a NAME.
+// A numeric date repeats whole, which is what CLDR says for it too: "1/3/2019 –
+// 1/5/2019" is how en writes that, and sharing the slashes would not read.
+func (d dateTimeOptions) rangeParts(start, end []numberPart) []sourcedPart {
+	if samePartRun(start, end) {
+		out := make([]sourcedPart, 0, len(start))
+		for _, p := range start {
+			out = append(out, sourcedPart{p, "shared"})
+		}
+		return out
+	}
+	whole := func() []sourcedPart {
+		var out []sourcedPart
+		for _, p := range start {
+			out = append(out, sourcedPart{p, "startRange"})
+		}
+		out = append(out, sourcedPart{numberPart{"literal", " – "}, "shared"})
+		for _, p := range end {
+			out = append(out, sourcedPart{p, "endRange"})
+		}
+		return out
+	}
+	named := false
+	switch d.comps["month"] {
+	case "short", "long", "narrow":
+		named = true
+	}
+	if !named || len(start) != len(end) {
+		return whole()
+	}
+	first, last, greatest := -1, -1, len(dtSignificance)
+	for i := range start {
+		if start[i] == end[i] {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		last = i
+		if s, ok := dtSignificance[start[i].typ]; ok && s < greatest {
+			greatest = s
+		}
+	}
+	// A range that spans a year or an era is not two points in one of them, so
+	// there is nothing outside the difference to say once.
+	if first < 0 || greatest <= dtSignificance["year"] {
+		return whole()
+	}
+	var out []sourcedPart
+	for _, p := range start[:first] {
+		out = append(out, sourcedPart{p, "shared"})
+	}
+	for _, p := range start[first : last+1] {
+		out = append(out, sourcedPart{p, "startRange"})
+	}
+	out = append(out, sourcedPart{numberPart{"literal", " – "}, "shared"})
+	for _, p := range end[first : last+1] {
+		out = append(out, sourcedPart{p, "endRange"})
+	}
+	for _, p := range end[last+1:] {
+		out = append(out, sourcedPart{p, "shared"})
 	}
 	return out
 }

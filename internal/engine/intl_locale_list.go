@@ -259,8 +259,10 @@ func (rt *Runtime) supportedValuesOf(keyv Value) (Value, *ThrowError) {
 var availableTimeZones = sync.OnceValue(func() []string {
 	out := make([]string, 0, len(zoneDisplayNames))
 	for id := range zoneDisplayNames {
-		// The other spellings of zero offset are links to UTC, and a list of
-		// canonical identifiers carries each zone once.
+		// Etc/GMT, Etc/UTC and GMT are the three non-canonical spellings of
+		// UTC. A formatter asked for one of them keeps it -- the identifier
+		// is the one that was requested, here as everywhere -- but a list of
+		// CANONICAL identifiers carries the zone once, as UTC.
 		if id == "Etc/UTC" || id == "Etc/GMT" || id == "GMT" {
 			continue
 		}

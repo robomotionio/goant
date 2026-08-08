@@ -121,3 +121,15 @@ var collationNames = sync.OnceValue(func() []string {
 	sort.Strings(out)
 	return out
 })
+
+// numberingSeparators overrides a locale's separators for the numbering
+// systems that bring their own. Arabic-Indic digits are written with the
+// Arabic decimal separator and thousands separator whatever locale asked for
+// them, which is why "en-US-u-nu-arab" reads ١٫٥ and not ١.٥.
+func numberingSeparators(system string) (decimal, group string, ok bool) {
+	switch system {
+	case "arab", "arabext":
+		return "٫", "٬", true
+	}
+	return "", "", false
+}

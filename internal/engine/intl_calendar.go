@@ -25,16 +25,13 @@ var supportedCalendars = []string{
 	"islamic-umalqura", "iso8601", "japanese", "persian", "roc",
 }
 
-// canonicalCalendar resolves a calendar type through the -u-ca aliases and
-// answers "gregory" for anything outside the supported set. The alias table is
-// CLDR's own, so "islamicc" arrives as "islamic-civil" and
-// "ethiopic-amete-alem" as "ethioaa".
-func canonicalCalendar(s string) string {
+// supportedCalendar resolves a calendar type through the -u-ca aliases and
+// reports whether it names one of the sixteen. The alias table is CLDR's own,
+// so "islamicc" arrives as "islamic-civil" and "ethiopic-amete-alem" as
+// "ethioaa".
+func supportedCalendar(s string) (string, bool) {
 	c := strings.Join(aliasKeywordValue("ca", strings.Split(asciiLower(s), "-")), "-")
-	if tagContains(supportedCalendars, c) {
-		return c
-	}
-	return "gregory"
+	return c, tagContains(supportedCalendars, c)
 }
 
 // calendarDisplayNames is what Intl.DisplayNames answers for type "calendar".
