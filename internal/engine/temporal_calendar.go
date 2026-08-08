@@ -464,10 +464,9 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 
 	// candidate is where the start lands after so many years and months, with
 	// the day left as it was however long the month turns out to be.
-	candidate := func(years, months int64) (int, int, int, bool) {
+	candidate := func(years, months int64) (int, int, int) {
 		y := c1.year + int(years)
 		m, ok := cal.monthFromCode(strconv.Itoa(y), c1.code)
-		exact := ok
 		if !ok {
 			if fallback, good := leapMonthFallback(id, c1.code); good {
 				m, ok = cal.monthFromCode(strconv.Itoa(y), fallback)
@@ -489,33 +488,22 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 			y--
 			m += cal.monthsInYear(y)
 		}
-		return y, m, c1.day, exact
+		return y, m, c1.day
 	}
-	// past reports whether a candidate has gone beyond the far end. A month the
-	// target year has not got counts as beyond it: a year from a leap month is
-	// not a year, it is the twelve months that reach the month standing in its
-	// place.
+	// past reports whether a candidate has gone beyond the far end. A leap month
+	// the target year has not got lands on the month that stands in for it --
+	// Adar I on Adar, a Chinese leap fourth on the fourth -- which is where
+	// adding with "constrain" puts it, so the day decides from there. The day is
+	// the one the start has, not the one the month can hold: a thirtieth
+	// measured to a twenty-ninth is a month short, not a month exactly.
 	past := func(years, months int64) bool {
-		y, m, d, exact := candidate(years, months)
-		// A leap month the target year has not got sits beside the month that
-		// stands in for it rather than on it: half a month after the one it
-		// repeats, or -- for Adar I, which is not a repeat -- half a month
-		// before the Adar that takes its place. Months are doubled so the half
-		// is a whole number.
-		mine, theirs := 2*m, 2*c2.month
-		if !exact && months == 0 {
-			if id == "hebrew" {
-				mine--
-			} else {
-				mine++
-			}
-		}
+		y, m, d := candidate(years, months)
 		c := 0
 		switch {
 		case y != c2.year:
 			c = sign64(int64(y - c2.year))
-		case mine != theirs:
-			c = sign64(int64(mine - theirs))
+		case m != c2.month:
+			c = sign64(int64(m - c2.month))
 		default:
 			c = sign64(int64(d - c2.day))
 		}
