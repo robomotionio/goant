@@ -2348,6 +2348,87 @@ const cldrRegionZonesData = "" +
 	"ZW Africa/Harare\n" +
 	""
 
+// cldrNumberingSystemsData = numbering systems with a simple digit mapping: name -> the code point of its zero.
+const cldrNumberingSystemsData = "" +
+	"adlm 125264\n" +
+	"ahom 71472\n" +
+	"arab 1632\n" +
+	"arabext 1776\n" +
+	"bali 6992\n" +
+	"beng 2534\n" +
+	"bhks 72784\n" +
+	"brah 69734\n" +
+	"cakm 69942\n" +
+	"cham 43600\n" +
+	"deva 2406\n" +
+	"diak 72016\n" +
+	"fullwide 65296\n" +
+	"gara 68928\n" +
+	"gong 73120\n" +
+	"gonm 73040\n" +
+	"gujr 2790\n" +
+	"gukh 90416\n" +
+	"guru 2662\n" +
+	"hmng 93008\n" +
+	"hmnp 123200\n" +
+	"java 43472\n" +
+	"kali 43264\n" +
+	"kawi 73552\n" +
+	"khmr 6112\n" +
+	"knda 3302\n" +
+	"krai 93552\n" +
+	"lana 6784\n" +
+	"lanatham 6800\n" +
+	"laoo 3792\n" +
+	"latn 48\n" +
+	"lepc 7232\n" +
+	"limb 6470\n" +
+	"mathbold 120782\n" +
+	"mathdbl 120792\n" +
+	"mathmono 120822\n" +
+	"mathsanb 120812\n" +
+	"mathsans 120802\n" +
+	"mlym 3430\n" +
+	"modi 71248\n" +
+	"mong 6160\n" +
+	"mroo 92768\n" +
+	"mtei 44016\n" +
+	"mymr 4160\n" +
+	"mymrepka 71386\n" +
+	"mymrpao 71376\n" +
+	"mymrshan 4240\n" +
+	"mymrtlng 43504\n" +
+	"nagm 124144\n" +
+	"newa 70736\n" +
+	"nkoo 1984\n" +
+	"olck 7248\n" +
+	"onao 124401\n" +
+	"orya 2918\n" +
+	"osma 66720\n" +
+	"outlined 118000\n" +
+	"rohg 68912\n" +
+	"saur 43216\n" +
+	"segment 130032\n" +
+	"shrd 70096\n" +
+	"sind 70384\n" +
+	"sinh 3558\n" +
+	"sora 69872\n" +
+	"sund 7088\n" +
+	"sunu 72688\n" +
+	"takr 71360\n" +
+	"talu 6608\n" +
+	"tamldec 3046\n" +
+	"telu 3174\n" +
+	"thai 3664\n" +
+	"tibt 3872\n" +
+	"tirh 70864\n" +
+	"tnsa 92864\n" +
+	"tols 73184\n" +
+	"vaii 42528\n" +
+	"wara 71904\n" +
+	"wcho 123632\n" +
+	""
+
 // cldrLikelyData = likely subtags. The value is the full tag when the language changes and
 // the script-region remainder when it does not, which is the common case.
 const cldrLikelyData = "" +

@@ -207,7 +207,7 @@ func (rt *Runtime) supportedValuesOf(keyv Value) (Value, *ThrowError) {
 	case "currency":
 		return rt.newArrayOfStrings(nil), nil
 	case "numberingSystem":
-		return rt.newArrayOfStrings([]string{"latn"}), nil
+		return rt.newArrayOfStrings(numberingSystemNames()), nil
 	case "timeZone":
 		return rt.newArrayOfStrings(availableTimeZones()), nil
 	case "unit":

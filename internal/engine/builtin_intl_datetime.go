@@ -45,6 +45,7 @@ var dtComponentValues = map[string][]string{
 
 type dateTimeOptions struct {
 	tag        string
+	numbering  string
 	timeZone   string
 	calendar   string
 	hourCycle  string
@@ -56,7 +57,7 @@ type dateTimeOptions struct {
 }
 
 func (d dateTimeOptions) String() string {
-	fields := []string{d.tag, d.timeZone, d.calendar, d.hourCycle,
+	fields := []string{d.tag, d.numbering, d.timeZone, d.calendar, d.hourCycle,
 		boolKeyword(d.hour12Set), d.dateStyle, d.timeStyle, strconv.Itoa(d.fracDigits)}
 	for _, c := range dtComponents {
 		fields = append(fields, d.comps[c])
@@ -66,16 +67,16 @@ func (d dateTimeOptions) String() string {
 
 func parseDateTimeOptions(s string) dateTimeOptions {
 	f := strings.Split(s, "\t")
-	if len(f) != 8+len(dtComponents) {
-		return dateTimeOptions{tag: defaultLocale, timeZone: localZoneID(),
+	if len(f) != 9+len(dtComponents) {
+		return dateTimeOptions{tag: defaultLocale, numbering: "latn", timeZone: localZoneID(),
 			calendar: "gregory", comps: map[string]string{}}
 	}
-	fd, _ := strconv.Atoi(f[7])
-	d := dateTimeOptions{tag: f[0], timeZone: f[1], calendar: f[2], hourCycle: f[3],
-		hour12Set: f[4] == "true", dateStyle: f[5], timeStyle: f[6], fracDigits: fd,
+	fd, _ := strconv.Atoi(f[8])
+	d := dateTimeOptions{tag: f[0], numbering: f[1], timeZone: f[2], calendar: f[3], hourCycle: f[4],
+		hour12Set: f[5] == "true", dateStyle: f[6], timeStyle: f[7], fracDigits: fd,
 		comps: map[string]string{}}
 	for i, c := range dtComponents {
-		if v := f[8+i]; v != "" {
+		if v := f[9+i]; v != "" {
 			d.comps[c] = v
 		}
 	}
@@ -93,18 +94,16 @@ func (rt *Runtime) requireDateTimeFormat(this Value) (dateTimeOptions, *ThrowErr
 
 // initDateTimeOptions is CreateDateTimeFormat's option half.
 func (rt *Runtime) initDateTimeOptions(options Value, requested []string) (dateTimeOptions, *ThrowError) {
-	d := dateTimeOptions{tag: defaultLocale, calendar: "gregory", comps: map[string]string{}}
+	d := dateTimeOptions{tag: defaultLocale, numbering: "latn", calendar: "gregory", comps: map[string]string{}}
 	if len(requested) > 0 {
+		d.tag = requested[0]
 		if t, ok := parseLangTag(requested[0]); ok {
-			d.tag = t.languageID()
 			if v, has := t.uKeyword("ca"); has && v != "" {
 				d.calendar = v
 			}
 			if v, has := t.uKeyword("hc"); has && tagContains([]string{"h11", "h12", "h23", "h24"}, v) {
 				d.hourCycle = v
 			}
-		} else {
-			d.tag = requested[0]
 		}
 	}
 	if options.IsNull() {
@@ -123,13 +122,19 @@ func (rt *Runtime) initDateTimeOptions(options Value, requested []string) (dateT
 		}
 		d.calendar = asciiLower(cal)
 	}
-	ns, ok, e := rt.intlStringOption(options, "numberingSystem", nil)
+	ns, hasNS, e := rt.intlStringOption(options, "numberingSystem", nil)
 	if e != nil {
 		return d, e
 	}
-	if ok && !isUnicodeType(ns) {
-		return d, rt.rangeError("Invalid numberingSystem: " + ns)
+	if hasNS {
+		if !isUnicodeType(ns) {
+			return d, rt.rangeError("Invalid numberingSystem: " + ns)
+		}
+		ns = asciiLower(ns)
+	} else {
+		ns = ""
 	}
+	d.tag, d.numbering = resolveNumberingSystem(d.tag, ns)
 	h12, e := rt.intlBoolOption(options, "hour12")
 	if e != nil {
 		return d, e
@@ -399,7 +404,7 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 		if !ok {
 			return false
 		}
-		out = append(out, numberPart{comp, d.dtFieldText(comp, style, t)})
+		out = append(out, numberPart{comp, mapDigits(d.dtFieldText(comp, style, t), d.numbering)})
 		return true
 	}
 

@@ -197,7 +197,7 @@ func (rt *Runtime) initIntl() {
 				}
 			}
 			oo.defineOwn("locale", rt.newString(n.tag), attrDefault)
-			oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
+			oo.defineOwn("numberingSystem", rt.newString(n.numbering), attrDefault)
 			oo.defineOwn("style", rt.newString(n.style), attrDefault)
 			str("currency", n.currency)
 			str("currencyDisplay", n.currencyDisplay)
@@ -331,7 +331,7 @@ func (rt *Runtime) initIntl() {
 			oo := rt.objPtr(o)
 			oo.defineOwn("locale", rt.newString(d.tag), attrDefault)
 			oo.defineOwn("calendar", rt.newString(d.calendar), attrDefault)
-			oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
+			oo.defineOwn("numberingSystem", rt.newString(d.numbering), attrDefault)
 			oo.defineOwn("timeZone", rt.newString(d.timeZone), attrDefault)
 			// hourCycle and hour12 are reported only by a formatter that shows
 			// an hour: they say nothing about a date.
@@ -575,7 +575,7 @@ func (rt *Runtime) initIntl() {
 			oo.defineOwn("locale", rt.newString(r.tag), attrDefault)
 			oo.defineOwn("style", rt.newString(r.style), attrDefault)
 			oo.defineOwn("numeric", rt.newString(r.numeric), attrDefault)
-			oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
+			oo.defineOwn("numberingSystem", rt.newString(r.numbering), attrDefault)
 			return o, nil
 		})
 	})
@@ -761,7 +761,7 @@ func (rt *Runtime) initIntl() {
 			o := rt.newPlainObject()
 			oo := rt.objPtr(o)
 			oo.defineOwn("locale", rt.newString(d.tag), attrDefault)
-			oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
+			oo.defineOwn("numberingSystem", rt.newString(d.numbering), attrDefault)
 			oo.defineOwn("style", rt.newString(d.style), attrDefault)
 			for i, unit := range durationUnits {
 				oo.defineOwn(unit, rt.newString(d.unitStyle[i]), attrDefault)

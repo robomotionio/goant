@@ -26,6 +26,7 @@ type numberOptions struct {
 	notation        string
 	compactDisplay  string
 	signDisplay     string
+	numbering       string
 	compactAuto     bool // compact notation choosing its own digits
 	roundingMode    string
 	roundingIncr    int
@@ -34,7 +35,7 @@ type numberOptions struct {
 }
 
 func defaultNumberOptions() numberOptions {
-	return numberOptions{tag: defaultLocale, style: "decimal", useGrouping: "auto",
+	return numberOptions{tag: defaultLocale, style: "decimal", useGrouping: "auto", numbering: "latn",
 		notation: "standard", signDisplay: "auto",
 		roundingMode: "halfExpand", roundingIncr: 1, trailingZero: "auto",
 		digits: pluralOptions{minInt: 1, minFrac: 0, maxFrac: 3}}
@@ -47,7 +48,7 @@ func (n numberOptions) String() string {
 	return strings.Join([]string{
 		n.tag, n.style, n.currency, n.currencyDisplay, n.currencySign, n.unit,
 		n.unitDisplay, n.useGrouping, n.notation, n.compactDisplay, n.signDisplay,
-		boolKeyword(n.compactAuto), n.roundingMode, strconv.Itoa(n.roundingIncr), n.trailingZero,
+		n.numbering, boolKeyword(n.compactAuto), n.roundingMode, strconv.Itoa(n.roundingIncr), n.trailingZero,
 		strconv.Itoa(n.digits.minInt), strconv.Itoa(n.digits.minFrac),
 		strconv.Itoa(n.digits.maxFrac), strconv.Itoa(n.digits.minSig),
 		strconv.Itoa(n.digits.maxSig),
@@ -56,17 +57,17 @@ func (n numberOptions) String() string {
 
 func parseNumberOptions(s string) numberOptions {
 	f := strings.Split(s, "\t")
-	if len(f) != 20 {
+	if len(f) != 21 {
 		return defaultNumberOptions()
 	}
 	i := func(k int) int { v, _ := strconv.Atoi(f[k]); return v }
 	return numberOptions{tag: f[0], style: f[1], currency: f[2], currencyDisplay: f[3],
 		currencySign: f[4], unit: f[5], unitDisplay: f[6], useGrouping: f[7],
 		notation: f[8], compactDisplay: f[9], signDisplay: f[10],
-		compactAuto:  f[11] == "true",
-		roundingMode: f[12], roundingIncr: i(13), trailingZero: f[14],
-		digits: pluralOptions{minInt: i(15), minFrac: i(16), maxFrac: i(17),
-			minSig: i(18), maxSig: i(19)}}
+		numbering: f[11], compactAuto: f[12] == "true",
+		roundingMode: f[13], roundingIncr: i(14), trailingZero: f[15],
+		digits: pluralOptions{minInt: i(16), minFrac: i(17), maxFrac: i(18),
+			minSig: i(19), maxSig: i(20)}}
 }
 
 // requireNumberFormat is RequireInternalSlot([[InitializedNumberFormat]]).
@@ -98,21 +99,27 @@ func isWellFormedUnit(s string) bool {
 func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberOptions, *ThrowError) {
 	n := defaultNumberOptions()
 	if len(requested) > 0 {
-		// The tag is kept as asked for, minus the extension: the number tables
-		// are per-locale but the resolved locale must not claim keywords this
-		// service did not honour.
-		if t, ok := parseLangTag(requested[0]); ok {
-			n.tag = t.languageID()
-		} else {
-			n.tag = requested[0]
-		}
+		// The whole tag, extension and all: resolveNumberingSystem below reads
+		// the -u-nu keyword out of it and hands back the tag with that keyword
+		// kept or dropped according to whether it was honoured.
+		n.tag = requested[0]
 	}
 	if _, _, e := rt.intlStringOption(options, "localeMatcher", []string{"lookup", "best fit"}); e != nil {
 		return n, e
 	}
-	if _, _, e := rt.intlStringOption(options, "numberingSystem", nil); e != nil {
+	ns, hasNS, e := rt.intlStringOption(options, "numberingSystem", nil)
+	if e != nil {
 		return n, e
 	}
+	if hasNS {
+		if !isUnicodeType(ns) {
+			return n, rt.rangeError("Invalid numberingSystem: " + ns)
+		}
+		ns = asciiLower(ns)
+	} else {
+		ns = ""
+	}
+	n.tag, n.numbering = resolveNumberingSystem(n.tag, ns)
 	style, ok, e := rt.intlStringOption(options, "style",
 		[]string{"decimal", "percent", "currency", "unit"})
 	if e != nil {
@@ -449,11 +456,11 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 
 	if nan {
 		add("nan", li.nan)
-		return withStyleAffixes(n, out)
+		return mapPartDigits(withStyleAffixes(n, out), n.numbering)
 	}
 	if infinite {
 		add("infinity", li.inf)
-		return withStyleAffixes(n, out)
+		return mapPartDigits(withStyleAffixes(n, out), n.numbering)
 	}
 
 	grouped := intPart
@@ -484,7 +491,23 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 		}
 		add("exponentInteger", strconv.Itoa(e))
 	}
-	return withStyleAffixes(n, out)
+	return mapPartDigits(withStyleAffixes(n, out), n.numbering)
+}
+
+// mapPartDigits rewrites the digit spans into the resolved numbering system.
+// Only the spans that ARE digits: a separator or a currency symbol is not a
+// number and does not change with the system counting it.
+func mapPartDigits(parts []numberPart, system string) []numberPart {
+	if system == "" || system == "latn" {
+		return parts
+	}
+	for i, p := range parts {
+		switch p.typ {
+		case "integer", "fraction", "exponentInteger":
+			parts[i].val = mapDigits(p.val, system)
+		}
+	}
+	return parts
 }
 
 // currencySymbols is the standard symbol of the currencies a script is likely

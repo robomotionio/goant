@@ -14,19 +14,22 @@ import (
 )
 
 type relTimeOptions struct {
-	tag     string
-	numeric string // "always" or "auto"
-	style   string // "long", "short", "narrow"
+	tag       string
+	numeric   string // "always" or "auto"
+	style     string // "long", "short", "narrow"
+	numbering string
 }
 
-func (r relTimeOptions) String() string { return r.tag + "\t" + r.numeric + "\t" + r.style }
+func (r relTimeOptions) String() string {
+	return strings.Join([]string{r.tag, r.numeric, r.style, r.numbering}, "\t")
+}
 
 func parseRelTimeOptions(s string) relTimeOptions {
 	f := strings.Split(s, "\t")
-	if len(f) != 3 {
-		return relTimeOptions{tag: defaultLocale, numeric: "always", style: "long"}
+	if len(f) != 4 {
+		return relTimeOptions{tag: defaultLocale, numeric: "always", style: "long", numbering: "latn"}
 	}
-	return relTimeOptions{tag: f[0], numeric: f[1], style: f[2]}
+	return relTimeOptions{tag: f[0], numeric: f[1], style: f[2], numbering: f[3]}
 }
 
 // relTimeUnits is the singular form of every unit the method accepts. The
@@ -95,7 +98,7 @@ func (r relTimeOptions) relTimeParts(v float64, unit string, li localeInfo) []re
 	// The count is formatted through the number rules, so grouping and the
 	// locale's digits apply to "in 1,000 days" as they would anywhere else.
 	n := defaultNumberOptions()
-	n.tag = r.tag
+	n.tag, n.numbering = r.tag, r.numbering
 	num := numberParts(n, li, math.Abs(v))
 
 	word := unit
@@ -140,20 +143,26 @@ func (rt *Runtime) requireRelTimeFormat(this Value) (relTimeOptions, *ThrowError
 }
 
 func (rt *Runtime) initRelTimeOptions(options Value, requested []string) (relTimeOptions, *ThrowError) {
-	r := relTimeOptions{tag: defaultLocale, numeric: "always", style: "long"}
+	r := relTimeOptions{tag: defaultLocale, numeric: "always", style: "long", numbering: "latn"}
 	if len(requested) > 0 {
-		if t, ok := parseLangTag(requested[0]); ok {
-			r.tag = t.languageID()
-		} else {
-			r.tag = requested[0]
-		}
+		r.tag = requested[0]
 	}
 	if _, _, e := rt.intlStringOption(options, "localeMatcher", []string{"lookup", "best fit"}); e != nil {
 		return r, e
 	}
-	if _, _, e := rt.intlStringOption(options, "numberingSystem", nil); e != nil {
+	ns, hasNS, e := rt.intlStringOption(options, "numberingSystem", nil)
+	if e != nil {
 		return r, e
 	}
+	if hasNS {
+		if !isUnicodeType(ns) {
+			return r, rt.rangeError("Invalid numberingSystem: " + ns)
+		}
+		ns = asciiLower(ns)
+	} else {
+		ns = ""
+	}
+	r.tag, r.numbering = resolveNumberingSystem(r.tag, ns)
 	style, ok, e := rt.intlStringOption(options, "style", []string{"long", "short", "narrow"})
 	if e != nil {
 		return r, e

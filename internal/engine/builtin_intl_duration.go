@@ -41,6 +41,7 @@ var durationUnitNames = map[string][3][2]string{
 
 type durationOptions struct {
 	tag        string
+	numbering  string
 	style      string   // "long", "short", "narrow", "digital"
 	unitStyle  []string // per durationUnits
 	display    []string // per durationUnits: "auto" or "always"
@@ -48,19 +49,19 @@ type durationOptions struct {
 }
 
 func (d durationOptions) String() string {
-	return strings.Join(append([]string{d.tag, d.style, strconv.Itoa(d.fracDigits)},
+	return strings.Join(append([]string{d.tag, d.numbering, d.style, strconv.Itoa(d.fracDigits)},
 		append(d.unitStyle, d.display...)...), "\t")
 }
 
 func parseDurationOptions(s string) durationOptions {
 	f := strings.Split(s, "\t")
 	n := len(durationUnits)
-	if len(f) != 3+2*n {
-		return durationOptions{tag: defaultLocale, style: "short", fracDigits: -1}
+	if len(f) != 4+2*n {
+		return durationOptions{tag: defaultLocale, numbering: "latn", style: "short", fracDigits: -1}
 	}
-	fd, _ := strconv.Atoi(f[2])
-	return durationOptions{tag: f[0], style: f[1], fracDigits: fd,
-		unitStyle: f[3 : 3+n], display: f[3+n:]}
+	fd, _ := strconv.Atoi(f[3])
+	return durationOptions{tag: f[0], numbering: f[1], style: f[2], fracDigits: fd,
+		unitStyle: f[4 : 4+n], display: f[4+n:]}
 }
 
 // isNumericStyle says whether a unit style spells the value as digits rather
@@ -78,20 +79,26 @@ func (rt *Runtime) requireDurationFormat(this Value) (durationOptions, *ThrowErr
 
 // initDurationOptions is GetDurationUnitOptions, ten times over.
 func (rt *Runtime) initDurationOptions(options Value, requested []string) (durationOptions, *ThrowError) {
-	d := durationOptions{tag: defaultLocale, style: "short", fracDigits: -1}
+	d := durationOptions{tag: defaultLocale, numbering: "latn", style: "short", fracDigits: -1}
 	if len(requested) > 0 {
-		if t, ok := parseLangTag(requested[0]); ok {
-			d.tag = t.languageID()
-		} else {
-			d.tag = requested[0]
-		}
+		d.tag = requested[0]
 	}
 	if _, _, e := rt.intlStringOption(options, "localeMatcher", []string{"lookup", "best fit"}); e != nil {
 		return d, e
 	}
-	if _, _, e := rt.intlStringOption(options, "numberingSystem", nil); e != nil {
+	ns, hasNS, e := rt.intlStringOption(options, "numberingSystem", nil)
+	if e != nil {
 		return d, e
 	}
+	if hasNS {
+		if !isUnicodeType(ns) {
+			return d, rt.rangeError("Invalid numberingSystem: " + ns)
+		}
+		ns = asciiLower(ns)
+	} else {
+		ns = ""
+	}
+	d.tag, d.numbering = resolveNumberingSystem(d.tag, ns)
 	style, ok, e := rt.intlStringOption(options, "style",
 		[]string{"long", "short", "narrow", "digital"})
 	if e != nil {
@@ -264,7 +271,7 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 		}
 		if isNumericStyle(style) {
 			n := defaultNumberOptions()
-			n.tag = d.tag
+			n.tag, n.numbering = d.tag, d.numbering
 			n.useGrouping = ""
 			if style == "2-digit" {
 				n.digits.minInt = 2
@@ -279,7 +286,7 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 		}
 		flushNumeric()
 		n := defaultNumberOptions()
-		n.tag = d.tag
+		n.tag, n.numbering = d.tag, d.numbering
 		n.style = "unit"
 		n.unit = singular
 		n.unitDisplay = style

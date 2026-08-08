@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -125,6 +126,13 @@ package engine
 	emit(&b, "cldrRegionZonesData",
 		"IANA zones per ISO 3166 region, from zone.tab, space-separated.",
 		regionZones(filepath.Join(*dir, "zone.tab")))
+
+	// The numbering systems whose digits are ten consecutive code points --
+	// which is all of them except the four algorithmic ones. The value is the
+	// zero digit; the rest follow it.
+	emit(&b, "cldrNumberingSystemsData",
+		"numbering systems with a simple digit mapping: name -> the code point of its zero.",
+		numberingSystems(filepath.Join(*dir, "numberingSystems.xml")))
 
 	// The likely-subtags value is written as a script+region pair whenever the
 	// language is unchanged, which it is for all but the und-* entries. That is
@@ -341,6 +349,42 @@ func regionZones(path string) [][2]string {
 		zones := byRegion[r]
 		sort.Strings(zones)
 		out = append(out, [2]string{r, strings.Join(zones, " ")})
+	}
+	return out
+}
+
+type numberingDoc struct {
+	Systems []struct {
+		ID     string `xml:"id,attr"`
+		Type   string `xml:"type,attr"`
+		Digits string `xml:"digits,attr"`
+	} `xml:"numberingSystems>numberingSystem"`
+}
+
+// numberingSystems keeps the systems whose ten digits are consecutive code
+// points, which is what makes them a mapping rather than a rule.
+func numberingSystems(path string) [][2]string {
+	var doc numberingDoc
+	read(path, &doc)
+	var out [][2]string
+	for _, s := range doc.Systems {
+		if s.Type != "numeric" {
+			continue
+		}
+		runes := []rune(s.Digits)
+		if len(runes) != 10 {
+			continue
+		}
+		ok := true
+		for i, r := range runes {
+			if r != runes[0]+rune(i) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out = append(out, [2]string{s.ID, strconv.Itoa(int(runes[0]))})
+		}
 	}
 	return out
 }
