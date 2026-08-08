@@ -11,9 +11,11 @@ package engine
 
 import (
 	"strings"
+	"unicode"
 
 	"golang.org/x/text/collate"
 	"golang.org/x/text/language"
+	"golang.org/x/text/unicode/norm"
 )
 
 // collatorOptions is a Collator's resolved state, stored on the instance as a
@@ -64,7 +66,9 @@ func (c collatorOptions) collator() *collate.Collator {
 	case "accent":
 		opts = append(opts, collate.IgnoreCase)
 	case "case":
-		opts = append(opts, collate.IgnoreDiacritics)
+		// Nothing here: x/text has an IgnoreDiacritics option and it does not
+		// ignore them -- "o" and "ö" still differ under it -- so the marks are
+		// taken off the strings instead, in compare below.
 	}
 	if c.numeric {
 		opts = append(opts, collate.Numeric)
@@ -84,7 +88,45 @@ func (c collatorOptions) compare(a, b string) int {
 	if c.ignorePunct {
 		a, b = stripPunctuation(a), stripPunctuation(b)
 	}
-	return c.collator().CompareString(a, b)
+	// A search collation finds the letter you typed the long way round: typing
+	// "AE" in German finds "Ä". The two read the same and differ one level
+	// down, where the one written out comes first -- which is how CLDR spells
+	// the rule, "&ae<<ä". One level down is where accents live, so the
+	// difference only counts at the sensitivities that count accents.
+	exp, expanding := searchExpansions[c.language()]
+	expanding = expanding && c.usage == "search"
+	x, y := a, b
+	if expanding {
+		x, y = expandForSearch(a, exp), expandForSearch(b, exp)
+	}
+	if c.sensitivity == "case" {
+		// Case counts and accents do not, so the accents come off and what is
+		// left is compared as written: "Aa" and "Aã" are the same word said
+		// twice, "aA" is a different one.
+		x, y = stripMarks(x), stripMarks(y)
+	}
+	if r := c.collator().CompareString(x, y); r != 0 {
+		return r
+	}
+	if expanding && (c.sensitivity == "accent" || c.sensitivity == "variant") {
+		return strings.Compare(expansionProfile(a, exp), expansionProfile(b, exp))
+	}
+	return 0
+}
+
+// stripMarks takes the combining marks off a string, which is what makes a
+// comparison blind to accents without also making it blind to case.
+func stripMarks(s string) string {
+	d := norm.NFD.String(s)
+	var b strings.Builder
+	b.Grow(len(d))
+	for _, r := range d {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return norm.NFC.String(b.String())
 }
 
 // stripPunctuation drops the characters ignorePunctuation is about. CLDR calls
@@ -280,4 +322,49 @@ func (rt *Runtime) collatorForCompare(locales, options Value) (collatorOptions, 
 		return collatorOptions{}, e
 	}
 	return rt.initCollatorOptions(options, requested)
+}
+
+// searchExpansions are the letters a language's search collation reads as the
+// pair they stand for. Only German has them among the locales here.
+var searchExpansions = map[string]map[rune]string{
+	"de": {
+		'ä': "ae", 'ö': "oe", 'ü': "ue", 'ß': "ss",
+		'Ä': "AE", 'Ö': "OE", 'Ü': "UE",
+	},
+}
+
+// language is the collator's language subtag, which is what the search
+// tailoring is keyed on.
+func (c collatorOptions) language() string {
+	if t, ok := parseLangTag(c.tag); ok {
+		return t.lang
+	}
+	return c.tag
+}
+
+func expandForSearch(s string, exp map[rune]string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if e, ok := exp[r]; ok {
+			b.WriteString(e)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// expansionProfile marks which letters had to be expanded, so that two strings
+// that read the same can still be told apart by which of them was written out.
+func expansionProfile(s string, exp map[rune]string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if _, ok := exp[r]; ok {
+			b.WriteByte('1')
+			continue
+		}
+		b.WriteByte('0')
+	}
+	return b.String()
 }
