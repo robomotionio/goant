@@ -22,6 +22,7 @@ Temporal's 2,029, so Track B below is no longer a decision — it is scheduled.
 | locale-sensitive casing, BigInt | 985 | unchanged |
 | scientific notation, currency symbols | 1,000 | unchanged |
 | unit spellings, DurationFormat via NumberFormat | 1,019 | unchanged |
+| compact notation | 1,022 | unchanged |
 
 **Where the remaining 2,338 are, and what the ceiling actually is.** Counted by
 what each failure needs rather than by which directory it sits in:
@@ -32,7 +33,7 @@ what each failure needs rather than by which directory it sits in:
 | **elsewhere, but needs Temporal** | **66** | 62 in DateTimeFormat, 4 in DurationFormat: they format a Temporal object |
 | genuinely classic Intl | 243 | |
 
-So **the ceiling without Temporal is 1,262, and 1,019 of it is reached — 81%.**
+So **the ceiling without Temporal is 1,262, and 1,022 of it is reached — 81%.**
 The 66 is the number worth knowing: more than half of what is left in
 `DateTimeFormat` is not a date-formatting problem at all.
 
@@ -40,7 +41,7 @@ The 243:
 
 | block | failing | needs |
 |---|---:|---|
-| NumberFormat | 90 | compact notation, per-locale currency placement |
+| NumberFormat | 86 | per-locale currency placement and compact patterns |
 | DurationFormat | 35 | `fractionalDigits`, duration strings as an argument |
 | DateTimeFormat | 42 | CLDR date patterns and field names — A4 |
 | ListFormat, RelativeTimeFormat, Segmenter, DisplayNames | 34 | per-locale wording |
