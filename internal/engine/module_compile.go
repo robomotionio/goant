@@ -20,6 +20,7 @@ type moduleImport struct {
 	specifier  string
 	importName string // "" for `import * as ns`
 	local      string
+	deferred   bool // the declaration was `import defer * as ns`
 }
 
 // importBinding records where a locally-bound imported name reads from.
@@ -77,6 +78,7 @@ func (c *compiler) emitImportPrologue(stmts []*Node) {
 			c.importBindings[sp.Right.Str] = b
 			c.fn.moduleImports = append(c.fn.moduleImports, moduleImport{
 				specifier: spec, importName: b.exportName, local: sp.Right.Str,
+				deferred: s.Flags&importPhaseDefer != 0,
 			})
 		}
 	}
@@ -144,6 +146,10 @@ func moduleExportEntries(stmts []*Node) map[string]string {
 type indirectExport struct {
 	specifier  string
 	importName string // "*" for a namespace re-export
+	// deferred marks a re-exported DEFERRED namespace. Re-exporting one does not
+	// undefer it: the module it names still has not run, and whoever receives it
+	// is the one who may run it.
+	deferred bool
 }
 
 // moduleIndirectExports maps each re-exported name to where it comes from.

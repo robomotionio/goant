@@ -632,7 +632,8 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 				if imported == "" {
 					imported = "*" // `import * as ns`: the whole namespace
 				}
-				c.fn.moduleIndirect[exported] = indirectExport{specifier: mi.specifier, importName: imported}
+				c.fn.moduleIndirect[exported] = indirectExport{
+					specifier: mi.specifier, importName: imported, deferred: mi.deferred}
 				break
 			}
 		}

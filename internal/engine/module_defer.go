@@ -44,6 +44,9 @@ func (rt *Runtime) deferredNamespace(m *moduleRecord) Value {
 				return mkundef(), e
 			}
 			if t.namespaceOf != nil {
+				if t.deferred {
+					return rt.deferredNamespace(t.namespaceOf), nil
+				}
 				return rt.moduleNamespace(t.namespaceOf), nil
 			}
 			v, _ := t.owner.exportValue(t.localName)
@@ -107,6 +110,28 @@ func (rt *Runtime) deferredAt(o *object, key string) *ThrowError {
 	return nil
 }
 
+// deferredOnChain triggers a deferred namespace anywhere on a receiver's
+// prototype chain. [[Set]] walks that chain looking for a setter, so a write
+// through `super` to an object whose prototype is a deferred namespace is a
+// question about the module even though the write lands somewhere else.
+func (rt *Runtime) deferredOnChain(obj Value, key string) *ThrowError {
+	if rt.deferredNamespaces == nil || key == "then" {
+		return nil
+	}
+	cur := obj
+	for depth := 0; depth < maxProtoChainDepth; depth++ {
+		o := rt.objPtr(cur)
+		if o == nil {
+			return nil
+		}
+		if m, ok := rt.deferredNamespaces[o]; ok {
+			return rt.runDeferred(m)
+		}
+		cur = o.proto
+	}
+	return nil
+}
+
 // touchDeferredValue is touchDeferred for callers holding a Value and a property
 // key that may be either a string or a symbol.
 func (rt *Runtime) touchDeferredValue(v Value, key Value) *ThrowError {
@@ -138,8 +163,15 @@ func (rt *Runtime) runDeferred(m *moduleRecord) *ThrowError {
 	if m.status == modErrored {
 		return m.evalErr
 	}
-	if m.status.settled() || m.status == modEvaluating {
+	if m.status == modEvaluated {
 		return nil
+	}
+	// Mid-evaluation. The module is on the stack -- its own, or another in its
+	// cycle, or one suspended at a top-level await -- so running it now would
+	// run it twice, and waiting for it is not something a property read can do.
+	// Neither is an answer, so there is no answer.
+	if m.status == modEvaluating || m.status == modEvaluatingAsync {
+		return rt.typeError("cannot access a deferred module while it is being evaluated")
 	}
 	_, _, err := rt.innerModuleEvaluation(m, nil, 0)
 	if err != nil {

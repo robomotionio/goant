@@ -165,7 +165,7 @@ func (rt *Runtime) resolveExport(m *moduleRecord, name string, seen map[string]b
 			return exportTarget{}, false
 		}
 		if ind.importName == "*" {
-			return exportTarget{namespaceOf: dep}, false
+			return exportTarget{namespaceOf: dep, deferred: ind.deferred}, false
 		}
 		return rt.resolveExport(dep, ind.importName, seen)
 	}
@@ -198,6 +198,7 @@ type exportTarget struct {
 	owner       *moduleRecord
 	localName   string
 	namespaceOf *moduleRecord
+	deferred    bool // namespaceOf is a DEFERRED namespace
 }
 
 func (t exportTarget) found() bool { return t.owner != nil || t.namespaceOf != nil }
@@ -819,6 +820,9 @@ func (rt *Runtime) moduleNamespace(m *moduleRecord) Value {
 		t, exported := target, name
 		get := rt.newNativeFunc("get "+name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			if t.namespaceOf != nil {
+				if t.deferred {
+					return rt.deferredNamespace(t.namespaceOf), nil
+				}
 				return rt.moduleNamespace(t.namespaceOf), nil
 			}
 			v, _ := t.owner.exportValue(t.localName)

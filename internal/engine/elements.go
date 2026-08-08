@@ -195,6 +195,9 @@ func (rt *Runtime) createDataProperty(obj, key, v Value) *ThrowError {
 // non-extensible object). Callers in strict mode turn a false into a TypeError.
 func (rt *Runtime) setFieldR(obj Value, name string, v Value) (bool, *ThrowError) {
 	rt.noteSharedMutation(obj)
+	if e := rt.deferredOnChain(obj, name); e != nil {
+		return false, e
+	}
 	if obj.IsNullish() {
 		return false, rt.typeError("cannot set properties of " + rt.nullishName(obj))
 	}

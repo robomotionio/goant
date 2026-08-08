@@ -57,6 +57,13 @@ func (rt *Runtime) isUnscopable(obj Value, name string) (bool, *ThrowError) {
 }
 
 func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
+	if rt.deferredNamespaces != nil && !key.IsSymbol() {
+		if o := rt.objPtr(obj); o != nil {
+			if e := rt.deferredAt(o, rt.strGo(key)); e != nil {
+				return false, e
+			}
+		}
+	}
 	rt.noteSharedMutation(obj)
 	if obj.IsNullish() {
 		return false, rt.typeError("cannot delete property of " + rt.nullishName(obj))
