@@ -118,10 +118,10 @@ func (rt *Runtime) requireListFormat(this Value) (listOptions, *ThrowError) {
 func (rt *Runtime) initListOptions(options Value, requested []string) (listOptions, *ThrowError) {
 	l := listOptions{tag: defaultLocale, kind: "conjunction", style: "long"}
 	if len(requested) > 0 {
-		if t, ok := parseLangTag(requested[0]); ok {
+		if t, ok := parseLangTag(lookupMatcher(requested)); ok {
 			l.tag = t.languageID()
 		} else {
-			l.tag = requested[0]
+			l.tag = lookupMatcher(requested)
 		}
 	}
 	if _, _, e := rt.intlStringOption(options, "localeMatcher", []string{"lookup", "best fit"}); e != nil {

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+
+	"golang.org/x/text/language"
 )
 
 // canonicalizeLocaleList is ECMA-402 9.2.1. It returns the canonicalised tags
@@ -136,14 +138,44 @@ func lastHyphen(s string) int {
 	return -1
 }
 
+// localeIsAvailable says whether this engine has anything for a tag. Two
+// different kinds of data qualify: the formatting tables, which cover a fixed
+// list, and the collation and plural rules, which cover every language CLDR
+// knows -- so a tag whose language x/text recognises counts even when no
+// pattern table names it. "xyz" is well formed and no language at all, and
+// does not.
+func localeIsAvailable(tag string) bool {
+	t, ok := parseLangTag(tag)
+	if !ok {
+		return false
+	}
+	if _, ok := bestAvailableLocale(availableLocales(), t.languageID()); ok {
+		return true
+	}
+	_, err := language.Parse(t.lang)
+	return err == nil
+}
+
+// lookupMatcher is ECMA-402 9.2.3: the first requested locale there is data
+// for, keywords and all, or the default when there is none. Echoing back a
+// locale we have nothing for would make resolvedOptions disagree with
+// supportedLocalesOf, which is the pair a script uses to find out.
+func lookupMatcher(requested []string) string {
+	for _, tag := range requested {
+		if localeIsAvailable(tag) {
+			return tag
+		}
+	}
+	return defaultLocale
+}
+
 // lookupSupportedLocales is ECMA-402 9.2.6, keeping the requested tag rather
 // than the prefix it matched on -- that is what supportedLocalesOf returns.
 func lookupSupportedLocales(requested []string) []string {
 	var out []string
 	avail := availableLocales()
 	for _, tag := range requested {
-		noExt := tagNoExtensions(tag)
-		if _, ok := bestAvailableLocale(avail, noExt); ok {
+		if _, ok := bestAvailableLocale(avail, tagNoExtensions(tag)); ok {
 			out = append(out, tag)
 		}
 	}

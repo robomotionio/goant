@@ -143,7 +143,7 @@ func (rt *Runtime) unwrapLegacyIntl(this Value, brand internalSlot) Value {
 func (rt *Runtime) initCollatorOptions(options Value, requested []string) (collatorOptions, *ThrowError) {
 	c := defaultCollatorOptions()
 	if len(requested) > 0 {
-		c.tag = requested[0]
+		c.tag = lookupMatcher(requested)
 	}
 	usage, ok, e := rt.intlStringOption(options, "usage", []string{"sort", "search"})
 	if e != nil {

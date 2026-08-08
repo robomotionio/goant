@@ -82,7 +82,7 @@ func (rt *Runtime) requireDurationFormat(this Value) (durationOptions, *ThrowErr
 func (rt *Runtime) initDurationOptions(options Value, requested []string) (durationOptions, *ThrowError) {
 	d := durationOptions{tag: defaultLocale, numbering: "latn", style: "short", fracDigits: -1}
 	if len(requested) > 0 {
-		d.tag = requested[0]
+		d.tag = lookupMatcher(requested)
 	}
 	if _, _, e := rt.intlStringOption(options, "localeMatcher", []string{"lookup", "best fit"}); e != nil {
 		return d, e

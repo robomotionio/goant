@@ -216,10 +216,10 @@ func (rt *Runtime) requireSegmenter(this Value) (segmenterOptions, *ThrowError) 
 func (rt *Runtime) initSegmenterOptions(options Value, requested []string) (segmenterOptions, *ThrowError) {
 	s := segmenterOptions{tag: defaultLocale, granularity: "grapheme"}
 	if len(requested) > 0 {
-		if t, ok := parseLangTag(requested[0]); ok {
+		if t, ok := parseLangTag(lookupMatcher(requested)); ok {
 			s.tag = t.languageID()
 		} else {
-			s.tag = requested[0]
+			s.tag = lookupMatcher(requested)
 		}
 	}
 	if _, _, e := rt.intlStringOption(options, "localeMatcher", []string{"lookup", "best fit"}); e != nil {

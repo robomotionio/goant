@@ -450,7 +450,7 @@ func (rt *Runtime) initIntl() {
 		// which knows only about the locales this engine can FORMAT. Arabic has
 		// six plural categories and no entry in that table.
 		if len(requested) > 0 {
-			p.tag = requested[0]
+			p.tag = lookupMatcher(requested)
 		}
 		inst.setSlot(slotIntlPluralOpts, rt.newString(p.String()))
 		return nil

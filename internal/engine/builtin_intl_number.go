@@ -106,7 +106,7 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 		// The whole tag, extension and all: resolveNumberingSystem below reads
 		// the -u-nu keyword out of it and hands back the tag with that keyword
 		// kept or dropped according to whether it was honoured.
-		n.tag = requested[0]
+		n.tag = lookupMatcher(requested)
 	}
 	if _, _, e := rt.intlStringOption(options, "localeMatcher", []string{"lookup", "best fit"}); e != nil {
 		return n, e

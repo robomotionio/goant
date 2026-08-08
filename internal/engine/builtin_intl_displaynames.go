@@ -94,10 +94,10 @@ func (rt *Runtime) requireDisplayNames(this Value) (displayOptions, *ThrowError)
 func (rt *Runtime) initDisplayOptions(options Value, requested []string) (displayOptions, *ThrowError) {
 	d := displayOptions{tag: defaultLocale, style: "long", fallback: "code", langStyle: "dialect"}
 	if len(requested) > 0 {
-		if t, ok := parseLangTag(requested[0]); ok {
+		if t, ok := parseLangTag(lookupMatcher(requested)); ok {
 			d.tag = t.languageID()
 		} else {
-			d.tag = requested[0]
+			d.tag = lookupMatcher(requested)
 		}
 	}
 	if options.IsNull() {

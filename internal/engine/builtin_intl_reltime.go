@@ -145,7 +145,7 @@ func (rt *Runtime) requireRelTimeFormat(this Value) (relTimeOptions, *ThrowError
 func (rt *Runtime) initRelTimeOptions(options Value, requested []string) (relTimeOptions, *ThrowError) {
 	r := relTimeOptions{tag: defaultLocale, numeric: "always", style: "long", numbering: "latn"}
 	if len(requested) > 0 {
-		r.tag = requested[0]
+		r.tag = lookupMatcher(requested)
 	}
 	if _, _, e := rt.intlStringOption(options, "localeMatcher", []string{"lookup", "best fit"}); e != nil {
 		return r, e
