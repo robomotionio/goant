@@ -248,20 +248,19 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 			return rt.newArrayOfStrings(f(t)), nil
 		})
 	}
-	// A value the tag asked for comes first, which is what
-	// CreateArrayFromListAndPreferred is for.
+	// A tag that names one of these outright is not asking what the locale
+	// prefers -- it has already chosen, so the list is that one value alone.
 	preferred := func(t *langTag, key string, rest []string) []string {
-		v, ok := t.uKeyword(key)
-		if !ok || v == "" || tagContains(rest, v) {
-			return rest
+		if v, ok := t.uKeyword(key); ok && v != "" {
+			return []string{v}
 		}
-		return append([]string{v}, rest...)
+		return rest
 	}
 	list("getCalendars", func(t *langTag) []string { return preferred(t, "ca", []string{"gregory"}) })
 	list("getCollations", func(t *langTag) []string { return preferred(t, "co", []string{"emoji", "eor"}) })
 	list("getNumberingSystems", func(t *langTag) []string { return preferred(t, "nu", []string{"latn"}) })
 	list("getHourCycles", func(t *langTag) []string {
-		return preferred(t, "hc", []string{hourCycleForRegion(effectiveRegion(t))})
+		return preferred(t, "hc", []string{hourCycleForLocale(t)})
 	})
 	rt.defMethod(po, "getTimeZones", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		t, e := rt.requireLocale(this)
@@ -290,7 +289,7 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 		if e != nil {
 			return mkundef(), e
 		}
-		first, weekend, minimal := weekInfo(effectiveRegion(t))
+		first, weekend := weekInfo(effectiveRegion(t))
 		// -u-fw names the first day outright, whatever the region would say.
 		if v, has := t.uKeyword("fw"); has {
 			if d := weekdayNumber(v); d != 0 {
@@ -306,7 +305,6 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 			rt.arraySet(ao, uint32(i), mknum(float64(d)))
 		}
 		oo.defineOwn("weekend", arr, attrDefault)
-		oo.defineOwn("minimalDays", mknum(float64(minimal)), attrDefault)
 		return o, nil
 	})
 
@@ -404,24 +402,27 @@ func weekdayKeyword(s string) string {
 	return ""
 }
 
-// effectiveRegion is the region a locale's calendar and week data comes from.
-// The -u-rg keyword overrides it outright, a -u-sd subdivision names it in its
-// first two letters, and otherwise it is the tag's own region or, failing
-// that, the one likely subtags infers.
+// effectiveRegion is the region a locale's calendar and week data comes from,
+// in RegionPreference's priority order: the -u-rg keyword overrides everything,
+// then the tag's own region, then a -u-sd subdivision's first two letters --
+// a subdivision is only consulted when the tag did not name a region at all,
+// because "the state of Inuvik in Japan" is a contradiction and the country
+// wins it. Failing all of those it is what likely subtags infers, and failing
+// that the world.
 func effectiveRegion(t *langTag) string {
 	if v, has := t.uKeyword("rg"); has && len(v) >= 2 {
-		return asciiUpper(v[:2])
-	}
-	if v, has := t.uKeyword("sd"); has && len(v) >= 2 {
 		return asciiUpper(v[:2])
 	}
 	if t.region != "" {
 		return t.region
 	}
-	if m, ok := t.maximized(); ok {
+	if v, has := t.uKeyword("sd"); has && len(v) >= 2 {
+		return asciiUpper(v[:2])
+	}
+	if m, ok := t.maximized(); ok && m.region != "" {
 		return m.region
 	}
-	return ""
+	return "001"
 }
 
 // weekdayNumber maps a -u-fw type to its ISO weekday number, 0 for a value
@@ -447,6 +448,20 @@ func hourCycleForRegion(region string) string {
 	return "h23"
 }
 
+// hourCycleForLocale reads the language before the region, because the clock
+// travels with the language rather than the country: Quebec writes 14:00 and
+// Ontario writes 2 PM, and both of them are CA.
+func hourCycleForLocale(t *langTag) string {
+	switch t.lang {
+	case "fr", "de", "ru", "pl", "cs", "sk", "hu", "ro", "bg", "uk", "lt",
+		"lv", "et", "sl", "hr", "sr", "ku", "fa", "vi", "id", "tr", "nl",
+		"sv", "nb", "no", "da", "fi", "is", "ca", "eu", "gl", "sq", "mk",
+		"be", "hy", "ka", "kk", "uz", "az", "mn", "th", "zh", "ja":
+		return "h23"
+	}
+	return hourCycleForRegion(effectiveRegion(t))
+}
+
 // textDirection is the writing direction of a language. The right-to-left
 // scripts are a closed and short list; everything else is left to right.
 func textDirection(lang string) string {
@@ -464,7 +479,7 @@ func textDirection(lang string) string {
 // Sunday is 7. Monday-start with a Saturday-Sunday weekend is the rule; the
 // regions listed are the exceptions that a European or American script is
 // likely to meet.
-func weekInfo(region string) (first int, weekend []int, minimalDays int) {
+func weekInfo(region string) (first int, weekend []int) {
 	switch region {
 	case "US", "CA", "JP", "IL", "PH", "BR", "MX", "KR", "TW", "ZA", "HK", "MO":
 		first = 7
@@ -486,18 +501,6 @@ func weekInfo(region string) (first int, weekend []int, minimalDays int) {
 		weekend = []int{7}
 	default:
 		weekend = []int{6, 7}
-	}
-	// Four is the ISO rule and CLDR's default for most of Europe; one is
-	// CLDR's default everywhere else.
-	switch region {
-	case "AD", "AN", "AT", "AX", "BE", "BG", "CH", "CZ", "DE", "DK", "EE",
-		"ES", "FI", "FJ", "FO", "FR", "GB", "GF", "GG", "GI", "GP", "GR",
-		"GU", "HU", "IE", "IM", "IS", "IT", "JE", "LI", "LT", "LU", "MC",
-		"MQ", "NL", "NO", "PL", "PT", "RE", "RU", "SE", "SJ", "SK", "SM",
-		"TR", "UA", "VA":
-		minimalDays = 4
-	default:
-		minimalDays = 1
 	}
 	return
 }
