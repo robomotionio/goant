@@ -20,64 +20,66 @@ func (rt *Runtime) canonicalizeLocaleList(v Value) ([]string, *ThrowError) {
 	if v.IsUndefined() {
 		return nil, nil
 	}
-	var items []Value
-	switch {
-	case v.IsString():
-		items = []Value{v}
-	default:
-		if tag, ok := rt.localeBrand(v); ok {
-			items = []Value{rt.newString(tag)}
-			break
-		}
-		if !v.IsObjectType() {
-			// ToObject of a primitive: a Number or a Boolean has no length, so
-			// the list is empty, and null or undefined throws.
-			if v.IsNullish() {
-				return nil, rt.typeError("Cannot convert " + rt.nullishName(v) + " to object")
-			}
-			return nil, nil
-		}
-		n, e := rt.lengthOf(v)
-		if e != nil {
-			return nil, e
-		}
-		for i := 0; i < n; i++ {
-			has, e := rt.hasPropE(v, strconv.Itoa(i))
-			if e != nil {
-				return nil, e
-			}
-			if !has {
-				continue
-			}
-			el, e := rt.getElement(v, mknum(float64(i)))
-			if e != nil {
-				return nil, e
-			}
-			items = append(items, el)
-		}
-	}
-
 	var seen []string
-	for _, el := range items {
+	add := func(el Value) *ThrowError {
 		tag := ""
 		if t, ok := rt.localeBrand(el); ok {
 			tag = t
 		} else {
 			if !el.IsString() && !el.IsObjectType() {
-				return nil, rt.typeError("Locale list elements must be strings or objects")
+				return rt.typeError("Locale list elements must be strings or objects")
 			}
 			s, e := rt.toStringValue(el)
 			if e != nil {
-				return nil, e
+				return e
 			}
 			tag = rt.strGo(s)
 		}
 		canon, ok := canonicalizeLangTag(tag)
 		if !ok {
-			return nil, rt.rangeError("Incorrect locale information provided: " + tag)
+			return rt.rangeError("Incorrect locale information provided: " + tag)
 		}
 		if !tagContains(seen, canon) {
 			seen = append(seen, canon)
+		}
+		return nil
+	}
+
+	if v.IsString() {
+		return seen, add(v)
+	}
+	if tag, ok := rt.localeBrand(v); ok {
+		return seen, add(rt.newString(tag))
+	}
+	// Everything else is read as an array-like, including a primitive: a
+	// Number is wrapped, and a property found on Number.prototype counts. That
+	// is a strange thing for a script to do and the specification says to do
+	// it, which is exactly the kind of thing a conformance suite checks.
+	o, e := rt.toObjectValue(v)
+	if e != nil {
+		return nil, e
+	}
+	n, e := rt.lengthOf(o)
+	if e != nil {
+		return nil, e
+	}
+	// One index at a time, all the way through: an element's own ToString may
+	// install the next one, so the reads cannot be batched ahead of the
+	// conversions.
+	for i := 0; i < n; i++ {
+		has, e := rt.hasPropE(o, strconv.Itoa(i))
+		if e != nil {
+			return nil, e
+		}
+		if !has {
+			continue
+		}
+		el, e := rt.getElement(o, mknum(float64(i)))
+		if e != nil {
+			return nil, e
+		}
+		if e := add(el); e != nil {
+			return nil, e
 		}
 	}
 	return seen, nil

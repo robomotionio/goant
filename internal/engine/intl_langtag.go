@@ -239,7 +239,9 @@ func validExtension(sing byte, body []string) bool {
 			i++
 		}
 		for i < len(body) {
-			if len(body[i]) != 2 || !tagAlnum(body[i]) {
+			// A keyword key is `alphanum alpha`: the second character must be a
+			// letter, so "0c" is a key and "c0" and "00" are not.
+			if len(body[i]) != 2 || !tagAlnum(body[i]) || !tagAlpha(body[i][1:]) {
 				return false
 			}
 			i++
@@ -331,37 +333,14 @@ func (t *langTag) canonicalize() {
 // with their CLDR preferred values.
 func (t *langTag) applyAliases() {
 	// The language alias is keyed on a unicode_language_id prefix, which may
-	// carry a script, a region or a variant along with the language ("sh" but
-	// also "sgn-GR" and "zh-guoyu"). The more specific key wins, so those are
-	// tried first.
-	langs := cldrLanguageAlias()
-	matched := false
-	tryKey := func(key string, drop func()) bool {
-		repl, ok := langs[key]
-		if !ok {
-			return false
-		}
-		drop()
-		t.mergeLanguageReplacement(repl)
-		return true
-	}
-	if t.script != "" {
-		matched = tryKey(t.lang+"-"+t.script, func() { t.script = "" })
-	}
-	if !matched && t.region != "" {
-		matched = tryKey(t.lang+"-"+t.region, func() { t.region = "" })
-	}
-	if !matched {
-		for i, v := range t.variants {
-			if matched = tryKey(t.lang+"-"+v, func() {
-				t.variants = append(t.variants[:i:i], t.variants[i+1:]...)
-			}); matched {
-				break
-			}
-		}
-	}
-	if !matched {
-		tryKey(t.lang, func() {})
+	// carry a script, a region or one or more variants along with the language
+	// ("sh", but also "sgn-GR", "zh-guoyu" and "und-hepburn-heploc"). The more
+	// subtags a key has the more specific it is, so the rules are tried longest
+	// first; and a key whose language is "und" matches any language, which is
+	// how CLDR spells a rule about a variant alone.
+	rules := cldrLangRules()
+	if !t.applyLangRules(rules[t.lang]) {
+		t.applyLangRules(rules["und"])
 	}
 
 	if repl, ok := cldrScriptAlias()[t.script]; ok {
@@ -380,6 +359,88 @@ func (t *langTag) applyAliases() {
 	}
 }
 
+// langAliasRule is one languageAlias entry with its key already parsed. n is
+// how many subtags the key has, which is what "longest match wins" counts.
+type langAliasRule struct {
+	key  *langTag
+	repl string
+	n    int
+}
+
+// cldrLangRules groups the language aliases by the language they key on, so a
+// tag consults a handful of rules rather than five hundred.
+var cldrLangRules = sync.OnceValue(func() map[string][]langAliasRule {
+	m := map[string][]langAliasRule{}
+	for k, v := range cldrLanguageAlias() {
+		kt, ok := parseLangTag(k)
+		if !ok {
+			continue
+		}
+		n := 1 + len(kt.variants)
+		if kt.script != "" {
+			n++
+		}
+		if kt.region != "" {
+			n++
+		}
+		// A bare "und" would match every tag and replace its language, which
+		// is not what the wildcard means.
+		if kt.lang == "und" && n == 1 {
+			continue
+		}
+		m[kt.lang] = append(m[kt.lang], langAliasRule{key: kt, repl: v, n: n})
+	}
+	for _, rs := range m {
+		sort.SliceStable(rs, func(i, j int) bool { return rs[i].n > rs[j].n })
+	}
+	return m
+})
+
+// applyLangRules applies the first rule that matches, removing the subtags the
+// key matched on and merging in the replacement. It reports whether one did.
+func (t *langTag) applyLangRules(rules []langAliasRule) bool {
+	for _, r := range rules {
+		if r.key.script != "" && r.key.script != t.script {
+			continue
+		}
+		if r.key.region != "" && r.key.region != t.region {
+			continue
+		}
+		ok := true
+		for _, v := range r.key.variants {
+			if !tagContains(t.variants, v) {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		if r.key.script != "" {
+			t.script = ""
+		}
+		if r.key.region != "" {
+			t.region = ""
+		}
+		for _, v := range r.key.variants {
+			t.variants = removeString(t.variants, v)
+		}
+		t.mergeLanguageReplacement(r.repl)
+		return true
+	}
+	return false
+}
+
+func removeString(ss []string, s string) []string {
+	out := ss[:0:0]
+	for _, v := range ss {
+		if v != s {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // mergeLanguageReplacement applies a languageAlias replacement, which is itself
 // a unicode_language_id: its language always wins, and its other subtags are
 // taken only where the tag has none. "sh" becomes "sr-Latn", but "sh-Cyrl"
@@ -390,7 +451,11 @@ func (t *langTag) mergeLanguageReplacement(repl string) {
 	if !ok {
 		return
 	}
-	t.lang = r.lang
+	// "und" on the replacement side means "leave the language alone" -- the
+	// rule was about a variant, not about what language this is.
+	if r.lang != "und" || t.lang == "" {
+		t.lang = r.lang
+	}
 	if t.script == "" {
 		t.script = r.script
 	}
@@ -459,6 +524,10 @@ func canonicalizeUnicodeExt(body []string) []string {
 			k.types = append(k.types, body[i])
 			i++
 		}
+		k.types = aliasKeywordValue(k.key, k.types)
+		// A type of "true" is written as the bare key: "-u-kn-true" and
+		// "-u-kn" are the same keyword and only one of them is canonical. The
+		// alias step above is what turns "-u-kb-yes" into one of them.
 		if len(k.types) == 1 && k.types[0] == "true" {
 			k.types = nil
 		}
@@ -519,9 +588,26 @@ func canonicalizeTransformExt(body []string) []string {
 	sort.SliceStable(fields, func(a, b int) bool { return fields[a].key < fields[b].key })
 	for _, f := range fields {
 		out = append(out, f.key)
-		out = append(out, f.values...)
+		out = append(out, aliasKeywordValue(f.key, f.values)...)
 	}
 	return out
+}
+
+var cldrKeywordAlias = sync.OnceValue(func() map[string]string { return parseAliasTable(cldrKeywordAliasData) })
+
+// aliasKeywordValue replaces a deprecated -u- or -t- keyword value with the one
+// CLDR prefers: "-u-ca-ethiopic-amete-alem" is "-u-ca-ethioaa", "-u-ks-primary"
+// is "-u-ks-level1". The value is looked up whole, because several of them are
+// spelled across more than one subtag.
+func aliasKeywordValue(key string, types []string) []string {
+	if len(types) == 0 {
+		return types
+	}
+	repl, ok := cldrKeywordAlias()[key+"/"+strings.Join(types, "-")]
+	if !ok {
+		return types
+	}
+	return strings.Split(repl, "-")
 }
 
 // String renders the tag. The private-use sequence is last by construction,
@@ -589,12 +675,20 @@ func (t *langTag) maximized() (*langTag, bool) {
 	if lang == "" {
 		lang = "und"
 	}
-	for _, key := range []string{
-		tagJoin(lang, t.script, t.region),
-		tagJoin(lang, "", t.region),
-		tagJoin(lang, t.script, ""),
-		lang,
-	} {
+	// The four lookups of AddLikelySubtags, most specific first. A candidate
+	// whose distinguishing subtag is absent is skipped rather than collapsed
+	// into the bare language: with no region, "lang-region" spells "lang" and
+	// answers the last question two steps early, which is how "ru-Armn" came
+	// back as ru-Armn-RU instead of ru-Armn-AM.
+	keys := []string{tagJoin(lang, t.script, t.region)}
+	if t.region != "" {
+		keys = append(keys, tagJoin(lang, "", t.region))
+	}
+	if t.script != "" {
+		keys = append(keys, tagJoin(lang, t.script, ""))
+	}
+	keys = append(keys, lang)
+	for _, key := range keys {
 		got, ok := likelyLookup(key)
 		if !ok {
 			continue
@@ -630,14 +724,18 @@ func (t *langTag) minimized() (*langTag, bool) {
 	if !ok {
 		return nil, false
 	}
-	full := max.languageID()
+	// The comparison is on language, script and region alone. Variants ride
+	// along untouched and would otherwise make every candidate look wrong:
+	// "en-fonipa" maximizes to "en-Latn-US-fonipa", and "en" maximizes to
+	// "en-Latn-US", which is the same answer to the question being asked.
+	full := (&langTag{lang: max.lang, script: max.script, region: max.region}).String()
 	for _, cand := range []*langTag{
 		{lang: max.lang},
 		{lang: max.lang, region: max.region},
 		{lang: max.lang, script: max.script},
 	} {
 		m, ok := cand.maximized()
-		if ok && m.languageID() == full {
+		if ok && (&langTag{lang: m.lang, script: m.script, region: m.region}).String() == full {
 			out := *t
 			out.lang = cand.lang
 			out.script = cand.script
@@ -678,8 +776,10 @@ func (t *langTag) uExt() *langExt {
 	return nil
 }
 
-// uKeyword reads one -u- keyword. A keyword written without a type ("-u-kn")
-// reads back as "true", which is what the option it stands for means.
+// uKeyword reads one -u- keyword, reporting whether it was there at all. A
+// keyword written without a type ("-u-kf") reads back as the empty string,
+// which is a different answer from absent: the getters return undefined for
+// one and "" for the other.
 func (t *langTag) uKeyword(key string) (string, bool) {
 	e := t.uExt()
 	if e == nil {
@@ -695,9 +795,6 @@ func (t *langTag) uKeyword(key string) (string, bool) {
 		var types []string
 		for j := i + 1; j < len(e.subtags) && len(e.subtags[j]) != 2; j++ {
 			types = append(types, e.subtags[j])
-		}
-		if len(types) == 0 {
-			return "true", true
 		}
 		return strings.Join(types, "-"), true
 	}

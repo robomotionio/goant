@@ -45,10 +45,11 @@ type likelyEntry struct {
 
 type metadata struct {
 	Alias struct {
-		Language  []aliasEntry `xml:"languageAlias"`
-		Script    []aliasEntry `xml:"scriptAlias"`
-		Territory []aliasEntry `xml:"territoryAlias"`
-		Variant   []aliasEntry `xml:"variantAlias"`
+		Language    []aliasEntry `xml:"languageAlias"`
+		Script      []aliasEntry `xml:"scriptAlias"`
+		Territory   []aliasEntry `xml:"territoryAlias"`
+		Variant     []aliasEntry `xml:"variantAlias"`
+		Subdivision []aliasEntry `xml:"subdivisionAlias"`
 	} `xml:"metadata>alias"`
 }
 
@@ -95,6 +96,27 @@ package engine
 			"// list is kept whole here.",
 		simple(meta.Alias.Territory))
 	emit(&b, "cldrVariantAliasData", "variant aliases.", simple(meta.Alias.Variant))
+
+	// The -u- and -t- keyword values have their own aliases, one file per key
+	// family under common/bcp47. Both spellings a deprecated value can have --
+	// an `alias` attribute on the canonical type, and a `preferred` attribute
+	// on the deprecated one -- end up as the same kind of entry here.
+	kw := keywordAliases(filepath.Join(*dir, "bcp47"))
+	for _, e := range meta.Alias.Subdivision {
+		// A subdivision alias reaches the -u- extension through two keys, `sd`
+		// (the subdivision itself) and `rg` (a region override spelled as one).
+		// A subdivision that split has several replacements; UTS 35 takes the
+		// first, and unlike a territory there is no likely-subtags tie-break.
+		repl := strings.Fields(dash(e.Replacement))
+		if len(repl) == 0 {
+			continue
+		}
+		for _, key := range []string{"sd", "rg"} {
+			kw = append(kw, [2]string{key + "/" + dash(e.Type), repl[0]})
+		}
+	}
+	emit(&b, "cldrKeywordAliasData",
+		"keyword value aliases, keyed \"<key>/<deprecated value>\".", kw)
 
 	// The likely-subtags value is written as a script+region pair whenever the
 	// language is unchanged, which it is for all but the und-* entries. That is
@@ -232,4 +254,53 @@ func emit(b *strings.Builder, name, doc string, pairs [][2]string) {
 		fmt.Fprintf(b, "\t%q +\n", p[0]+" "+p[1]+"\n")
 	}
 	fmt.Fprintf(b, "\t\"\"\n")
+}
+
+// keyDoc is one common/bcp47 file: a handful of keys, each with its types.
+type keyDoc struct {
+	Keys []struct {
+		Name  string `xml:"name,attr"`
+		Types []struct {
+			Name       string `xml:"name,attr"`
+			Alias      string `xml:"alias,attr"`
+			Deprecated string `xml:"deprecated,attr"`
+			Preferred  string `xml:"preferred,attr"`
+		} `xml:"type"`
+	} `xml:"keyword>key"`
+}
+
+// keywordAliases reads every file in the bcp47 directory and returns the
+// deprecated spellings of each keyword value, keyed "<key>/<value>".
+func keywordAliases(dir string) [][2]string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	var out [][2]string
+	for _, f := range entries {
+		if filepath.Ext(f.Name()) != ".xml" {
+			continue
+		}
+		var doc keyDoc
+		read(filepath.Join(dir, f.Name()), &doc)
+		for _, k := range doc.Keys {
+			for _, t := range k.Types {
+				if t.Deprecated == "true" {
+					// A deprecated type also carries the alias it replaced,
+					// which points the wrong way: "islamicc" is deprecated in
+					// favour of "islamic-civil" and lists it as an alias too.
+					// Only the preferred direction is a canonicalisation.
+					if t.Preferred != "" {
+						out = append(out, [2]string{k.Name + "/" + t.Name, t.Preferred})
+					}
+					continue
+				}
+				for _, a := range strings.Fields(t.Alias) {
+					out = append(out, [2]string{k.Name + "/" + strings.ToLower(a), t.Name})
+				}
+			}
+		}
+	}
+	return out
 }

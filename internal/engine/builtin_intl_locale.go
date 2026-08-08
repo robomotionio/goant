@@ -164,11 +164,28 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 			t.variants = vs
 		}
 
+		// The remaining options are read in this order, and the order is
+		// observable: constructor-getter-order.js installs a getter on each and
+		// records the sequence.
 		if e := rt.keywordOption(t, options, "calendar", "ca", nil); e != nil {
 			return mkundef(), e
 		}
 		if e := rt.keywordOption(t, options, "collation", "co", nil); e != nil {
 			return mkundef(), e
+		}
+		// firstDayOfWeek is an ordinary keyword type, except that the numbers
+		// 0 through 7 spell the weekday names -u-fw uses.
+		if got, present, e := rt.intlStringOption(options, "firstDayOfWeek", nil); e != nil {
+			return mkundef(), e
+		} else if present {
+			day := asciiLower(got)
+			if d := weekdayKeyword(day); d != "" {
+				day = d
+			}
+			if !isUnicodeType(day) {
+				return mkundef(), rt.rangeError("Invalid value " + got + " for option firstDayOfWeek")
+			}
+			t.setUKeyword("fw", day)
 		}
 		if e := rt.keywordOption(t, options, "hourCycle", "hc", []string{"h11", "h12", "h23", "h24"}); e != nil {
 			return mkundef(), e
@@ -176,29 +193,9 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 		if e := rt.keywordOption(t, options, "caseFirst", "kf", []string{"upper", "lower", "false"}); e != nil {
 			return mkundef(), e
 		}
-		if e := rt.keywordOption(t, options, "numberingSystem", "nu", nil); e != nil {
-			return mkundef(), e
-		}
-		// firstDayOfWeek accepts a weekday name or the numbers 1-7, and is
-		// stored as the name the -u-fw keyword uses.
+		// numeric is a boolean, spelled in the tag as the presence or absence
+		// of a type on -u-kn.
 		if !options.IsUndefined() {
-			v, e := rt.getField(options, "firstDayOfWeek")
-			if e != nil {
-				return mkundef(), e
-			}
-			if !v.IsUndefined() {
-				s, e := rt.toStringValue(v)
-				if e != nil {
-					return mkundef(), e
-				}
-				day := weekdayKeyword(asciiLower(rt.strGo(s)))
-				if day == "" {
-					return mkundef(), rt.rangeError("Invalid firstDayOfWeek option: " + rt.strGo(s))
-				}
-				t.setUKeyword("fw", day)
-			}
-			// numeric is a boolean, spelled in the tag as the presence or
-			// absence of a type on -u-kn.
 			nv, e := rt.getField(options, "numeric")
 			if e != nil {
 				return mkundef(), e
@@ -210,6 +207,9 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 					t.setUKeyword("kn", "false")
 				}
 			}
+		}
+		if e := rt.keywordOption(t, options, "numberingSystem", "nu", nil); e != nil {
+			return mkundef(), e
 		}
 
 		t.canonicalize()
@@ -258,10 +258,15 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 	getter("script", func(t *langTag) Value { return str(t.script) })
 	getter("region", func(t *langTag) Value { return str(t.region) })
 	getter("variants", func(t *langTag) Value { return str(strings.Join(t.variants, "-")) })
+	// A keyword getter answers undefined when the keyword is absent and its
+	// value when it is there, which for a keyword written bare is "".
 	kw := func(name, key string) {
 		getter(name, func(t *langTag) Value {
-			v, _ := t.uKeyword(key)
-			return str(v)
+			v, ok := t.uKeyword(key)
+			if !ok {
+				return mkundef()
+			}
+			return rt.newString(v)
 		})
 	}
 	kw("calendar", "ca")
@@ -269,16 +274,12 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 	kw("hourCycle", "hc")
 	kw("caseFirst", "kf")
 	kw("numberingSystem", "nu")
-	getter("firstDayOfWeek", func(t *langTag) Value {
-		v, ok := t.uKeyword("fw")
-		if !ok {
-			return mkundef()
-		}
-		return str(v)
-	})
+	kw("firstDayOfWeek", "fw")
+	// numeric is the one boolean keyword: "-u-kn" and "-u-kn-true" are true,
+	// "-u-kn-false" is false, and no keyword at all is false.
 	getter("numeric", func(t *langTag) Value {
 		v, ok := t.uKeyword("kn")
-		return mkbool(ok && v == "true")
+		return mkbool(ok && (v == "" || v == "true"))
 	})
 
 	intl.defineOwn("Locale", ctor, attrWritable|attrConfigurable)
