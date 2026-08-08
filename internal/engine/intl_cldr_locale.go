@@ -237,7 +237,12 @@ func pluralPick(m map[string]string, tag string, n float64) string {
 	if m == nil {
 		return ""
 	}
-	var p pluralOptions
+	// The category is decided by the number as it will be WRITTEN, not by its
+	// value: Polish counts 123456.78 seconds as "sekundy" and 123456 of them
+	// as "sekund", and the only difference is the two digits after the comma.
+	// So the operands come from the same digit settings the count is formatted
+	// with, which is the default three fraction digits.
+	p := defaultPluralOptions()
 	p.tag = tag
 	if cat, ok := m[p.selectForm(pluralTag(tag), n)]; ok {
 		return cat

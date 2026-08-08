@@ -30,6 +30,24 @@ func parseListOptions(s string) listOptions {
 // patterns returns the four CLDR list patterns: the one for a two-item list,
 // and the start, middle and end pieces of a longer one.
 func (l listOptions) patterns() (two, start, middle, end string) {
+	// CLDR names the three kinds "standard", "or" and "unit", and hangs the
+	// two narrower widths off the same names.
+	name := "standard"
+	switch l.kind {
+	case "disjunction":
+		name = "or"
+	case "unit":
+		name = "unit"
+	}
+	switch l.style {
+	case "short":
+		name += "-short"
+	case "narrow":
+		name += "-narrow"
+	}
+	if p, ok := cldrLists()[l.tag+"\t"+name]; ok {
+		return p.two, p.start, p.middle, p.end
+	}
 	switch l.kind {
 	case "disjunction":
 		return "{0} or {1}", "{0}, {1}", "{0}, {1}", "{0}, or {1}"

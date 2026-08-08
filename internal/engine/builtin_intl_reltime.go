@@ -49,49 +49,55 @@ func singularUnit(s string) (string, bool) {
 	return "", false
 }
 
+// cldrWidth is the name CLDR gives a style: "long" is unsuffixed there as here,
+// and the other two match.
+func cldrWidth(style string) string {
+	switch style {
+	case "short", "narrow":
+		return style
+	}
+	return "long"
+}
+
+// relTimeFor is the locale's relative-time patterns for one unit and style,
+// falling back to the wider styles and then to English.
+func relTimeFor(tag, style, unit string) (cldrRelative, bool) {
+	widths := []string{cldrWidth(style)}
+	switch widths[0] {
+	case "narrow":
+		widths = append(widths, "short", "long")
+	case "short":
+		widths = append(widths, "long")
+	}
+	for _, t := range []string{tag, "en-US"} {
+		for _, w := range widths {
+			if r, ok := cldrRelatives()[t+"\t"+w+"\t"+unit]; ok {
+				return r, true
+			}
+		}
+	}
+	return cldrRelative{}, false
+}
+
 // relTimeAuto is the wording numeric: "auto" uses in place of a number, where
-// English has one. An empty string means there is none and the numeric form is
-// used instead.
-func relTimeAuto(unit string, v float64) string {
-	if v != math.Trunc(v) {
+// the locale has one: "yesterday", "last year", "now". An empty string means
+// there is none and the numeric form is used instead.
+func relTimeAuto(tag, style, unit string, v float64) string {
+	if v != math.Trunc(v) || v < -2 || v > 2 {
 		return ""
 	}
-	switch unit {
-	case "day":
-		switch v {
-		case -1:
-			return "yesterday"
-		case 0:
-			return "today"
-		case 1:
-			return "tomorrow"
-		}
-	case "year", "quarter", "month", "week":
-		switch v {
-		case -1:
-			return "last " + unit
-		case 0:
-			return "this " + unit
-		case 1:
-			return "next " + unit
-		}
-	case "hour", "minute":
-		if v == 0 {
-			return "this " + unit
-		}
-	case "second":
-		if v == 0 {
-			return "now"
-		}
+	r, ok := relTimeFor(tag, style, unit)
+	if !ok {
+		return ""
 	}
-	return ""
+	return r.named[int(v)+2]
 }
 
 // relTimeParts renders the phrase as spans. The numeric span carries the unit
 // it counts, which is what formatToParts reports alongside its value.
 func (r relTimeOptions) relTimeParts(v float64, unit string, li localeInfo) []relPart {
 	if r.numeric == "auto" {
-		if phrase := relTimeAuto(unit, v); phrase != "" {
+		if phrase := relTimeAuto(r.tag, r.style, unit, v); phrase != "" {
 			return []relPart{{numberPart{"literal", phrase}, ""}}
 		}
 	}
@@ -101,27 +107,39 @@ func (r relTimeOptions) relTimeParts(v float64, unit string, li localeInfo) []re
 	n.tag, n.numbering = r.tag, r.numbering
 	num := numberParts(n, li, math.Abs(v))
 
-	word := unit
-	if math.Abs(v) != 1 {
-		word += "s"
+	// The pattern says what goes on either side of the count, and which
+	// pattern applies is the count's plural category: Polish has four.
+	pattern := ""
+	if cr, ok := relTimeFor(r.tag, r.style, unit); ok {
+		side := cr.future
+		if math.Signbit(v) {
+			side = cr.past
+		}
+		pattern = pluralPick(side, r.tag, math.Abs(v))
 	}
-	var out []relPart
-	add := func(typ, val, u string) {
-		if val != "" {
-			out = append(out, relPart{numberPart{typ, val}, u})
+	if pattern == "" {
+		word := unit
+		if math.Abs(v) != 1 {
+			word += "s"
+		}
+		pattern = "in {0} " + word
+		if math.Signbit(v) {
+			pattern = "{0} " + word + " ago"
 		}
 	}
-	past := math.Signbit(v)
-	if !past {
-		add("literal", "in ", "")
+	i := strings.Index(pattern, "{0}")
+	if i < 0 {
+		return []relPart{{numberPart{"literal", pattern}, ""}}
+	}
+	var out []relPart
+	if head := unquoteCLDR(pattern[:i]); head != "" {
+		out = append(out, relPart{numberPart{"literal", head}, ""})
 	}
 	for _, p := range num {
 		out = append(out, relPart{p, unit})
 	}
-	if past {
-		add("literal", " "+word+" ago", "")
-	} else {
-		add("literal", " "+word, "")
+	if tail := unquoteCLDR(pattern[i+3:]); tail != "" {
+		out = append(out, relPart{numberPart{"literal", tail}, ""})
 	}
 	return out
 }

@@ -354,12 +354,17 @@ const cldrUnitData = "" +
 	"af-ZA\tlong\tkilobyte\tone={0} kilogreep;other={0} kilogreep\n" +
 	"af-ZA\tlong\tkilogram\tone={0} kilogram;other={0} kilogram\n" +
 	"af-ZA\tlong\tkilometer\tone={0} kilometer;other={0} kilometer\n" +
+	"af-ZA\tlong\tkilometer-per-hour\tone={0} kilometer per uur;other={0} kilometer per uur\n" +
 	"af-ZA\tlong\tliter\tone={0} liter;other={0} liter\n" +
+	"af-ZA\tlong\tliter-per-kilometer\tone={0} liter per kilometer;other={0} liter per kilometer\n" +
 	"af-ZA\tlong\tmegabit\tone={0} megabis;other={0} megabis\n" +
 	"af-ZA\tlong\tmegabyte\tone={0} megagreep;other={0} megagreep\n" +
 	"af-ZA\tlong\tmeter\tone={0} meter;other={0} meter\n" +
+	"af-ZA\tlong\tmeter-per-second\tone={0} meter per sekonde;other={0} meter per sekonde\n" +
 	"af-ZA\tlong\tmicrosecond\tone={0} mikrosekonde;other={0} mikrosekondes\n" +
 	"af-ZA\tlong\tmile\tone={0} myl;other={0} myl\n" +
+	"af-ZA\tlong\tmile-per-gallon\tone={0} myl per VSA-gelling;other={0} myl per VSA-gelling\n" +
+	"af-ZA\tlong\tmile-per-hour\tone={0} myl per uur;other={0} myl per uur\n" +
 	"af-ZA\tlong\tmile-scandinavian\tone={0} Skandinawiese myl;other={0} Skandinawiese myl\n" +
 	"af-ZA\tlong\tmilliliter\tone={0} milliliter;other={0} milliliter\n" +
 	"af-ZA\tlong\tmillimeter\tone={0} millimeter;other={0} millimeter\n" +
@@ -400,12 +405,17 @@ const cldrUnitData = "" +
 	"af-ZA\tshort\tkilobyte\tother={0} kB\n" +
 	"af-ZA\tshort\tkilogram\tother={0} kg\n" +
 	"af-ZA\tshort\tkilometer\tother={0} km\n" +
+	"af-ZA\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"af-ZA\tshort\tliter\tother={0} l\n" +
+	"af-ZA\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"af-ZA\tshort\tmegabit\tother={0} Mb\n" +
 	"af-ZA\tshort\tmegabyte\tother={0} MB\n" +
 	"af-ZA\tshort\tmeter\tother={0} m\n" +
+	"af-ZA\tshort\tmeter-per-second\tone={0} m/s.;other={0} m/s.\n" +
 	"af-ZA\tshort\tmicrosecond\tone={0} μs.;other={0} μs.\n" +
 	"af-ZA\tshort\tmile\tone={0} myl;other={0} myl\n" +
+	"af-ZA\tshort\tmile-per-gallon\tone={0} m.p.VSA-g.;other={0} m.p.VSA-g.\n" +
+	"af-ZA\tshort\tmile-per-hour\tone={0} myl/h;other={0} myl/h\n" +
 	"af-ZA\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"af-ZA\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"af-ZA\tshort\tmillimeter\tother={0} mm\n" +
@@ -446,12 +456,17 @@ const cldrUnitData = "" +
 	"af-ZA\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"af-ZA\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"af-ZA\tnarrow\tkilometer\tother={0} km\n" +
+	"af-ZA\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"af-ZA\tnarrow\tliter\tother={0} l\n" +
+	"af-ZA\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"af-ZA\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"af-ZA\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"af-ZA\tnarrow\tmeter\tother={0} m\n" +
+	"af-ZA\tnarrow\tmeter-per-second\tone={0}m/s.;other={0}m/s.\n" +
 	"af-ZA\tnarrow\tmicrosecond\tone={0}μs.;other={0}μs.\n" +
 	"af-ZA\tnarrow\tmile\tone={0} myl;other={0} myl\n" +
+	"af-ZA\tnarrow\tmile-per-gallon\tone={0}m.p.g.;other={0}m.p.g.\n" +
+	"af-ZA\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"af-ZA\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"af-ZA\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"af-ZA\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -492,12 +507,17 @@ const cldrUnitData = "" +
 	"am-ET\tlong\tkilobyte\tone={0} ኪባ;other={0} ኪባ\n" +
 	"am-ET\tlong\tkilogram\tone={0} ኪሎግራም;other={0} ኪሎግራም\n" +
 	"am-ET\tlong\tkilometer\tone={0} ኪሎሜትር;other={0} ኪሎሜትር\n" +
+	"am-ET\tlong\tkilometer-per-hour\tone={0} ኪሎሜትር በሰዓት;other={0} ኪሎሜትር በሰዓት\n" +
 	"am-ET\tlong\tliter\tone={0} ሊትር;other={0} ሊትር\n" +
+	"am-ET\tlong\tliter-per-kilometer\tone={0} ሊ/ኪሜ;other={0} ሊ/ኪሜ\n" +
 	"am-ET\tlong\tmegabit\tone={0} ሜባ;other={0} ሜባ\n" +
 	"am-ET\tlong\tmegabyte\tone={0} ሜጋባይት;other={0} ሜጋባይት\n" +
 	"am-ET\tlong\tmeter\tone={0} ሜትር;other={0} ሜትር\n" +
+	"am-ET\tlong\tmeter-per-second\tone={0} ሜትር በሰከንድ;other={0} ሜትር በሰከንድ\n" +
 	"am-ET\tlong\tmicrosecond\tone={0} ማይክሮሰከንድ;other={0} ማይክሮሰከንድ\n" +
 	"am-ET\tlong\tmile\tone={0} ማይል;other={0} ማይል\n" +
+	"am-ET\tlong\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"am-ET\tlong\tmile-per-hour\tone={0} ማይል በሰዓት;other={0} ማይል በሰዓት\n" +
 	"am-ET\tlong\tmile-scandinavian\tone={0} ስማይል;other={0} ስማይል\n" +
 	"am-ET\tlong\tmilliliter\tone={0} ሚሊ ሊትር;other={0} ሚሊ ሊትር\n" +
 	"am-ET\tlong\tmillimeter\tone={0} ሚሊሜትር;other={0} ሚሊሜትር\n" +
@@ -538,12 +558,17 @@ const cldrUnitData = "" +
 	"am-ET\tshort\tkilobyte\tone={0} ኪባ;other={0} ኪባ\n" +
 	"am-ET\tshort\tkilogram\tone={0} ኪግ;other={0} ኪግ\n" +
 	"am-ET\tshort\tkilometer\tone={0} ኪሜ;other={0} ኪሜ\n" +
+	"am-ET\tshort\tkilometer-per-hour\tone={0} ኪሜ/ሰ;other={0} ኪሜ/ሰ\n" +
 	"am-ET\tshort\tliter\tone={0} ሊ;other={0} ሊ\n" +
+	"am-ET\tshort\tliter-per-kilometer\tone={0} ሊ/ኪሜ;other={0} ሊ/ኪሜ\n" +
 	"am-ET\tshort\tmegabit\tone={0} ሜባ;other={0} ሜባ\n" +
 	"am-ET\tshort\tmegabyte\tone={0} ሜጋባይት;other={0} ሜጋባይት\n" +
 	"am-ET\tshort\tmeter\tone={0} ሜ;other={0} ሜ\n" +
+	"am-ET\tshort\tmeter-per-second\tone={0} ሜ/ሴ;other={0} ሜ/ሴ\n" +
 	"am-ET\tshort\tmicrosecond\tone={0} ማሰ;other={0} ማሰ\n" +
 	"am-ET\tshort\tmile\tone={0} ማይል;other={0} ማይል\n" +
+	"am-ET\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"am-ET\tshort\tmile-per-hour\tone={0} ማይል/ሰ;other={0} ማይል/ሰ\n" +
 	"am-ET\tshort\tmile-scandinavian\tone={0} ስማይል;other={0} ስማይል\n" +
 	"am-ET\tshort\tmilliliter\tone={0} ሚሊ ሊትር;other={0} ሚሊ ሊትር\n" +
 	"am-ET\tshort\tmillimeter\tone={0} ሚሜ;other={0} ሚሜ\n" +
@@ -584,12 +609,17 @@ const cldrUnitData = "" +
 	"am-ET\tnarrow\tkilobyte\tone={0} ኪባ;other={0} ኪባ\n" +
 	"am-ET\tnarrow\tkilogram\tone={0} ኪግ;other={0} ኪግ\n" +
 	"am-ET\tnarrow\tkilometer\tone={0} ኪሜ;other={0} ኪሜ\n" +
+	"am-ET\tnarrow\tkilometer-per-hour\tone={0} ኪሜ/ሰ;other={0} ኪሜ/ሰ\n" +
 	"am-ET\tnarrow\tliter\tone={0} ሊ;other={0} ሊ\n" +
+	"am-ET\tnarrow\tliter-per-kilometer\tone={0} ሊ/ኪሜ;other={0} ሊ/ኪሜ\n" +
 	"am-ET\tnarrow\tmegabit\tone={0} ሜባ;other={0} ሜባ\n" +
 	"am-ET\tnarrow\tmegabyte\tone={0} ሜጋባይት;other={0} ሜጋባይት\n" +
 	"am-ET\tnarrow\tmeter\tone={0} ሜ;other={0} ሜ\n" +
+	"am-ET\tnarrow\tmeter-per-second\tone={0} ሜ/ሴ;other={0} ሜ/ሴ\n" +
 	"am-ET\tnarrow\tmicrosecond\tone={0} ማሰ;other={0} ማሰ\n" +
 	"am-ET\tnarrow\tmile\tone={0} ማይል;other={0} ማይል\n" +
+	"am-ET\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"am-ET\tnarrow\tmile-per-hour\tone={0} ማይል/ሰ;other={0} ማይል/ሰ\n" +
 	"am-ET\tnarrow\tmile-scandinavian\tone={0} ስማይል;other={0} ስማይል\n" +
 	"am-ET\tnarrow\tmilliliter\tone={0} ሚሊ;other={0} ሚሊ\n" +
 	"am-ET\tnarrow\tmillimeter\tone={0} ሚሜ;other={0} ሚሜ\n" +
@@ -630,12 +660,17 @@ const cldrUnitData = "" +
 	"az-AZ\tlong\tkilobyte\tone={0} kilobayt;other={0} kilobayt\n" +
 	"az-AZ\tlong\tkilogram\tone={0} kiloqram;other={0} kiloqram\n" +
 	"az-AZ\tlong\tkilometer\tone={0} kilometr;other={0} kilometr\n" +
+	"az-AZ\tlong\tkilometer-per-hour\tone={0} kilometr/saat;other={0} kilometr/saat\n" +
 	"az-AZ\tlong\tliter\tone={0} litr;other={0} litr\n" +
+	"az-AZ\tlong\tliter-per-kilometer\tone={0} litr/kilometr;other={0} litr/kilometr\n" +
 	"az-AZ\tlong\tmegabit\tone={0} meqabit;other={0} meqabit\n" +
 	"az-AZ\tlong\tmegabyte\tone={0} meqabayt;other={0} meqabayt\n" +
 	"az-AZ\tlong\tmeter\tone={0} metr;other={0} metr\n" +
+	"az-AZ\tlong\tmeter-per-second\tone={0} metr/saniyə;other={0} metr/saniyə\n" +
 	"az-AZ\tlong\tmicrosecond\tone={0} mikrosaniyə;other={0} mikrosaniyə\n" +
 	"az-AZ\tlong\tmile\tone={0} mil;other={0} mil\n" +
+	"az-AZ\tlong\tmile-per-gallon\tone=qallona {0} mil;other=qallona {0} mil\n" +
+	"az-AZ\tlong\tmile-per-hour\tone={0} mil/saat;other={0} mil/saat\n" +
 	"az-AZ\tlong\tmile-scandinavian\tother={0} smi\n" +
 	"az-AZ\tlong\tmilliliter\tone={0} millilitr;other={0} millilitr\n" +
 	"az-AZ\tlong\tmillimeter\tone={0} millimetr;other={0} millimetr\n" +
@@ -676,12 +711,17 @@ const cldrUnitData = "" +
 	"az-AZ\tshort\tkilobyte\tother={0} kB\n" +
 	"az-AZ\tshort\tkilogram\tone={0} kq;other={0} kq\n" +
 	"az-AZ\tshort\tkilometer\tother={0} km\n" +
+	"az-AZ\tshort\tkilometer-per-hour\tone={0} km/saat;other={0} km/saat\n" +
 	"az-AZ\tshort\tliter\tother={0} l\n" +
+	"az-AZ\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"az-AZ\tshort\tmegabit\tother={0} Mb\n" +
 	"az-AZ\tshort\tmegabyte\tother={0} MB\n" +
 	"az-AZ\tshort\tmeter\tother={0} m\n" +
+	"az-AZ\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"az-AZ\tshort\tmicrosecond\tone={0} μsan;other={0} μsan\n" +
 	"az-AZ\tshort\tmile\tone={0} mil;other={0} mil\n" +
+	"az-AZ\tshort\tmile-per-gallon\tone={0} mil/qal;other={0} mil/qal\n" +
+	"az-AZ\tshort\tmile-per-hour\tone={0} mil/saat;other={0} mil/saat\n" +
 	"az-AZ\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"az-AZ\tshort\tmilliliter\tother={0} mL\n" +
 	"az-AZ\tshort\tmillimeter\tother={0} mm\n" +
@@ -722,12 +762,17 @@ const cldrUnitData = "" +
 	"az-AZ\tnarrow\tkilobyte\tother={0} kB\n" +
 	"az-AZ\tnarrow\tkilogram\tone={0} kq;other={0} kq\n" +
 	"az-AZ\tnarrow\tkilometer\tother={0} km\n" +
+	"az-AZ\tnarrow\tkilometer-per-hour\tone={0} km/saat;other={0} km/saat\n" +
 	"az-AZ\tnarrow\tliter\tother={0} l\n" +
+	"az-AZ\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"az-AZ\tnarrow\tmegabit\tother={0} Mb\n" +
 	"az-AZ\tnarrow\tmegabyte\tother={0} MB\n" +
 	"az-AZ\tnarrow\tmeter\tother={0} m\n" +
+	"az-AZ\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"az-AZ\tnarrow\tmicrosecond\tone={0} μsan;other={0} μsan\n" +
 	"az-AZ\tnarrow\tmile\tone={0} mil;other={0} mil\n" +
+	"az-AZ\tnarrow\tmile-per-gallon\tone={0} mil/qal;other={0} mil/qal\n" +
+	"az-AZ\tnarrow\tmile-per-hour\tone={0} mil/saat;other={0} mil/saat\n" +
 	"az-AZ\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"az-AZ\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"az-AZ\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -768,12 +813,17 @@ const cldrUnitData = "" +
 	"bg-BG\tlong\tkilobyte\tone={0} килобайт;other={0} килобайта\n" +
 	"bg-BG\tlong\tkilogram\tone={0} килограм;other={0} килограма\n" +
 	"bg-BG\tlong\tkilometer\tone={0} километър;other={0} километра\n" +
+	"bg-BG\tlong\tkilometer-per-hour\tone={0} километър в час;other={0} километра в час\n" +
 	"bg-BG\tlong\tliter\tone={0} литър;other={0} литра\n" +
+	"bg-BG\tlong\tliter-per-kilometer\tone={0} литър на километър;other={0} литра на километър\n" +
 	"bg-BG\tlong\tmegabit\tone={0} мегабит;other={0} мегабита\n" +
 	"bg-BG\tlong\tmegabyte\tone={0} мегабайт;other={0} мегабайта\n" +
 	"bg-BG\tlong\tmeter\tone={0} метър;other={0} метра\n" +
+	"bg-BG\tlong\tmeter-per-second\tone={0} метър за секунда;other={0} метра за секунда\n" +
 	"bg-BG\tlong\tmicrosecond\tone={0} микросекунда;other={0} микросекунди\n" +
 	"bg-BG\tlong\tmile\tone={0} миля;other={0} мили\n" +
+	"bg-BG\tlong\tmile-per-gallon\tone={0} миля на галон;other={0} мили на галон\n" +
+	"bg-BG\tlong\tmile-per-hour\tone={0} миля в час;other={0} мили в час\n" +
 	"bg-BG\tlong\tmile-scandinavian\tone={0} шведска миля;other={0} шведски мили\n" +
 	"bg-BG\tlong\tmilliliter\tone={0} милилитър;other={0} милилитра\n" +
 	"bg-BG\tlong\tmillimeter\tone={0} милиметър;other={0} милиметра\n" +
@@ -814,12 +864,17 @@ const cldrUnitData = "" +
 	"bg-BG\tshort\tkilobyte\tother={0} kB\n" +
 	"bg-BG\tshort\tkilogram\tother={0} kg\n" +
 	"bg-BG\tshort\tkilometer\tother={0} km\n" +
+	"bg-BG\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"bg-BG\tshort\tliter\tother={0} l\n" +
+	"bg-BG\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"bg-BG\tshort\tmegabit\tother={0} Mb\n" +
 	"bg-BG\tshort\tmegabyte\tother={0} MB\n" +
 	"bg-BG\tshort\tmeter\tother={0} m\n" +
+	"bg-BG\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"bg-BG\tshort\tmicrosecond\tother={0} μs\n" +
 	"bg-BG\tshort\tmile\tother={0} mi\n" +
+	"bg-BG\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"bg-BG\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"bg-BG\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"bg-BG\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"bg-BG\tshort\tmillimeter\tother={0} mm\n" +
@@ -860,12 +915,17 @@ const cldrUnitData = "" +
 	"bg-BG\tnarrow\tkilobyte\tother={0} kB\n" +
 	"bg-BG\tnarrow\tkilogram\tother={0} kg\n" +
 	"bg-BG\tnarrow\tkilometer\tother={0} km\n" +
+	"bg-BG\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"bg-BG\tnarrow\tliter\tother={0} l\n" +
+	"bg-BG\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"bg-BG\tnarrow\tmegabit\tother={0} Mb\n" +
 	"bg-BG\tnarrow\tmegabyte\tother={0} MB\n" +
 	"bg-BG\tnarrow\tmeter\tother={0} m\n" +
+	"bg-BG\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"bg-BG\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"bg-BG\tnarrow\tmile\tother={0} mi\n" +
+	"bg-BG\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"bg-BG\tnarrow\tmile-per-hour\tone={0} миля/ч;other={0} мили/ч\n" +
 	"bg-BG\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"bg-BG\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"bg-BG\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -906,12 +966,17 @@ const cldrUnitData = "" +
 	"bs-BA\tlong\tkilobyte\tone={0} kilobajt;few={0} kilobajta;other={0} kilobajta\n" +
 	"bs-BA\tlong\tkilogram\tone={0} kilogram;few={0} kilograma;other={0} kilograma\n" +
 	"bs-BA\tlong\tkilometer\tone={0} kilometar;few={0} kilometra;other={0} kilometara\n" +
+	"bs-BA\tlong\tkilometer-per-hour\tone={0} kilometar na sat;few={0} kilometra na sat;other={0} kilometara na sat\n" +
 	"bs-BA\tlong\tliter\tone={0} litar;few={0} litra;other={0} litara\n" +
+	"bs-BA\tlong\tliter-per-kilometer\tone={0} litar po kilometru;few={0} litra po kilometru;other={0} litara po kilometru\n" +
 	"bs-BA\tlong\tmegabit\tone={0} megabit;few={0} megabita;other={0} megabita\n" +
 	"bs-BA\tlong\tmegabyte\tone={0} megabajt;few={0} megabajta;other={0} megabajta\n" +
 	"bs-BA\tlong\tmeter\tone={0} metar;few={0} metra;other={0} metara\n" +
+	"bs-BA\tlong\tmeter-per-second\tone={0} metar u sekundi;few={0} metra u sekundi;other={0} metara u sekundi\n" +
 	"bs-BA\tlong\tmicrosecond\tone={0} mikrosekunda;few={0} mikrosekunde;other={0} mikrosekundi\n" +
 	"bs-BA\tlong\tmile\tone={0} milja;few={0} milje;other={0} milja\n" +
+	"bs-BA\tlong\tmile-per-gallon\tone={0} milja po galonu;few={0} milje po galonu;other={0} milja po galonu\n" +
+	"bs-BA\tlong\tmile-per-hour\tone={0} milja na sat;few={0} milje na sat;other={0} milja na sat\n" +
 	"bs-BA\tlong\tmile-scandinavian\tone={0} skandinavska milja;few={0} skandinavske milje;other={0} skandinavskih milja\n" +
 	"bs-BA\tlong\tmilliliter\tone={0} mililitar;few={0} mililitra;other={0} mililitara\n" +
 	"bs-BA\tlong\tmillimeter\tone={0} milimetar;few={0} milimetra;other={0} milimetara\n" +
@@ -952,12 +1017,17 @@ const cldrUnitData = "" +
 	"bs-BA\tshort\tkilobyte\tother={0} kB\n" +
 	"bs-BA\tshort\tkilogram\tother={0} kg\n" +
 	"bs-BA\tshort\tkilometer\tother={0} km\n" +
+	"bs-BA\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"bs-BA\tshort\tliter\tother={0} l\n" +
+	"bs-BA\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"bs-BA\tshort\tmegabit\tother={0} Mb\n" +
 	"bs-BA\tshort\tmegabyte\tother={0} MB\n" +
 	"bs-BA\tshort\tmeter\tother={0} m\n" +
+	"bs-BA\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"bs-BA\tshort\tmicrosecond\tother={0} μs\n" +
 	"bs-BA\tshort\tmile\tother={0} mi\n" +
+	"bs-BA\tshort\tmile-per-gallon\tone={0} mpg;few={0} mpg;other={0} mpg\n" +
+	"bs-BA\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"bs-BA\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"bs-BA\tshort\tmilliliter\tone={0} ml;few={0} ml;other={0} ml\n" +
 	"bs-BA\tshort\tmillimeter\tother={0} mm\n" +
@@ -998,12 +1068,17 @@ const cldrUnitData = "" +
 	"bs-BA\tnarrow\tkilobyte\tother={0} kB\n" +
 	"bs-BA\tnarrow\tkilogram\tother={0} kg\n" +
 	"bs-BA\tnarrow\tkilometer\tother={0} km\n" +
+	"bs-BA\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"bs-BA\tnarrow\tliter\tone={0}l;few={0}l;other={0}l\n" +
+	"bs-BA\tnarrow\tliter-per-kilometer\tother={0} L/km\n" +
 	"bs-BA\tnarrow\tmegabit\tother={0} Mb\n" +
 	"bs-BA\tnarrow\tmegabyte\tother={0} MB\n" +
 	"bs-BA\tnarrow\tmeter\tother={0} m\n" +
+	"bs-BA\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"bs-BA\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"bs-BA\tnarrow\tmile\tother={0} mi\n" +
+	"bs-BA\tnarrow\tmile-per-gallon\tone={0} mpg;few={0} mpg;other={0} mpg\n" +
+	"bs-BA\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"bs-BA\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"bs-BA\tnarrow\tmilliliter\tone={0} ml;few={0} ml;other={0} ml\n" +
 	"bs-BA\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -1044,12 +1119,17 @@ const cldrUnitData = "" +
 	"ca-ES\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"ca-ES\tlong\tkilogram\tone={0} quilogram;other={0} quilograms\n" +
 	"ca-ES\tlong\tkilometer\tone={0} quilòmetre;other={0} quilòmetres\n" +
+	"ca-ES\tlong\tkilometer-per-hour\tone={0} quilòmetre per hora;other={0} quilòmetres per hora\n" +
 	"ca-ES\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"ca-ES\tlong\tliter-per-kilometer\tone={0} litre per quilòmetre;other={0} litres per quilòmetre\n" +
 	"ca-ES\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"ca-ES\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"ca-ES\tlong\tmeter\tone={0} metre;other={0} metres\n" +
+	"ca-ES\tlong\tmeter-per-second\tone={0} metre per segon;other={0} metres per segon\n" +
 	"ca-ES\tlong\tmicrosecond\tone={0} microsegon;other={0} microsegons\n" +
 	"ca-ES\tlong\tmile\tone={0} milla;other={0} milles\n" +
+	"ca-ES\tlong\tmile-per-gallon\tone={0} milla per galó;other={0} milles per galó\n" +
+	"ca-ES\tlong\tmile-per-hour\tone={0} milla per hora;other={0} milles per hora\n" +
 	"ca-ES\tlong\tmile-scandinavian\tone={0} milla escandinava;other={0} milles escandinaves\n" +
 	"ca-ES\tlong\tmilliliter\tone={0} mil·lilitre;other={0} mil·lilitres\n" +
 	"ca-ES\tlong\tmillimeter\tone={0} mil·límetre;other={0} mil·límetres\n" +
@@ -1090,12 +1170,17 @@ const cldrUnitData = "" +
 	"ca-ES\tshort\tkilobyte\tother={0} kB\n" +
 	"ca-ES\tshort\tkilogram\tother={0} kg\n" +
 	"ca-ES\tshort\tkilometer\tother={0} km\n" +
+	"ca-ES\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"ca-ES\tshort\tliter\tother={0} l\n" +
+	"ca-ES\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"ca-ES\tshort\tmegabit\tone={0} Mbit;other={0} Mbit\n" +
 	"ca-ES\tshort\tmegabyte\tother={0} MB\n" +
 	"ca-ES\tshort\tmeter\tother={0} m\n" +
+	"ca-ES\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"ca-ES\tshort\tmicrosecond\tother={0} μs\n" +
 	"ca-ES\tshort\tmile\tother={0} mi\n" +
+	"ca-ES\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"ca-ES\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"ca-ES\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"ca-ES\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"ca-ES\tshort\tmillimeter\tother={0} mm\n" +
@@ -1136,12 +1221,17 @@ const cldrUnitData = "" +
 	"ca-ES\tnarrow\tkilobyte\tother={0} kB\n" +
 	"ca-ES\tnarrow\tkilogram\tother={0} kg\n" +
 	"ca-ES\tnarrow\tkilometer\tother={0} km\n" +
+	"ca-ES\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"ca-ES\tnarrow\tliter\tother={0} l\n" +
+	"ca-ES\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"ca-ES\tnarrow\tmegabit\tone={0} Mbit;other={0} Mbit\n" +
 	"ca-ES\tnarrow\tmegabyte\tother={0} MB\n" +
 	"ca-ES\tnarrow\tmeter\tother={0} m\n" +
+	"ca-ES\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"ca-ES\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"ca-ES\tnarrow\tmile\tother={0} mi\n" +
+	"ca-ES\tnarrow\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"ca-ES\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"ca-ES\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"ca-ES\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"ca-ES\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -1182,12 +1272,17 @@ const cldrUnitData = "" +
 	"cs-CZ\tlong\tkilobyte\tone={0} kilobajt;few={0} kilobajty;many={0} kilobajtu;other={0} kilobajtů\n" +
 	"cs-CZ\tlong\tkilogram\tone={0} kilogram;few={0} kilogramy;many={0} kilogramu;other={0} kilogramů\n" +
 	"cs-CZ\tlong\tkilometer\tone={0} kilometr;few={0} kilometry;many={0} kilometru;other={0} kilometrů\n" +
+	"cs-CZ\tlong\tkilometer-per-hour\tone={0} kilometr za hodinu;few={0} kilometry za hodinu;many={0} kilometru za hodinu;other={0} kilometrů za hodinu\n" +
 	"cs-CZ\tlong\tliter\tone={0} litr;few={0} litry;many={0} litru;other={0} litrů\n" +
+	"cs-CZ\tlong\tliter-per-kilometer\tone={0} litr na kilometr;few={0} litry na kilometr;many={0} litru na kilometr;other={0} litrů na kilometr\n" +
 	"cs-CZ\tlong\tmegabit\tone={0} megabit;few={0} megabity;many={0} megabitu;other={0} megabitů\n" +
 	"cs-CZ\tlong\tmegabyte\tone={0} megabajt;few={0} megabajty;many={0} megabajtu;other={0} megabajtů\n" +
 	"cs-CZ\tlong\tmeter\tone={0} metr;few={0} metry;many={0} metru;other={0} metrů\n" +
+	"cs-CZ\tlong\tmeter-per-second\tone={0} metr za sekundu;few={0} metry za sekundu;many={0} metru za sekundu;other={0} metrů za sekundu\n" +
 	"cs-CZ\tlong\tmicrosecond\tone={0} mikrosekunda;few={0} mikrosekundy;many={0} mikrosekundy;other={0} mikrosekund\n" +
 	"cs-CZ\tlong\tmile\tone={0} míle;few={0} míle;many={0} míle;other={0} mil\n" +
+	"cs-CZ\tlong\tmile-per-gallon\tone={0} míle na galon;few={0} míle na galon;many={0} míle na galon;other={0} mil na galon\n" +
+	"cs-CZ\tlong\tmile-per-hour\tone={0} míle za hodinu;few={0} míle za hodinu;many={0} míle za hodinu;other={0} mil za hodinu\n" +
 	"cs-CZ\tlong\tmile-scandinavian\tone={0} skandinávská míle;few={0} skandinávské míle;many={0} skandinávské míle;other={0} skandinávských mil\n" +
 	"cs-CZ\tlong\tmilliliter\tone={0} mililitr;few={0} mililitry;many={0} mililitru;other={0} mililitrů\n" +
 	"cs-CZ\tlong\tmillimeter\tone={0} milimetr;few={0} milimetry;many={0} milimetru;other={0} milimetrů\n" +
@@ -1228,12 +1323,17 @@ const cldrUnitData = "" +
 	"cs-CZ\tshort\tkilobyte\tother={0} kB\n" +
 	"cs-CZ\tshort\tkilogram\tother={0} kg\n" +
 	"cs-CZ\tshort\tkilometer\tother={0} km\n" +
+	"cs-CZ\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"cs-CZ\tshort\tliter\tother={0} l\n" +
+	"cs-CZ\tshort\tliter-per-kilometer\tone={0} l/km;few={0} l/km;many={0} l/km;other={0} l/km\n" +
 	"cs-CZ\tshort\tmegabit\tother={0} Mb\n" +
 	"cs-CZ\tshort\tmegabyte\tother={0} MB\n" +
 	"cs-CZ\tshort\tmeter\tother={0} m\n" +
+	"cs-CZ\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"cs-CZ\tshort\tmicrosecond\tother={0} μs\n" +
 	"cs-CZ\tshort\tmile\tother={0} mi\n" +
+	"cs-CZ\tshort\tmile-per-gallon\tone={0} mpg;few={0} mpg;many={0} mpg;other={0} mpg\n" +
+	"cs-CZ\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"cs-CZ\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"cs-CZ\tshort\tmilliliter\tone={0} ml;few={0} ml;many={0} ml;other={0} ml\n" +
 	"cs-CZ\tshort\tmillimeter\tother={0} mm\n" +
@@ -1274,12 +1374,17 @@ const cldrUnitData = "" +
 	"cs-CZ\tnarrow\tkilobyte\tother={0} kB\n" +
 	"cs-CZ\tnarrow\tkilogram\tother={0} kg\n" +
 	"cs-CZ\tnarrow\tkilometer\tother={0} km\n" +
+	"cs-CZ\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"cs-CZ\tnarrow\tliter\tother={0} l\n" +
+	"cs-CZ\tnarrow\tliter-per-kilometer\tone={0} l/km;few={0} l/km;many={0} l/km;other={0} l/km\n" +
 	"cs-CZ\tnarrow\tmegabit\tother={0} Mb\n" +
 	"cs-CZ\tnarrow\tmegabyte\tother={0} MB\n" +
 	"cs-CZ\tnarrow\tmeter\tother={0} m\n" +
+	"cs-CZ\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"cs-CZ\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"cs-CZ\tnarrow\tmile\tother={0} mi\n" +
+	"cs-CZ\tnarrow\tmile-per-gallon\tone={0} mpg;few={0} mpg;many={0} mpg;other={0} mpg\n" +
+	"cs-CZ\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"cs-CZ\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"cs-CZ\tnarrow\tmilliliter\tone={0} ml;few={0} ml;many={0} ml;other={0} ml\n" +
 	"cs-CZ\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -1320,12 +1425,17 @@ const cldrUnitData = "" +
 	"da-DK\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"da-DK\tlong\tkilogram\tone={0} kilogram;other={0} kilogram\n" +
 	"da-DK\tlong\tkilometer\tone={0} kilometer;other={0} kilometer\n" +
+	"da-DK\tlong\tkilometer-per-hour\tone={0} kilometer i timen;other={0} kilometer i timen\n" +
 	"da-DK\tlong\tliter\tone={0} liter;other={0} liter\n" +
+	"da-DK\tlong\tliter-per-kilometer\tone={0} liter pr. kilometer;other={0} liter pr. kilometer\n" +
 	"da-DK\tlong\tmegabit\tone={0} megabit;other={0} megabit\n" +
 	"da-DK\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"da-DK\tlong\tmeter\tone={0} meter;other={0} meter\n" +
+	"da-DK\tlong\tmeter-per-second\tone={0} meter i sekundet;other={0} meter i sekundet\n" +
 	"da-DK\tlong\tmicrosecond\tone={0} mikrosekund;other={0} mikrosekunder\n" +
 	"da-DK\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"da-DK\tlong\tmile-per-gallon\tone=mil pr. gallon;other={0} mil pr. gallon\n" +
+	"da-DK\tlong\tmile-per-hour\tone={0} engelsk mil i timen;other={0} engelske mil i timen\n" +
 	"da-DK\tlong\tmile-scandinavian\tone={0} svensk mil;other={0} svenske mil\n" +
 	"da-DK\tlong\tmilliliter\tone={0} milliliter;other={0} milliliter\n" +
 	"da-DK\tlong\tmillimeter\tone={0} millimeter;other={0} millimeter\n" +
@@ -1366,12 +1476,17 @@ const cldrUnitData = "" +
 	"da-DK\tshort\tkilobyte\tother={0} kB\n" +
 	"da-DK\tshort\tkilogram\tother={0} kg\n" +
 	"da-DK\tshort\tkilometer\tother={0} km\n" +
+	"da-DK\tshort\tkilometer-per-hour\tone={0} km/t.;other={0} km/t.\n" +
 	"da-DK\tshort\tliter\tother={0} l\n" +
+	"da-DK\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"da-DK\tshort\tmegabit\tone={0} Mbit;other={0} Mbit\n" +
 	"da-DK\tshort\tmegabyte\tother={0} MB\n" +
 	"da-DK\tshort\tmeter\tother={0} m\n" +
+	"da-DK\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"da-DK\tshort\tmicrosecond\tother={0} μs\n" +
 	"da-DK\tshort\tmile\tother={0} mi\n" +
+	"da-DK\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"da-DK\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"da-DK\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"da-DK\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"da-DK\tshort\tmillimeter\tother={0} mm\n" +
@@ -1412,12 +1527,17 @@ const cldrUnitData = "" +
 	"da-DK\tnarrow\tkilobyte\tother={0} kB\n" +
 	"da-DK\tnarrow\tkilogram\tother={0} kg\n" +
 	"da-DK\tnarrow\tkilometer\tother={0} km\n" +
+	"da-DK\tnarrow\tkilometer-per-hour\tone={0} km/t;other={0} km/t\n" +
 	"da-DK\tnarrow\tliter\tother={0} l\n" +
+	"da-DK\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"da-DK\tnarrow\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"da-DK\tnarrow\tmegabyte\tother={0} MB\n" +
 	"da-DK\tnarrow\tmeter\tother={0} m\n" +
+	"da-DK\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"da-DK\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"da-DK\tnarrow\tmile\tother={0} mi\n" +
+	"da-DK\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"da-DK\tnarrow\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"da-DK\tnarrow\tmile-scandinavian\tone={0}sv. mil;other={0}sv. mil\n" +
 	"da-DK\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"da-DK\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -1458,12 +1578,17 @@ const cldrUnitData = "" +
 	"de-AT\tlong\tkilobyte\tone={0} Kilobyte;other={0} Kilobyte\n" +
 	"de-AT\tlong\tkilogram\tone={0} Kilogramm;other={0} Kilogramm\n" +
 	"de-AT\tlong\tkilometer\tone={0} Kilometer;other={0} Kilometer\n" +
+	"de-AT\tlong\tkilometer-per-hour\tone={0} Kilometer pro Stunde;other={0} Kilometer pro Stunde\n" +
 	"de-AT\tlong\tliter\tone={0} Liter;other={0} Liter\n" +
+	"de-AT\tlong\tliter-per-kilometer\tone={0} Liter pro Kilometer;other={0} Liter pro Kilometer\n" +
 	"de-AT\tlong\tmegabit\tone={0} Megabit;other={0} Megabit\n" +
 	"de-AT\tlong\tmegabyte\tone={0} Megabyte;other={0} Megabyte\n" +
 	"de-AT\tlong\tmeter\tone={0} Meter;other={0} Meter\n" +
+	"de-AT\tlong\tmeter-per-second\tone={0} Meter pro Sekunde;other={0} Meter pro Sekunde\n" +
 	"de-AT\tlong\tmicrosecond\tone={0} Mikrosekunde;other={0} Mikrosekunden\n" +
 	"de-AT\tlong\tmile\tone={0} Meile;other={0} Meilen\n" +
+	"de-AT\tlong\tmile-per-gallon\tone={0} Meile pro Gallone;other={0} Meilen pro Gallone\n" +
+	"de-AT\tlong\tmile-per-hour\tone={0} Meile pro Stunde;other={0} Meilen pro Stunde\n" +
 	"de-AT\tlong\tmile-scandinavian\tone={0} skandinavische Meile;other={0} skandinavische Meilen\n" +
 	"de-AT\tlong\tmilliliter\tone={0} Milliliter;other={0} Milliliter\n" +
 	"de-AT\tlong\tmillimeter\tone={0} Millimeter;other={0} Millimeter\n" +
@@ -1504,12 +1629,17 @@ const cldrUnitData = "" +
 	"de-AT\tshort\tkilobyte\tother={0} kB\n" +
 	"de-AT\tshort\tkilogram\tother={0} kg\n" +
 	"de-AT\tshort\tkilometer\tother={0} km\n" +
+	"de-AT\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"de-AT\tshort\tliter\tother={0} l\n" +
+	"de-AT\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"de-AT\tshort\tmegabit\tother={0} Mb\n" +
 	"de-AT\tshort\tmegabyte\tother={0} MB\n" +
 	"de-AT\tshort\tmeter\tother={0} m\n" +
+	"de-AT\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"de-AT\tshort\tmicrosecond\tother={0} μs\n" +
 	"de-AT\tshort\tmile\tother={0} mi\n" +
+	"de-AT\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"de-AT\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"de-AT\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"de-AT\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"de-AT\tshort\tmillimeter\tother={0} mm\n" +
@@ -1550,12 +1680,17 @@ const cldrUnitData = "" +
 	"de-AT\tnarrow\tkilobyte\tother={0} kB\n" +
 	"de-AT\tnarrow\tkilogram\tother={0} kg\n" +
 	"de-AT\tnarrow\tkilometer\tother={0} km\n" +
+	"de-AT\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"de-AT\tnarrow\tliter\tother={0} l\n" +
+	"de-AT\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"de-AT\tnarrow\tmegabit\tother={0} Mb\n" +
 	"de-AT\tnarrow\tmegabyte\tother={0} MB\n" +
 	"de-AT\tnarrow\tmeter\tother={0} m\n" +
+	"de-AT\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"de-AT\tnarrow\tmicrosecond\tone={0}μs;other={0} μs\n" +
 	"de-AT\tnarrow\tmile\tother={0} mi\n" +
+	"de-AT\tnarrow\tmile-per-gallon\tone={0}mpg;other={0}mpg\n" +
+	"de-AT\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"de-AT\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"de-AT\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"de-AT\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -1596,12 +1731,17 @@ const cldrUnitData = "" +
 	"de-CH\tlong\tkilobyte\tone={0} Kilobyte;other={0} Kilobyte\n" +
 	"de-CH\tlong\tkilogram\tone={0} Kilogramm;other={0} Kilogramm\n" +
 	"de-CH\tlong\tkilometer\tone={0} Kilometer;other={0} Kilometer\n" +
+	"de-CH\tlong\tkilometer-per-hour\tone={0} Kilometer pro Stunde;other={0} Kilometer pro Stunde\n" +
 	"de-CH\tlong\tliter\tone={0} Liter;other={0} Liter\n" +
+	"de-CH\tlong\tliter-per-kilometer\tone={0} Liter pro Kilometer;other={0} Liter pro Kilometer\n" +
 	"de-CH\tlong\tmegabit\tone={0} Megabit;other={0} Megabit\n" +
 	"de-CH\tlong\tmegabyte\tone={0} Megabyte;other={0} Megabyte\n" +
 	"de-CH\tlong\tmeter\tone={0} Meter;other={0} Meter\n" +
+	"de-CH\tlong\tmeter-per-second\tone={0} Meter pro Sekunde;other={0} Meter pro Sekunde\n" +
 	"de-CH\tlong\tmicrosecond\tone={0} Mikrosekunde;other={0} Mikrosekunden\n" +
 	"de-CH\tlong\tmile\tone={0} Meile;other={0} Meilen\n" +
+	"de-CH\tlong\tmile-per-gallon\tone={0} Meile pro Gallone;other={0} Meilen pro Gallone\n" +
+	"de-CH\tlong\tmile-per-hour\tone={0} Meile pro Stunde;other={0} Meilen pro Stunde\n" +
 	"de-CH\tlong\tmile-scandinavian\tone={0} skandinavische Meile;other={0} skandinavische Meilen\n" +
 	"de-CH\tlong\tmilliliter\tone={0} Milliliter;other={0} Milliliter\n" +
 	"de-CH\tlong\tmillimeter\tone={0} Millimeter;other={0} Millimeter\n" +
@@ -1642,12 +1782,17 @@ const cldrUnitData = "" +
 	"de-CH\tshort\tkilobyte\tother={0} kB\n" +
 	"de-CH\tshort\tkilogram\tother={0} kg\n" +
 	"de-CH\tshort\tkilometer\tother={0} km\n" +
+	"de-CH\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"de-CH\tshort\tliter\tother={0} l\n" +
+	"de-CH\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"de-CH\tshort\tmegabit\tother={0} Mb\n" +
 	"de-CH\tshort\tmegabyte\tother={0} MB\n" +
 	"de-CH\tshort\tmeter\tother={0} m\n" +
+	"de-CH\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"de-CH\tshort\tmicrosecond\tother={0} μs\n" +
 	"de-CH\tshort\tmile\tother={0} mi\n" +
+	"de-CH\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"de-CH\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"de-CH\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"de-CH\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"de-CH\tshort\tmillimeter\tother={0} mm\n" +
@@ -1688,12 +1833,17 @@ const cldrUnitData = "" +
 	"de-CH\tnarrow\tkilobyte\tother={0} kB\n" +
 	"de-CH\tnarrow\tkilogram\tother={0} kg\n" +
 	"de-CH\tnarrow\tkilometer\tother={0} km\n" +
+	"de-CH\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"de-CH\tnarrow\tliter\tother={0} l\n" +
+	"de-CH\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"de-CH\tnarrow\tmegabit\tother={0} Mb\n" +
 	"de-CH\tnarrow\tmegabyte\tother={0} MB\n" +
 	"de-CH\tnarrow\tmeter\tother={0} m\n" +
+	"de-CH\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"de-CH\tnarrow\tmicrosecond\tone={0}μs;other={0} μs\n" +
 	"de-CH\tnarrow\tmile\tother={0} mi\n" +
+	"de-CH\tnarrow\tmile-per-gallon\tone={0}mpg;other={0}mpg\n" +
+	"de-CH\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"de-CH\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"de-CH\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"de-CH\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -1734,12 +1884,17 @@ const cldrUnitData = "" +
 	"de-DE\tlong\tkilobyte\tone={0} Kilobyte;other={0} Kilobyte\n" +
 	"de-DE\tlong\tkilogram\tone={0} Kilogramm;other={0} Kilogramm\n" +
 	"de-DE\tlong\tkilometer\tone={0} Kilometer;other={0} Kilometer\n" +
+	"de-DE\tlong\tkilometer-per-hour\tone={0} Kilometer pro Stunde;other={0} Kilometer pro Stunde\n" +
 	"de-DE\tlong\tliter\tone={0} Liter;other={0} Liter\n" +
+	"de-DE\tlong\tliter-per-kilometer\tone={0} Liter pro Kilometer;other={0} Liter pro Kilometer\n" +
 	"de-DE\tlong\tmegabit\tone={0} Megabit;other={0} Megabit\n" +
 	"de-DE\tlong\tmegabyte\tone={0} Megabyte;other={0} Megabyte\n" +
 	"de-DE\tlong\tmeter\tone={0} Meter;other={0} Meter\n" +
+	"de-DE\tlong\tmeter-per-second\tone={0} Meter pro Sekunde;other={0} Meter pro Sekunde\n" +
 	"de-DE\tlong\tmicrosecond\tone={0} Mikrosekunde;other={0} Mikrosekunden\n" +
 	"de-DE\tlong\tmile\tone={0} Meile;other={0} Meilen\n" +
+	"de-DE\tlong\tmile-per-gallon\tone={0} Meile pro Gallone;other={0} Meilen pro Gallone\n" +
+	"de-DE\tlong\tmile-per-hour\tone={0} Meile pro Stunde;other={0} Meilen pro Stunde\n" +
 	"de-DE\tlong\tmile-scandinavian\tone={0} skandinavische Meile;other={0} skandinavische Meilen\n" +
 	"de-DE\tlong\tmilliliter\tone={0} Milliliter;other={0} Milliliter\n" +
 	"de-DE\tlong\tmillimeter\tone={0} Millimeter;other={0} Millimeter\n" +
@@ -1780,12 +1935,17 @@ const cldrUnitData = "" +
 	"de-DE\tshort\tkilobyte\tother={0} kB\n" +
 	"de-DE\tshort\tkilogram\tother={0} kg\n" +
 	"de-DE\tshort\tkilometer\tother={0} km\n" +
+	"de-DE\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"de-DE\tshort\tliter\tother={0} l\n" +
+	"de-DE\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"de-DE\tshort\tmegabit\tother={0} Mb\n" +
 	"de-DE\tshort\tmegabyte\tother={0} MB\n" +
 	"de-DE\tshort\tmeter\tother={0} m\n" +
+	"de-DE\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"de-DE\tshort\tmicrosecond\tother={0} μs\n" +
 	"de-DE\tshort\tmile\tother={0} mi\n" +
+	"de-DE\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"de-DE\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"de-DE\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"de-DE\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"de-DE\tshort\tmillimeter\tother={0} mm\n" +
@@ -1826,12 +1986,17 @@ const cldrUnitData = "" +
 	"de-DE\tnarrow\tkilobyte\tother={0} kB\n" +
 	"de-DE\tnarrow\tkilogram\tother={0} kg\n" +
 	"de-DE\tnarrow\tkilometer\tother={0} km\n" +
+	"de-DE\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"de-DE\tnarrow\tliter\tother={0} l\n" +
+	"de-DE\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"de-DE\tnarrow\tmegabit\tother={0} Mb\n" +
 	"de-DE\tnarrow\tmegabyte\tother={0} MB\n" +
 	"de-DE\tnarrow\tmeter\tother={0} m\n" +
+	"de-DE\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"de-DE\tnarrow\tmicrosecond\tone={0}μs;other={0} μs\n" +
 	"de-DE\tnarrow\tmile\tother={0} mi\n" +
+	"de-DE\tnarrow\tmile-per-gallon\tone={0}mpg;other={0}mpg\n" +
+	"de-DE\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"de-DE\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"de-DE\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"de-DE\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -1872,12 +2037,17 @@ const cldrUnitData = "" +
 	"el-GR\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobyte\n" +
 	"el-GR\tlong\tkilogram\tone={0} χιλιόγραμμο;other={0} χιλιόγραμμα\n" +
 	"el-GR\tlong\tkilometer\tone={0} χιλιόμετρο;other={0} χιλιόμετρα\n" +
+	"el-GR\tlong\tkilometer-per-hour\tone={0} χιλιόμετρο ανά ώρα;other={0} χιλιόμετρα ανά ώρα\n" +
 	"el-GR\tlong\tliter\tone={0} λίτρο;other={0} λίτρα\n" +
+	"el-GR\tlong\tliter-per-kilometer\tone={0} λίτρο ανά χιλιόμετρο;other={0} λίτρα ανά χιλιόμετρο\n" +
 	"el-GR\tlong\tmegabit\tone={0} megabit;other={0} megabit\n" +
 	"el-GR\tlong\tmegabyte\tone={0} megabyte;other={0} megabyte\n" +
 	"el-GR\tlong\tmeter\tone={0} μέτρο;other={0} μέτρα\n" +
+	"el-GR\tlong\tmeter-per-second\tone={0} μέτρο ανά δευτερόλεπτο;other={0} μέτρα ανά δευτερόλεπτο\n" +
 	"el-GR\tlong\tmicrosecond\tone={0} μικροδευτερόλεπτο;other={0} μικροδευτερόλεπτα\n" +
 	"el-GR\tlong\tmile\tone={0} μίλι;other={0} μίλια\n" +
+	"el-GR\tlong\tmile-per-gallon\tone={0} μίλι ανά γαλόνι;other={0} μίλια ανά γαλόνι\n" +
+	"el-GR\tlong\tmile-per-hour\tone={0} μίλι ανά ώρα;other={0} μίλια ανά ώρα\n" +
 	"el-GR\tlong\tmile-scandinavian\tone={0} σκανδιναβικό μίλι;other={0} σκανδιναβικά μίλια\n" +
 	"el-GR\tlong\tmilliliter\tone={0} χιλιοστόλιτρο;other={0} χιλιοστόλιτρα\n" +
 	"el-GR\tlong\tmillimeter\tone={0} χιλιοστόμετρο;other={0} χιλιοστόμετρα\n" +
@@ -1918,12 +2088,17 @@ const cldrUnitData = "" +
 	"el-GR\tshort\tkilobyte\tother={0} kB\n" +
 	"el-GR\tshort\tkilogram\tone={0} κιλό;other={0} κιλά\n" +
 	"el-GR\tshort\tkilometer\tone={0} χλμ.;other={0} χλμ.\n" +
+	"el-GR\tshort\tkilometer-per-hour\tone={0} χλμ./ώρα;other={0} χλμ./ώρα\n" +
 	"el-GR\tshort\tliter\tone={0} λίτ.;other={0} λίτ.\n" +
+	"el-GR\tshort\tliter-per-kilometer\tone={0} λίτρο/χλμ.;other={0} λίτρα/χλμ.\n" +
 	"el-GR\tshort\tmegabit\tother={0} Mb\n" +
 	"el-GR\tshort\tmegabyte\tother={0} MB\n" +
 	"el-GR\tshort\tmeter\tone={0} μ.;other={0} μ.\n" +
+	"el-GR\tshort\tmeter-per-second\tone={0} μέτρο/δευτ.;other={0} μέτρα/δευτ.\n" +
 	"el-GR\tshort\tmicrosecond\tother={0} μs\n" +
 	"el-GR\tshort\tmile\tone={0} μίλ.;other={0} μίλ.\n" +
+	"el-GR\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"el-GR\tshort\tmile-per-hour\tone={0} μίλι/ώρα;other={0} μίλια/ώρα\n" +
 	"el-GR\tshort\tmile-scandinavian\tone={0} σκανδ. μίλι;other={0} σκανδ. μίλια\n" +
 	"el-GR\tshort\tmilliliter\tother={0} mL\n" +
 	"el-GR\tshort\tmillimeter\tone={0} χλστ.;other={0} χλστ.\n" +
@@ -1964,12 +2139,17 @@ const cldrUnitData = "" +
 	"el-GR\tnarrow\tkilobyte\tother={0} kB\n" +
 	"el-GR\tnarrow\tkilogram\tone={0} kg;other={0} kg\n" +
 	"el-GR\tnarrow\tkilometer\tone={0} χλμ.;other={0} χλμ.\n" +
+	"el-GR\tnarrow\tkilometer-per-hour\tone={0} χλμ/ώ.;other={0} χλμ/ώ.\n" +
 	"el-GR\tnarrow\tliter\tone={0} λ.;other={0} λ.\n" +
+	"el-GR\tnarrow\tliter-per-kilometer\tone={0} λ/χλμ;other={0} λ/χλμ\n" +
 	"el-GR\tnarrow\tmegabit\tother={0} Mb\n" +
 	"el-GR\tnarrow\tmegabyte\tother={0} MB\n" +
 	"el-GR\tnarrow\tmeter\tone={0} μ.;other={0} μ.\n" +
+	"el-GR\tnarrow\tmeter-per-second\tone={0} μ./δ.;other={0} μ./δ.\n" +
 	"el-GR\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"el-GR\tnarrow\tmile\tone={0} mi;other={0} mi\n" +
+	"el-GR\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"el-GR\tnarrow\tmile-per-hour\tone={0} μίλι/ώ.;other={0} μίλια/ώ.\n" +
 	"el-GR\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"el-GR\tnarrow\tmilliliter\tother={0} mL\n" +
 	"el-GR\tnarrow\tmillimeter\tone={0} χλστ.;other={0} χλστ.\n" +
@@ -2010,12 +2190,17 @@ const cldrUnitData = "" +
 	"en-AU\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"en-AU\tlong\tkilogram\tone={0} kilogram;other={0} kilograms\n" +
 	"en-AU\tlong\tkilometer\tone={0} kilometre;other={0} kilometres\n" +
+	"en-AU\tlong\tkilometer-per-hour\tone={0} kilometre per hour;other={0} kilometres per hour\n" +
 	"en-AU\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"en-AU\tlong\tliter-per-kilometer\tone={0} litre per kilometre;other={0} litres per kilometre\n" +
 	"en-AU\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"en-AU\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"en-AU\tlong\tmeter\tone={0} metre;other={0} metres\n" +
+	"en-AU\tlong\tmeter-per-second\tone={0} metre per second;other={0} metres per second\n" +
 	"en-AU\tlong\tmicrosecond\tone={0} microsecond;other={0} microseconds\n" +
 	"en-AU\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"en-AU\tlong\tmile-per-gallon\tone={0} mile per US gallon;other={0} miles per US gallon\n" +
+	"en-AU\tlong\tmile-per-hour\tone={0} mile per hour;other={0} miles per hour\n" +
 	"en-AU\tlong\tmile-scandinavian\tone={0} Scandinavian mile;other={0} Scandinavian miles\n" +
 	"en-AU\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"en-AU\tlong\tmillimeter\tone={0} millimetre;other={0} millimetres\n" +
@@ -2056,12 +2241,17 @@ const cldrUnitData = "" +
 	"en-AU\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"en-AU\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"en-AU\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"en-AU\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"en-AU\tshort\tliter\tone={0} L;other={0} L\n" +
+	"en-AU\tshort\tliter-per-kilometer\tone={0} L/km;other={0} L/km\n" +
 	"en-AU\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"en-AU\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"en-AU\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"en-AU\tshort\tmeter-per-second\tone={0} m/s.;other={0} m/s.\n" +
 	"en-AU\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"en-AU\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"en-AU\tshort\tmile-per-gallon\tone={0} mpg US;other={0} mpg US\n" +
+	"en-AU\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"en-AU\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"en-AU\tshort\tmilliliter\tone={0} mL;other={0} mL\n" +
 	"en-AU\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -2102,12 +2292,17 @@ const cldrUnitData = "" +
 	"en-AU\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"en-AU\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"en-AU\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"en-AU\tnarrow\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"en-AU\tnarrow\tliter\tone={0}L;other={0}L\n" +
+	"en-AU\tnarrow\tliter-per-kilometer\tone={0}L/km;other={0}L/km\n" +
 	"en-AU\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"en-AU\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"en-AU\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"en-AU\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"en-AU\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"en-AU\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"en-AU\tnarrow\tmile-per-gallon\tone={0}mpgUS;other={0}mpgUS\n" +
+	"en-AU\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"en-AU\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"en-AU\tnarrow\tmilliliter\tone={0}mL;other={0}mL\n" +
 	"en-AU\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -2148,12 +2343,17 @@ const cldrUnitData = "" +
 	"en-CA\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"en-CA\tlong\tkilogram\tone={0} kilogram;other={0} kilograms\n" +
 	"en-CA\tlong\tkilometer\tone={0} kilometre;other={0} kilometres\n" +
+	"en-CA\tlong\tkilometer-per-hour\tone={0} kilometre per hour;other={0} kilometres per hour\n" +
 	"en-CA\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"en-CA\tlong\tliter-per-kilometer\tone={0} litre per kilometre;other={0} litres per kilometre\n" +
 	"en-CA\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"en-CA\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"en-CA\tlong\tmeter\tone={0} metre;other={0} metres\n" +
+	"en-CA\tlong\tmeter-per-second\tone={0} metre per second;other={0} metres per second\n" +
 	"en-CA\tlong\tmicrosecond\tone={0} microsecond;other={0} microseconds\n" +
 	"en-CA\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"en-CA\tlong\tmile-per-gallon\tone={0} mile per US gallon;other={0} miles per US gallon\n" +
+	"en-CA\tlong\tmile-per-hour\tone={0} mile per hour;other={0} miles per hour\n" +
 	"en-CA\tlong\tmile-scandinavian\tone={0} Scandinavian mile;other={0} Scandinavian miles\n" +
 	"en-CA\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"en-CA\tlong\tmillimeter\tone={0} millimetre;other={0} millimetres\n" +
@@ -2194,12 +2394,17 @@ const cldrUnitData = "" +
 	"en-CA\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"en-CA\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"en-CA\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"en-CA\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"en-CA\tshort\tliter\tone={0} L;other={0} L\n" +
+	"en-CA\tshort\tliter-per-kilometer\tone={0} L/km;other={0} L/km\n" +
 	"en-CA\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"en-CA\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"en-CA\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"en-CA\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"en-CA\tshort\tmicrosecond\tone={0} μsec;other={0} μsecs\n" +
 	"en-CA\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"en-CA\tshort\tmile-per-gallon\tone={0} mpg US;other={0} mpg US\n" +
+	"en-CA\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"en-CA\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"en-CA\tshort\tmilliliter\tone={0} mL;other={0} mL\n" +
 	"en-CA\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -2240,12 +2445,17 @@ const cldrUnitData = "" +
 	"en-CA\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"en-CA\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"en-CA\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"en-CA\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"en-CA\tnarrow\tliter\tone={0}L;other={0}L\n" +
+	"en-CA\tnarrow\tliter-per-kilometer\tone={0}L/km;other={0}L/km\n" +
 	"en-CA\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"en-CA\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"en-CA\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"en-CA\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"en-CA\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"en-CA\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"en-CA\tnarrow\tmile-per-gallon\tone={0}mpgUS;other={0}mpgUS\n" +
+	"en-CA\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"en-CA\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"en-CA\tnarrow\tmilliliter\tone={0}mL;other={0}mL\n" +
 	"en-CA\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -2286,12 +2496,17 @@ const cldrUnitData = "" +
 	"en-GB\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"en-GB\tlong\tkilogram\tone={0} kilogram;other={0} kilograms\n" +
 	"en-GB\tlong\tkilometer\tone={0} kilometre;other={0} kilometres\n" +
+	"en-GB\tlong\tkilometer-per-hour\tone={0} kilometre per hour;other={0} kilometres per hour\n" +
 	"en-GB\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"en-GB\tlong\tliter-per-kilometer\tone={0} litre per kilometre;other={0} litres per kilometre\n" +
 	"en-GB\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"en-GB\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"en-GB\tlong\tmeter\tone={0} metre;other={0} metres\n" +
+	"en-GB\tlong\tmeter-per-second\tone={0} metre per second;other={0} metres per second\n" +
 	"en-GB\tlong\tmicrosecond\tone={0} microsecond;other={0} microseconds\n" +
 	"en-GB\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"en-GB\tlong\tmile-per-gallon\tone={0} mile per US gallon;other={0} miles per US gallon\n" +
+	"en-GB\tlong\tmile-per-hour\tone={0} mile per hour;other={0} miles per hour\n" +
 	"en-GB\tlong\tmile-scandinavian\tone={0} Scandinavian mile;other={0} Scandinavian miles\n" +
 	"en-GB\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"en-GB\tlong\tmillimeter\tone={0} millimetre;other={0} millimetres\n" +
@@ -2332,12 +2547,17 @@ const cldrUnitData = "" +
 	"en-GB\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"en-GB\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"en-GB\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"en-GB\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"en-GB\tshort\tliter\tone={0} l;other={0} l\n" +
+	"en-GB\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"en-GB\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"en-GB\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"en-GB\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"en-GB\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"en-GB\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"en-GB\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"en-GB\tshort\tmile-per-gallon\tone={0} mpg US;other={0} mpg US\n" +
+	"en-GB\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"en-GB\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"en-GB\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"en-GB\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -2378,12 +2598,17 @@ const cldrUnitData = "" +
 	"en-GB\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"en-GB\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"en-GB\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"en-GB\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"en-GB\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"en-GB\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"en-GB\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"en-GB\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"en-GB\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"en-GB\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"en-GB\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"en-GB\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"en-GB\tnarrow\tmile-per-gallon\tone={0}mpgUS;other={0}mpgUS\n" +
+	"en-GB\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"en-GB\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"en-GB\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"en-GB\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -2424,12 +2649,17 @@ const cldrUnitData = "" +
 	"en-IE\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"en-IE\tlong\tkilogram\tone={0} kilogram;other={0} kilograms\n" +
 	"en-IE\tlong\tkilometer\tone={0} kilometre;other={0} kilometres\n" +
+	"en-IE\tlong\tkilometer-per-hour\tone={0} kilometre per hour;other={0} kilometres per hour\n" +
 	"en-IE\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"en-IE\tlong\tliter-per-kilometer\tone={0} litre per kilometre;other={0} litres per kilometre\n" +
 	"en-IE\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"en-IE\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"en-IE\tlong\tmeter\tone={0} metre;other={0} metres\n" +
+	"en-IE\tlong\tmeter-per-second\tone={0} metre per second;other={0} metres per second\n" +
 	"en-IE\tlong\tmicrosecond\tone={0} microsecond;other={0} microseconds\n" +
 	"en-IE\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"en-IE\tlong\tmile-per-gallon\tone={0} mile per US gallon;other={0} miles per US gallon\n" +
+	"en-IE\tlong\tmile-per-hour\tone={0} mile per hour;other={0} miles per hour\n" +
 	"en-IE\tlong\tmile-scandinavian\tone={0} Scandinavian mile;other={0} Scandinavian miles\n" +
 	"en-IE\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"en-IE\tlong\tmillimeter\tone={0} millimetre;other={0} millimetres\n" +
@@ -2470,12 +2700,17 @@ const cldrUnitData = "" +
 	"en-IE\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"en-IE\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"en-IE\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"en-IE\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"en-IE\tshort\tliter\tone={0} l;other={0} l\n" +
+	"en-IE\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"en-IE\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"en-IE\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"en-IE\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"en-IE\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"en-IE\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"en-IE\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"en-IE\tshort\tmile-per-gallon\tone={0} mpg US;other={0} mpg US\n" +
+	"en-IE\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"en-IE\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"en-IE\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"en-IE\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -2516,12 +2751,17 @@ const cldrUnitData = "" +
 	"en-IE\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"en-IE\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"en-IE\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"en-IE\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"en-IE\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"en-IE\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"en-IE\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"en-IE\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"en-IE\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"en-IE\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"en-IE\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"en-IE\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"en-IE\tnarrow\tmile-per-gallon\tone={0}mpgUS;other={0}mpgUS\n" +
+	"en-IE\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"en-IE\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"en-IE\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"en-IE\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -2562,12 +2802,17 @@ const cldrUnitData = "" +
 	"en-IN\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"en-IN\tlong\tkilogram\tone={0} kilogram;other={0} kilograms\n" +
 	"en-IN\tlong\tkilometer\tone={0} kilometre;other={0} kilometres\n" +
+	"en-IN\tlong\tkilometer-per-hour\tone={0} kilometre per hour;other={0} kilometres per hour\n" +
 	"en-IN\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"en-IN\tlong\tliter-per-kilometer\tone={0} litre per kilometre;other={0} litres per kilometre\n" +
 	"en-IN\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"en-IN\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"en-IN\tlong\tmeter\tone={0} metre;other={0} metres\n" +
+	"en-IN\tlong\tmeter-per-second\tone={0} metre per second;other={0} metres per second\n" +
 	"en-IN\tlong\tmicrosecond\tone={0} microsecond;other={0} microseconds\n" +
 	"en-IN\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"en-IN\tlong\tmile-per-gallon\tone={0} mile per US gallon;other={0} miles per US gallon\n" +
+	"en-IN\tlong\tmile-per-hour\tone={0} mile per hour;other={0} miles per hour\n" +
 	"en-IN\tlong\tmile-scandinavian\tone={0} Scandinavian mile;other={0} Scandinavian miles\n" +
 	"en-IN\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"en-IN\tlong\tmillimeter\tone={0} millimetre;other={0} millimetres\n" +
@@ -2608,12 +2853,17 @@ const cldrUnitData = "" +
 	"en-IN\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"en-IN\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"en-IN\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"en-IN\tshort\tkilometer-per-hour\tone={0} kph;other={0} kph\n" +
 	"en-IN\tshort\tliter\tone={0} l;other={0} l\n" +
+	"en-IN\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"en-IN\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"en-IN\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"en-IN\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"en-IN\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"en-IN\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"en-IN\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"en-IN\tshort\tmile-per-gallon\tone={0} mpg US;other={0} mpg US\n" +
+	"en-IN\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"en-IN\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"en-IN\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"en-IN\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -2654,12 +2904,17 @@ const cldrUnitData = "" +
 	"en-IN\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"en-IN\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"en-IN\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"en-IN\tnarrow\tkilometer-per-hour\tone={0}kph;other={0}kph\n" +
 	"en-IN\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"en-IN\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"en-IN\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"en-IN\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"en-IN\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"en-IN\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"en-IN\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"en-IN\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"en-IN\tnarrow\tmile-per-gallon\tone={0}mpgUS;other={0}mpgUS\n" +
+	"en-IN\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"en-IN\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"en-IN\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"en-IN\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -2700,12 +2955,17 @@ const cldrUnitData = "" +
 	"en-NZ\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"en-NZ\tlong\tkilogram\tone={0} kilogram;other={0} kilograms\n" +
 	"en-NZ\tlong\tkilometer\tone={0} kilometre;other={0} kilometres\n" +
+	"en-NZ\tlong\tkilometer-per-hour\tone={0} kilometre per hour;other={0} kilometres per hour\n" +
 	"en-NZ\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"en-NZ\tlong\tliter-per-kilometer\tone={0} litre per kilometre;other={0} litres per kilometre\n" +
 	"en-NZ\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"en-NZ\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"en-NZ\tlong\tmeter\tone={0} metre;other={0} metres\n" +
+	"en-NZ\tlong\tmeter-per-second\tone={0} metre per second;other={0} metres per second\n" +
 	"en-NZ\tlong\tmicrosecond\tone={0} microsecond;other={0} microseconds\n" +
 	"en-NZ\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"en-NZ\tlong\tmile-per-gallon\tone={0} mile per US gallon;other={0} miles per US gallon\n" +
+	"en-NZ\tlong\tmile-per-hour\tone={0} mile per hour;other={0} miles per hour\n" +
 	"en-NZ\tlong\tmile-scandinavian\tone={0} Scandinavian mile;other={0} Scandinavian miles\n" +
 	"en-NZ\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"en-NZ\tlong\tmillimeter\tone={0} millimetre;other={0} millimetres\n" +
@@ -2746,12 +3006,17 @@ const cldrUnitData = "" +
 	"en-NZ\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"en-NZ\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"en-NZ\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"en-NZ\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"en-NZ\tshort\tliter\tone={0} l;other={0} l\n" +
+	"en-NZ\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"en-NZ\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"en-NZ\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"en-NZ\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"en-NZ\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"en-NZ\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"en-NZ\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"en-NZ\tshort\tmile-per-gallon\tone={0} mpg US;other={0} mpg US\n" +
+	"en-NZ\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"en-NZ\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"en-NZ\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"en-NZ\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -2792,12 +3057,17 @@ const cldrUnitData = "" +
 	"en-NZ\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"en-NZ\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"en-NZ\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"en-NZ\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"en-NZ\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"en-NZ\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"en-NZ\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"en-NZ\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"en-NZ\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"en-NZ\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"en-NZ\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"en-NZ\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"en-NZ\tnarrow\tmile-per-gallon\tone={0}mpgUS;other={0}mpgUS\n" +
+	"en-NZ\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"en-NZ\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"en-NZ\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"en-NZ\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -2838,12 +3108,17 @@ const cldrUnitData = "" +
 	"en-PH\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"en-PH\tlong\tkilogram\tone={0} kilogram;other={0} kilograms\n" +
 	"en-PH\tlong\tkilometer\tone={0} kilometer;other={0} kilometers\n" +
+	"en-PH\tlong\tkilometer-per-hour\tone={0} kilometer per hour;other={0} kilometers per hour\n" +
 	"en-PH\tlong\tliter\tone={0} liter;other={0} liters\n" +
+	"en-PH\tlong\tliter-per-kilometer\tone={0} liter per kilometer;other={0} liters per kilometer\n" +
 	"en-PH\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"en-PH\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"en-PH\tlong\tmeter\tone={0} meter;other={0} meters\n" +
+	"en-PH\tlong\tmeter-per-second\tone={0} meter per second;other={0} meters per second\n" +
 	"en-PH\tlong\tmicrosecond\tone={0} microsecond;other={0} microseconds\n" +
 	"en-PH\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"en-PH\tlong\tmile-per-gallon\tone={0} mile per gallon;other={0} miles per gallon\n" +
+	"en-PH\tlong\tmile-per-hour\tone={0} mile per hour;other={0} miles per hour\n" +
 	"en-PH\tlong\tmile-scandinavian\tone={0} mile-scandinavian;other={0} miles-scandinavian\n" +
 	"en-PH\tlong\tmilliliter\tone={0} milliliter;other={0} milliliters\n" +
 	"en-PH\tlong\tmillimeter\tone={0} millimeter;other={0} millimeters\n" +
@@ -2884,12 +3159,17 @@ const cldrUnitData = "" +
 	"en-PH\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"en-PH\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"en-PH\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"en-PH\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"en-PH\tshort\tliter\tone={0} L;other={0} L\n" +
+	"en-PH\tshort\tliter-per-kilometer\tone={0} L/km;other={0} L/km\n" +
 	"en-PH\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"en-PH\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"en-PH\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"en-PH\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"en-PH\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"en-PH\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"en-PH\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"en-PH\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"en-PH\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"en-PH\tshort\tmilliliter\tone={0} mL;other={0} mL\n" +
 	"en-PH\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -2930,12 +3210,17 @@ const cldrUnitData = "" +
 	"en-PH\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"en-PH\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"en-PH\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"en-PH\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"en-PH\tnarrow\tliter\tone={0}L;other={0}L\n" +
+	"en-PH\tnarrow\tliter-per-kilometer\tone={0}L/km;other={0}L/km\n" +
 	"en-PH\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"en-PH\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"en-PH\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"en-PH\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"en-PH\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"en-PH\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"en-PH\tnarrow\tmile-per-gallon\tone={0}mpg;other={0}mpg\n" +
+	"en-PH\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"en-PH\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"en-PH\tnarrow\tmilliliter\tone={0}mL;other={0}mL\n" +
 	"en-PH\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -2976,12 +3261,17 @@ const cldrUnitData = "" +
 	"en-SG\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"en-SG\tlong\tkilogram\tone={0} kilogram;other={0} kilograms\n" +
 	"en-SG\tlong\tkilometer\tone={0} kilometre;other={0} kilometres\n" +
+	"en-SG\tlong\tkilometer-per-hour\tone={0} kilometre per hour;other={0} kilometres per hour\n" +
 	"en-SG\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"en-SG\tlong\tliter-per-kilometer\tone={0} litre per kilometre;other={0} litres per kilometre\n" +
 	"en-SG\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"en-SG\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"en-SG\tlong\tmeter\tone={0} metre;other={0} metres\n" +
+	"en-SG\tlong\tmeter-per-second\tone={0} metre per second;other={0} metres per second\n" +
 	"en-SG\tlong\tmicrosecond\tone={0} microsecond;other={0} microseconds\n" +
 	"en-SG\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"en-SG\tlong\tmile-per-gallon\tone={0} mile per US gallon;other={0} miles per US gallon\n" +
+	"en-SG\tlong\tmile-per-hour\tone={0} mile per hour;other={0} miles per hour\n" +
 	"en-SG\tlong\tmile-scandinavian\tone={0} Scandinavian mile;other={0} Scandinavian miles\n" +
 	"en-SG\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"en-SG\tlong\tmillimeter\tone={0} millimetre;other={0} millimetres\n" +
@@ -3022,12 +3312,17 @@ const cldrUnitData = "" +
 	"en-SG\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"en-SG\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"en-SG\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"en-SG\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"en-SG\tshort\tliter\tone={0} l;other={0} l\n" +
+	"en-SG\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"en-SG\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"en-SG\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"en-SG\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"en-SG\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"en-SG\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"en-SG\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"en-SG\tshort\tmile-per-gallon\tone={0} mpg US;other={0} mpg US\n" +
+	"en-SG\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"en-SG\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"en-SG\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"en-SG\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -3068,12 +3363,17 @@ const cldrUnitData = "" +
 	"en-SG\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"en-SG\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"en-SG\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"en-SG\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"en-SG\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"en-SG\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"en-SG\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"en-SG\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"en-SG\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"en-SG\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"en-SG\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"en-SG\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"en-SG\tnarrow\tmile-per-gallon\tone={0}mpgUS;other={0}mpgUS\n" +
+	"en-SG\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"en-SG\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"en-SG\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"en-SG\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -3114,12 +3414,17 @@ const cldrUnitData = "" +
 	"en-US\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"en-US\tlong\tkilogram\tone={0} kilogram;other={0} kilograms\n" +
 	"en-US\tlong\tkilometer\tone={0} kilometer;other={0} kilometers\n" +
+	"en-US\tlong\tkilometer-per-hour\tone={0} kilometer per hour;other={0} kilometers per hour\n" +
 	"en-US\tlong\tliter\tone={0} liter;other={0} liters\n" +
+	"en-US\tlong\tliter-per-kilometer\tone={0} liter per kilometer;other={0} liters per kilometer\n" +
 	"en-US\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"en-US\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"en-US\tlong\tmeter\tone={0} meter;other={0} meters\n" +
+	"en-US\tlong\tmeter-per-second\tone={0} meter per second;other={0} meters per second\n" +
 	"en-US\tlong\tmicrosecond\tone={0} microsecond;other={0} microseconds\n" +
 	"en-US\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"en-US\tlong\tmile-per-gallon\tone={0} mile per gallon;other={0} miles per gallon\n" +
+	"en-US\tlong\tmile-per-hour\tone={0} mile per hour;other={0} miles per hour\n" +
 	"en-US\tlong\tmile-scandinavian\tone={0} mile-scandinavian;other={0} miles-scandinavian\n" +
 	"en-US\tlong\tmilliliter\tone={0} milliliter;other={0} milliliters\n" +
 	"en-US\tlong\tmillimeter\tone={0} millimeter;other={0} millimeters\n" +
@@ -3160,12 +3465,17 @@ const cldrUnitData = "" +
 	"en-US\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"en-US\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"en-US\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"en-US\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"en-US\tshort\tliter\tone={0} L;other={0} L\n" +
+	"en-US\tshort\tliter-per-kilometer\tone={0} L/km;other={0} L/km\n" +
 	"en-US\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"en-US\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"en-US\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"en-US\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"en-US\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"en-US\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"en-US\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"en-US\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"en-US\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"en-US\tshort\tmilliliter\tone={0} mL;other={0} mL\n" +
 	"en-US\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -3206,12 +3516,17 @@ const cldrUnitData = "" +
 	"en-US\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"en-US\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"en-US\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"en-US\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"en-US\tnarrow\tliter\tone={0}L;other={0}L\n" +
+	"en-US\tnarrow\tliter-per-kilometer\tone={0}L/km;other={0}L/km\n" +
 	"en-US\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"en-US\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"en-US\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"en-US\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"en-US\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"en-US\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"en-US\tnarrow\tmile-per-gallon\tone={0}mpg;other={0}mpg\n" +
+	"en-US\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"en-US\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"en-US\tnarrow\tmilliliter\tone={0}mL;other={0}mL\n" +
 	"en-US\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -3252,12 +3567,17 @@ const cldrUnitData = "" +
 	"en-ZA\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"en-ZA\tlong\tkilogram\tone={0} kilogram;other={0} kilograms\n" +
 	"en-ZA\tlong\tkilometer\tone={0} kilometre;other={0} kilometres\n" +
+	"en-ZA\tlong\tkilometer-per-hour\tone={0} kilometre per hour;other={0} kilometres per hour\n" +
 	"en-ZA\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"en-ZA\tlong\tliter-per-kilometer\tone={0} litre per kilometre;other={0} litres per kilometre\n" +
 	"en-ZA\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"en-ZA\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"en-ZA\tlong\tmeter\tone={0} metre;other={0} metres\n" +
+	"en-ZA\tlong\tmeter-per-second\tone={0} metre per second;other={0} metres per second\n" +
 	"en-ZA\tlong\tmicrosecond\tone={0} microsecond;other={0} microseconds\n" +
 	"en-ZA\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"en-ZA\tlong\tmile-per-gallon\tone={0} mile per US gallon;other={0} miles per US gallon\n" +
+	"en-ZA\tlong\tmile-per-hour\tone={0} mile per hour;other={0} miles per hour\n" +
 	"en-ZA\tlong\tmile-scandinavian\tone={0} Scandinavian mile;other={0} Scandinavian miles\n" +
 	"en-ZA\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"en-ZA\tlong\tmillimeter\tone={0} millimetre;other={0} millimetres\n" +
@@ -3298,12 +3618,17 @@ const cldrUnitData = "" +
 	"en-ZA\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"en-ZA\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"en-ZA\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"en-ZA\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"en-ZA\tshort\tliter\tone={0} l;other={0} l\n" +
+	"en-ZA\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"en-ZA\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"en-ZA\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"en-ZA\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"en-ZA\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"en-ZA\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"en-ZA\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"en-ZA\tshort\tmile-per-gallon\tone={0} mpg US;other={0} mpg US\n" +
+	"en-ZA\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"en-ZA\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"en-ZA\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"en-ZA\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -3344,12 +3669,17 @@ const cldrUnitData = "" +
 	"en-ZA\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"en-ZA\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"en-ZA\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"en-ZA\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"en-ZA\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"en-ZA\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"en-ZA\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"en-ZA\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"en-ZA\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"en-ZA\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"en-ZA\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"en-ZA\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"en-ZA\tnarrow\tmile-per-gallon\tone={0}mpgUS;other={0}mpgUS\n" +
+	"en-ZA\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"en-ZA\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"en-ZA\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"en-ZA\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -3390,12 +3720,17 @@ const cldrUnitData = "" +
 	"es-AR\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"es-AR\tlong\tkilogram\tone={0} kilogramo;other={0} kilogramos\n" +
 	"es-AR\tlong\tkilometer\tone={0} kilómetro;other={0} kilómetros\n" +
+	"es-AR\tlong\tkilometer-per-hour\tone={0} kilómetro por hora;other={0} kilómetros por hora\n" +
 	"es-AR\tlong\tliter\tone={0} litro;other={0} litros\n" +
+	"es-AR\tlong\tliter-per-kilometer\tone={0} litro por kilómetro;other={0} litros por kilómetro\n" +
 	"es-AR\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"es-AR\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"es-AR\tlong\tmeter\tone={0} metro;other={0} metros\n" +
+	"es-AR\tlong\tmeter-per-second\tone={0} metro por segundo;other={0} metros por segundo\n" +
 	"es-AR\tlong\tmicrosecond\tone={0} microsegundo;other={0} microsegundos\n" +
 	"es-AR\tlong\tmile\tone={0} milla;other={0} millas\n" +
+	"es-AR\tlong\tmile-per-gallon\tone={0} milla por galón;other={0} millas por galón\n" +
+	"es-AR\tlong\tmile-per-hour\tone={0} milla por hora;other={0} millas por hora\n" +
 	"es-AR\tlong\tmile-scandinavian\tone={0} milla escandinava;other={0} millas escandinavas\n" +
 	"es-AR\tlong\tmilliliter\tone={0} mililitro;other={0} mililitros\n" +
 	"es-AR\tlong\tmillimeter\tone={0} milímetro;other={0} milímetros\n" +
@@ -3436,12 +3771,17 @@ const cldrUnitData = "" +
 	"es-AR\tshort\tkilobyte\tother={0} kB\n" +
 	"es-AR\tshort\tkilogram\tother={0} kg\n" +
 	"es-AR\tshort\tkilometer\tother={0} km\n" +
+	"es-AR\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"es-AR\tshort\tliter\tother={0} l\n" +
+	"es-AR\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"es-AR\tshort\tmegabit\tother={0} Mb\n" +
 	"es-AR\tshort\tmegabyte\tother={0} MB\n" +
 	"es-AR\tshort\tmeter\tother={0} m\n" +
+	"es-AR\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"es-AR\tshort\tmicrosecond\tother={0} μs\n" +
 	"es-AR\tshort\tmile\tother={0} mi\n" +
+	"es-AR\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"es-AR\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"es-AR\tshort\tmile-scandinavian\tone={0} mi esc.;other={0} mi esc.\n" +
 	"es-AR\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"es-AR\tshort\tmillimeter\tother={0} mm\n" +
@@ -3482,12 +3822,17 @@ const cldrUnitData = "" +
 	"es-AR\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"es-AR\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"es-AR\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"es-AR\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"es-AR\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"es-AR\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"es-AR\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"es-AR\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"es-AR\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"es-AR\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"es-AR\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"es-AR\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"es-AR\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"es-AR\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"es-AR\tnarrow\tmile-scandinavian\tone={0}mi esc.;other={0}mi esc.\n" +
 	"es-AR\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"es-AR\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -3528,12 +3873,17 @@ const cldrUnitData = "" +
 	"es-CL\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"es-CL\tlong\tkilogram\tone={0} kilogramo;other={0} kilogramos\n" +
 	"es-CL\tlong\tkilometer\tone={0} kilómetro;other={0} kilómetros\n" +
+	"es-CL\tlong\tkilometer-per-hour\tone={0} kilómetro por hora;other={0} kilómetros por hora\n" +
 	"es-CL\tlong\tliter\tone={0} litro;other={0} litros\n" +
+	"es-CL\tlong\tliter-per-kilometer\tone={0} litro por kilómetro;other={0} litros por kilómetro\n" +
 	"es-CL\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"es-CL\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"es-CL\tlong\tmeter\tone={0} metro;other={0} metros\n" +
+	"es-CL\tlong\tmeter-per-second\tone={0} metro por segundo;other={0} metros por segundo\n" +
 	"es-CL\tlong\tmicrosecond\tone={0} microsegundo;other={0} microsegundos\n" +
 	"es-CL\tlong\tmile\tone={0} milla;other={0} millas\n" +
+	"es-CL\tlong\tmile-per-gallon\tone={0} milla por galón;other={0} millas por galón\n" +
+	"es-CL\tlong\tmile-per-hour\tone={0} milla por hora;other={0} millas por hora\n" +
 	"es-CL\tlong\tmile-scandinavian\tone={0} milla escandinava;other={0} millas escandinavas\n" +
 	"es-CL\tlong\tmilliliter\tone={0} mililitro;other={0} mililitros\n" +
 	"es-CL\tlong\tmillimeter\tone={0} milímetro;other={0} milímetros\n" +
@@ -3574,12 +3924,17 @@ const cldrUnitData = "" +
 	"es-CL\tshort\tkilobyte\tother={0} kB\n" +
 	"es-CL\tshort\tkilogram\tother={0} kg\n" +
 	"es-CL\tshort\tkilometer\tother={0} km\n" +
+	"es-CL\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"es-CL\tshort\tliter\tother={0} l\n" +
+	"es-CL\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"es-CL\tshort\tmegabit\tother={0} Mb\n" +
 	"es-CL\tshort\tmegabyte\tother={0} MB\n" +
 	"es-CL\tshort\tmeter\tother={0} m\n" +
+	"es-CL\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"es-CL\tshort\tmicrosecond\tother={0} μs\n" +
 	"es-CL\tshort\tmile\tother={0} mi\n" +
+	"es-CL\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"es-CL\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"es-CL\tshort\tmile-scandinavian\tone={0} mi esc.;other={0} mi esc.\n" +
 	"es-CL\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"es-CL\tshort\tmillimeter\tother={0} mm\n" +
@@ -3620,12 +3975,17 @@ const cldrUnitData = "" +
 	"es-CL\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"es-CL\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"es-CL\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"es-CL\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"es-CL\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"es-CL\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"es-CL\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"es-CL\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"es-CL\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"es-CL\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"es-CL\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"es-CL\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"es-CL\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"es-CL\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"es-CL\tnarrow\tmile-scandinavian\tone={0}mi esc.;other={0}mi esc.\n" +
 	"es-CL\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"es-CL\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -3666,12 +4026,17 @@ const cldrUnitData = "" +
 	"es-CO\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"es-CO\tlong\tkilogram\tone={0} kilogramo;other={0} kilogramos\n" +
 	"es-CO\tlong\tkilometer\tone={0} kilómetro;other={0} kilómetros\n" +
+	"es-CO\tlong\tkilometer-per-hour\tone={0} kilómetro por hora;other={0} kilómetros por hora\n" +
 	"es-CO\tlong\tliter\tone={0} litro;other={0} litros\n" +
+	"es-CO\tlong\tliter-per-kilometer\tone={0} litro por kilómetro;other={0} litros por kilómetro\n" +
 	"es-CO\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"es-CO\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"es-CO\tlong\tmeter\tone={0} metro;other={0} metros\n" +
+	"es-CO\tlong\tmeter-per-second\tone={0} metro por segundo;other={0} metros por segundo\n" +
 	"es-CO\tlong\tmicrosecond\tone={0} microsegundo;other={0} microsegundos\n" +
 	"es-CO\tlong\tmile\tone={0} milla;other={0} millas\n" +
+	"es-CO\tlong\tmile-per-gallon\tone={0} milla por galón;other={0} millas por galón\n" +
+	"es-CO\tlong\tmile-per-hour\tone={0} milla por hora;other={0} millas por hora\n" +
 	"es-CO\tlong\tmile-scandinavian\tone={0} milla escandinava;other={0} millas escandinavas\n" +
 	"es-CO\tlong\tmilliliter\tone={0} mililitro;other={0} mililitros\n" +
 	"es-CO\tlong\tmillimeter\tone={0} milímetro;other={0} milímetros\n" +
@@ -3712,12 +4077,17 @@ const cldrUnitData = "" +
 	"es-CO\tshort\tkilobyte\tother={0} kB\n" +
 	"es-CO\tshort\tkilogram\tother={0} kg\n" +
 	"es-CO\tshort\tkilometer\tother={0} km\n" +
+	"es-CO\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"es-CO\tshort\tliter\tother={0} l\n" +
+	"es-CO\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"es-CO\tshort\tmegabit\tother={0} Mb\n" +
 	"es-CO\tshort\tmegabyte\tother={0} MB\n" +
 	"es-CO\tshort\tmeter\tother={0} m\n" +
+	"es-CO\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"es-CO\tshort\tmicrosecond\tother={0} μs\n" +
 	"es-CO\tshort\tmile\tother={0} mi\n" +
+	"es-CO\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"es-CO\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"es-CO\tshort\tmile-scandinavian\tone={0} mi esc.;other={0} mi esc.\n" +
 	"es-CO\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"es-CO\tshort\tmillimeter\tother={0} mm\n" +
@@ -3758,12 +4128,17 @@ const cldrUnitData = "" +
 	"es-CO\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"es-CO\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"es-CO\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"es-CO\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"es-CO\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"es-CO\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"es-CO\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"es-CO\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"es-CO\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"es-CO\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"es-CO\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"es-CO\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"es-CO\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"es-CO\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"es-CO\tnarrow\tmile-scandinavian\tone={0}mi esc.;other={0}mi esc.\n" +
 	"es-CO\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"es-CO\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -3804,12 +4179,17 @@ const cldrUnitData = "" +
 	"es-ES\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"es-ES\tlong\tkilogram\tone={0} kilogramo;other={0} kilogramos\n" +
 	"es-ES\tlong\tkilometer\tone={0} kilómetro;other={0} kilómetros\n" +
+	"es-ES\tlong\tkilometer-per-hour\tone={0} kilómetro por hora;other={0} kilómetros por hora\n" +
 	"es-ES\tlong\tliter\tone={0} litro;other={0} litros\n" +
+	"es-ES\tlong\tliter-per-kilometer\tone={0} litro por kilómetro;other={0} litros por kilómetro\n" +
 	"es-ES\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"es-ES\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"es-ES\tlong\tmeter\tone={0} metro;other={0} metros\n" +
+	"es-ES\tlong\tmeter-per-second\tone={0} metro por segundo;other={0} metros por segundo\n" +
 	"es-ES\tlong\tmicrosecond\tone={0} microsegundo;other={0} microsegundos\n" +
 	"es-ES\tlong\tmile\tone={0} milla;other={0} millas\n" +
+	"es-ES\tlong\tmile-per-gallon\tone={0} milla por galón;other={0} millas por galón\n" +
+	"es-ES\tlong\tmile-per-hour\tone={0} milla por hora;other={0} millas por hora\n" +
 	"es-ES\tlong\tmile-scandinavian\tone={0} milla escandinava;other={0} millas escandinavas\n" +
 	"es-ES\tlong\tmilliliter\tone={0} mililitro;other={0} mililitros\n" +
 	"es-ES\tlong\tmillimeter\tone={0} milímetro;other={0} milímetros\n" +
@@ -3850,12 +4230,17 @@ const cldrUnitData = "" +
 	"es-ES\tshort\tkilobyte\tother={0} kB\n" +
 	"es-ES\tshort\tkilogram\tother={0} kg\n" +
 	"es-ES\tshort\tkilometer\tother={0} km\n" +
+	"es-ES\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"es-ES\tshort\tliter\tother={0} l\n" +
+	"es-ES\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"es-ES\tshort\tmegabit\tother={0} Mb\n" +
 	"es-ES\tshort\tmegabyte\tother={0} MB\n" +
 	"es-ES\tshort\tmeter\tother={0} m\n" +
+	"es-ES\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"es-ES\tshort\tmicrosecond\tother={0} μs\n" +
 	"es-ES\tshort\tmile\tother={0} mi\n" +
+	"es-ES\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"es-ES\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"es-ES\tshort\tmile-scandinavian\tone={0} mi esc.;other={0} mi esc.\n" +
 	"es-ES\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"es-ES\tshort\tmillimeter\tother={0} mm\n" +
@@ -3896,12 +4281,17 @@ const cldrUnitData = "" +
 	"es-ES\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"es-ES\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"es-ES\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"es-ES\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"es-ES\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"es-ES\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"es-ES\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"es-ES\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"es-ES\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"es-ES\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"es-ES\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"es-ES\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"es-ES\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"es-ES\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"es-ES\tnarrow\tmile-scandinavian\tone={0}mi esc;other={0}mi esc\n" +
 	"es-ES\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"es-ES\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -3942,12 +4332,17 @@ const cldrUnitData = "" +
 	"es-MX\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"es-MX\tlong\tkilogram\tone={0} kilogramo;other={0} kilogramos\n" +
 	"es-MX\tlong\tkilometer\tone={0} kilómetro;other={0} kilómetros\n" +
+	"es-MX\tlong\tkilometer-per-hour\tone={0} kilómetro por hora;other={0} kilómetros por hora\n" +
 	"es-MX\tlong\tliter\tone={0} litro;other={0} litros\n" +
+	"es-MX\tlong\tliter-per-kilometer\tone={0} litro por kilómetro;other={0} litros por kilómetro\n" +
 	"es-MX\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"es-MX\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"es-MX\tlong\tmeter\tone={0} metro;other={0} metros\n" +
+	"es-MX\tlong\tmeter-per-second\tone={0} metro por segundo;other={0} metros por segundo\n" +
 	"es-MX\tlong\tmicrosecond\tone={0} microsegundo;other={0} microsegundos\n" +
 	"es-MX\tlong\tmile\tone={0} milla;other={0} millas\n" +
+	"es-MX\tlong\tmile-per-gallon\tone={0} milla por galón;other={0} millas por galón\n" +
+	"es-MX\tlong\tmile-per-hour\tone={0} milla por hora;other={0} millas por hora\n" +
 	"es-MX\tlong\tmile-scandinavian\tone={0} milla escandinava;other={0} millas escandinavas\n" +
 	"es-MX\tlong\tmilliliter\tone={0} mililitro;other={0} mililitros\n" +
 	"es-MX\tlong\tmillimeter\tone={0} milímetro;other={0} milímetros\n" +
@@ -3988,12 +4383,17 @@ const cldrUnitData = "" +
 	"es-MX\tshort\tkilobyte\tother={0} kB\n" +
 	"es-MX\tshort\tkilogram\tother={0} kg\n" +
 	"es-MX\tshort\tkilometer\tother={0} km\n" +
+	"es-MX\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"es-MX\tshort\tliter\tother={0} l\n" +
+	"es-MX\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"es-MX\tshort\tmegabit\tother={0} Mb\n" +
 	"es-MX\tshort\tmegabyte\tother={0} MB\n" +
 	"es-MX\tshort\tmeter\tother={0} m\n" +
+	"es-MX\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"es-MX\tshort\tmicrosecond\tother={0} μs\n" +
 	"es-MX\tshort\tmile\tother={0} mi\n" +
+	"es-MX\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"es-MX\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"es-MX\tshort\tmile-scandinavian\tone={0} mi esc.;other={0} mi esc.\n" +
 	"es-MX\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"es-MX\tshort\tmillimeter\tother={0} mm\n" +
@@ -4034,12 +4434,17 @@ const cldrUnitData = "" +
 	"es-MX\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"es-MX\tnarrow\tkilogram\tone={0} kg;other={0}kg\n" +
 	"es-MX\tnarrow\tkilometer\tone={0} km;other={0}km\n" +
+	"es-MX\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"es-MX\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"es-MX\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"es-MX\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"es-MX\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"es-MX\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"es-MX\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"es-MX\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"es-MX\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"es-MX\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"es-MX\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"es-MX\tnarrow\tmile-scandinavian\tone={0}mi esc.;other={0}mi esc.\n" +
 	"es-MX\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"es-MX\tnarrow\tmillimeter\tone={0} mm;other={0}mm\n" +
@@ -4080,12 +4485,17 @@ const cldrUnitData = "" +
 	"es-PE\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"es-PE\tlong\tkilogram\tone={0} kilogramo;other={0} kilogramos\n" +
 	"es-PE\tlong\tkilometer\tone={0} kilómetro;other={0} kilómetros\n" +
+	"es-PE\tlong\tkilometer-per-hour\tone={0} kilómetro por hora;other={0} kilómetros por hora\n" +
 	"es-PE\tlong\tliter\tone={0} litro;other={0} litros\n" +
+	"es-PE\tlong\tliter-per-kilometer\tone={0} litro por kilómetro;other={0} litros por kilómetro\n" +
 	"es-PE\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"es-PE\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"es-PE\tlong\tmeter\tone={0} metro;other={0} metros\n" +
+	"es-PE\tlong\tmeter-per-second\tone={0} metro por segundo;other={0} metros por segundo\n" +
 	"es-PE\tlong\tmicrosecond\tone={0} microsegundo;other={0} microsegundos\n" +
 	"es-PE\tlong\tmile\tone={0} milla;other={0} millas\n" +
+	"es-PE\tlong\tmile-per-gallon\tone={0} milla por galón;other={0} millas por galón\n" +
+	"es-PE\tlong\tmile-per-hour\tone={0} milla por hora;other={0} millas por hora\n" +
 	"es-PE\tlong\tmile-scandinavian\tone={0} milla escandinava;other={0} millas escandinavas\n" +
 	"es-PE\tlong\tmilliliter\tone={0} mililitro;other={0} mililitros\n" +
 	"es-PE\tlong\tmillimeter\tone={0} milímetro;other={0} milímetros\n" +
@@ -4126,12 +4536,17 @@ const cldrUnitData = "" +
 	"es-PE\tshort\tkilobyte\tother={0} kB\n" +
 	"es-PE\tshort\tkilogram\tother={0} kg\n" +
 	"es-PE\tshort\tkilometer\tother={0} km\n" +
+	"es-PE\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"es-PE\tshort\tliter\tother={0} l\n" +
+	"es-PE\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"es-PE\tshort\tmegabit\tother={0} Mb\n" +
 	"es-PE\tshort\tmegabyte\tother={0} MB\n" +
 	"es-PE\tshort\tmeter\tother={0} m\n" +
+	"es-PE\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"es-PE\tshort\tmicrosecond\tother={0} μs\n" +
 	"es-PE\tshort\tmile\tother={0} mi\n" +
+	"es-PE\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"es-PE\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"es-PE\tshort\tmile-scandinavian\tone={0} mi esc.;other={0} mi esc.\n" +
 	"es-PE\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"es-PE\tshort\tmillimeter\tother={0} mm\n" +
@@ -4172,12 +4587,17 @@ const cldrUnitData = "" +
 	"es-PE\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"es-PE\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"es-PE\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"es-PE\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"es-PE\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"es-PE\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"es-PE\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"es-PE\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"es-PE\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"es-PE\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"es-PE\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"es-PE\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"es-PE\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"es-PE\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"es-PE\tnarrow\tmile-scandinavian\tone={0}mi esc.;other={0}mi esc.\n" +
 	"es-PE\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"es-PE\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -4218,12 +4638,17 @@ const cldrUnitData = "" +
 	"es-VE\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"es-VE\tlong\tkilogram\tone={0} kilogramo;other={0} kilogramos\n" +
 	"es-VE\tlong\tkilometer\tone={0} kilómetro;other={0} kilómetros\n" +
+	"es-VE\tlong\tkilometer-per-hour\tone={0} kilómetro por hora;other={0} kilómetros por hora\n" +
 	"es-VE\tlong\tliter\tone={0} litro;other={0} litros\n" +
+	"es-VE\tlong\tliter-per-kilometer\tone={0} litro por kilómetro;other={0} litros por kilómetro\n" +
 	"es-VE\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"es-VE\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"es-VE\tlong\tmeter\tone={0} metro;other={0} metros\n" +
+	"es-VE\tlong\tmeter-per-second\tone={0} metro por segundo;other={0} metros por segundo\n" +
 	"es-VE\tlong\tmicrosecond\tone={0} microsegundo;other={0} microsegundos\n" +
 	"es-VE\tlong\tmile\tone={0} milla;other={0} millas\n" +
+	"es-VE\tlong\tmile-per-gallon\tone={0} milla por galón;other={0} millas por galón\n" +
+	"es-VE\tlong\tmile-per-hour\tone={0} milla por hora;other={0} millas por hora\n" +
 	"es-VE\tlong\tmile-scandinavian\tone={0} milla escandinava;other={0} millas escandinavas\n" +
 	"es-VE\tlong\tmilliliter\tone={0} mililitro;other={0} mililitros\n" +
 	"es-VE\tlong\tmillimeter\tone={0} milímetro;other={0} milímetros\n" +
@@ -4264,12 +4689,17 @@ const cldrUnitData = "" +
 	"es-VE\tshort\tkilobyte\tother={0} kB\n" +
 	"es-VE\tshort\tkilogram\tother={0} kg\n" +
 	"es-VE\tshort\tkilometer\tother={0} km\n" +
+	"es-VE\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"es-VE\tshort\tliter\tother={0} l\n" +
+	"es-VE\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"es-VE\tshort\tmegabit\tother={0} Mb\n" +
 	"es-VE\tshort\tmegabyte\tother={0} MB\n" +
 	"es-VE\tshort\tmeter\tother={0} m\n" +
+	"es-VE\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"es-VE\tshort\tmicrosecond\tother={0} μs\n" +
 	"es-VE\tshort\tmile\tother={0} mi\n" +
+	"es-VE\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"es-VE\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"es-VE\tshort\tmile-scandinavian\tone={0} mi esc.;other={0} mi esc.\n" +
 	"es-VE\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"es-VE\tshort\tmillimeter\tother={0} mm\n" +
@@ -4310,12 +4740,17 @@ const cldrUnitData = "" +
 	"es-VE\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"es-VE\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"es-VE\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"es-VE\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"es-VE\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"es-VE\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"es-VE\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"es-VE\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"es-VE\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"es-VE\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"es-VE\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"es-VE\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"es-VE\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"es-VE\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"es-VE\tnarrow\tmile-scandinavian\tone={0}mi esc.;other={0}mi esc.\n" +
 	"es-VE\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"es-VE\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -4356,12 +4791,17 @@ const cldrUnitData = "" +
 	"et-EE\tlong\tkilobyte\tone={0} kilobait;other={0} kilobaiti\n" +
 	"et-EE\tlong\tkilogram\tone={0} kilogramm;other={0} kilogrammi\n" +
 	"et-EE\tlong\tkilometer\tone={0} kilomeeter;other={0} kilomeetrit\n" +
+	"et-EE\tlong\tkilometer-per-hour\tone={0} kilomeeter tunnis;other={0} kilomeetrit tunnis\n" +
 	"et-EE\tlong\tliter\tone={0} liiter;other={0} liitrit\n" +
+	"et-EE\tlong\tliter-per-kilometer\tone={0} liiter kilomeetri kohta;other={0} liitrit kilomeetri kohta\n" +
 	"et-EE\tlong\tmegabit\tone={0} megabitt;other={0} megabitti\n" +
 	"et-EE\tlong\tmegabyte\tone={0} megabait;other={0} megabaiti\n" +
 	"et-EE\tlong\tmeter\tone={0} meeter;other={0} meetrit\n" +
+	"et-EE\tlong\tmeter-per-second\tone={0} meeter sekundis;other={0} meetrit sekundis\n" +
 	"et-EE\tlong\tmicrosecond\tone={0} mikrosekund;other={0} mikrosekundit\n" +
 	"et-EE\tlong\tmile\tone={0} miil;other={0} miili\n" +
+	"et-EE\tlong\tmile-per-gallon\tone={0} miil galloni kohta;other={0} miili galloni kohta\n" +
+	"et-EE\tlong\tmile-per-hour\tone={0} miil tunnis;other={0} miili tunnis\n" +
 	"et-EE\tlong\tmile-scandinavian\tone={0} Skandinaavia miil;other={0} Skandinaavia miili\n" +
 	"et-EE\tlong\tmilliliter\tone={0} milliliiter;other={0} milliliitrit\n" +
 	"et-EE\tlong\tmillimeter\tone={0} millimeeter;other={0} millimeetrit\n" +
@@ -4402,12 +4842,17 @@ const cldrUnitData = "" +
 	"et-EE\tshort\tkilobyte\tother={0} kB\n" +
 	"et-EE\tshort\tkilogram\tother={0} kg\n" +
 	"et-EE\tshort\tkilometer\tother={0} km\n" +
+	"et-EE\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"et-EE\tshort\tliter\tother={0} l\n" +
+	"et-EE\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"et-EE\tshort\tmegabit\tother={0} Mb\n" +
 	"et-EE\tshort\tmegabyte\tother={0} MB\n" +
 	"et-EE\tshort\tmeter\tother={0} m\n" +
+	"et-EE\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"et-EE\tshort\tmicrosecond\tother={0} μs\n" +
 	"et-EE\tshort\tmile\tother={0} mi\n" +
+	"et-EE\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"et-EE\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"et-EE\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"et-EE\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"et-EE\tshort\tmillimeter\tother={0} mm\n" +
@@ -4448,12 +4893,17 @@ const cldrUnitData = "" +
 	"et-EE\tnarrow\tkilobyte\tother={0} kB\n" +
 	"et-EE\tnarrow\tkilogram\tother={0} kg\n" +
 	"et-EE\tnarrow\tkilometer\tother={0} km\n" +
+	"et-EE\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"et-EE\tnarrow\tliter\tother={0} l\n" +
+	"et-EE\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"et-EE\tnarrow\tmegabit\tother={0} Mb\n" +
 	"et-EE\tnarrow\tmegabyte\tother={0} MB\n" +
 	"et-EE\tnarrow\tmeter\tother={0} m\n" +
+	"et-EE\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"et-EE\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"et-EE\tnarrow\tmile\tone={0} miil;other={0} miili\n" +
+	"et-EE\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"et-EE\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"et-EE\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"et-EE\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"et-EE\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -4494,12 +4944,17 @@ const cldrUnitData = "" +
 	"fi-FI\tlong\tkilobyte\tone={0} kilotavu;other={0} kilotavua\n" +
 	"fi-FI\tlong\tkilogram\tone={0} kilogramma;other={0} kilogrammaa\n" +
 	"fi-FI\tlong\tkilometer\tone={0} kilometri;other={0} kilometriä\n" +
+	"fi-FI\tlong\tkilometer-per-hour\tone={0} kilometri tunnissa;other={0} kilometriä tunnissa\n" +
 	"fi-FI\tlong\tliter\tone={0} litra;other={0} litraa\n" +
+	"fi-FI\tlong\tliter-per-kilometer\tone={0} litra / kilometri;other={0} litraa / kilometri\n" +
 	"fi-FI\tlong\tmegabit\tone={0} megabitti;other={0} megabittiä\n" +
 	"fi-FI\tlong\tmegabyte\tone={0} megatavu;other={0} megatavua\n" +
 	"fi-FI\tlong\tmeter\tone={0} metri;other={0} metriä\n" +
+	"fi-FI\tlong\tmeter-per-second\tone={0} metri sekunnissa;other={0} metriä sekunnissa\n" +
 	"fi-FI\tlong\tmicrosecond\tone={0} mikrosekunti;other={0} mikrosekuntia\n" +
 	"fi-FI\tlong\tmile\tone={0} maili;other={0} mailia\n" +
+	"fi-FI\tlong\tmile-per-gallon\tone={0} maili / am. gallona;other={0} mailia / am. gallona\n" +
+	"fi-FI\tlong\tmile-per-hour\tone={0} maili tunnissa;other={0} mailia tunnissa\n" +
 	"fi-FI\tlong\tmile-scandinavian\tone={0} peninkulma;other={0} peninkulmaa\n" +
 	"fi-FI\tlong\tmilliliter\tone={0} millilitra;other={0} millilitraa\n" +
 	"fi-FI\tlong\tmillimeter\tone={0} millimetri;other={0} millimetriä\n" +
@@ -4540,12 +4995,17 @@ const cldrUnitData = "" +
 	"fi-FI\tshort\tkilobyte\tone={0} kt;other={0} kt\n" +
 	"fi-FI\tshort\tkilogram\tother={0} kg\n" +
 	"fi-FI\tshort\tkilometer\tother={0} km\n" +
+	"fi-FI\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"fi-FI\tshort\tliter\tother={0} l\n" +
+	"fi-FI\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"fi-FI\tshort\tmegabit\tother={0} Mb\n" +
 	"fi-FI\tshort\tmegabyte\tone={0} Mt;other={0} Mt\n" +
 	"fi-FI\tshort\tmeter\tother={0} m\n" +
+	"fi-FI\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"fi-FI\tshort\tmicrosecond\tother={0} μs\n" +
 	"fi-FI\tshort\tmile\tother={0} mi\n" +
+	"fi-FI\tshort\tmile-per-gallon\tone={0} mpg-am;other={0} mpg-am\n" +
+	"fi-FI\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"fi-FI\tshort\tmile-scandinavian\tone={0} pnk;other={0} pnk\n" +
 	"fi-FI\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"fi-FI\tshort\tmillimeter\tother={0} mm\n" +
@@ -4586,12 +5046,17 @@ const cldrUnitData = "" +
 	"fi-FI\tnarrow\tkilobyte\tone={0}kt;other={0}kt\n" +
 	"fi-FI\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"fi-FI\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"fi-FI\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"fi-FI\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"fi-FI\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"fi-FI\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"fi-FI\tnarrow\tmegabyte\tone={0}Mt;other={0}Mt\n" +
 	"fi-FI\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"fi-FI\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"fi-FI\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"fi-FI\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"fi-FI\tnarrow\tmile-per-gallon\tone={0}mpg-am;other={0}mpg-am\n" +
+	"fi-FI\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"fi-FI\tnarrow\tmile-scandinavian\tone={0}pnk;other={0}pnk\n" +
 	"fi-FI\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"fi-FI\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -4632,12 +5097,17 @@ const cldrUnitData = "" +
 	"fil-PH\tlong\tkilobyte\tone={0} kilobyte;other={0} na kilobyte\n" +
 	"fil-PH\tlong\tkilogram\tone={0} kilo;other={0} kilo\n" +
 	"fil-PH\tlong\tkilometer\tone={0} kilometro;other={0} na kilometro\n" +
+	"fil-PH\tlong\tkilometer-per-hour\tone={0} kilometro kada oras;other={0} na kilometro kada oras\n" +
 	"fil-PH\tlong\tliter\tone={0} litro;other={0} na litro\n" +
+	"fil-PH\tlong\tliter-per-kilometer\tone={0} litro kada kilometro;other={0} litro kada kilometro\n" +
 	"fil-PH\tlong\tmegabit\tone={0} megabit;other={0} na megabit\n" +
 	"fil-PH\tlong\tmegabyte\tone={0} megabyte;other={0} na megabyte\n" +
 	"fil-PH\tlong\tmeter\tone={0} metro;other={0} na metro\n" +
+	"fil-PH\tlong\tmeter-per-second\tone={0} metro kada segundo;other={0} metro kada segundo\n" +
 	"fil-PH\tlong\tmicrosecond\tone={0} mikrosegundo;other={0} mikrosegundo\n" +
 	"fil-PH\tlong\tmile\tone={0} milya;other={0} na milya\n" +
+	"fil-PH\tlong\tmile-per-gallon\tone={0} milya kada galon;other={0} na milya kada galon\n" +
+	"fil-PH\tlong\tmile-per-hour\tone={0} milya kada oras;other={0} milya kada oras\n" +
 	"fil-PH\tlong\tmile-scandinavian\tone={0} milya-scandinavian;other={0} na milya-scandinavian\n" +
 	"fil-PH\tlong\tmilliliter\tone={0} mililitro;other={0} mililitro\n" +
 	"fil-PH\tlong\tmillimeter\tone={0} milimetro;other={0} na milimetro\n" +
@@ -4678,12 +5148,17 @@ const cldrUnitData = "" +
 	"fil-PH\tshort\tkilobyte\tother={0} kB\n" +
 	"fil-PH\tshort\tkilogram\tother={0} kg\n" +
 	"fil-PH\tshort\tkilometer\tother={0} km\n" +
+	"fil-PH\tshort\tkilometer-per-hour\tone={0} kph;other={0} kph\n" +
 	"fil-PH\tshort\tliter\tone={0} L;other={0} L\n" +
+	"fil-PH\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"fil-PH\tshort\tmegabit\tother={0} Mb\n" +
 	"fil-PH\tshort\tmegabyte\tother={0} MB\n" +
 	"fil-PH\tshort\tmeter\tother={0} m\n" +
+	"fil-PH\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"fil-PH\tshort\tmicrosecond\tother={0} μs\n" +
 	"fil-PH\tshort\tmile\tother={0} mi\n" +
+	"fil-PH\tshort\tmile-per-gallon\tone={0} mpg;other={0} na mpg\n" +
+	"fil-PH\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"fil-PH\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"fil-PH\tshort\tmilliliter\tother={0} mL\n" +
 	"fil-PH\tshort\tmillimeter\tother={0} mm\n" +
@@ -4724,12 +5199,17 @@ const cldrUnitData = "" +
 	"fil-PH\tnarrow\tkilobyte\tother={0} kB\n" +
 	"fil-PH\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"fil-PH\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"fil-PH\tnarrow\tkilometer-per-hour\tone={0}kph;other={0}kph\n" +
 	"fil-PH\tnarrow\tliter\tone={0}L;other={0}L\n" +
+	"fil-PH\tnarrow\tliter-per-kilometer\tother={0} L/km\n" +
 	"fil-PH\tnarrow\tmegabit\tother={0} Mb\n" +
 	"fil-PH\tnarrow\tmegabyte\tother={0} MB\n" +
 	"fil-PH\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"fil-PH\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"fil-PH\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"fil-PH\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"fil-PH\tnarrow\tmile-per-gallon\tone={0} mpg;other={0}mpg\n" +
+	"fil-PH\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"fil-PH\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"fil-PH\tnarrow\tmilliliter\tother={0} mL\n" +
 	"fil-PH\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -4770,12 +5250,17 @@ const cldrUnitData = "" +
 	"fr-BE\tlong\tkilobyte\tone={0} kilooctet;other={0} kilooctets\n" +
 	"fr-BE\tlong\tkilogram\tone={0} kilogramme;other={0} kilogrammes\n" +
 	"fr-BE\tlong\tkilometer\tone={0} kilomètre;other={0} kilomètres\n" +
+	"fr-BE\tlong\tkilometer-per-hour\tone={0} kilomètre par heure;other={0} kilomètres par heure\n" +
 	"fr-BE\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"fr-BE\tlong\tliter-per-kilometer\tone={0} litre au kilomètre;other={0} litres au kilomètre\n" +
 	"fr-BE\tlong\tmegabit\tone={0} mégabit;other={0} mégabits\n" +
 	"fr-BE\tlong\tmegabyte\tone={0} mégaoctet;other={0} mégaoctets\n" +
 	"fr-BE\tlong\tmeter\tone={0} mètre;other={0} mètres\n" +
+	"fr-BE\tlong\tmeter-per-second\tone={0} mètre par seconde;other={0} mètres par seconde\n" +
 	"fr-BE\tlong\tmicrosecond\tone={0} microseconde;other={0} microsecondes\n" +
 	"fr-BE\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"fr-BE\tlong\tmile-per-gallon\tone={0} mile par gallon;other={0} miles par gallon\n" +
+	"fr-BE\tlong\tmile-per-hour\tone={0} mile par heure;other={0} miles par heure\n" +
 	"fr-BE\tlong\tmile-scandinavian\tone={0} mille scandinave;other={0} milles scandinaves\n" +
 	"fr-BE\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"fr-BE\tlong\tmillimeter\tone={0} millimètre;other={0} millimètres\n" +
@@ -4816,12 +5301,17 @@ const cldrUnitData = "" +
 	"fr-BE\tshort\tkilobyte\tone={0} ko;other={0} ko\n" +
 	"fr-BE\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"fr-BE\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"fr-BE\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"fr-BE\tshort\tliter\tone={0} l;other={0} l\n" +
+	"fr-BE\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"fr-BE\tshort\tmegabit\tone={0} Mbit;other={0} Mbit\n" +
 	"fr-BE\tshort\tmegabyte\tone={0} Mo;other={0} Mo\n" +
 	"fr-BE\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"fr-BE\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"fr-BE\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"fr-BE\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"fr-BE\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"fr-BE\tshort\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"fr-BE\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"fr-BE\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"fr-BE\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -4862,12 +5352,17 @@ const cldrUnitData = "" +
 	"fr-BE\tnarrow\tkilobyte\tone={0}ko;other={0}ko\n" +
 	"fr-BE\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"fr-BE\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"fr-BE\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"fr-BE\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"fr-BE\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"fr-BE\tnarrow\tmegabit\tone={0}Mbit;other={0}Mbit\n" +
 	"fr-BE\tnarrow\tmegabyte\tone={0}Mo;other={0}Mo\n" +
 	"fr-BE\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"fr-BE\tnarrow\tmeter-per-second\tone={0} m/s;other={0}m/s\n" +
 	"fr-BE\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"fr-BE\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"fr-BE\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"fr-BE\tnarrow\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"fr-BE\tnarrow\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"fr-BE\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"fr-BE\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -4908,12 +5403,17 @@ const cldrUnitData = "" +
 	"fr-CA\tlong\tkilobyte\tone={0} kilooctet;other={0} kilooctets\n" +
 	"fr-CA\tlong\tkilogram\tone={0} kilogramme;other={0} kilogrammes\n" +
 	"fr-CA\tlong\tkilometer\tone={0} kilomètre;other={0} kilomètres\n" +
+	"fr-CA\tlong\tkilometer-per-hour\tone={0} kilomètre par heure;other={0} kilomètres par heure\n" +
 	"fr-CA\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"fr-CA\tlong\tliter-per-kilometer\tone={0} litre au kilomètre;other={0} litres au kilomètre\n" +
 	"fr-CA\tlong\tmegabit\tone={0} mégabit;other={0} mégabits\n" +
 	"fr-CA\tlong\tmegabyte\tone={0} mégaoctet;other={0} mégaoctets\n" +
 	"fr-CA\tlong\tmeter\tone={0} mètre;other={0} mètres\n" +
+	"fr-CA\tlong\tmeter-per-second\tone={0} mètre par seconde;other={0} mètres par seconde\n" +
 	"fr-CA\tlong\tmicrosecond\tone={0} microseconde;other={0} microsecondes\n" +
 	"fr-CA\tlong\tmile\tone={0} mille;other={0} milles\n" +
+	"fr-CA\tlong\tmile-per-gallon\tone={0} mille au gallon;other={0} milles au gallon\n" +
+	"fr-CA\tlong\tmile-per-hour\tone={0} mille à l’heure;other={0} milles à l’heure\n" +
 	"fr-CA\tlong\tmile-scandinavian\tone={0} mille scandinave;other={0} milles scandinaves\n" +
 	"fr-CA\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"fr-CA\tlong\tmillimeter\tone={0} millimètre;other={0} millimètres\n" +
@@ -4954,12 +5454,17 @@ const cldrUnitData = "" +
 	"fr-CA\tshort\tkilobyte\tone={0} ko;other={0} ko\n" +
 	"fr-CA\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"fr-CA\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"fr-CA\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"fr-CA\tshort\tliter\tone={0} l;other={0} l\n" +
+	"fr-CA\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"fr-CA\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"fr-CA\tshort\tmegabyte\tone={0} Mo;other={0} Mo\n" +
 	"fr-CA\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"fr-CA\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"fr-CA\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"fr-CA\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"fr-CA\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"fr-CA\tshort\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"fr-CA\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"fr-CA\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"fr-CA\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -5000,12 +5505,17 @@ const cldrUnitData = "" +
 	"fr-CA\tnarrow\tkilobyte\tone={0}ko;other={0}ko\n" +
 	"fr-CA\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"fr-CA\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"fr-CA\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"fr-CA\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"fr-CA\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"fr-CA\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"fr-CA\tnarrow\tmegabyte\tone={0}Mo;other={0}Mo\n" +
 	"fr-CA\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"fr-CA\tnarrow\tmeter-per-second\tone={0} m/s;other={0}m/s\n" +
 	"fr-CA\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"fr-CA\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"fr-CA\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"fr-CA\tnarrow\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"fr-CA\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"fr-CA\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"fr-CA\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -5046,12 +5556,17 @@ const cldrUnitData = "" +
 	"fr-CH\tlong\tkilobyte\tone={0} kilooctet;other={0} kilooctets\n" +
 	"fr-CH\tlong\tkilogram\tone={0} kilogramme;other={0} kilogrammes\n" +
 	"fr-CH\tlong\tkilometer\tone={0} kilomètre;other={0} kilomètres\n" +
+	"fr-CH\tlong\tkilometer-per-hour\tone={0} kilomètre par heure;other={0} kilomètres par heure\n" +
 	"fr-CH\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"fr-CH\tlong\tliter-per-kilometer\tone={0} litre au kilomètre;other={0} litres au kilomètre\n" +
 	"fr-CH\tlong\tmegabit\tone={0} mégabit;other={0} mégabits\n" +
 	"fr-CH\tlong\tmegabyte\tone={0} mégaoctet;other={0} mégaoctets\n" +
 	"fr-CH\tlong\tmeter\tone={0} mètre;other={0} mètres\n" +
+	"fr-CH\tlong\tmeter-per-second\tone={0} mètre par seconde;other={0} mètres par seconde\n" +
 	"fr-CH\tlong\tmicrosecond\tone={0} microseconde;other={0} microsecondes\n" +
 	"fr-CH\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"fr-CH\tlong\tmile-per-gallon\tone={0} mile par gallon;other={0} miles par gallon\n" +
+	"fr-CH\tlong\tmile-per-hour\tone={0} mile par heure;other={0} miles par heure\n" +
 	"fr-CH\tlong\tmile-scandinavian\tone={0} mille scandinave;other={0} milles scandinaves\n" +
 	"fr-CH\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"fr-CH\tlong\tmillimeter\tone={0} millimètre;other={0} millimètres\n" +
@@ -5092,12 +5607,17 @@ const cldrUnitData = "" +
 	"fr-CH\tshort\tkilobyte\tone={0} ko;other={0} ko\n" +
 	"fr-CH\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"fr-CH\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"fr-CH\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"fr-CH\tshort\tliter\tone={0} l;other={0} l\n" +
+	"fr-CH\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"fr-CH\tshort\tmegabit\tone={0} Mbit;other={0} Mbit\n" +
 	"fr-CH\tshort\tmegabyte\tone={0} Mo;other={0} Mo\n" +
 	"fr-CH\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"fr-CH\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"fr-CH\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"fr-CH\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"fr-CH\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"fr-CH\tshort\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"fr-CH\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"fr-CH\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"fr-CH\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -5138,12 +5658,17 @@ const cldrUnitData = "" +
 	"fr-CH\tnarrow\tkilobyte\tone={0}ko;other={0}ko\n" +
 	"fr-CH\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"fr-CH\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"fr-CH\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"fr-CH\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"fr-CH\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"fr-CH\tnarrow\tmegabit\tone={0}Mbit;other={0}Mbit\n" +
 	"fr-CH\tnarrow\tmegabyte\tone={0}Mo;other={0}Mo\n" +
 	"fr-CH\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"fr-CH\tnarrow\tmeter-per-second\tone={0} m/s;other={0}m/s\n" +
 	"fr-CH\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"fr-CH\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"fr-CH\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"fr-CH\tnarrow\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"fr-CH\tnarrow\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"fr-CH\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"fr-CH\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -5184,12 +5709,17 @@ const cldrUnitData = "" +
 	"fr-FR\tlong\tkilobyte\tone={0} kilooctet;other={0} kilooctets\n" +
 	"fr-FR\tlong\tkilogram\tone={0} kilogramme;other={0} kilogrammes\n" +
 	"fr-FR\tlong\tkilometer\tone={0} kilomètre;other={0} kilomètres\n" +
+	"fr-FR\tlong\tkilometer-per-hour\tone={0} kilomètre par heure;other={0} kilomètres par heure\n" +
 	"fr-FR\tlong\tliter\tone={0} litre;other={0} litres\n" +
+	"fr-FR\tlong\tliter-per-kilometer\tone={0} litre au kilomètre;other={0} litres au kilomètre\n" +
 	"fr-FR\tlong\tmegabit\tone={0} mégabit;other={0} mégabits\n" +
 	"fr-FR\tlong\tmegabyte\tone={0} mégaoctet;other={0} mégaoctets\n" +
 	"fr-FR\tlong\tmeter\tone={0} mètre;other={0} mètres\n" +
+	"fr-FR\tlong\tmeter-per-second\tone={0} mètre par seconde;other={0} mètres par seconde\n" +
 	"fr-FR\tlong\tmicrosecond\tone={0} microseconde;other={0} microsecondes\n" +
 	"fr-FR\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"fr-FR\tlong\tmile-per-gallon\tone={0} mile par gallon;other={0} miles par gallon\n" +
+	"fr-FR\tlong\tmile-per-hour\tone={0} mile par heure;other={0} miles par heure\n" +
 	"fr-FR\tlong\tmile-scandinavian\tone={0} mille scandinave;other={0} milles scandinaves\n" +
 	"fr-FR\tlong\tmilliliter\tone={0} millilitre;other={0} millilitres\n" +
 	"fr-FR\tlong\tmillimeter\tone={0} millimètre;other={0} millimètres\n" +
@@ -5230,12 +5760,17 @@ const cldrUnitData = "" +
 	"fr-FR\tshort\tkilobyte\tone={0} ko;other={0} ko\n" +
 	"fr-FR\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"fr-FR\tshort\tkilometer\tone={0} km;other={0} km\n" +
+	"fr-FR\tshort\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"fr-FR\tshort\tliter\tone={0} l;other={0} l\n" +
+	"fr-FR\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"fr-FR\tshort\tmegabit\tone={0} Mbit;other={0} Mbit\n" +
 	"fr-FR\tshort\tmegabyte\tone={0} Mo;other={0} Mo\n" +
 	"fr-FR\tshort\tmeter\tone={0} m;other={0} m\n" +
+	"fr-FR\tshort\tmeter-per-second\tone={0} m/s;other={0} m/s\n" +
 	"fr-FR\tshort\tmicrosecond\tone={0} μs;other={0} μs\n" +
 	"fr-FR\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"fr-FR\tshort\tmile-per-gallon\tone={0} mi/gal;other={0} mi/gal\n" +
+	"fr-FR\tshort\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"fr-FR\tshort\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"fr-FR\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"fr-FR\tshort\tmillimeter\tone={0} mm;other={0} mm\n" +
@@ -5276,12 +5811,17 @@ const cldrUnitData = "" +
 	"fr-FR\tnarrow\tkilobyte\tone={0}ko;other={0}ko\n" +
 	"fr-FR\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"fr-FR\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"fr-FR\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"fr-FR\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"fr-FR\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"fr-FR\tnarrow\tmegabit\tone={0}Mbit;other={0}Mbit\n" +
 	"fr-FR\tnarrow\tmegabyte\tone={0}Mo;other={0}Mo\n" +
 	"fr-FR\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"fr-FR\tnarrow\tmeter-per-second\tone={0} m/s;other={0}m/s\n" +
 	"fr-FR\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"fr-FR\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"fr-FR\tnarrow\tmile-per-gallon\tone={0}mi/gal;other={0}mi/gal\n" +
+	"fr-FR\tnarrow\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"fr-FR\tnarrow\tmile-scandinavian\tone={0} smi;other={0} smi\n" +
 	"fr-FR\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"fr-FR\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -5322,12 +5862,17 @@ const cldrUnitData = "" +
 	"gu-IN\tlong\tkilobyte\tone={0} કિલોબાઇટ;other={0} કિલોબાઇટ\n" +
 	"gu-IN\tlong\tkilogram\tone={0} કિલોગ્રામ;other={0} કિલોગ્રામ\n" +
 	"gu-IN\tlong\tkilometer\tone={0} કિલોમીટર;other={0} કિલોમીટર\n" +
+	"gu-IN\tlong\tkilometer-per-hour\tone={0} કિલોમીટર પ્રતિ કલાક;other={0} કિલોમીટર પ્રતિ કલાક\n" +
 	"gu-IN\tlong\tliter\tone={0} લિટર;other={0} લિટર\n" +
+	"gu-IN\tlong\tliter-per-kilometer\tone={0} લીટર પ્રતિ કિલોમીટર;other={0} લીટર પ્રતિ કિલોમીટર\n" +
 	"gu-IN\tlong\tmegabit\tone={0} મેગાબિટ;other={0} મેગાબિટ\n" +
 	"gu-IN\tlong\tmegabyte\tone={0} મેગાબાઇટ;other={0} મેગાબાઇટ\n" +
 	"gu-IN\tlong\tmeter\tone={0} મીટર;other={0} મીટર\n" +
+	"gu-IN\tlong\tmeter-per-second\tone={0} મીટર પ્રતિ સેકન્ડ;other={0} મીટર પ્રતિ સેકન્ડ\n" +
 	"gu-IN\tlong\tmicrosecond\tone={0} માઇક્રોસેકંડ;other={0} માઇક્રોસેકંડ\n" +
 	"gu-IN\tlong\tmile\tone={0} માઇલ;other={0} માઇલ\n" +
+	"gu-IN\tlong\tmile-per-gallon\tone={0} માઇલ પ્રતિ ગૅલન;other={0} માઇલ પ્રતિ ગૅલન\n" +
+	"gu-IN\tlong\tmile-per-hour\tone={0} માઇલ પ્રતિ કલાક;other={0} માઇલ પ્રતિ કલાક\n" +
 	"gu-IN\tlong\tmile-scandinavian\tone={0} માઈલ-સ્કૅન્ડિનેવિઅન;other={0} માઈલ-સ્કૅન્ડિનેવિઅન\n" +
 	"gu-IN\tlong\tmilliliter\tone={0} મિલિલીટર;other={0} મિલિલીટર\n" +
 	"gu-IN\tlong\tmillimeter\tone={0} મિલિમીટર;other={0} મિલિમીટર\n" +
@@ -5368,12 +5913,17 @@ const cldrUnitData = "" +
 	"gu-IN\tshort\tkilobyte\tother={0} kB\n" +
 	"gu-IN\tshort\tkilogram\tone={0} કિગ્રા;other={0} કિગ્રા\n" +
 	"gu-IN\tshort\tkilometer\tone={0} કિમી;other={0} કિમી\n" +
+	"gu-IN\tshort\tkilometer-per-hour\tone={0} કિમી/કલાક;other={0} કિમી/કલાક\n" +
 	"gu-IN\tshort\tliter\tone={0} લિ;other={0} લિ\n" +
+	"gu-IN\tshort\tliter-per-kilometer\tone={0} લીટર/કિમી;other={0} લીટર/કિમી\n" +
 	"gu-IN\tshort\tmegabit\tother={0} Mb\n" +
 	"gu-IN\tshort\tmegabyte\tother={0} MB\n" +
 	"gu-IN\tshort\tmeter\tone={0} મી;other={0} મી\n" +
+	"gu-IN\tshort\tmeter-per-second\tone={0} મીટર/સેકન્ડ;other={0} મીટર/સેકન્ડ\n" +
 	"gu-IN\tshort\tmicrosecond\tother={0} μs\n" +
 	"gu-IN\tshort\tmile\tone={0} માઇલ;other={0} માઇલ\n" +
+	"gu-IN\tshort\tmile-per-gallon\tone={0} માઇલ/ગૅલન;other={0} માઇલ/ગૅલન\n" +
+	"gu-IN\tshort\tmile-per-hour\tone={0} માઇલ/કલાક;other={0} માઇલ/કલાક\n" +
 	"gu-IN\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"gu-IN\tshort\tmilliliter\tone={0} મિલિલીટર;other={0} મિલિલીટર\n" +
 	"gu-IN\tshort\tmillimeter\tone={0} મિમી;other={0} મિમી\n" +
@@ -5414,12 +5964,17 @@ const cldrUnitData = "" +
 	"gu-IN\tnarrow\tkilobyte\tother={0} kB\n" +
 	"gu-IN\tnarrow\tkilogram\tone={0} કિગ્રા;other={0} કિગ્રા\n" +
 	"gu-IN\tnarrow\tkilometer\tone={0} કિમી;other={0} કિમી\n" +
+	"gu-IN\tnarrow\tkilometer-per-hour\tone={0} કિપ્રક;other={0} કિપ્રક\n" +
 	"gu-IN\tnarrow\tliter\tone={0} લિ;other={0} લિ\n" +
+	"gu-IN\tnarrow\tliter-per-kilometer\tone={0} લીટર/કિમી;other={0} લીટર/કિમી\n" +
 	"gu-IN\tnarrow\tmegabit\tother={0} Mb\n" +
 	"gu-IN\tnarrow\tmegabyte\tother={0} MB\n" +
 	"gu-IN\tnarrow\tmeter\tone={0} મી;other={0} મી\n" +
+	"gu-IN\tnarrow\tmeter-per-second\tone={0} મીટર/સેકન્ડ;other={0} મીટર/સેકન્ડ\n" +
 	"gu-IN\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"gu-IN\tnarrow\tmile\tone={0} માઇલ;other={0} માઇલ\n" +
+	"gu-IN\tnarrow\tmile-per-gallon\tone={0} માઇલ/ગૅલન;other={0} માઇલ/ગૅલન\n" +
+	"gu-IN\tnarrow\tmile-per-hour\tone={0} માઇલ/કલાક;other={0} માઇલ/કલાક\n" +
 	"gu-IN\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"gu-IN\tnarrow\tmilliliter\tone={0} મિલિલીટર;other={0} મિલિલીટર\n" +
 	"gu-IN\tnarrow\tmillimeter\tone={0} મિમી;other={0} મિમી\n" +
@@ -5460,12 +6015,17 @@ const cldrUnitData = "" +
 	"he-IL\tlong\tkilobyte\tone={0} קילו-בייט;two={0} קילו-בייט;many={0} קילו-בייט;other={0} קילו-בייט\n" +
 	"he-IL\tlong\tkilogram\tone={0} קילוגרם;two={0} קילוגרם;many={0} קילוגרם;other={0} קילוגרם\n" +
 	"he-IL\tlong\tkilometer\tone={0} קילומטר;two={0} קילומטרים;many={0} קילומטרים;other={0} קילומטרים\n" +
+	"he-IL\tlong\tkilometer-per-hour\tone={0} קילומטר לשעה;two={0} קילומטר לשעה;many={0} קילומטר לשעה;other={0} קילומטר לשעה\n" +
 	"he-IL\tlong\tliter\tone={0} ליטר;two={0} ליטר;many={0} ליטר;other={0} ליטר\n" +
+	"he-IL\tlong\tliter-per-kilometer\tone={0} ליטר/קילומטר;two={0} ליטרים/קילומטר;many={0} ליטרים/קילומטר;other={0} ליטרים/קילומטר\n" +
 	"he-IL\tlong\tmegabit\tone={0} מגה-ביט;two={0} מגה-ביט;many={0} מגה-ביט;other={0} מגה-ביט\n" +
 	"he-IL\tlong\tmegabyte\tone={0} מגה-בייט;two={0} מגה-בייט;many={0} מגה-בייט;other={0} מגה-בייט\n" +
 	"he-IL\tlong\tmeter\tone={0} מטר;two={0} מטרים;many={0} מטרים;other={0} מטרים\n" +
+	"he-IL\tlong\tmeter-per-second\tone={0} מטר לשנייה;two={0} מטר לשנייה;many={0} מטר לשנייה;other={0} מטר לשנייה\n" +
 	"he-IL\tlong\tmicrosecond\tone={0} מיליונית שנייה;two={0} מיליוניות שנייה;many={0} מיליוניות שנייה;other={0} מיליוניות שנייה\n" +
 	"he-IL\tlong\tmile\tone={0} מייל;two={0} מייל;other={0} מייל\n" +
+	"he-IL\tlong\tmile-per-gallon\tone={0} מייל/גלון;two={0} מייל/גלון;many={0} מייל/גלון;other={0} מייל/גלון\n" +
+	"he-IL\tlong\tmile-per-hour\tone={0} מייל לשעה;two={0} מייל לשעה;many={0} מייל לשעה;other={0} מייל לשעה\n" +
 	"he-IL\tlong\tmile-scandinavian\tone={0} מייל-סקנדינביה;two={0} מייל-סקנדינביה;many={0} מייל-סקנדינביה;other={0} מייל-סקנדינביה\n" +
 	"he-IL\tlong\tmilliliter\tone={0} מיליליטר;two={0} מיליליטר;many={0} מיליליטר;other={0} מיליליטר\n" +
 	"he-IL\tlong\tmillimeter\tone={0} מילימטר;two={0} מילימטרים;many={0} מילימטרים;other={0} מילימטרים\n" +
@@ -5506,12 +6066,17 @@ const cldrUnitData = "" +
 	"he-IL\tshort\tkilobyte\tone=kB‏{0};two={0} kB;other={0} kB\n" +
 	"he-IL\tshort\tkilogram\tone={0} ק״ג;two={0} ק״ג;other={0} ק״ג\n" +
 	"he-IL\tshort\tkilometer\tone={0} ק״מ;two={0} ק״מ;other={0} ק״מ\n" +
+	"he-IL\tshort\tkilometer-per-hour\tone={0} קמ״ש;two={0} קמ״ש;other={0} קמ״ש\n" +
 	"he-IL\tshort\tliter\tone={0} ל׳;two={0} ל׳;other={0} ל׳\n" +
+	"he-IL\tshort\tliter-per-kilometer\tone={0} ל׳/ק״מ;two={0} ל׳/ק״מ;other={0} ל׳/ק״מ\n" +
 	"he-IL\tshort\tmegabit\tone=Mb‏{0};two={0} Mb;other={0} Mb\n" +
 	"he-IL\tshort\tmegabyte\tone=MB‏{0};two={0} MB;other={0} MB\n" +
 	"he-IL\tshort\tmeter\tone={0} מ׳;two={0} מ׳;other={0} מ׳\n" +
+	"he-IL\tshort\tmeter-per-second\tone={0} מ׳/שנ׳;two={0} מ׳/שנ׳;other={0} מ׳/שנ׳\n" +
 	"he-IL\tshort\tmicrosecond\tother={0} μs\n" +
 	"he-IL\tshort\tmile\tone={0} מייל;two={0} מייל;other={0} מייל\n" +
+	"he-IL\tshort\tmile-per-gallon\tone={0} mpg;two={0} mpg;other={0} mpg\n" +
+	"he-IL\tshort\tmile-per-hour\tone={0} mph;two={0} mph;other={0} mph\n" +
 	"he-IL\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"he-IL\tshort\tmilliliter\tone={0} מ״ל;two={0} מ״ל;other={0} מ״ל\n" +
 	"he-IL\tshort\tmillimeter\tone={0} מ″מ;two={0} מ״מ;other={0} מ״מ\n" +
@@ -5552,12 +6117,17 @@ const cldrUnitData = "" +
 	"he-IL\tnarrow\tkilobyte\tone=kB‏{0};two={0} kB;other={0} kB\n" +
 	"he-IL\tnarrow\tkilogram\tone={0}kg;two={0}kg;many={0}kg;other={0}kg\n" +
 	"he-IL\tnarrow\tkilometer\tone={0} ק״מ;two={0} ק״מ;other={0} ק״מ\n" +
+	"he-IL\tnarrow\tkilometer-per-hour\tone={0} קמ״ש;two={0} קמ״ש;other={0} קמ״ש\n" +
 	"he-IL\tnarrow\tliter\tone={0} ל׳;two={0} ל׳;other={0} ל׳\n" +
+	"he-IL\tnarrow\tliter-per-kilometer\tone={0} ל׳/ק״מ;two={0} ל׳/ק״מ;other={0} ל׳/ק״מ\n" +
 	"he-IL\tnarrow\tmegabit\tone=Mb‏{0};two={0} Mb;other={0} Mb\n" +
 	"he-IL\tnarrow\tmegabyte\tone=MB‏{0};two={0} MB;other={0} MB\n" +
 	"he-IL\tnarrow\tmeter\tone={0} מ׳;two={0} מ׳;other={0} מ׳\n" +
+	"he-IL\tnarrow\tmeter-per-second\tone={0} מ׳/שנ׳;two={0} מ׳/שנ׳;other={0} מ׳/שנ׳\n" +
 	"he-IL\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"he-IL\tnarrow\tmile\tone={0} מייל;two={0} מייל;other={0} מייל\n" +
+	"he-IL\tnarrow\tmile-per-gallon\tone={0} mpg;two={0} mpg;other={0} mpg\n" +
+	"he-IL\tnarrow\tmile-per-hour\tone={0} mph;two={0} mph;other={0} mph\n" +
 	"he-IL\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"he-IL\tnarrow\tmilliliter\tone={0} מ״ל;two={0} מ״ל;other={0} מ״ל\n" +
 	"he-IL\tnarrow\tmillimeter\tone={0} מ″מ;two={0} מ״מ;other={0} מ״מ\n" +
@@ -5598,12 +6168,17 @@ const cldrUnitData = "" +
 	"hi-IN\tlong\tkilobyte\tone={0} किलोबाइट;other={0} किलोबाइट\n" +
 	"hi-IN\tlong\tkilogram\tone={0} किलोग्राम;other={0} किलोग्राम\n" +
 	"hi-IN\tlong\tkilometer\tone={0} किलोमीटर;other={0} किलोमीटर\n" +
+	"hi-IN\tlong\tkilometer-per-hour\tone={0} किलोमीटर प्रति घंटा;other={0} किलोमीटर प्रति घंटा\n" +
 	"hi-IN\tlong\tliter\tone={0} लीटर;other={0} लीटर\n" +
+	"hi-IN\tlong\tliter-per-kilometer\tone={0} लीटर प्रति किलोमीटर;other={0} लीटर प्रति किलोमीटर\n" +
 	"hi-IN\tlong\tmegabit\tone={0} मेगाबिट;other={0} मेगाबिट\n" +
 	"hi-IN\tlong\tmegabyte\tone={0} मेगाबाइट;other={0} मेगाबाइट\n" +
 	"hi-IN\tlong\tmeter\tone={0} मीटर;other={0} मीटर\n" +
+	"hi-IN\tlong\tmeter-per-second\tone={0} मीटर प्रति सेकंड;other={0} मीटर प्रति सेकंड\n" +
 	"hi-IN\tlong\tmicrosecond\tone={0} माइक्रोसेकंड;other={0} माइक्रोसेकंड\n" +
 	"hi-IN\tlong\tmile\tone={0} मील;other={0} मील\n" +
+	"hi-IN\tlong\tmile-per-gallon\tone={0} मील प्रति गैलन;other={0} मील प्रति गैलन\n" +
+	"hi-IN\tlong\tmile-per-hour\tone={0} मील प्रति घंटा;other={0} मील प्रति घंटा\n" +
 	"hi-IN\tlong\tmile-scandinavian\tone={0} मील-स्कैण्डिनेवियन;other={0} मील-स्कैण्डिनेवियन\n" +
 	"hi-IN\tlong\tmilliliter\tone={0} मिलीलीटर;other={0} मिलीलीटर\n" +
 	"hi-IN\tlong\tmillimeter\tone={0} मिलीमीटर;other={0} मिलीमीटर\n" +
@@ -5644,12 +6219,17 @@ const cldrUnitData = "" +
 	"hi-IN\tshort\tkilobyte\tother={0} kB\n" +
 	"hi-IN\tshort\tkilogram\tone={0} कि॰ग्रा॰;other={0} कि॰ग्रा॰\n" +
 	"hi-IN\tshort\tkilometer\tone={0} कि॰मी॰;other={0} कि॰मी॰\n" +
+	"hi-IN\tshort\tkilometer-per-hour\tone={0} कि॰मी॰/घं॰;other={0} कि॰मी॰/घं॰\n" +
 	"hi-IN\tshort\tliter\tone={0} ली॰;other={0} ली॰\n" +
+	"hi-IN\tshort\tliter-per-kilometer\tone={0} ली/किमी;other={0} ली/किमी\n" +
 	"hi-IN\tshort\tmegabit\tother={0} Mb\n" +
 	"hi-IN\tshort\tmegabyte\tother={0} MB\n" +
 	"hi-IN\tshort\tmeter\tone={0} मी;other={0} मी\n" +
+	"hi-IN\tshort\tmeter-per-second\tone={0} मी॰/से॰;other={0} मी॰/से॰\n" +
 	"hi-IN\tshort\tmicrosecond\tother={0} μs\n" +
 	"hi-IN\tshort\tmile\tone={0} मील;other={0} मील\n" +
+	"hi-IN\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"hi-IN\tshort\tmile-per-hour\tone={0} मी॰प्र॰घं॰;other={0} मी॰प्र॰घं॰\n" +
 	"hi-IN\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"hi-IN\tshort\tmilliliter\tone={0} मि॰ ली॰;other={0} मि॰ ली॰\n" +
 	"hi-IN\tshort\tmillimeter\tone={0} मि॰मी॰;other={0} मि॰मी॰\n" +
@@ -5690,12 +6270,17 @@ const cldrUnitData = "" +
 	"hi-IN\tnarrow\tkilobyte\tother={0} kB\n" +
 	"hi-IN\tnarrow\tkilogram\tone={0} किग्रा;other={0} किग्रा\n" +
 	"hi-IN\tnarrow\tkilometer\tone={0} किमी;other={0} किमी\n" +
+	"hi-IN\tnarrow\tkilometer-per-hour\tone={0} किमी/घं;other={0} किमी/घं\n" +
 	"hi-IN\tnarrow\tliter\tone={0} ली;other={0} ली\n" +
+	"hi-IN\tnarrow\tliter-per-kilometer\tone={0} ली/किमी;other={0} ली/किमी\n" +
 	"hi-IN\tnarrow\tmegabit\tother={0} Mb\n" +
 	"hi-IN\tnarrow\tmegabyte\tother={0} MB\n" +
 	"hi-IN\tnarrow\tmeter\tone={0} मी;other={0} मी\n" +
+	"hi-IN\tnarrow\tmeter-per-second\tone={0} मी॰/से॰;other={0} मी॰/से॰\n" +
 	"hi-IN\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"hi-IN\tnarrow\tmile\tone={0} मील;other={0} मील\n" +
+	"hi-IN\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"hi-IN\tnarrow\tmile-per-hour\tone={0} मीप्रघं;other={0} मीप्रघं\n" +
 	"hi-IN\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"hi-IN\tnarrow\tmilliliter\tone={0} मिली;other={0} मिली\n" +
 	"hi-IN\tnarrow\tmillimeter\tone={0} मिमी;other={0} मिमी\n" +
@@ -5736,12 +6321,17 @@ const cldrUnitData = "" +
 	"hr-HR\tlong\tkilobyte\tone={0} kilobajt;few={0} kilobajta;other={0} kilobajta\n" +
 	"hr-HR\tlong\tkilogram\tone={0} kilogram;few={0} kilograma;other={0} kilograma\n" +
 	"hr-HR\tlong\tkilometer\tone={0} kilometar;few={0} kilometra;other={0} kilometara\n" +
+	"hr-HR\tlong\tkilometer-per-hour\tone={0} kilometar na sat;few={0} kilometra na sat;other={0} kilometara na sat\n" +
 	"hr-HR\tlong\tliter\tone={0} litra;few={0} litre;other={0} litara\n" +
+	"hr-HR\tlong\tliter-per-kilometer\tone={0} litra po kilometru;few={0} litre po kilometru;other={0} litara po kilometru\n" +
 	"hr-HR\tlong\tmegabit\tone={0} megabit;few={0} megabita;other={0} megabita\n" +
 	"hr-HR\tlong\tmegabyte\tone={0} megabajt;few={0} megabajta;other={0} megabajta\n" +
 	"hr-HR\tlong\tmeter\tone={0} metar;few={0} metra;other={0} metara\n" +
+	"hr-HR\tlong\tmeter-per-second\tone={0} metar u sekundi;few={0} metra u sekundi;other={0} metara u sekundi\n" +
 	"hr-HR\tlong\tmicrosecond\tone={0} mikrosekunda;few={0} mikrosekunde;other={0} mikrosekundi\n" +
 	"hr-HR\tlong\tmile\tone={0} milja;few={0} milje;other={0} milja\n" +
+	"hr-HR\tlong\tmile-per-gallon\tone={0} milja po galonu;few={0} milje po galonu;other={0} milja po galonu\n" +
+	"hr-HR\tlong\tmile-per-hour\tone={0} milja na sat;few={0} milje na sat;other={0} milja na sat\n" +
 	"hr-HR\tlong\tmile-scandinavian\tone={0} skandinavska milja;few={0} skandinavske milje;other={0} skandinavskih milja\n" +
 	"hr-HR\tlong\tmilliliter\tone={0} mililitar;few={0} mililitra;other={0} mililitara\n" +
 	"hr-HR\tlong\tmillimeter\tone={0} milimetar;few={0} milimetra;other={0} milimetara\n" +
@@ -5782,12 +6372,17 @@ const cldrUnitData = "" +
 	"hr-HR\tshort\tkilobyte\tother={0} kB\n" +
 	"hr-HR\tshort\tkilogram\tother={0} kg\n" +
 	"hr-HR\tshort\tkilometer\tother={0} km\n" +
+	"hr-HR\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"hr-HR\tshort\tliter\tother={0} l\n" +
+	"hr-HR\tshort\tliter-per-kilometer\tone={0} l/km;few={0} l/km;other={0} l/km\n" +
 	"hr-HR\tshort\tmegabit\tother={0} Mb\n" +
 	"hr-HR\tshort\tmegabyte\tother={0} MB\n" +
 	"hr-HR\tshort\tmeter\tother={0} m\n" +
+	"hr-HR\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"hr-HR\tshort\tmicrosecond\tother={0} μs\n" +
 	"hr-HR\tshort\tmile\tother={0} mi\n" +
+	"hr-HR\tshort\tmile-per-gallon\tone={0} mpg;few={0} mpg;other={0} mpg\n" +
+	"hr-HR\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"hr-HR\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"hr-HR\tshort\tmilliliter\tone={0} ml;few={0} ml;other={0} ml\n" +
 	"hr-HR\tshort\tmillimeter\tother={0} mm\n" +
@@ -5828,12 +6423,17 @@ const cldrUnitData = "" +
 	"hr-HR\tnarrow\tkilobyte\tother={0} kB\n" +
 	"hr-HR\tnarrow\tkilogram\tother={0} kg\n" +
 	"hr-HR\tnarrow\tkilometer\tother={0} km\n" +
+	"hr-HR\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"hr-HR\tnarrow\tliter\tother={0} l\n" +
+	"hr-HR\tnarrow\tliter-per-kilometer\tone={0} l/km;few={0} l/km;other={0} l/km\n" +
 	"hr-HR\tnarrow\tmegabit\tother={0} Mb\n" +
 	"hr-HR\tnarrow\tmegabyte\tother={0} MB\n" +
 	"hr-HR\tnarrow\tmeter\tother={0} m\n" +
+	"hr-HR\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"hr-HR\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"hr-HR\tnarrow\tmile\tother={0} mi\n" +
+	"hr-HR\tnarrow\tmile-per-gallon\tone={0} mpg;few={0} mpg;other={0} mpg\n" +
+	"hr-HR\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"hr-HR\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"hr-HR\tnarrow\tmilliliter\tone={0} ml;few={0} ml;other={0} ml\n" +
 	"hr-HR\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -5874,12 +6474,17 @@ const cldrUnitData = "" +
 	"hu-HU\tlong\tkilobyte\tone={0} kilobájt;other={0} kilobájt\n" +
 	"hu-HU\tlong\tkilogram\tone={0} kilogramm;other={0} kilogramm\n" +
 	"hu-HU\tlong\tkilometer\tone={0} kilométer;other={0} kilométer\n" +
+	"hu-HU\tlong\tkilometer-per-hour\tone={0} kilométer per óra;other={0} kilométer per óra\n" +
 	"hu-HU\tlong\tliter\tone={0} liter;other={0} liter\n" +
+	"hu-HU\tlong\tliter-per-kilometer\tone={0} liter per kilométer;other={0} liter per kilométer\n" +
 	"hu-HU\tlong\tmegabit\tone={0} megabit;other={0} megabit\n" +
 	"hu-HU\tlong\tmegabyte\tone={0} megabájt;other={0} megabájt\n" +
 	"hu-HU\tlong\tmeter\tone={0} méter;other={0} méter\n" +
+	"hu-HU\tlong\tmeter-per-second\tone={0} méter per másodperc;other={0} méter per másodperc\n" +
 	"hu-HU\tlong\tmicrosecond\tone={0} mikroszekundum;other={0} mikroszekundum\n" +
 	"hu-HU\tlong\tmile\tone={0} mérföld;other={0} mérföld\n" +
+	"hu-HU\tlong\tmile-per-gallon\tone={0} mérföld per gallon;other={0} mérföld per gallon\n" +
+	"hu-HU\tlong\tmile-per-hour\tone={0} mérföld per óra;other={0} mérföld per óra\n" +
 	"hu-HU\tlong\tmile-scandinavian\tone={0} svéd mérföld;other={0} svéd mérföld\n" +
 	"hu-HU\tlong\tmilliliter\tone={0} milliliter;other={0} milliliter\n" +
 	"hu-HU\tlong\tmillimeter\tone={0} milliméter;other={0} milliméter\n" +
@@ -5920,12 +6525,17 @@ const cldrUnitData = "" +
 	"hu-HU\tshort\tkilobyte\tother={0} kB\n" +
 	"hu-HU\tshort\tkilogram\tother={0} kg\n" +
 	"hu-HU\tshort\tkilometer\tother={0} km\n" +
+	"hu-HU\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"hu-HU\tshort\tliter\tother={0} l\n" +
+	"hu-HU\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"hu-HU\tshort\tmegabit\tother={0} Mb\n" +
 	"hu-HU\tshort\tmegabyte\tother={0} MB\n" +
 	"hu-HU\tshort\tmeter\tother={0} m\n" +
+	"hu-HU\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"hu-HU\tshort\tmicrosecond\tother={0} μs\n" +
 	"hu-HU\tshort\tmile\tone={0} mf;other={0} mf\n" +
+	"hu-HU\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"hu-HU\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"hu-HU\tshort\tmile-scandinavian\tone={0} mil;other={0} mil\n" +
 	"hu-HU\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"hu-HU\tshort\tmillimeter\tother={0} mm\n" +
@@ -5966,12 +6576,17 @@ const cldrUnitData = "" +
 	"hu-HU\tnarrow\tkilobyte\tother={0} kB\n" +
 	"hu-HU\tnarrow\tkilogram\tother={0} kg\n" +
 	"hu-HU\tnarrow\tkilometer\tother={0} km\n" +
+	"hu-HU\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"hu-HU\tnarrow\tliter\tother={0} l\n" +
+	"hu-HU\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"hu-HU\tnarrow\tmegabit\tother={0} Mb\n" +
 	"hu-HU\tnarrow\tmegabyte\tother={0} MB\n" +
 	"hu-HU\tnarrow\tmeter\tother={0} m\n" +
+	"hu-HU\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"hu-HU\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"hu-HU\tnarrow\tmile\tone={0} mf;other={0} mf\n" +
+	"hu-HU\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"hu-HU\tnarrow\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"hu-HU\tnarrow\tmile-scandinavian\tone={0} mil;other={0} mil\n" +
 	"hu-HU\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"hu-HU\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -6012,12 +6627,17 @@ const cldrUnitData = "" +
 	"id-ID\tlong\tkilobyte\tother={0} kilobyte\n" +
 	"id-ID\tlong\tkilogram\tother={0} kilogram\n" +
 	"id-ID\tlong\tkilometer\tother={0} kilometer\n" +
+	"id-ID\tlong\tkilometer-per-hour\tother={0} kilometer per jam\n" +
 	"id-ID\tlong\tliter\tother={0} liter\n" +
+	"id-ID\tlong\tliter-per-kilometer\tother={0} liter per kilometer\n" +
 	"id-ID\tlong\tmegabit\tother={0} megabit\n" +
 	"id-ID\tlong\tmegabyte\tother={0} megabyte\n" +
 	"id-ID\tlong\tmeter\tother={0} meter\n" +
+	"id-ID\tlong\tmeter-per-second\tother={0} meter per detik\n" +
 	"id-ID\tlong\tmicrosecond\tother={0} mikrodetik\n" +
 	"id-ID\tlong\tmile\tother={0} mil\n" +
+	"id-ID\tlong\tmile-per-gallon\tother={0} mil per galon\n" +
+	"id-ID\tlong\tmile-per-hour\tother={0} mil per jam\n" +
 	"id-ID\tlong\tmile-scandinavian\tother={0} mil skandinavia\n" +
 	"id-ID\tlong\tmilliliter\tother={0} mililiter\n" +
 	"id-ID\tlong\tmillimeter\tother={0} milimeter\n" +
@@ -6058,12 +6678,17 @@ const cldrUnitData = "" +
 	"id-ID\tshort\tkilobyte\tother={0} kB\n" +
 	"id-ID\tshort\tkilogram\tother={0} kg\n" +
 	"id-ID\tshort\tkilometer\tother={0} km\n" +
+	"id-ID\tshort\tkilometer-per-hour\tother={0} km/j\n" +
 	"id-ID\tshort\tliter\tother={0} L\n" +
+	"id-ID\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"id-ID\tshort\tmegabit\tother={0} Mb\n" +
 	"id-ID\tshort\tmegabyte\tother={0} MB\n" +
 	"id-ID\tshort\tmeter\tother={0} m\n" +
+	"id-ID\tshort\tmeter-per-second\tother={0} m/dtk\n" +
 	"id-ID\tshort\tmicrosecond\tother={0} μd\n" +
 	"id-ID\tshort\tmile\tother={0} mi\n" +
+	"id-ID\tshort\tmile-per-gallon\tother={0} mpg\n" +
+	"id-ID\tshort\tmile-per-hour\tother={0} mpj\n" +
 	"id-ID\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"id-ID\tshort\tmilliliter\tother={0} mL\n" +
 	"id-ID\tshort\tmillimeter\tother={0} mm\n" +
@@ -6104,12 +6729,17 @@ const cldrUnitData = "" +
 	"id-ID\tnarrow\tkilobyte\tother={0} kB\n" +
 	"id-ID\tnarrow\tkilogram\tother={0} kg\n" +
 	"id-ID\tnarrow\tkilometer\tother={0} km\n" +
+	"id-ID\tnarrow\tkilometer-per-hour\tother={0}km/j\n" +
 	"id-ID\tnarrow\tliter\tother={0} L\n" +
+	"id-ID\tnarrow\tliter-per-kilometer\tother={0} L/km\n" +
 	"id-ID\tnarrow\tmegabit\tother={0} Mb\n" +
 	"id-ID\tnarrow\tmegabyte\tother={0} MB\n" +
 	"id-ID\tnarrow\tmeter\tother={0} m\n" +
+	"id-ID\tnarrow\tmeter-per-second\tother={0} m/dtk\n" +
 	"id-ID\tnarrow\tmicrosecond\tother={0} μd\n" +
 	"id-ID\tnarrow\tmile\tother={0} mi\n" +
+	"id-ID\tnarrow\tmile-per-gallon\tother={0} mpg\n" +
+	"id-ID\tnarrow\tmile-per-hour\tother={0} mpj\n" +
 	"id-ID\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"id-ID\tnarrow\tmilliliter\tother={0} mL\n" +
 	"id-ID\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -6150,12 +6780,17 @@ const cldrUnitData = "" +
 	"it-CH\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobyte\n" +
 	"it-CH\tlong\tkilogram\tone={0} chilogrammo;other={0} chilogrammi\n" +
 	"it-CH\tlong\tkilometer\tone={0} chilometro;other={0} chilometri\n" +
+	"it-CH\tlong\tkilometer-per-hour\tone={0} chilometro orario;other={0} chilometri orari\n" +
 	"it-CH\tlong\tliter\tone={0} litro;other={0} litri\n" +
+	"it-CH\tlong\tliter-per-kilometer\tone={0} litro per chilometro;other={0} litri per chilometro\n" +
 	"it-CH\tlong\tmegabit\tone={0} megabit;other={0} megabit\n" +
 	"it-CH\tlong\tmegabyte\tone={0} megabyte;other={0} megabyte\n" +
 	"it-CH\tlong\tmeter\tone={0} metro;other={0} metri\n" +
+	"it-CH\tlong\tmeter-per-second\tone={0} metro al secondo;other={0} metri al secondo\n" +
 	"it-CH\tlong\tmicrosecond\tone={0} microsecondo;other={0} microsecondi\n" +
 	"it-CH\tlong\tmile\tone={0} miglio;other={0} miglia\n" +
+	"it-CH\tlong\tmile-per-gallon\tone={0} miglio per gallone;other={0} miglia per gallone\n" +
+	"it-CH\tlong\tmile-per-hour\tone={0} miglio all’ora;other={0} miglia all’ora\n" +
 	"it-CH\tlong\tmile-scandinavian\tone={0} miglio scandinavo;other={0} miglia scandinave\n" +
 	"it-CH\tlong\tmilliliter\tone={0} millilitro;other={0} millilitri\n" +
 	"it-CH\tlong\tmillimeter\tone={0} millimetro;other={0} millimetri\n" +
@@ -6196,12 +6831,17 @@ const cldrUnitData = "" +
 	"it-CH\tshort\tkilobyte\tother={0} kB\n" +
 	"it-CH\tshort\tkilogram\tother={0} kg\n" +
 	"it-CH\tshort\tkilometer\tother={0} km\n" +
+	"it-CH\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"it-CH\tshort\tliter\tother={0} l\n" +
+	"it-CH\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"it-CH\tshort\tmegabit\tother={0} Mb\n" +
 	"it-CH\tshort\tmegabyte\tother={0} MB\n" +
 	"it-CH\tshort\tmeter\tother={0} m\n" +
+	"it-CH\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"it-CH\tshort\tmicrosecond\tother={0} μs\n" +
 	"it-CH\tshort\tmile\tother={0} mi\n" +
+	"it-CH\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"it-CH\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"it-CH\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"it-CH\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"it-CH\tshort\tmillimeter\tother={0} mm\n" +
@@ -6242,12 +6882,17 @@ const cldrUnitData = "" +
 	"it-CH\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"it-CH\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"it-CH\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"it-CH\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"it-CH\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"it-CH\tnarrow\tliter-per-kilometer\tone={0}L/km;other={0}L/km\n" +
 	"it-CH\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"it-CH\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"it-CH\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"it-CH\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"it-CH\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"it-CH\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"it-CH\tnarrow\tmile-per-gallon\tone={0}mpg;other={0}mpg\n" +
+	"it-CH\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"it-CH\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"it-CH\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"it-CH\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -6288,12 +6933,17 @@ const cldrUnitData = "" +
 	"it-IT\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobyte\n" +
 	"it-IT\tlong\tkilogram\tone={0} chilogrammo;other={0} chilogrammi\n" +
 	"it-IT\tlong\tkilometer\tone={0} chilometro;other={0} chilometri\n" +
+	"it-IT\tlong\tkilometer-per-hour\tone={0} chilometro orario;other={0} chilometri orari\n" +
 	"it-IT\tlong\tliter\tone={0} litro;other={0} litri\n" +
+	"it-IT\tlong\tliter-per-kilometer\tone={0} litro per chilometro;other={0} litri per chilometro\n" +
 	"it-IT\tlong\tmegabit\tone={0} megabit;other={0} megabit\n" +
 	"it-IT\tlong\tmegabyte\tone={0} megabyte;other={0} megabyte\n" +
 	"it-IT\tlong\tmeter\tone={0} metro;other={0} metri\n" +
+	"it-IT\tlong\tmeter-per-second\tone={0} metro al secondo;other={0} metri al secondo\n" +
 	"it-IT\tlong\tmicrosecond\tone={0} microsecondo;other={0} microsecondi\n" +
 	"it-IT\tlong\tmile\tone={0} miglio;other={0} miglia\n" +
+	"it-IT\tlong\tmile-per-gallon\tone={0} miglio per gallone;other={0} miglia per gallone\n" +
+	"it-IT\tlong\tmile-per-hour\tone={0} miglio all’ora;other={0} miglia all’ora\n" +
 	"it-IT\tlong\tmile-scandinavian\tone={0} miglio scandinavo;other={0} miglia scandinave\n" +
 	"it-IT\tlong\tmilliliter\tone={0} millilitro;other={0} millilitri\n" +
 	"it-IT\tlong\tmillimeter\tone={0} millimetro;other={0} millimetri\n" +
@@ -6334,12 +6984,17 @@ const cldrUnitData = "" +
 	"it-IT\tshort\tkilobyte\tother={0} kB\n" +
 	"it-IT\tshort\tkilogram\tother={0} kg\n" +
 	"it-IT\tshort\tkilometer\tother={0} km\n" +
+	"it-IT\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"it-IT\tshort\tliter\tother={0} l\n" +
+	"it-IT\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"it-IT\tshort\tmegabit\tother={0} Mb\n" +
 	"it-IT\tshort\tmegabyte\tother={0} MB\n" +
 	"it-IT\tshort\tmeter\tother={0} m\n" +
+	"it-IT\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"it-IT\tshort\tmicrosecond\tother={0} μs\n" +
 	"it-IT\tshort\tmile\tother={0} mi\n" +
+	"it-IT\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"it-IT\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"it-IT\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"it-IT\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"it-IT\tshort\tmillimeter\tother={0} mm\n" +
@@ -6380,12 +7035,17 @@ const cldrUnitData = "" +
 	"it-IT\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"it-IT\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"it-IT\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"it-IT\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"it-IT\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"it-IT\tnarrow\tliter-per-kilometer\tone={0}L/km;other={0}L/km\n" +
 	"it-IT\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"it-IT\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"it-IT\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"it-IT\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"it-IT\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"it-IT\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"it-IT\tnarrow\tmile-per-gallon\tone={0}mpg;other={0}mpg\n" +
+	"it-IT\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"it-IT\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"it-IT\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"it-IT\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -6426,12 +7086,17 @@ const cldrUnitData = "" +
 	"ja-JP\tlong\tkilobyte\tother={0} キロバイト\n" +
 	"ja-JP\tlong\tkilogram\tother={0} キログラム\n" +
 	"ja-JP\tlong\tkilometer\tother={0} キロメートル\n" +
+	"ja-JP\tlong\tkilometer-per-hour\tother=時速 {0} キロメートル\n" +
 	"ja-JP\tlong\tliter\tother={0} リットル\n" +
+	"ja-JP\tlong\tliter-per-kilometer\tother={0} リットル毎キロメートル\n" +
 	"ja-JP\tlong\tmegabit\tother={0} メガビット\n" +
 	"ja-JP\tlong\tmegabyte\tother={0} メガバイト\n" +
 	"ja-JP\tlong\tmeter\tother={0} メートル\n" +
+	"ja-JP\tlong\tmeter-per-second\tother=秒速 {0} メートル\n" +
 	"ja-JP\tlong\tmicrosecond\tother={0} マイクロ秒\n" +
 	"ja-JP\tlong\tmile\tother={0} マイル\n" +
+	"ja-JP\tlong\tmile-per-gallon\tother={0} マイル毎ガロン\n" +
+	"ja-JP\tlong\tmile-per-hour\tother=時速 {0} マイル\n" +
 	"ja-JP\tlong\tmile-scandinavian\tother={0} スカンジナビアマイル\n" +
 	"ja-JP\tlong\tmilliliter\tother={0} ミリリットル\n" +
 	"ja-JP\tlong\tmillimeter\tother={0} ミリメートル\n" +
@@ -6472,12 +7137,17 @@ const cldrUnitData = "" +
 	"ja-JP\tshort\tkilobyte\tother={0} KB\n" +
 	"ja-JP\tshort\tkilogram\tother={0} kg\n" +
 	"ja-JP\tshort\tkilometer\tother={0} km\n" +
+	"ja-JP\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"ja-JP\tshort\tliter\tother={0} L\n" +
+	"ja-JP\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"ja-JP\tshort\tmegabit\tother={0} Mb\n" +
 	"ja-JP\tshort\tmegabyte\tother={0} MB\n" +
 	"ja-JP\tshort\tmeter\tother={0} m\n" +
+	"ja-JP\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"ja-JP\tshort\tmicrosecond\tother={0} μs\n" +
 	"ja-JP\tshort\tmile\tother={0} mi\n" +
+	"ja-JP\tshort\tmile-per-gallon\tother={0} mpg\n" +
+	"ja-JP\tshort\tmile-per-hour\tother={0} mph\n" +
 	"ja-JP\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"ja-JP\tshort\tmilliliter\tother={0} ml\n" +
 	"ja-JP\tshort\tmillimeter\tother={0} mm\n" +
@@ -6518,12 +7188,17 @@ const cldrUnitData = "" +
 	"ja-JP\tnarrow\tkilobyte\tother={0}KB\n" +
 	"ja-JP\tnarrow\tkilogram\tother={0}kg\n" +
 	"ja-JP\tnarrow\tkilometer\tother={0}km\n" +
+	"ja-JP\tnarrow\tkilometer-per-hour\tother={0}km/h\n" +
 	"ja-JP\tnarrow\tliter\tother={0}L\n" +
+	"ja-JP\tnarrow\tliter-per-kilometer\tother={0}L/km\n" +
 	"ja-JP\tnarrow\tmegabit\tother={0}Mb\n" +
 	"ja-JP\tnarrow\tmegabyte\tother={0}MB\n" +
 	"ja-JP\tnarrow\tmeter\tother={0}m\n" +
+	"ja-JP\tnarrow\tmeter-per-second\tother={0}m/s\n" +
 	"ja-JP\tnarrow\tmicrosecond\tother={0}μs\n" +
 	"ja-JP\tnarrow\tmile\tother={0}mi\n" +
+	"ja-JP\tnarrow\tmile-per-gallon\tother={0}mpg\n" +
+	"ja-JP\tnarrow\tmile-per-hour\tother={0}mi/h\n" +
 	"ja-JP\tnarrow\tmile-scandinavian\tother={0}smi\n" +
 	"ja-JP\tnarrow\tmilliliter\tother={0}ml\n" +
 	"ja-JP\tnarrow\tmillimeter\tother={0}mm\n" +
@@ -6564,12 +7239,17 @@ const cldrUnitData = "" +
 	"kn-IN\tlong\tkilobyte\tone={0} ಕಿಲೋಬೈಟ್‌;other={0} ಕಿಲೋಬೈಟ್‌ಗಳು\n" +
 	"kn-IN\tlong\tkilogram\tone={0} ಕಿಲೋಗ್ರಾಂ;other={0} ಕಿಲೋಗ್ರಾಂಗಳು\n" +
 	"kn-IN\tlong\tkilometer\tone={0} ಕಿಲೋಮೀಟರ್;other={0} ಕಿಲೋಮೀಟರ್‌ಗಳು\n" +
+	"kn-IN\tlong\tkilometer-per-hour\tone={0} ಕಿಲೋಮೀಟರ್ ಪ್ರತಿ ಗಂಟೆಗೆ;other={0} ಕಿಲೋಮೀಟರ್‌ಗಳು ಪ್ರತಿ ಗಂಟೆಗೆ\n" +
 	"kn-IN\tlong\tliter\tone={0} ಲೀಟರ್;other={0} ಲೀಟರ್‌ಗಳು\n" +
+	"kn-IN\tlong\tliter-per-kilometer\tone={0} ಲೀಟರ್ ಪ್ರತಿ ಕಿಲೋಮೀಟರ್‌ಗೆ;other={0} ಪ್ರತಿ ಕಿಲೋಮೀಟರ್‌‌ಗೆ ಲೀಟರ್‌ಗಳು\n" +
 	"kn-IN\tlong\tmegabit\tone={0} ಮೆಗಾಬಿಟ್‌;other={0} ಮೆಗಾಬಿಟ್‌ಗಳು\n" +
 	"kn-IN\tlong\tmegabyte\tone={0} ಮೆಗಾಬೈಟ್‌;other={0} ಮೆಗಾಬೈಟ್‌ಗಳು\n" +
 	"kn-IN\tlong\tmeter\tone={0} ಮೀಟರ್;other={0} ಮೀಟರ್‌ಗಳು\n" +
+	"kn-IN\tlong\tmeter-per-second\tone={0} ಮೀಟರ್‌ ಪ್ರತಿ ಸೆಕೆಂಡ್‌ಗೆ;other={0} ಮೀಟರ್‌ಗಳು ಪ್ರತಿ ಸೆಕೆಂಡ್‌ಗೆ\n" +
 	"kn-IN\tlong\tmicrosecond\tone={0} ಮೈಕ್ರೊಸೆಕೆಂಡ್;other={0} ಮೈಕ್ರೊಸೆಕೆಂಡುಗಳು\n" +
 	"kn-IN\tlong\tmile\tone={0} ಮೈಲು;other={0} ಮೈಲುಗಳು\n" +
+	"kn-IN\tlong\tmile-per-gallon\tone={0} ಪ್ರತಿ ಗ್ಯಾಲನ್‌‌ಗೆ ಮೈಲಿ;other={0} ಪ್ರತಿ ಗ್ಯಾಲನ್‌ಗೆ ಮೈಲಿಗಳು\n" +
+	"kn-IN\tlong\tmile-per-hour\tone={0} ಮೈಲು ಪ್ರತಿ ಗಂಟೆಗೆ;other={0} ಗಂಟೆಗೆ ಮೈಲುಗಳು\n" +
 	"kn-IN\tlong\tmile-scandinavian\tone={0} ಸ್ಕ್ಯಾಂಡಿನೇವಿಯನ್-ಮೈಲು;other={0} ಸ್ಕ್ಯಾಂಡಿನೇವಿಯನ್-ಮೈಲುಗಳು\n" +
 	"kn-IN\tlong\tmilliliter\tone={0} ಮಿಲಿಲೀಟರ್;other={0} ಮಿಲಿಲೀಟರ್‌ಗಳು\n" +
 	"kn-IN\tlong\tmillimeter\tone={0} ಮಿಲಿಮೀಟರ್;other={0} ಮಿಲಿಮೀಟರ್‌ಗಳು\n" +
@@ -6610,12 +7290,17 @@ const cldrUnitData = "" +
 	"kn-IN\tshort\tkilobyte\tone={0} ಕಿ.ಬೈ.;other={0} ಕಿ.ಬೈ.\n" +
 	"kn-IN\tshort\tkilogram\tone={0} ಕೆಜಿ;other={0} ಕೆಜಿ\n" +
 	"kn-IN\tshort\tkilometer\tone={0} ಕಿಮೀ;other={0} ಕಿಮೀ\n" +
+	"kn-IN\tshort\tkilometer-per-hour\tone={0} ಕಿ.ಮೀ./ಗಂ;other={0} ಕಿ.ಮೀ./ಗಂ\n" +
 	"kn-IN\tshort\tliter\tone={0} ಲೀ;other={0} ಲೀ\n" +
+	"kn-IN\tshort\tliter-per-kilometer\tone={0} ಲೀ/ಕಿ.ಮೀ;other={0} ಲೀ/ಕಿ.ಮೀ\n" +
 	"kn-IN\tshort\tmegabit\tone={0} ಮೆ.ಬಿ.;other={0} ಮೆ.ಬಿ.\n" +
 	"kn-IN\tshort\tmegabyte\tone={0} ಮೆ.ಬೈ.;other={0} ಮೆ.ಬೈ.\n" +
 	"kn-IN\tshort\tmeter\tone={0} ಮೀ;other={0} ಮೀ\n" +
+	"kn-IN\tshort\tmeter-per-second\tone={0} ಮೀ/ಸೆ.;other={0} ಮೀ/ಸೆ.\n" +
 	"kn-IN\tshort\tmicrosecond\tother={0} μs\n" +
 	"kn-IN\tshort\tmile\tone={0} ಮೈ.;other={0} ಮೈ.\n" +
+	"kn-IN\tshort\tmile-per-gallon\tone={0} ಪ್ರಗ್ಯಾಮೈ;other={0} ಪ್ರ.ಗ್ಯಾ.ಮೈ.\n" +
+	"kn-IN\tshort\tmile-per-hour\tone={0} ಮೈ/ಗಂ;other={0} ಮೈ/ಗಂ\n" +
 	"kn-IN\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"kn-IN\tshort\tmilliliter\tone={0} ಮಿ.ಲೀ;other={0} ಮಿ.ಲೀ\n" +
 	"kn-IN\tshort\tmillimeter\tone={0} ಮಿಮೀ;other={0} ಮಿಮೀ\n" +
@@ -6656,12 +7341,17 @@ const cldrUnitData = "" +
 	"kn-IN\tnarrow\tkilobyte\tone={0}ಕಿ.ಬೈ.;other={0}ಕಿ.ಬೈ.\n" +
 	"kn-IN\tnarrow\tkilogram\tone={0}ಕೆಜಿ;other={0}ಕೆಜಿ\n" +
 	"kn-IN\tnarrow\tkilometer\tone={0}ಕಿಮೀ;other={0}ಕಿಮೀ\n" +
+	"kn-IN\tnarrow\tkilometer-per-hour\tone={0} ಕಿ.ಮೀ./ಗಂ;other={0} ಕಿ.ಮೀ./ಗಂ\n" +
 	"kn-IN\tnarrow\tliter\tone={0}ಲೀ;other={0}ಲೀ\n" +
+	"kn-IN\tnarrow\tliter-per-kilometer\tone={0} ಲೀ/ಕಿ.ಮೀ;other={0} ಲೀ/ಕಿ.ಮೀ\n" +
 	"kn-IN\tnarrow\tmegabit\tone={0}ಮೆ.ಬಿ.;other={0}ಮೆ.ಬಿ.\n" +
 	"kn-IN\tnarrow\tmegabyte\tone={0}ಮೆ.ಬೈ.;other={0}ಮೆ.ಬೈ.\n" +
 	"kn-IN\tnarrow\tmeter\tone={0}ಮೀ;other={0}ಮೀ\n" +
+	"kn-IN\tnarrow\tmeter-per-second\tone={0}ಮೀ/ಸೆ.;other={0}ಮೀ/ಸೆ.\n" +
 	"kn-IN\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"kn-IN\tnarrow\tmile\tone={0}ಮೈ.;other={0}ಮೈ.\n" +
+	"kn-IN\tnarrow\tmile-per-gallon\tone={0}mpg;other={0}mpg\n" +
+	"kn-IN\tnarrow\tmile-per-hour\tone={0}ಮೈ/ಗಂ;other={0}ಮೈ/ಗಂ\n" +
 	"kn-IN\tnarrow\tmile-scandinavian\tone={0}smi;other={0}smi\n" +
 	"kn-IN\tnarrow\tmilliliter\tone={0}ಮಿ.ಲೀ;other={0}ಮಿ.ಲೀ\n" +
 	"kn-IN\tnarrow\tmillimeter\tone={0}ಮಿಮೀ;other={0}ಮಿಮೀ\n" +
@@ -6702,12 +7392,17 @@ const cldrUnitData = "" +
 	"ko-KR\tlong\tkilobyte\tother={0}킬로바이트\n" +
 	"ko-KR\tlong\tkilogram\tother={0}킬로그램\n" +
 	"ko-KR\tlong\tkilometer\tother={0}킬로미터\n" +
+	"ko-KR\tlong\tkilometer-per-hour\tother=시속 {0}킬로미터\n" +
 	"ko-KR\tlong\tliter\tother={0}리터\n" +
+	"ko-KR\tlong\tliter-per-kilometer\tother=킬로미터당 {0}리터\n" +
 	"ko-KR\tlong\tmegabit\tother={0}메가비트\n" +
 	"ko-KR\tlong\tmegabyte\tother={0}메가바이트\n" +
 	"ko-KR\tlong\tmeter\tother={0}미터\n" +
+	"ko-KR\tlong\tmeter-per-second\tother=초속 {0}미터\n" +
 	"ko-KR\tlong\tmicrosecond\tother={0}마이크로초\n" +
 	"ko-KR\tlong\tmile\tother={0}마일\n" +
+	"ko-KR\tlong\tmile-per-gallon\tother=갤런당 {0}마일\n" +
+	"ko-KR\tlong\tmile-per-hour\tother=시속 {0}마일\n" +
 	"ko-KR\tlong\tmile-scandinavian\tother={0}스칸디나비아 마일\n" +
 	"ko-KR\tlong\tmilliliter\tother={0}밀리리터\n" +
 	"ko-KR\tlong\tmillimeter\tother={0}밀리미터\n" +
@@ -6748,12 +7443,17 @@ const cldrUnitData = "" +
 	"ko-KR\tshort\tkilobyte\tother={0}kB\n" +
 	"ko-KR\tshort\tkilogram\tother={0}kg\n" +
 	"ko-KR\tshort\tkilometer\tother={0}km\n" +
+	"ko-KR\tshort\tkilometer-per-hour\tother={0}km/h\n" +
 	"ko-KR\tshort\tliter\tother={0}L\n" +
+	"ko-KR\tshort\tliter-per-kilometer\tother={0}L/km\n" +
 	"ko-KR\tshort\tmegabit\tother={0}Mb\n" +
 	"ko-KR\tshort\tmegabyte\tother={0}MB\n" +
 	"ko-KR\tshort\tmeter\tother={0}m\n" +
+	"ko-KR\tshort\tmeter-per-second\tother={0}m/s\n" +
 	"ko-KR\tshort\tmicrosecond\tother={0}μs\n" +
 	"ko-KR\tshort\tmile\tother={0}mi\n" +
+	"ko-KR\tshort\tmile-per-gallon\tother={0}mpg\n" +
+	"ko-KR\tshort\tmile-per-hour\tother={0}mi/h\n" +
 	"ko-KR\tshort\tmile-scandinavian\tother={0}smi\n" +
 	"ko-KR\tshort\tmilliliter\tother={0}mL\n" +
 	"ko-KR\tshort\tmillimeter\tother={0}mm\n" +
@@ -6794,12 +7494,17 @@ const cldrUnitData = "" +
 	"ko-KR\tnarrow\tkilobyte\tother={0}kB\n" +
 	"ko-KR\tnarrow\tkilogram\tother={0}kg\n" +
 	"ko-KR\tnarrow\tkilometer\tother={0}km\n" +
+	"ko-KR\tnarrow\tkilometer-per-hour\tother={0}km/h\n" +
 	"ko-KR\tnarrow\tliter\tother={0}L\n" +
+	"ko-KR\tnarrow\tliter-per-kilometer\tother={0}L/km\n" +
 	"ko-KR\tnarrow\tmegabit\tother={0}Mb\n" +
 	"ko-KR\tnarrow\tmegabyte\tother={0}MB\n" +
 	"ko-KR\tnarrow\tmeter\tother={0}m\n" +
+	"ko-KR\tnarrow\tmeter-per-second\tother={0}m/s\n" +
 	"ko-KR\tnarrow\tmicrosecond\tother={0}μs\n" +
 	"ko-KR\tnarrow\tmile\tother={0}mi\n" +
+	"ko-KR\tnarrow\tmile-per-gallon\tother={0}mpg\n" +
+	"ko-KR\tnarrow\tmile-per-hour\tother={0}mph\n" +
 	"ko-KR\tnarrow\tmile-scandinavian\tother={0}smi\n" +
 	"ko-KR\tnarrow\tmilliliter\tother={0}mL\n" +
 	"ko-KR\tnarrow\tmillimeter\tother={0}mm\n" +
@@ -6840,12 +7545,17 @@ const cldrUnitData = "" +
 	"lt-LT\tlong\tkilobyte\tone={0} kilobaitas;few={0} kilobaitai;many={0} kilobaito;other={0} kilobaitų\n" +
 	"lt-LT\tlong\tkilogram\tone={0} kilogramas;few={0} kilogramai;many={0} kilogramo;other={0} kilogramų\n" +
 	"lt-LT\tlong\tkilometer\tone={0} kilometras;few={0} kilometrai;many={0} kilometro;other={0} kilometrų\n" +
+	"lt-LT\tlong\tkilometer-per-hour\tone={0} kilometras per valandą;few={0} kilometrai per valandą;many={0} kilometro per valandą;other={0} kilometrų per valandą\n" +
 	"lt-LT\tlong\tliter\tone={0} litras;few={0} litrai;many={0} litro;other={0} litrų\n" +
+	"lt-LT\tlong\tliter-per-kilometer\tone={0} litras kilometrui;few={0} litrai kilometrui;many={0} litro kilometrui;other={0} litrų kilometrui\n" +
 	"lt-LT\tlong\tmegabit\tone={0} megabitas;few={0} megabitai;many={0} megabito;other={0} megabitų\n" +
 	"lt-LT\tlong\tmegabyte\tone={0} megabaitas;few={0} megabaitai;many={0} megabaito;other={0} megabaitų\n" +
 	"lt-LT\tlong\tmeter\tone={0} metras;few={0} metrai;many={0} metro;other={0} metrų\n" +
+	"lt-LT\tlong\tmeter-per-second\tone={0} metras per sekundę;few={0} metrai per sekundę;many={0} metro per sekundę;other={0} metrų per sekundę\n" +
 	"lt-LT\tlong\tmicrosecond\tone={0} mikrosekundė;few={0} mikrosekundės;many={0} mikrosekundės;other={0} mikrosekundžių\n" +
 	"lt-LT\tlong\tmile\tone={0} mylia;few={0} mylios;many={0} mylios;other={0} mylių\n" +
+	"lt-LT\tlong\tmile-per-gallon\tone={0} mylia už galoną;few={0} mylios už galoną;many={0} mylios už galoną;other={0} mylių už galoną\n" +
+	"lt-LT\tlong\tmile-per-hour\tone={0} mylia per valandą;few={0} mylios per valandą;many={0} mylios per valandą;other={0} mylių per valandą\n" +
 	"lt-LT\tlong\tmile-scandinavian\tone={0} ilgoji mylia;few={0} ilgosios mylios;many={0} ilgosios mylios;other={0} ilgųjų mylių\n" +
 	"lt-LT\tlong\tmilliliter\tone={0} mililitras;few={0} mililitrai;many={0} mililitro;other={0} mililitrų\n" +
 	"lt-LT\tlong\tmillimeter\tone={0} milimetras;few={0} milimetrai;many={0} milimetro;other={0} milimetrų\n" +
@@ -6886,12 +7596,17 @@ const cldrUnitData = "" +
 	"lt-LT\tshort\tkilobyte\tother={0} kB\n" +
 	"lt-LT\tshort\tkilogram\tother={0} kg\n" +
 	"lt-LT\tshort\tkilometer\tother={0} km\n" +
+	"lt-LT\tshort\tkilometer-per-hour\tone={0} km/val.;few={0} km/val.;many={0} km/val.;other={0} km/val.\n" +
 	"lt-LT\tshort\tliter\tother={0} l\n" +
+	"lt-LT\tshort\tliter-per-kilometer\tone={0} l/km;few={0} l/km;many={0} l/km;other={0} l/km\n" +
 	"lt-LT\tshort\tmegabit\tother={0} Mb\n" +
 	"lt-LT\tshort\tmegabyte\tother={0} MB\n" +
 	"lt-LT\tshort\tmeter\tother={0} m\n" +
+	"lt-LT\tshort\tmeter-per-second\tone={0} m/sek.;few={0} m/sek.;many={0} m/sek.;other={0} m/sek.\n" +
 	"lt-LT\tshort\tmicrosecond\tother={0} μs\n" +
 	"lt-LT\tshort\tmile\tother={0} mi\n" +
+	"lt-LT\tshort\tmile-per-gallon\tone={0} my/gal;few={0} my/gal;many={0} my/gal;other={0} my/gal\n" +
+	"lt-LT\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"lt-LT\tshort\tmile-scandinavian\tone={0} IM;few={0} IM;many={0} IM;other={0} IM\n" +
 	"lt-LT\tshort\tmilliliter\tone={0} ml;few={0} ml;many={0} ml;other={0} ml\n" +
 	"lt-LT\tshort\tmillimeter\tother={0} mm\n" +
@@ -6932,12 +7647,17 @@ const cldrUnitData = "" +
 	"lt-LT\tnarrow\tkilobyte\tother={0} kB\n" +
 	"lt-LT\tnarrow\tkilogram\tother={0} kg\n" +
 	"lt-LT\tnarrow\tkilometer\tother={0} km\n" +
+	"lt-LT\tnarrow\tkilometer-per-hour\tone={0} km/h;few={0} km/h;many={0} km/h;other={0} km/h\n" +
 	"lt-LT\tnarrow\tliter\tother={0} l\n" +
+	"lt-LT\tnarrow\tliter-per-kilometer\tone={0} l/km;few={0} l/km;many={0} l/km;other={0} l/km\n" +
 	"lt-LT\tnarrow\tmegabit\tother={0} Mb\n" +
 	"lt-LT\tnarrow\tmegabyte\tother={0} MB\n" +
 	"lt-LT\tnarrow\tmeter\tother={0} m\n" +
+	"lt-LT\tnarrow\tmeter-per-second\tone={0} m/s;few={0} m/s;many={0} m/s;other={0} m/s\n" +
 	"lt-LT\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"lt-LT\tnarrow\tmile\tother={0} mi\n" +
+	"lt-LT\tnarrow\tmile-per-gallon\tone={0} mi/gal;few={0} mi/gal;many={0} mi/gal;other={0} mi/gal\n" +
+	"lt-LT\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"lt-LT\tnarrow\tmile-scandinavian\tone={0} IM;few={0} IM;many={0} IM;other={0} IM\n" +
 	"lt-LT\tnarrow\tmilliliter\tone={0} ml;few={0} ml;many={0} ml;other={0} ml\n" +
 	"lt-LT\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -6978,12 +7698,17 @@ const cldrUnitData = "" +
 	"lv-LV\tlong\tkilobyte\tzero={0} kilobaitu;one={0} kilobaits;other={0} kilobaiti\n" +
 	"lv-LV\tlong\tkilogram\tzero={0} kilogramu;one={0} kilograms;other={0} kilogrami\n" +
 	"lv-LV\tlong\tkilometer\tzero={0} kilometru;one={0} kilometrs;other={0} kilometri\n" +
+	"lv-LV\tlong\tkilometer-per-hour\tzero={0} kilometru stundā;one={0} kilometrs stundā;other={0} kilometri stundā\n" +
 	"lv-LV\tlong\tliter\tzero={0} litru;one={0} litrs;other={0} litri\n" +
+	"lv-LV\tlong\tliter-per-kilometer\tzero={0} litru uz kilometru;one={0} litrs uz kilometru;other={0} litri uz kilometru\n" +
 	"lv-LV\tlong\tmegabit\tzero={0} megabitu;one={0} megabits;other={0} megabiti\n" +
 	"lv-LV\tlong\tmegabyte\tzero={0} megabaitu;one={0} megabaits;other={0} megabaits\n" +
 	"lv-LV\tlong\tmeter\tzero={0} metru;one={0} metrs;other={0} metri\n" +
+	"lv-LV\tlong\tmeter-per-second\tzero={0} metru sekundē;one={0} metrs sekundē;other={0} metri sekundē\n" +
 	"lv-LV\tlong\tmicrosecond\tzero={0} mikrosekunžu;one={0} mikrosekunde;other={0} mikrosekundes\n" +
 	"lv-LV\tlong\tmile\tzero={0} jūdžu;one={0} jūdze;other={0} jūdzes\n" +
+	"lv-LV\tlong\tmile-per-gallon\tzero={0} jūdžu uz galonu;one={0} jūdze uz galonu;other={0} jūdzes uz galonu\n" +
+	"lv-LV\tlong\tmile-per-hour\tzero={0} jūdžu stundā;one={0} jūdze stundā;other={0} jūdzes stundā\n" +
 	"lv-LV\tlong\tmile-scandinavian\tzero={0} skandināvu jūdžu;one={0} skandināvu jūdze;other={0} skandināvu jūdzes\n" +
 	"lv-LV\tlong\tmilliliter\tzero={0} mililitru;one={0} mililitrs;other={0} mililitri\n" +
 	"lv-LV\tlong\tmillimeter\tzero={0} milimetru;one={0} milimetrs;other={0} milimetri\n" +
@@ -7024,12 +7749,17 @@ const cldrUnitData = "" +
 	"lv-LV\tshort\tkilobyte\tother={0} kB\n" +
 	"lv-LV\tshort\tkilogram\tother={0} kg\n" +
 	"lv-LV\tshort\tkilometer\tother={0} km\n" +
+	"lv-LV\tshort\tkilometer-per-hour\tzero={0} km/st.;one={0} km/st.;other={0} km/st.\n" +
 	"lv-LV\tshort\tliter\tother={0} l\n" +
+	"lv-LV\tshort\tliter-per-kilometer\tzero={0} l/km;one={0} l/km;other={0} l/km\n" +
 	"lv-LV\tshort\tmegabit\tother={0} Mb\n" +
 	"lv-LV\tshort\tmegabyte\tother={0} MB\n" +
 	"lv-LV\tshort\tmeter\tother={0} m\n" +
+	"lv-LV\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"lv-LV\tshort\tmicrosecond\tother={0} μs\n" +
 	"lv-LV\tshort\tmile\tzero={0} jūdzes;one={0} jūdze;other={0} jūdzes\n" +
+	"lv-LV\tshort\tmile-per-gallon\tzero={0} mpg;one={0} mpg;other={0} mpg\n" +
+	"lv-LV\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"lv-LV\tshort\tmile-scandinavian\tzero={0} skandināvu jūdzes;one={0} skandināvu jūdze;other={0} skandināvu jūdzes\n" +
 	"lv-LV\tshort\tmilliliter\tzero={0} ml;one={0} ml;other={0} ml\n" +
 	"lv-LV\tshort\tmillimeter\tother={0} mm\n" +
@@ -7070,12 +7800,17 @@ const cldrUnitData = "" +
 	"lv-LV\tnarrow\tkilobyte\tother={0} kB\n" +
 	"lv-LV\tnarrow\tkilogram\tother={0} kg\n" +
 	"lv-LV\tnarrow\tkilometer\tother={0} km\n" +
+	"lv-LV\tnarrow\tkilometer-per-hour\tzero={0} km/h;one={0} km/h;other={0} km/h\n" +
 	"lv-LV\tnarrow\tliter\tother={0} l\n" +
+	"lv-LV\tnarrow\tliter-per-kilometer\tzero={0} l/km;one={0} l/km;other={0} l/km\n" +
 	"lv-LV\tnarrow\tmegabit\tother={0} Mb\n" +
 	"lv-LV\tnarrow\tmegabyte\tother={0} MB\n" +
 	"lv-LV\tnarrow\tmeter\tother={0} m\n" +
+	"lv-LV\tnarrow\tmeter-per-second\tzero={0}m/s;one={0}m/s;other={0}m/s\n" +
 	"lv-LV\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"lv-LV\tnarrow\tmile\tzero={0}mi;one={0}mi;other={0}mi\n" +
+	"lv-LV\tnarrow\tmile-per-gallon\tzero={0} mpg;one={0} mpg;other={0} mpg\n" +
+	"lv-LV\tnarrow\tmile-per-hour\tzero={0}mi/h;one={0}mi/h;other={0}mi/h\n" +
 	"lv-LV\tnarrow\tmile-scandinavian\tzero={0} sk.j.;one={0} sk.j.;other={0} sk.j.\n" +
 	"lv-LV\tnarrow\tmilliliter\tzero={0} ml;one={0} ml;other={0} ml\n" +
 	"lv-LV\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -7116,12 +7851,17 @@ const cldrUnitData = "" +
 	"ml-IN\tlong\tkilobyte\tone={0} കിലോബൈറ്റ്;other={0} കിലോബൈറ്റ്\n" +
 	"ml-IN\tlong\tkilogram\tone={0} കിലോഗ്രാം;other={0} കിലോഗ്രാം\n" +
 	"ml-IN\tlong\tkilometer\tone={0} കിലോമീറ്റർ;other={0} കിലോമീറ്റർ\n" +
+	"ml-IN\tlong\tkilometer-per-hour\tone={0} കിലോമീറ്റർ/മണിക്കൂർ;other={0} കിലോമീറ്റർ/മണിക്കൂർ\n" +
 	"ml-IN\tlong\tliter\tone={0} ലിറ്റർ;other={0} ലിറ്റർ\n" +
+	"ml-IN\tlong\tliter-per-kilometer\tone={0} ലിറ്റർ/കിലോമീറ്റർ;other={0} ലിറ്റർ/കിലോമീറ്റർ\n" +
 	"ml-IN\tlong\tmegabit\tone={0} മെഗാബിറ്റ്;other={0} മെഗാബിറ്റ്\n" +
 	"ml-IN\tlong\tmegabyte\tone={0} മെഗാബൈറ്റ്;other={0} മെഗാബൈറ്റ്\n" +
 	"ml-IN\tlong\tmeter\tone={0} മീറ്റർ;other={0} മീറ്റർ\n" +
+	"ml-IN\tlong\tmeter-per-second\tone={0} മീറ്റർ/സെക്കൻഡ്;other={0} മീറ്റർ/സെക്കൻഡ്\n" +
 	"ml-IN\tlong\tmicrosecond\tone={0} മൈക്രോസെക്കൻഡ്;other={0} മൈക്രോസെക്കൻഡ്\n" +
 	"ml-IN\tlong\tmile\tone={0} മൈൽ;other={0} മൈൽ\n" +
+	"ml-IN\tlong\tmile-per-gallon\tone={0} മൈൽ/ഗാലൻ;other={0} മൈൽ/ഗാലൻ\n" +
+	"ml-IN\tlong\tmile-per-hour\tone={0} മൈൽ/മണിക്കൂർ;other={0} മൈൽ/മണിക്കൂർ\n" +
 	"ml-IN\tlong\tmile-scandinavian\tone={0} സ്കാൻഡിനേവിയൻ മൈൽ;other={0} സ്കാൻഡിനേവിയൻ മൈൽ\n" +
 	"ml-IN\tlong\tmilliliter\tone={0} മില്ലിലിറ്റർ;other={0} മില്ലിലിറ്റർ\n" +
 	"ml-IN\tlong\tmillimeter\tone={0} മില്ലീമീറ്റർ;other={0} മില്ലീമീറ്റർ\n" +
@@ -7162,12 +7902,17 @@ const cldrUnitData = "" +
 	"ml-IN\tshort\tkilobyte\tone={0} kB;other={0} kB\n" +
 	"ml-IN\tshort\tkilogram\tone={0} കി.ഗ്രാം;other={0} കി.ഗ്രാം\n" +
 	"ml-IN\tshort\tkilometer\tone={0} കി.മീ.;other={0} കി.മീ.\n" +
+	"ml-IN\tshort\tkilometer-per-hour\tone={0} കി.മീ/മ.;other={0} കി.മീ/മ.\n" +
 	"ml-IN\tshort\tliter\tone={0} ലി.;other={0} ലി.\n" +
+	"ml-IN\tshort\tliter-per-kilometer\tone={0} ലി/കി.മീ.;other={0} ലി/കി.മീ.\n" +
 	"ml-IN\tshort\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"ml-IN\tshort\tmegabyte\tone={0} MB;other={0} MB\n" +
 	"ml-IN\tshort\tmeter\tone={0} മീ.;other={0} മീ.\n" +
+	"ml-IN\tshort\tmeter-per-second\tone={0} മീ/സെ.;other={0} മീ/സെ.\n" +
 	"ml-IN\tshort\tmicrosecond\tone={0} μ.സെ.;other={0} μ.സെ.\n" +
 	"ml-IN\tshort\tmile\tone={0} മൈൽ;other={0} മൈൽ\n" +
+	"ml-IN\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"ml-IN\tshort\tmile-per-hour\tone={0} മൈ/മ.;other={0} മൈ/മ.\n" +
 	"ml-IN\tshort\tmile-scandinavian\tone={0} സ്.മൈ.;other={0} സ്.മൈ.\n" +
 	"ml-IN\tshort\tmilliliter\tone={0} മി.ലി.;other={0} മി.ലി.\n" +
 	"ml-IN\tshort\tmillimeter\tone={0} മി.മീ.;other={0} മി.മീ.\n" +
@@ -7208,12 +7953,17 @@ const cldrUnitData = "" +
 	"ml-IN\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"ml-IN\tnarrow\tkilogram\tone={0}കി.ഗ്രാം;other={0}കി.ഗ്രാം\n" +
 	"ml-IN\tnarrow\tkilometer\tone={0} കി.മീ.;other={0} കി.മീ.\n" +
+	"ml-IN\tnarrow\tkilometer-per-hour\tone={0}കി.മീ/മ.;other={0}കി.മീ/മ.\n" +
 	"ml-IN\tnarrow\tliter\tone={0} ലി.;other={0} ലി.\n" +
+	"ml-IN\tnarrow\tliter-per-kilometer\tone={0} ലി/കി.മീ.;other={0} ലി/കി.മീ.\n" +
 	"ml-IN\tnarrow\tmegabit\tone={0} Mb;other={0} Mb\n" +
 	"ml-IN\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"ml-IN\tnarrow\tmeter\tone={0} മീ.;other={0} മീ.\n" +
+	"ml-IN\tnarrow\tmeter-per-second\tone={0} മീ/സെ;other={0} മീ/സെ\n" +
 	"ml-IN\tnarrow\tmicrosecond\tone={0} μ.സെ.;other={0} μ.സെ.\n" +
 	"ml-IN\tnarrow\tmile\tone={0} മൈ;other={0} മൈ\n" +
+	"ml-IN\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"ml-IN\tnarrow\tmile-per-hour\tone={0} മൈ/മ;other={0} മൈ/മ\n" +
 	"ml-IN\tnarrow\tmile-scandinavian\tone={0}സ്.മൈ.;other={0}സ്.മൈ.\n" +
 	"ml-IN\tnarrow\tmilliliter\tone={0} മി.ലി.;other={0} മി.ലി.\n" +
 	"ml-IN\tnarrow\tmillimeter\tone={0} മി.മീ.;other={0} മി.മീ.\n" +
@@ -7254,12 +8004,17 @@ const cldrUnitData = "" +
 	"ms-MY\tlong\tkilobyte\tother={0} kilobait\n" +
 	"ms-MY\tlong\tkilogram\tother={0} kilogram\n" +
 	"ms-MY\tlong\tkilometer\tother={0} kilometer\n" +
+	"ms-MY\tlong\tkilometer-per-hour\tother={0} kilometer sejam\n" +
 	"ms-MY\tlong\tliter\tother={0} liter\n" +
+	"ms-MY\tlong\tliter-per-kilometer\tother={0} liter sekilometer\n" +
 	"ms-MY\tlong\tmegabit\tother={0} megabit\n" +
 	"ms-MY\tlong\tmegabyte\tother={0} megabait\n" +
 	"ms-MY\tlong\tmeter\tother={0} meter\n" +
+	"ms-MY\tlong\tmeter-per-second\tother={0} meter sesaat\n" +
 	"ms-MY\tlong\tmicrosecond\tother={0} mikrosaat\n" +
 	"ms-MY\tlong\tmile\tother={0} batu\n" +
+	"ms-MY\tlong\tmile-per-gallon\tother={0} batu segelen\n" +
+	"ms-MY\tlong\tmile-per-hour\tother={0} batu sejam\n" +
 	"ms-MY\tlong\tmile-scandinavian\tother={0} batu-skandinavia\n" +
 	"ms-MY\tlong\tmilliliter\tother={0} mililiter\n" +
 	"ms-MY\tlong\tmillimeter\tother={0} milimeter\n" +
@@ -7300,12 +8055,17 @@ const cldrUnitData = "" +
 	"ms-MY\tshort\tkilobyte\tother={0} kB\n" +
 	"ms-MY\tshort\tkilogram\tother={0} kg\n" +
 	"ms-MY\tshort\tkilometer\tother={0} km\n" +
+	"ms-MY\tshort\tkilometer-per-hour\tother={0} kmj\n" +
 	"ms-MY\tshort\tliter\tother={0} l\n" +
+	"ms-MY\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"ms-MY\tshort\tmegabit\tother={0} Mb\n" +
 	"ms-MY\tshort\tmegabyte\tother={0} MB\n" +
 	"ms-MY\tshort\tmeter\tother={0} m\n" +
+	"ms-MY\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"ms-MY\tshort\tmicrosecond\tother={0} μs\n" +
 	"ms-MY\tshort\tmile\tother={0} bt\n" +
+	"ms-MY\tshort\tmile-per-gallon\tother={0} bpg\n" +
+	"ms-MY\tshort\tmile-per-hour\tother={0} bsj\n" +
 	"ms-MY\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"ms-MY\tshort\tmilliliter\tother={0} mL\n" +
 	"ms-MY\tshort\tmillimeter\tother={0} mm\n" +
@@ -7346,12 +8106,17 @@ const cldrUnitData = "" +
 	"ms-MY\tnarrow\tkilobyte\tother={0}kB\n" +
 	"ms-MY\tnarrow\tkilogram\tother={0} kg\n" +
 	"ms-MY\tnarrow\tkilometer\tother={0} km\n" +
+	"ms-MY\tnarrow\tkilometer-per-hour\tother={0} kmj\n" +
 	"ms-MY\tnarrow\tliter\tother={0} l\n" +
+	"ms-MY\tnarrow\tliter-per-kilometer\tother={0} L/km\n" +
 	"ms-MY\tnarrow\tmegabit\tother={0}Mb\n" +
 	"ms-MY\tnarrow\tmegabyte\tother={0}MB\n" +
 	"ms-MY\tnarrow\tmeter\tother={0} m\n" +
+	"ms-MY\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"ms-MY\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"ms-MY\tnarrow\tmile\tother={0} bt\n" +
+	"ms-MY\tnarrow\tmile-per-gallon\tother={0} bpg\n" +
+	"ms-MY\tnarrow\tmile-per-hour\tother={0} bsj\n" +
 	"ms-MY\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"ms-MY\tnarrow\tmilliliter\tother={0} mL\n" +
 	"ms-MY\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -7392,12 +8157,17 @@ const cldrUnitData = "" +
 	"nb-NO\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobyte\n" +
 	"nb-NO\tlong\tkilogram\tone={0} kilogram;other={0} kilogram\n" +
 	"nb-NO\tlong\tkilometer\tone={0} kilometer;other={0} kilometer\n" +
+	"nb-NO\tlong\tkilometer-per-hour\tone={0} kilometer per time;other={0} kilometer per time\n" +
 	"nb-NO\tlong\tliter\tone={0} liter;other={0} liter\n" +
+	"nb-NO\tlong\tliter-per-kilometer\tone={0} liter per kilometer;other={0} liter per kilometer\n" +
 	"nb-NO\tlong\tmegabit\tone={0} megabit;other={0} megabit\n" +
 	"nb-NO\tlong\tmegabyte\tone={0} megabyte;other={0} megabyte\n" +
 	"nb-NO\tlong\tmeter\tone={0} meter;other={0} meter\n" +
+	"nb-NO\tlong\tmeter-per-second\tone={0} meter per sekund;other={0} meter per sekund\n" +
 	"nb-NO\tlong\tmicrosecond\tone={0} mikrosekund;other={0} mikrosekunder\n" +
 	"nb-NO\tlong\tmile\tone={0} mile;other={0} miles\n" +
+	"nb-NO\tlong\tmile-per-gallon\tone={0} mile per gallon;other={0} miles per gallon\n" +
+	"nb-NO\tlong\tmile-per-hour\tone={0} engelsk mil per time;other={0} engelske mil per time\n" +
 	"nb-NO\tlong\tmile-scandinavian\tone={0} mil;other={0} mil\n" +
 	"nb-NO\tlong\tmilliliter\tone={0} milliliter;other={0} milliliter\n" +
 	"nb-NO\tlong\tmillimeter\tone={0} millimeter;other={0} millimeter\n" +
@@ -7438,12 +8208,17 @@ const cldrUnitData = "" +
 	"nb-NO\tshort\tkilobyte\tother={0} kB\n" +
 	"nb-NO\tshort\tkilogram\tother={0} kg\n" +
 	"nb-NO\tshort\tkilometer\tother={0} km\n" +
+	"nb-NO\tshort\tkilometer-per-hour\tone={0} km/t;other={0} km/t\n" +
 	"nb-NO\tshort\tliter\tother={0} l\n" +
+	"nb-NO\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"nb-NO\tshort\tmegabit\tother={0} Mb\n" +
 	"nb-NO\tshort\tmegabyte\tother={0} MB\n" +
 	"nb-NO\tshort\tmeter\tother={0} m\n" +
+	"nb-NO\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"nb-NO\tshort\tmicrosecond\tother={0} μs\n" +
 	"nb-NO\tshort\tmile\tone={0} mile;other={0} miles\n" +
+	"nb-NO\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"nb-NO\tshort\tmile-per-hour\tone={0} mile/t;other={0} miles/t\n" +
 	"nb-NO\tshort\tmile-scandinavian\tone={0} mil;other={0} mil\n" +
 	"nb-NO\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"nb-NO\tshort\tmillimeter\tother={0} mm\n" +
@@ -7484,12 +8259,17 @@ const cldrUnitData = "" +
 	"nb-NO\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"nb-NO\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"nb-NO\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"nb-NO\tnarrow\tkilometer-per-hour\tone={0}km/t;other={0}km/t\n" +
 	"nb-NO\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"nb-NO\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"nb-NO\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"nb-NO\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"nb-NO\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"nb-NO\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"nb-NO\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"nb-NO\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"nb-NO\tnarrow\tmile-per-gallon\tone={0}mpg;other={0}mpg\n" +
+	"nb-NO\tnarrow\tmile-per-hour\tone={0}mi/t;other={0}mi/t\n" +
 	"nb-NO\tnarrow\tmile-scandinavian\tone={0}mil;other={0}mil\n" +
 	"nb-NO\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"nb-NO\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -7530,12 +8310,17 @@ const cldrUnitData = "" +
 	"nl-BE\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobyte\n" +
 	"nl-BE\tlong\tkilogram\tone={0} kilogram;other={0} kilogram\n" +
 	"nl-BE\tlong\tkilometer\tone={0} kilometer;other={0} kilometer\n" +
+	"nl-BE\tlong\tkilometer-per-hour\tone={0} kilometer per uur;other={0} kilometer per uur\n" +
 	"nl-BE\tlong\tliter\tone={0} liter;other={0} liter\n" +
+	"nl-BE\tlong\tliter-per-kilometer\tone={0} liter per kilometer;other={0} liter per kilometer\n" +
 	"nl-BE\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"nl-BE\tlong\tmegabyte\tone={0} megabyte;other={0} megabyte\n" +
 	"nl-BE\tlong\tmeter\tone={0} meter;other={0} meter\n" +
+	"nl-BE\tlong\tmeter-per-second\tone={0} meter per seconde;other={0} meter per seconde\n" +
 	"nl-BE\tlong\tmicrosecond\tone={0} microseconde;other={0} microseconden\n" +
 	"nl-BE\tlong\tmile\tone={0} mijl;other={0} mijl\n" +
+	"nl-BE\tlong\tmile-per-gallon\tone={0} mijl per gallon;other={0} mijl per gallon\n" +
+	"nl-BE\tlong\tmile-per-hour\tone={0} mijl per uur;other={0} mijl per uur\n" +
 	"nl-BE\tlong\tmile-scandinavian\tone={0} Scandinavische mijl;other={0} Scandinavische mijl\n" +
 	"nl-BE\tlong\tmilliliter\tone={0} milliliter;other={0} milliliter\n" +
 	"nl-BE\tlong\tmillimeter\tone={0} millimeter;other={0} millimeter\n" +
@@ -7576,12 +8361,17 @@ const cldrUnitData = "" +
 	"nl-BE\tshort\tkilobyte\tother={0} kB\n" +
 	"nl-BE\tshort\tkilogram\tother={0} kg\n" +
 	"nl-BE\tshort\tkilometer\tother={0} km\n" +
+	"nl-BE\tshort\tkilometer-per-hour\tone={0} km/u;other={0} km/u\n" +
 	"nl-BE\tshort\tliter\tother={0} l\n" +
+	"nl-BE\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"nl-BE\tshort\tmegabit\tother={0} Mb\n" +
 	"nl-BE\tshort\tmegabyte\tother={0} MB\n" +
 	"nl-BE\tshort\tmeter\tother={0} m\n" +
+	"nl-BE\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"nl-BE\tshort\tmicrosecond\tother={0} μs\n" +
 	"nl-BE\tshort\tmile\tother={0} mi\n" +
+	"nl-BE\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"nl-BE\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"nl-BE\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"nl-BE\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"nl-BE\tshort\tmillimeter\tother={0} mm\n" +
@@ -7622,12 +8412,17 @@ const cldrUnitData = "" +
 	"nl-BE\tnarrow\tkilobyte\tother={0} kB\n" +
 	"nl-BE\tnarrow\tkilogram\tother={0} kg\n" +
 	"nl-BE\tnarrow\tkilometer\tother={0} km\n" +
+	"nl-BE\tnarrow\tkilometer-per-hour\tone={0} km/u;other={0} km/u\n" +
 	"nl-BE\tnarrow\tliter\tother={0} l\n" +
+	"nl-BE\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"nl-BE\tnarrow\tmegabit\tother={0} Mb\n" +
 	"nl-BE\tnarrow\tmegabyte\tother={0} MB\n" +
 	"nl-BE\tnarrow\tmeter\tother={0} m\n" +
+	"nl-BE\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"nl-BE\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"nl-BE\tnarrow\tmile\tother={0} mi\n" +
+	"nl-BE\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"nl-BE\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"nl-BE\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"nl-BE\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"nl-BE\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -7668,12 +8463,17 @@ const cldrUnitData = "" +
 	"nl-NL\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobyte\n" +
 	"nl-NL\tlong\tkilogram\tone={0} kilogram;other={0} kilogram\n" +
 	"nl-NL\tlong\tkilometer\tone={0} kilometer;other={0} kilometer\n" +
+	"nl-NL\tlong\tkilometer-per-hour\tone={0} kilometer per uur;other={0} kilometer per uur\n" +
 	"nl-NL\tlong\tliter\tone={0} liter;other={0} liter\n" +
+	"nl-NL\tlong\tliter-per-kilometer\tone={0} liter per kilometer;other={0} liter per kilometer\n" +
 	"nl-NL\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"nl-NL\tlong\tmegabyte\tone={0} megabyte;other={0} megabyte\n" +
 	"nl-NL\tlong\tmeter\tone={0} meter;other={0} meter\n" +
+	"nl-NL\tlong\tmeter-per-second\tone={0} meter per seconde;other={0} meter per seconde\n" +
 	"nl-NL\tlong\tmicrosecond\tone={0} microseconde;other={0} microseconden\n" +
 	"nl-NL\tlong\tmile\tone={0} mijl;other={0} mijl\n" +
+	"nl-NL\tlong\tmile-per-gallon\tone={0} mijl per gallon;other={0} mijl per gallon\n" +
+	"nl-NL\tlong\tmile-per-hour\tone={0} mijl per uur;other={0} mijl per uur\n" +
 	"nl-NL\tlong\tmile-scandinavian\tone={0} Scandinavische mijl;other={0} Scandinavische mijl\n" +
 	"nl-NL\tlong\tmilliliter\tone={0} milliliter;other={0} milliliter\n" +
 	"nl-NL\tlong\tmillimeter\tone={0} millimeter;other={0} millimeter\n" +
@@ -7714,12 +8514,17 @@ const cldrUnitData = "" +
 	"nl-NL\tshort\tkilobyte\tother={0} kB\n" +
 	"nl-NL\tshort\tkilogram\tother={0} kg\n" +
 	"nl-NL\tshort\tkilometer\tother={0} km\n" +
+	"nl-NL\tshort\tkilometer-per-hour\tone={0} km/u;other={0} km/u\n" +
 	"nl-NL\tshort\tliter\tother={0} l\n" +
+	"nl-NL\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"nl-NL\tshort\tmegabit\tother={0} Mb\n" +
 	"nl-NL\tshort\tmegabyte\tother={0} MB\n" +
 	"nl-NL\tshort\tmeter\tother={0} m\n" +
+	"nl-NL\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"nl-NL\tshort\tmicrosecond\tother={0} μs\n" +
 	"nl-NL\tshort\tmile\tother={0} mi\n" +
+	"nl-NL\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"nl-NL\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"nl-NL\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"nl-NL\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"nl-NL\tshort\tmillimeter\tother={0} mm\n" +
@@ -7760,12 +8565,17 @@ const cldrUnitData = "" +
 	"nl-NL\tnarrow\tkilobyte\tother={0} kB\n" +
 	"nl-NL\tnarrow\tkilogram\tother={0} kg\n" +
 	"nl-NL\tnarrow\tkilometer\tother={0} km\n" +
+	"nl-NL\tnarrow\tkilometer-per-hour\tone={0} km/u;other={0} km/u\n" +
 	"nl-NL\tnarrow\tliter\tother={0} l\n" +
+	"nl-NL\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"nl-NL\tnarrow\tmegabit\tother={0} Mb\n" +
 	"nl-NL\tnarrow\tmegabyte\tother={0} MB\n" +
 	"nl-NL\tnarrow\tmeter\tother={0} m\n" +
+	"nl-NL\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"nl-NL\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"nl-NL\tnarrow\tmile\tother={0} mi\n" +
+	"nl-NL\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"nl-NL\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"nl-NL\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"nl-NL\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"nl-NL\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -7806,12 +8616,17 @@ const cldrUnitData = "" +
 	"pa-IN\tlong\tkilobyte\tone={0} ਕਿਲੋਬਾਇਟ;other={0} ਕਿਲੋਬਾਇਟ\n" +
 	"pa-IN\tlong\tkilogram\tone={0} ਕਿਲੋਗ੍ਰਾਮ;other={0} ਕਿਲੋਗ੍ਰਾਮ\n" +
 	"pa-IN\tlong\tkilometer\tone={0} ਕਿਲੋਮੀਟਰ;other={0} ਕਿਲੋਮੀਟਰ\n" +
+	"pa-IN\tlong\tkilometer-per-hour\tone={0} ਕਿਲੋਮੀਟਰ ਪ੍ਰਤਿ ਘੰਟਾ;other={0} ਕਿਲੋਮੀਟਰ ਪ੍ਰਤਿ ਘੰਟਾ\n" +
 	"pa-IN\tlong\tliter\tone={0} ਲਿਟਰ;other={0} ਲਿਟਰ\n" +
+	"pa-IN\tlong\tliter-per-kilometer\tone={0} ਲਿਟਰ ਪ੍ਰਤਿ ਕਿਲੋਮੀਟਰ;other={0} ਲਿਟਰ ਪ੍ਰਤਿ ਕਿਲੋਮੀਟਰ\n" +
 	"pa-IN\tlong\tmegabit\tone={0} ਮੈਗਾਬਿਟ;other={0} ਮੈਗਾਬਿਟ\n" +
 	"pa-IN\tlong\tmegabyte\tone={0} ਮੈਗਾਬਾਇਟ;other={0} ਮੈਗਾਬਾਇਟ\n" +
 	"pa-IN\tlong\tmeter\tone={0} ਮੀਟਰ;other={0} ਮੀਟਰ\n" +
+	"pa-IN\tlong\tmeter-per-second\tone={0} ਮੀਟਰ ਪ੍ਰਤਿ ਸਕਿੰਟ;other={0} ਮੀਟਰ ਪ੍ਰਤਿ ਸਕਿੰਟ\n" +
 	"pa-IN\tlong\tmicrosecond\tone={0} ਮਾਈਕਰੋਸਕਿੰਟ;other={0} ਮਾਈਕਰੋਸਕਿੰਟ\n" +
 	"pa-IN\tlong\tmile\tone={0} ਮੀਲ;other={0} ਮੀਲ\n" +
+	"pa-IN\tlong\tmile-per-gallon\tone={0} ਮੀਲ ਪ੍ਰਤੀ ਗੈਲਨ;other={0} ਮੀਲ ਪ੍ਰਤੀ ਗੈਲਨ\n" +
+	"pa-IN\tlong\tmile-per-hour\tone={0} ਮੀਲ ਪ੍ਰਤੀ ਘੰਟਾ;other={0} ਮੀਲ ਪ੍ਰਤੀ ਘੰਟਾ\n" +
 	"pa-IN\tlong\tmile-scandinavian\tone={0} ਮੀਲ-ਸਕੈਂਡਿਨੇਵਿਆਈ;other={0} ਮੀਲ-ਸਕੈਂਡਿਨੇਵਿਆਈ\n" +
 	"pa-IN\tlong\tmilliliter\tone={0} ਮਿਲੀਲਿਟਰ;other={0} ਮਿਲੀਲਿਟਰ\n" +
 	"pa-IN\tlong\tmillimeter\tone={0} ਮਿਲੀਮੀਟਰ;other={0} ਮਿਲੀਮੀਟਰ\n" +
@@ -7852,12 +8667,17 @@ const cldrUnitData = "" +
 	"pa-IN\tshort\tkilobyte\tother={0} kB\n" +
 	"pa-IN\tshort\tkilogram\tone={0} ਕਿ.ਗ੍ਰਾ.;other={0} ਕਿ.ਗ੍ਰਾ.\n" +
 	"pa-IN\tshort\tkilometer\tone={0} ਕਿ.ਮੀ.;other={0} ਕਿ.ਮੀ.\n" +
+	"pa-IN\tshort\tkilometer-per-hour\tone={0} ਕਿ.ਮੀ./ਘੰ.;other={0} ਕਿ.ਮੀ./ਘੰ.\n" +
 	"pa-IN\tshort\tliter\tone={0} ਲਿ.;other={0} ਲਿ.\n" +
+	"pa-IN\tshort\tliter-per-kilometer\tone={0} ਲਿ./ਕਿ.ਮੀ.;other={0} ਲਿ./ਕਿ.ਮੀ.\n" +
 	"pa-IN\tshort\tmegabit\tother={0} Mb\n" +
 	"pa-IN\tshort\tmegabyte\tother={0} MB\n" +
 	"pa-IN\tshort\tmeter\tone={0} ਮੀ.;other={0} ਮੀ.\n" +
+	"pa-IN\tshort\tmeter-per-second\tone={0} ਮੀ./ਸ.;other={0} ਮੀ./ਸ.\n" +
 	"pa-IN\tshort\tmicrosecond\tother={0} μs\n" +
 	"pa-IN\tshort\tmile\tone={0} ਮੀਲ;other={0} ਮੀਲ\n" +
+	"pa-IN\tshort\tmile-per-gallon\tone={0} ਮੀ.ਪ੍ਰ.ਗੈ.;other={0} ਮੀ.ਪ੍ਰ.ਗੈ.\n" +
+	"pa-IN\tshort\tmile-per-hour\tone={0} ਮੀਲ/ਘੰ.;other={0} ਮੀਲ/ਘੰ.\n" +
 	"pa-IN\tshort\tmile-scandinavian\tone={0} ਸਕੈਂਡ. ਮੀਲ;other={0} ਸਕੈਂਡ. ਮੀਲ\n" +
 	"pa-IN\tshort\tmilliliter\tone={0} ਮਿ.ਲਿ.;other={0} ਮਿ.ਲਿ.\n" +
 	"pa-IN\tshort\tmillimeter\tone={0} ਮਿ.ਮੀ.;other={0} ਮਿ.ਮੀ.\n" +
@@ -7898,12 +8718,17 @@ const cldrUnitData = "" +
 	"pa-IN\tnarrow\tkilobyte\tother={0} kB\n" +
 	"pa-IN\tnarrow\tkilogram\tone={0} ਕਿ.ਗ੍ਰਾ.;other={0} ਕਿ.ਗ੍ਰਾ.\n" +
 	"pa-IN\tnarrow\tkilometer\tone={0} ਕਿ.ਮੀ.;other={0} ਕਿ.ਮੀ.\n" +
+	"pa-IN\tnarrow\tkilometer-per-hour\tone={0} ਕਿ.ਮੀ./ਘੰ.;other={0} ਕਿ.ਮੀ./ਘੰ.\n" +
 	"pa-IN\tnarrow\tliter\tone={0} ਲਿ.;other={0} ਲਿ.\n" +
+	"pa-IN\tnarrow\tliter-per-kilometer\tone={0}ਲਿ./ਕਿ.ਮੀ.;other={0}ਲਿ./ਕਿ.ਮੀ.\n" +
 	"pa-IN\tnarrow\tmegabit\tother={0} Mb\n" +
 	"pa-IN\tnarrow\tmegabyte\tother={0} MB\n" +
 	"pa-IN\tnarrow\tmeter\tone={0} ਮੀ.;other={0} ਮੀ.\n" +
+	"pa-IN\tnarrow\tmeter-per-second\tone={0}ਮੀ/ਸ;other={0}ਮੀ/ਸ\n" +
 	"pa-IN\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"pa-IN\tnarrow\tmile\tone={0} ਮੀਲ;other={0} ਮੀਲ\n" +
+	"pa-IN\tnarrow\tmile-per-gallon\tone={0} ਮੀ.ਪ੍ਰ.ਗੈ.;other={0} ਮੀ.ਪ੍ਰ.ਗੈ.\n" +
+	"pa-IN\tnarrow\tmile-per-hour\tone={0} ਮੀਲ/ਘੰ.;other={0} ਮੀਲ/ਘੰ.\n" +
 	"pa-IN\tnarrow\tmile-scandinavian\tone={0} ਸਕੈਂਡ. ਮੀਲ;other={0} ਸਕੈਂਡ. ਮੀਲ\n" +
 	"pa-IN\tnarrow\tmilliliter\tone={0} ਮਿ.ਲਿ.;other={0} ਮਿ.ਲਿ.\n" +
 	"pa-IN\tnarrow\tmillimeter\tone={0} ਮਿ.ਮੀ.;other={0} ਮਿ.ਮੀ.\n" +
@@ -7944,12 +8769,17 @@ const cldrUnitData = "" +
 	"pl-PL\tlong\tkilobyte\tone={0} kilobajt;few={0} kilobajty;many={0} kilobajtów;other={0} kilobajta\n" +
 	"pl-PL\tlong\tkilogram\tone={0} kilogram;few={0} kilogramy;many={0} kilogramów;other={0} kilograma\n" +
 	"pl-PL\tlong\tkilometer\tone={0} kilometr;few={0} kilometry;many={0} kilometrów;other={0} kilometra\n" +
+	"pl-PL\tlong\tkilometer-per-hour\tone={0} kilometr na godzinę;few={0} kilometry na godzinę;many={0} kilometrów na godzinę;other={0} kilometra na godzinę\n" +
 	"pl-PL\tlong\tliter\tone={0} litr;few={0} litry;many={0} litrów;other={0} litra\n" +
+	"pl-PL\tlong\tliter-per-kilometer\tone={0} litr na kilometr;few={0} litry na kilometr;many={0} litrów na kilometr;other={0} litra na kilometr\n" +
 	"pl-PL\tlong\tmegabit\tone={0} megabit;few={0} megabity;many={0} megabitów;other={0} megabita\n" +
 	"pl-PL\tlong\tmegabyte\tone={0} megabajt;few={0} megabajty;many={0} megabajtów;other={0} megabajta\n" +
 	"pl-PL\tlong\tmeter\tone={0} metr;few={0} metry;many={0} metrów;other={0} metra\n" +
+	"pl-PL\tlong\tmeter-per-second\tone={0} metr na sekundę;few={0} metry na sekundę;many={0} metrów na sekundę;other={0} metra na sekundę\n" +
 	"pl-PL\tlong\tmicrosecond\tone={0} mikrosekunda;few={0} mikrosekundy;many={0} mikrosekund;other={0} mikrosekundy\n" +
 	"pl-PL\tlong\tmile\tone={0} mila;few={0} mile;many={0} mil;other={0} mili\n" +
+	"pl-PL\tlong\tmile-per-gallon\tone={0} mila na galon;few={0} mile na galon;many={0} mil na galon;other={0} mili na galon\n" +
+	"pl-PL\tlong\tmile-per-hour\tone={0} mila na godzinę;few={0} mile na godzinę;many={0} mil na godzinę;other={0} mili na godzinę\n" +
 	"pl-PL\tlong\tmile-scandinavian\tone={0} mila skandynawska;few={0} mile skandynawskie;many={0} mil skandynawskich;other={0} mili skandynawskiej\n" +
 	"pl-PL\tlong\tmilliliter\tone={0} mililitr;few={0} mililitry;many={0} mililitrów;other={0} mililitra\n" +
 	"pl-PL\tlong\tmillimeter\tone={0} milimetr;few={0} milimetry;many={0} milimetrów;other={0} milimetra\n" +
@@ -7990,12 +8820,17 @@ const cldrUnitData = "" +
 	"pl-PL\tshort\tkilobyte\tother={0} kB\n" +
 	"pl-PL\tshort\tkilogram\tother={0} kg\n" +
 	"pl-PL\tshort\tkilometer\tother={0} km\n" +
+	"pl-PL\tshort\tkilometer-per-hour\tone={0} km/godz.;few={0} km/godz.;many={0} km/godz.;other={0} km/godz.\n" +
 	"pl-PL\tshort\tliter\tother={0} l\n" +
+	"pl-PL\tshort\tliter-per-kilometer\tone={0} l/km;few={0} l/km;many={0} l/km;other={0} l/km\n" +
 	"pl-PL\tshort\tmegabit\tother={0} Mb\n" +
 	"pl-PL\tshort\tmegabyte\tother={0} MB\n" +
 	"pl-PL\tshort\tmeter\tother={0} m\n" +
+	"pl-PL\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"pl-PL\tshort\tmicrosecond\tother={0} μs\n" +
 	"pl-PL\tshort\tmile\tone={0} mila;few={0} mile;many={0} mil;other={0} mili\n" +
+	"pl-PL\tshort\tmile-per-gallon\tone={0} mpg;few={0} mpg;many={0} mpg;other={0} mpg\n" +
+	"pl-PL\tshort\tmile-per-hour\tone={0} mila/h;few={0} mile/h;many={0} mil/h;other={0} mili/h\n" +
 	"pl-PL\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"pl-PL\tshort\tmilliliter\tone={0} ml;few={0} ml;many={0} ml;other={0} ml\n" +
 	"pl-PL\tshort\tmillimeter\tother={0} mm\n" +
@@ -8036,12 +8871,17 @@ const cldrUnitData = "" +
 	"pl-PL\tnarrow\tkilobyte\tother={0} kB\n" +
 	"pl-PL\tnarrow\tkilogram\tother={0} kg\n" +
 	"pl-PL\tnarrow\tkilometer\tother={0} km\n" +
+	"pl-PL\tnarrow\tkilometer-per-hour\tone={0} km/h;few={0} km/h;many={0} km/h;other={0}km/h\n" +
 	"pl-PL\tnarrow\tliter\tother={0} l\n" +
+	"pl-PL\tnarrow\tliter-per-kilometer\tone={0} l/km;few={0} l/km;many={0} l/km;other={0} l/km\n" +
 	"pl-PL\tnarrow\tmegabit\tother={0} Mb\n" +
 	"pl-PL\tnarrow\tmegabyte\tother={0} MB\n" +
 	"pl-PL\tnarrow\tmeter\tother={0} m\n" +
+	"pl-PL\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"pl-PL\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"pl-PL\tnarrow\tmile\tone={0} mila;few={0} mile;many={0} mil;other={0} mili\n" +
+	"pl-PL\tnarrow\tmile-per-gallon\tone={0} mpg;few={0} mpg;many={0} mpg;other={0} mpg\n" +
+	"pl-PL\tnarrow\tmile-per-hour\tone={0} mph;few={0} mph;many={0} mph;other={0} mph\n" +
 	"pl-PL\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"pl-PL\tnarrow\tmilliliter\tone={0} ml;few={0} ml;many={0} ml;other={0} ml\n" +
 	"pl-PL\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -8082,12 +8922,17 @@ const cldrUnitData = "" +
 	"pt-BR\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"pt-BR\tlong\tkilogram\tone={0} quilograma;other={0} quilogramas\n" +
 	"pt-BR\tlong\tkilometer\tone={0} quilômetro;other={0} quilômetros\n" +
+	"pt-BR\tlong\tkilometer-per-hour\tone={0} quilômetro por hora;other={0} quilômetros por hora\n" +
 	"pt-BR\tlong\tliter\tone={0} litro;other={0} litros\n" +
+	"pt-BR\tlong\tliter-per-kilometer\tone={0} litro por quilômetro;other={0} litros por quilômetro\n" +
 	"pt-BR\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"pt-BR\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"pt-BR\tlong\tmeter\tone={0} metro;other={0} metros\n" +
+	"pt-BR\tlong\tmeter-per-second\tone={0} metro por segundo;other={0} metros por segundo\n" +
 	"pt-BR\tlong\tmicrosecond\tone={0} microssegundo;other={0} microssegundos\n" +
 	"pt-BR\tlong\tmile\tone={0} milha;other={0} milhas\n" +
+	"pt-BR\tlong\tmile-per-gallon\tone={0} milha por galão;other={0} milhas por galão\n" +
+	"pt-BR\tlong\tmile-per-hour\tone={0} milha por hora;other={0} milhas por hora\n" +
 	"pt-BR\tlong\tmile-scandinavian\tone={0} milha escandinava;other={0} milhas escandinavas\n" +
 	"pt-BR\tlong\tmilliliter\tone={0} mililitro;other={0} mililitros\n" +
 	"pt-BR\tlong\tmillimeter\tone={0} milímetro;other={0} milímetros\n" +
@@ -8128,12 +8973,17 @@ const cldrUnitData = "" +
 	"pt-BR\tshort\tkilobyte\tother={0} kB\n" +
 	"pt-BR\tshort\tkilogram\tother={0} kg\n" +
 	"pt-BR\tshort\tkilometer\tother={0} km\n" +
+	"pt-BR\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"pt-BR\tshort\tliter\tother={0} l\n" +
+	"pt-BR\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"pt-BR\tshort\tmegabit\tother={0} Mb\n" +
 	"pt-BR\tshort\tmegabyte\tother={0} MB\n" +
 	"pt-BR\tshort\tmeter\tother={0} m\n" +
+	"pt-BR\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"pt-BR\tshort\tmicrosecond\tother={0} μs\n" +
 	"pt-BR\tshort\tmile\tother={0} mi\n" +
+	"pt-BR\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"pt-BR\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"pt-BR\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"pt-BR\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"pt-BR\tshort\tmillimeter\tother={0} mm\n" +
@@ -8174,12 +9024,17 @@ const cldrUnitData = "" +
 	"pt-BR\tnarrow\tkilobyte\tother={0} kB\n" +
 	"pt-BR\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"pt-BR\tnarrow\tkilometer\tother={0} km\n" +
+	"pt-BR\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"pt-BR\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"pt-BR\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"pt-BR\tnarrow\tmegabit\tother={0} Mb\n" +
 	"pt-BR\tnarrow\tmegabyte\tother={0} MB\n" +
 	"pt-BR\tnarrow\tmeter\tother={0} m\n" +
+	"pt-BR\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"pt-BR\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"pt-BR\tnarrow\tmile\tother={0} mi\n" +
+	"pt-BR\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"pt-BR\tnarrow\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"pt-BR\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"pt-BR\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"pt-BR\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -8220,12 +9075,17 @@ const cldrUnitData = "" +
 	"pt-PT\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobytes\n" +
 	"pt-PT\tlong\tkilogram\tone={0} quilograma;other={0} quilogramas\n" +
 	"pt-PT\tlong\tkilometer\tone={0} quilómetro;other={0} quilómetros\n" +
+	"pt-PT\tlong\tkilometer-per-hour\tone={0} quilómetro por hora;other={0} quilómetros por hora\n" +
 	"pt-PT\tlong\tliter\tone={0} litro;other={0} litros\n" +
+	"pt-PT\tlong\tliter-per-kilometer\tone={0} litro por quilómetro;other={0} litros por quilómetro\n" +
 	"pt-PT\tlong\tmegabit\tone={0} megabit;other={0} megabits\n" +
 	"pt-PT\tlong\tmegabyte\tone={0} megabyte;other={0} megabytes\n" +
 	"pt-PT\tlong\tmeter\tone={0} metro;other={0} metros\n" +
+	"pt-PT\tlong\tmeter-per-second\tone={0} metro por segundo;other={0} metros por segundo\n" +
 	"pt-PT\tlong\tmicrosecond\tone={0} microssegundo;other={0} microssegundos\n" +
 	"pt-PT\tlong\tmile\tone={0} milha;other={0} milhas\n" +
+	"pt-PT\tlong\tmile-per-gallon\tone={0} milha por galão;other={0} milhas por galão\n" +
+	"pt-PT\tlong\tmile-per-hour\tone={0} milha por hora;other={0} milhas por hora\n" +
 	"pt-PT\tlong\tmile-scandinavian\tone={0} milha escandinava;other={0} milhas escandinavas\n" +
 	"pt-PT\tlong\tmilliliter\tone={0} mililitro;other={0} mililitros\n" +
 	"pt-PT\tlong\tmillimeter\tone={0} milímetro;other={0} milímetros\n" +
@@ -8266,12 +9126,17 @@ const cldrUnitData = "" +
 	"pt-PT\tshort\tkilobyte\tother={0} kB\n" +
 	"pt-PT\tshort\tkilogram\tother={0} kg\n" +
 	"pt-PT\tshort\tkilometer\tother={0} km\n" +
+	"pt-PT\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"pt-PT\tshort\tliter\tother={0} l\n" +
+	"pt-PT\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"pt-PT\tshort\tmegabit\tother={0} Mb\n" +
 	"pt-PT\tshort\tmegabyte\tother={0} MB\n" +
 	"pt-PT\tshort\tmeter\tother={0} m\n" +
+	"pt-PT\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"pt-PT\tshort\tmicrosecond\tother={0} μs\n" +
 	"pt-PT\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"pt-PT\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"pt-PT\tshort\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"pt-PT\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"pt-PT\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"pt-PT\tshort\tmillimeter\tother={0} mm\n" +
@@ -8312,12 +9177,17 @@ const cldrUnitData = "" +
 	"pt-PT\tnarrow\tkilobyte\tother={0} kB\n" +
 	"pt-PT\tnarrow\tkilogram\tone={0} kg;other={0} kg\n" +
 	"pt-PT\tnarrow\tkilometer\tother={0} km\n" +
+	"pt-PT\tnarrow\tkilometer-per-hour\tone={0} km/h;other={0} km/h\n" +
 	"pt-PT\tnarrow\tliter\tone={0} l;other={0} l\n" +
+	"pt-PT\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"pt-PT\tnarrow\tmegabit\tother={0} Mb\n" +
 	"pt-PT\tnarrow\tmegabyte\tother={0} MB\n" +
 	"pt-PT\tnarrow\tmeter\tother={0} m\n" +
+	"pt-PT\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"pt-PT\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"pt-PT\tnarrow\tmile\tone={0} mi;other={0} mi\n" +
+	"pt-PT\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"pt-PT\tnarrow\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"pt-PT\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"pt-PT\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"pt-PT\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -8358,12 +9228,17 @@ const cldrUnitData = "" +
 	"ro-RO\tlong\tkilobyte\tone={0} kilobyte;few={0} kilobyți;other={0} de kilobyți\n" +
 	"ro-RO\tlong\tkilogram\tone={0} kilogram;few={0} kilograme;other={0} de kilograme\n" +
 	"ro-RO\tlong\tkilometer\tone={0} kilometru;few={0} kilometri;other={0} de kilometri\n" +
+	"ro-RO\tlong\tkilometer-per-hour\tone={0} kilometru pe oră;few={0} kilometri pe oră;other={0} de kilometri pe oră\n" +
 	"ro-RO\tlong\tliter\tone={0} litru;few={0} litri;other={0} de litri\n" +
+	"ro-RO\tlong\tliter-per-kilometer\tone={0} litru pe kilometru;few={0} litri pe kilometru;other={0} de litri pe kilometru\n" +
 	"ro-RO\tlong\tmegabit\tone={0} megabit;few={0} megabiți;other={0} de megabiți\n" +
 	"ro-RO\tlong\tmegabyte\tone={0} megabyte;few={0} megabyți;other={0} de megabyți\n" +
 	"ro-RO\tlong\tmeter\tone={0} metru;few={0} metri;other={0} de metri\n" +
+	"ro-RO\tlong\tmeter-per-second\tone={0} metru pe secundă;few={0} metri pe secundă;other={0} de metri pe secundă\n" +
 	"ro-RO\tlong\tmicrosecond\tone={0} microsecundă;few={0} microsecunde;other={0} de microsecunde\n" +
 	"ro-RO\tlong\tmile\tone={0} milă;few={0} mile;other={0} de mile\n" +
+	"ro-RO\tlong\tmile-per-gallon\tone={0} milă pe galon;few={0} mile pe galon;other={0} de mile pe galon\n" +
+	"ro-RO\tlong\tmile-per-hour\tone={0} milă pe oră;few={0} mile pe oră;other={0} de mile pe oră\n" +
 	"ro-RO\tlong\tmile-scandinavian\tone={0} milă scandinavă;few={0} mile scandinave;other={0} de mile scandinave\n" +
 	"ro-RO\tlong\tmilliliter\tone={0} mililitru;few={0} mililitri;other={0} de mililitri\n" +
 	"ro-RO\tlong\tmillimeter\tone={0} milimetru;few={0} milimetri;other={0} de milimetri\n" +
@@ -8404,12 +9279,17 @@ const cldrUnitData = "" +
 	"ro-RO\tshort\tkilobyte\tother={0} kB\n" +
 	"ro-RO\tshort\tkilogram\tother={0} kg\n" +
 	"ro-RO\tshort\tkilometer\tother={0} km\n" +
+	"ro-RO\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"ro-RO\tshort\tliter\tother={0} l\n" +
+	"ro-RO\tshort\tliter-per-kilometer\tone={0} l/km;few={0} l/km;other={0} l/km\n" +
 	"ro-RO\tshort\tmegabit\tother={0} Mb\n" +
 	"ro-RO\tshort\tmegabyte\tother={0} MB\n" +
 	"ro-RO\tshort\tmeter\tother={0} m\n" +
+	"ro-RO\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"ro-RO\tshort\tmicrosecond\tother={0} μs\n" +
 	"ro-RO\tshort\tmile\tother={0} mi\n" +
+	"ro-RO\tshort\tmile-per-gallon\tone={0} milă/gal.;few={0} mile/gal.;other={0} mile/gal.\n" +
+	"ro-RO\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"ro-RO\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"ro-RO\tshort\tmilliliter\tone={0} ml;few={0} ml;other={0} ml\n" +
 	"ro-RO\tshort\tmillimeter\tother={0} mm\n" +
@@ -8450,12 +9330,17 @@ const cldrUnitData = "" +
 	"ro-RO\tnarrow\tkilobyte\tother={0} kB\n" +
 	"ro-RO\tnarrow\tkilogram\tother={0} kg\n" +
 	"ro-RO\tnarrow\tkilometer\tother={0} km\n" +
+	"ro-RO\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"ro-RO\tnarrow\tliter\tother={0} l\n" +
+	"ro-RO\tnarrow\tliter-per-kilometer\tone={0} l/km;few={0} l/km;other={0} l/km\n" +
 	"ro-RO\tnarrow\tmegabit\tother={0} Mb\n" +
 	"ro-RO\tnarrow\tmegabyte\tother={0} MB\n" +
 	"ro-RO\tnarrow\tmeter\tother={0} m\n" +
+	"ro-RO\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"ro-RO\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"ro-RO\tnarrow\tmile\tother={0} mi\n" +
+	"ro-RO\tnarrow\tmile-per-gallon\tone={0} mi/gal;few={0} mi/gal;other={0} mi/gal\n" +
+	"ro-RO\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"ro-RO\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"ro-RO\tnarrow\tmilliliter\tone={0} ml;few={0} ml;other={0} ml\n" +
 	"ro-RO\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -8496,12 +9381,17 @@ const cldrUnitData = "" +
 	"ru-RU\tlong\tkilobyte\tone={0} килобайт;few={0} килобайта;many={0} килобайт;other={0} килобайта\n" +
 	"ru-RU\tlong\tkilogram\tone={0} килограмм;few={0} килограмма;many={0} килограмм;other={0} килограмма\n" +
 	"ru-RU\tlong\tkilometer\tone={0} километр;few={0} километра;many={0} километров;other={0} километра\n" +
+	"ru-RU\tlong\tkilometer-per-hour\tone={0} километр в час;few={0} километра в час;many={0} километров в час;other={0} километра в час\n" +
 	"ru-RU\tlong\tliter\tone={0} литр;few={0} литра;many={0} литров;other={0} литра\n" +
+	"ru-RU\tlong\tliter-per-kilometer\tone={0} литр на километр;few={0} литра на километр;many={0} литров на километр;other={0} литра на километр\n" +
 	"ru-RU\tlong\tmegabit\tone={0} мегабит;few={0} мегабита;many={0} мегабит;other={0} мегабита\n" +
 	"ru-RU\tlong\tmegabyte\tone={0} мегабайт;few={0} мегабайта;many={0} мегабайт;other={0} мегабайта\n" +
 	"ru-RU\tlong\tmeter\tone={0} метр;few={0} метра;many={0} метров;other={0} метра\n" +
+	"ru-RU\tlong\tmeter-per-second\tone={0} метр в секунду;few={0} метра в секунду;many={0} метров в секунду;other={0} метра в секунду\n" +
 	"ru-RU\tlong\tmicrosecond\tone={0} микросекунда;few={0} микросекунды;many={0} микросекунд;other={0} микросекунды\n" +
 	"ru-RU\tlong\tmile\tone={0} миля;few={0} мили;many={0} миль;other={0} мили\n" +
+	"ru-RU\tlong\tmile-per-gallon\tone={0} миля на амер. галлон;few={0} мили на амер. галлон;many={0} миль на амер. галлон;other={0} мили на амер. галлон\n" +
+	"ru-RU\tlong\tmile-per-hour\tone={0} миля в час;few={0} мили в час;many={0} миль в час;other={0} мили в час\n" +
 	"ru-RU\tlong\tmile-scandinavian\tone={0} скандинавская миля;few={0} скандинавские мили;many={0} скандинавских миль;other={0} скандинавской мили\n" +
 	"ru-RU\tlong\tmilliliter\tone={0} миллилитр;few={0} миллилитра;many={0} миллилитров;other={0} миллилитра\n" +
 	"ru-RU\tlong\tmillimeter\tone={0} миллиметр;few={0} миллиметра;many={0} миллиметров;other={0} миллиметра\n" +
@@ -8542,12 +9432,17 @@ const cldrUnitData = "" +
 	"ru-RU\tshort\tkilobyte\tone={0} кБ;few={0} кБ;many={0} кБ;other={0} кБ\n" +
 	"ru-RU\tshort\tkilogram\tone={0} кг;few={0} кг;many={0} кг;other={0} кг\n" +
 	"ru-RU\tshort\tkilometer\tone={0} км;few={0} км;many={0} км;other={0} км\n" +
+	"ru-RU\tshort\tkilometer-per-hour\tone={0} км/ч;few={0} км/ч;many={0} км/ч;other={0} км/ч\n" +
 	"ru-RU\tshort\tliter\tone={0} л;few={0} л;many={0} л;other={0} л\n" +
+	"ru-RU\tshort\tliter-per-kilometer\tone={0} л/км;few={0} л/км;many={0} л/км;other={0} л/км\n" +
 	"ru-RU\tshort\tmegabit\tone={0} Мбит;few={0} Мбит;many={0} Мбит;other={0} Мбит\n" +
 	"ru-RU\tshort\tmegabyte\tone={0} МБ;few={0} МБ;many={0} МБ;other={0} МБ\n" +
 	"ru-RU\tshort\tmeter\tone={0} м;few={0} м;many={0} м;other={0} м\n" +
+	"ru-RU\tshort\tmeter-per-second\tone={0} м/с;few={0} м/с;many={0} м/с;other={0} м/с\n" +
 	"ru-RU\tshort\tmicrosecond\tone={0} мкс;few={0} мкс;many={0} мкс;other={0} мкс\n" +
 	"ru-RU\tshort\tmile\tone={0} ми;few={0} ми;many={0} ми;other={0} ми\n" +
+	"ru-RU\tshort\tmile-per-gallon\tone={0} ми/ам. гал;few={0} ми/ам. гал;many={0} ми/ам. гал;other={0} ми/ам. гал\n" +
+	"ru-RU\tshort\tmile-per-hour\tone={0} ми/ч;few={0} ми/ч;many={0} ми/ч;other={0} ми/ч\n" +
 	"ru-RU\tshort\tmile-scandinavian\tone={0} ск. ми;few={0} ск. ми;many={0} ск. ми;other={0} ск. ми\n" +
 	"ru-RU\tshort\tmilliliter\tone={0} мл;few={0} мл;many={0} мл;other={0} мл\n" +
 	"ru-RU\tshort\tmillimeter\tone={0} мм;few={0} мм;many={0} мм;other={0} мм\n" +
@@ -8588,12 +9483,17 @@ const cldrUnitData = "" +
 	"ru-RU\tnarrow\tkilobyte\tone={0} кБ;few={0} кБ;many={0} кБ;other={0} кБ\n" +
 	"ru-RU\tnarrow\tkilogram\tone={0} кг;few={0} кг;many={0} кг;other={0} кг\n" +
 	"ru-RU\tnarrow\tkilometer\tone={0} км;few={0} км;many={0} км;other={0} км\n" +
+	"ru-RU\tnarrow\tkilometer-per-hour\tone={0} км/ч;few={0} км/ч;many={0} км/ч;other={0} км/ч\n" +
 	"ru-RU\tnarrow\tliter\tone={0} л;few={0} л;many={0} л;other={0} л\n" +
+	"ru-RU\tnarrow\tliter-per-kilometer\tone={0} л/км;few={0} л/км;many={0} л/км;other={0} л/км\n" +
 	"ru-RU\tnarrow\tmegabit\tone={0} Мбит;few={0} Мбит;many={0} Мбит;other={0} Мбит\n" +
 	"ru-RU\tnarrow\tmegabyte\tone={0} МБ;few={0} МБ;many={0} МБ;other={0} МБ\n" +
 	"ru-RU\tnarrow\tmeter\tone={0} м;few={0} м;many={0} м;other={0} м\n" +
+	"ru-RU\tnarrow\tmeter-per-second\tone={0} м/с;few={0} м/с;many={0} м/с;other={0} м/с\n" +
 	"ru-RU\tnarrow\tmicrosecond\tone={0} мкс;few={0} мкс;many={0} мкс;other={0} мкс\n" +
 	"ru-RU\tnarrow\tmile\tone={0} ми;few={0} ми;many={0} ми;other={0} ми\n" +
+	"ru-RU\tnarrow\tmile-per-gallon\tone={0} ми/ам. гал;few={0} ми/ам. гал;many={0} ми/ам. гал;other={0} ми/ам. гал\n" +
+	"ru-RU\tnarrow\tmile-per-hour\tone={0} ми/ч;few={0} ми/ч;many={0} ми/ч;other={0} ми/ч\n" +
 	"ru-RU\tnarrow\tmile-scandinavian\tone={0} ск. ми;few={0} ск. ми;many={0} ск. ми;other={0} ск. ми\n" +
 	"ru-RU\tnarrow\tmilliliter\tone={0} мл;few={0} мл;many={0} мл;other={0} мл\n" +
 	"ru-RU\tnarrow\tmillimeter\tone={0} мм;few={0} мм;many={0} мм;other={0} мм\n" +
@@ -8634,12 +9534,17 @@ const cldrUnitData = "" +
 	"sk-SK\tlong\tkilobyte\tone={0} kilobajt;few={0} kilobajty;many={0} kilobajtu;other={0} kilobajtov\n" +
 	"sk-SK\tlong\tkilogram\tone={0} kilogram;few={0} kilogramy;many={0} kilogramu;other={0} kilogramov\n" +
 	"sk-SK\tlong\tkilometer\tone={0} kilometer;few={0} kilometre;many={0} kilometra;other={0} kilometrov\n" +
+	"sk-SK\tlong\tkilometer-per-hour\tone={0} kilometer za hodinu;few={0} kilometre za hodinu;many={0} kilometra za hodinu;other={0} kilometrov za hodinu\n" +
 	"sk-SK\tlong\tliter\tone={0} liter;few={0} litre;many={0} litra;other={0} litrov\n" +
+	"sk-SK\tlong\tliter-per-kilometer\tone={0} liter na kilometer;few={0} litre na kilometer;many={0} litra na kilometer;other={0} litrov na kilometer\n" +
 	"sk-SK\tlong\tmegabit\tone={0} megabit;few={0} megabity;many={0} megabitu;other={0} megabitov\n" +
 	"sk-SK\tlong\tmegabyte\tone={0} megabajt;few={0} megabajty;many={0} megabajtu;other={0} megabajtov\n" +
 	"sk-SK\tlong\tmeter\tone={0} meter;few={0} metre;many={0} metra;other={0} metrov\n" +
+	"sk-SK\tlong\tmeter-per-second\tone={0} meter za sekundu;few={0} metre za sekundu;many={0} metra za sekundu;other={0} metrov za sekundu\n" +
 	"sk-SK\tlong\tmicrosecond\tone={0} mikrosekunda;few={0} mikrosekundy;many={0} mikrosekundy;other={0} mikrosekúnd\n" +
 	"sk-SK\tlong\tmile\tone={0} míľa;few={0} míle;many={0} míle;other={0} míľ\n" +
+	"sk-SK\tlong\tmile-per-gallon\tone={0} míľa na galón;few={0} míle na galón;many={0} míle na galón;other={0} míľ na galón\n" +
+	"sk-SK\tlong\tmile-per-hour\tone={0} míľa za hodinu;few={0} míle za hodinu;many={0} míle za hodinu;other={0} míľ za hodinu\n" +
 	"sk-SK\tlong\tmile-scandinavian\tone={0} škandinávska míľa;few={0} škandinávske míle;many={0} škandinávskej míle;other={0} škandinávskych míľ\n" +
 	"sk-SK\tlong\tmilliliter\tone={0} mililiter;few={0} mililitre;many={0} mililitra;other={0} mililitrov\n" +
 	"sk-SK\tlong\tmillimeter\tone={0} milimeter;few={0} milimetre;many={0} milimetra;other={0} milimetrov\n" +
@@ -8680,12 +9585,17 @@ const cldrUnitData = "" +
 	"sk-SK\tshort\tkilobyte\tother={0} kB\n" +
 	"sk-SK\tshort\tkilogram\tother={0} kg\n" +
 	"sk-SK\tshort\tkilometer\tother={0} km\n" +
+	"sk-SK\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"sk-SK\tshort\tliter\tother={0} l\n" +
+	"sk-SK\tshort\tliter-per-kilometer\tone={0} l/km;few={0} l/km;many={0} l/km;other={0} l/km\n" +
 	"sk-SK\tshort\tmegabit\tother={0} Mb\n" +
 	"sk-SK\tshort\tmegabyte\tother={0} MB\n" +
 	"sk-SK\tshort\tmeter\tother={0} m\n" +
+	"sk-SK\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"sk-SK\tshort\tmicrosecond\tother={0} μs\n" +
 	"sk-SK\tshort\tmile\tother={0} mi\n" +
+	"sk-SK\tshort\tmile-per-gallon\tone={0} mpg;few={0} mpg;many={0} mpg;other={0} mpg\n" +
+	"sk-SK\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"sk-SK\tshort\tmile-scandinavian\tone={0} ŠM;few={0} ŠM;many={0} ŠM;other={0} ŠM\n" +
 	"sk-SK\tshort\tmilliliter\tone={0} ml;few={0} ml;many={0} ml;other={0} ml\n" +
 	"sk-SK\tshort\tmillimeter\tother={0} mm\n" +
@@ -8726,12 +9636,17 @@ const cldrUnitData = "" +
 	"sk-SK\tnarrow\tkilobyte\tother={0} kB\n" +
 	"sk-SK\tnarrow\tkilogram\tother={0} kg\n" +
 	"sk-SK\tnarrow\tkilometer\tother={0} km\n" +
+	"sk-SK\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"sk-SK\tnarrow\tliter\tother={0} l\n" +
+	"sk-SK\tnarrow\tliter-per-kilometer\tone={0} l/km;few={0} l/km;many={0} l/km;other={0} l/km\n" +
 	"sk-SK\tnarrow\tmegabit\tother={0} Mb\n" +
 	"sk-SK\tnarrow\tmegabyte\tother={0} MB\n" +
 	"sk-SK\tnarrow\tmeter\tother={0} m\n" +
+	"sk-SK\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"sk-SK\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"sk-SK\tnarrow\tmile\tother={0} mi\n" +
+	"sk-SK\tnarrow\tmile-per-gallon\tone={0} mpg;few={0} mpg;many={0} mpg;other={0} mpg\n" +
+	"sk-SK\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"sk-SK\tnarrow\tmile-scandinavian\tone={0} ŠM;few={0} ŠM;many={0} ŠM;other={0} ŠM\n" +
 	"sk-SK\tnarrow\tmilliliter\tone={0} ml;few={0} ml;many={0} ml;other={0} ml\n" +
 	"sk-SK\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -8772,12 +9687,17 @@ const cldrUnitData = "" +
 	"sl-SI\tlong\tkilobyte\tone={0} kilobajt;two={0} kilobajta;few={0} kilobajti;other={0} kilobajtov\n" +
 	"sl-SI\tlong\tkilogram\tone={0} kilogram;two={0} kilograma;few={0} kilogrami;other={0} kilogramov\n" +
 	"sl-SI\tlong\tkilometer\tone={0} kilometer;two={0} kilometra;few={0} kilometri;other={0} kilometrov\n" +
+	"sl-SI\tlong\tkilometer-per-hour\tone={0} kilometer na uro;two={0} kilometra na uro;few={0} kilometri na uro;other={0} kilometrov na uro\n" +
 	"sl-SI\tlong\tliter\tone={0} liter;two={0} litra;few={0} litri;other={0} litrov\n" +
+	"sl-SI\tlong\tliter-per-kilometer\tone={0} liter na kilometer;two={0} litra na kilometer;few={0} litri na kilometer;other={0} litrov na kilometer\n" +
 	"sl-SI\tlong\tmegabit\tone={0} megabit;two={0} megabita;few={0} megabiti;other={0} megabitov\n" +
 	"sl-SI\tlong\tmegabyte\tone={0} megabajt;two={0} megabajta;few={0} megabajti;other={0} megabajtov\n" +
 	"sl-SI\tlong\tmeter\tone={0} meter;two={0} metra;few={0} metri;other={0} metrov\n" +
+	"sl-SI\tlong\tmeter-per-second\tone={0} meter na sekundo;two={0} metra na sekundo;few={0} metri na sekundo;other={0} metrov na sekundo\n" +
 	"sl-SI\tlong\tmicrosecond\tone={0} mikrosekunda;two={0} mikrosekundi;few={0} mikrosekunde;other={0} mikrosekund\n" +
 	"sl-SI\tlong\tmile\tone={0} milja;two={0} milji;few={0} milje;other={0} milj\n" +
+	"sl-SI\tlong\tmile-per-gallon\tone={0} milja na galono;two={0} milji na galono;few={0} milje na galono;other={0} milj na galono\n" +
+	"sl-SI\tlong\tmile-per-hour\tone={0} milja na uro;two={0} milji na uro;few={0} milje na uro;other={0} milj na uro\n" +
 	"sl-SI\tlong\tmile-scandinavian\tone={0} skandinavska milja;two={0} skandinavski milji;few={0} skandinavske milje;other={0} skandinavskih milj\n" +
 	"sl-SI\tlong\tmilliliter\tone={0} mililiter;two={0} mililitra;few={0} mililitri;other={0} militrov\n" +
 	"sl-SI\tlong\tmillimeter\tone={0} milimeter;two={0} milimetra;few={0} milimetri;other={0} milimetrov\n" +
@@ -8818,12 +9738,17 @@ const cldrUnitData = "" +
 	"sl-SI\tshort\tkilobyte\tother={0} kB\n" +
 	"sl-SI\tshort\tkilogram\tother={0} kg\n" +
 	"sl-SI\tshort\tkilometer\tother={0} km\n" +
+	"sl-SI\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"sl-SI\tshort\tliter\tother={0} l\n" +
+	"sl-SI\tshort\tliter-per-kilometer\tone={0} l/km;two={0} l/km;few={0} l/km;other={0} l/km\n" +
 	"sl-SI\tshort\tmegabit\tother={0} Mb\n" +
 	"sl-SI\tshort\tmegabyte\tother={0} MB\n" +
 	"sl-SI\tshort\tmeter\tother={0} m\n" +
+	"sl-SI\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"sl-SI\tshort\tmicrosecond\tother={0} μs\n" +
 	"sl-SI\tshort\tmile\tother={0} mi\n" +
+	"sl-SI\tshort\tmile-per-gallon\tone={0} mpg;two={0} mpg;few={0} mpg;other={0} mpg\n" +
+	"sl-SI\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"sl-SI\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"sl-SI\tshort\tmilliliter\tone={0} ml;two={0} ml;few={0} ml;other={0} ml\n" +
 	"sl-SI\tshort\tmillimeter\tother={0} mm\n" +
@@ -8864,12 +9789,17 @@ const cldrUnitData = "" +
 	"sl-SI\tnarrow\tkilobyte\tother={0} kB\n" +
 	"sl-SI\tnarrow\tkilogram\tother={0} kg\n" +
 	"sl-SI\tnarrow\tkilometer\tother={0} km\n" +
+	"sl-SI\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"sl-SI\tnarrow\tliter\tother={0} l\n" +
+	"sl-SI\tnarrow\tliter-per-kilometer\tone={0} l/km;two={0} l/km;few={0} l/km;other={0} l/km\n" +
 	"sl-SI\tnarrow\tmegabit\tother={0} Mb\n" +
 	"sl-SI\tnarrow\tmegabyte\tother={0} MB\n" +
 	"sl-SI\tnarrow\tmeter\tother={0} m\n" +
+	"sl-SI\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"sl-SI\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"sl-SI\tnarrow\tmile\tother={0} mi\n" +
+	"sl-SI\tnarrow\tmile-per-gallon\tone={0} mpg;two={0} mpg;few={0} mpg;other={0} mpg\n" +
+	"sl-SI\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"sl-SI\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"sl-SI\tnarrow\tmilliliter\tone={0} ml;two={0} ml;few={0} ml;other={0} ml\n" +
 	"sl-SI\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -8910,12 +9840,17 @@ const cldrUnitData = "" +
 	"sr-RS\tlong\tkilobyte\tone={0} килобајт;few={0} килобајта;other={0} килобајтова\n" +
 	"sr-RS\tlong\tkilogram\tone={0} килограм;few={0} килограма;other={0} килограма\n" +
 	"sr-RS\tlong\tkilometer\tone={0} километар;few={0} километра;other={0} километара\n" +
+	"sr-RS\tlong\tkilometer-per-hour\tone={0} километар на сат;few={0} километра на сат;other={0} километара на сат\n" +
 	"sr-RS\tlong\tliter\tone={0} литар;few={0} литра;other={0} литара\n" +
+	"sr-RS\tlong\tliter-per-kilometer\tone={0} литар по километру;few={0} литра по километру;other={0} литара по километру\n" +
 	"sr-RS\tlong\tmegabit\tone={0} мегабит;few={0} мегабита;other={0} мегабитова\n" +
 	"sr-RS\tlong\tmegabyte\tone={0} мегабајт;few={0} мегабајта;other={0} мегабајтова\n" +
 	"sr-RS\tlong\tmeter\tone={0} метар;few={0} метра;other={0} метара\n" +
+	"sr-RS\tlong\tmeter-per-second\tone={0} метар у секунди;few={0} метра у секунди;other={0} метара у секунди\n" +
 	"sr-RS\tlong\tmicrosecond\tone={0} микросекунда;few={0} микросекунде;other={0} микросекунди\n" +
 	"sr-RS\tlong\tmile\tone={0} миља;few={0} миље;other={0} миља\n" +
+	"sr-RS\tlong\tmile-per-gallon\tone={0} миља по галону;few={0} миље по галону;other={0} миља по галону\n" +
+	"sr-RS\tlong\tmile-per-hour\tone={0} миља на сат;few={0} миље на сат;other={0} миља на сат\n" +
 	"sr-RS\tlong\tmile-scandinavian\tone={0} скандинавска миља;few={0} скандинавске миље;other={0} скандинавских миља\n" +
 	"sr-RS\tlong\tmilliliter\tone={0} милилитар;few={0} милилитра;other={0} милилитара\n" +
 	"sr-RS\tlong\tmillimeter\tone={0} милиметар;few={0} милиметра;other={0} милиметара\n" +
@@ -8956,12 +9891,17 @@ const cldrUnitData = "" +
 	"sr-RS\tshort\tkilobyte\tother={0} kB\n" +
 	"sr-RS\tshort\tkilogram\tother={0} kg\n" +
 	"sr-RS\tshort\tkilometer\tother={0} km\n" +
+	"sr-RS\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"sr-RS\tshort\tliter\tother={0} l\n" +
+	"sr-RS\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"sr-RS\tshort\tmegabit\tother={0} Mb\n" +
 	"sr-RS\tshort\tmegabyte\tother={0} MB\n" +
 	"sr-RS\tshort\tmeter\tother={0} m\n" +
+	"sr-RS\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"sr-RS\tshort\tmicrosecond\tother={0} μs\n" +
 	"sr-RS\tshort\tmile\tother={0} mi\n" +
+	"sr-RS\tshort\tmile-per-gallon\tone={0} mpg;few={0} mpg;other={0} mpg\n" +
+	"sr-RS\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"sr-RS\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"sr-RS\tshort\tmilliliter\tother={0} mL\n" +
 	"sr-RS\tshort\tmillimeter\tother={0} mm\n" +
@@ -9002,12 +9942,17 @@ const cldrUnitData = "" +
 	"sr-RS\tnarrow\tkilobyte\tother={0} kB\n" +
 	"sr-RS\tnarrow\tkilogram\tother={0} kg\n" +
 	"sr-RS\tnarrow\tkilometer\tother={0} km\n" +
+	"sr-RS\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"sr-RS\tnarrow\tliter\tother={0} l\n" +
+	"sr-RS\tnarrow\tliter-per-kilometer\tother={0} L/km\n" +
 	"sr-RS\tnarrow\tmegabit\tother={0} Mb\n" +
 	"sr-RS\tnarrow\tmegabyte\tother={0} MB\n" +
 	"sr-RS\tnarrow\tmeter\tother={0} m\n" +
+	"sr-RS\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"sr-RS\tnarrow\tmicrosecond\tother={0} μs\n" +
 	"sr-RS\tnarrow\tmile\tone={0} миља;few={0} миље;other={0} миља\n" +
+	"sr-RS\tnarrow\tmile-per-gallon\tone={0} mpg;few={0} mpg;other={0} mpg\n" +
+	"sr-RS\tnarrow\tmile-per-hour\tother={0} mi/h\n" +
 	"sr-RS\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"sr-RS\tnarrow\tmilliliter\tother={0} mL\n" +
 	"sr-RS\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -9048,12 +9993,17 @@ const cldrUnitData = "" +
 	"sv-SE\tlong\tkilobyte\tone={0} kilobyte;other={0} kilobyte\n" +
 	"sv-SE\tlong\tkilogram\tone={0} kilogram;other={0} kilogram\n" +
 	"sv-SE\tlong\tkilometer\tone={0} kilometer;other={0} kilometer\n" +
+	"sv-SE\tlong\tkilometer-per-hour\tone={0} kilometer per timme;other={0} kilometer per timme\n" +
 	"sv-SE\tlong\tliter\tone={0} liter;other={0} liter\n" +
+	"sv-SE\tlong\tliter-per-kilometer\tone={0} liter per kilometer;other={0} liter per kilometer\n" +
 	"sv-SE\tlong\tmegabit\tone={0} megabit;other={0} megabit\n" +
 	"sv-SE\tlong\tmegabyte\tone={0} megabyte;other={0} megabyte\n" +
 	"sv-SE\tlong\tmeter\tone={0} meter;other={0} meter\n" +
+	"sv-SE\tlong\tmeter-per-second\tone={0} meter per sekund;other={0} meter per sekund\n" +
 	"sv-SE\tlong\tmicrosecond\tone={0} mikrosekund;other={0} mikrosekunder\n" +
 	"sv-SE\tlong\tmile\tone={0} mile;other={0} mile\n" +
+	"sv-SE\tlong\tmile-per-gallon\tone={0} mile per gallon;other={0} miles per gallon\n" +
+	"sv-SE\tlong\tmile-per-hour\tone={0} mile per timme;other={0} mile per timme\n" +
 	"sv-SE\tlong\tmile-scandinavian\tone={0} mil;other={0} mil\n" +
 	"sv-SE\tlong\tmilliliter\tone={0} milliliter;other={0} milliliter\n" +
 	"sv-SE\tlong\tmillimeter\tone={0} millimeter;other={0} millimeter\n" +
@@ -9094,12 +10044,17 @@ const cldrUnitData = "" +
 	"sv-SE\tshort\tkilobyte\tother={0} kB\n" +
 	"sv-SE\tshort\tkilogram\tother={0} kg\n" +
 	"sv-SE\tshort\tkilometer\tother={0} km\n" +
+	"sv-SE\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"sv-SE\tshort\tliter\tother={0} l\n" +
+	"sv-SE\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"sv-SE\tshort\tmegabit\tother={0} Mb\n" +
 	"sv-SE\tshort\tmegabyte\tother={0} MB\n" +
 	"sv-SE\tshort\tmeter\tother={0} m\n" +
+	"sv-SE\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"sv-SE\tshort\tmicrosecond\tother={0} μs\n" +
 	"sv-SE\tshort\tmile\tother={0} mi\n" +
+	"sv-SE\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"sv-SE\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"sv-SE\tshort\tmile-scandinavian\tone={0} mil;other={0} mil\n" +
 	"sv-SE\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"sv-SE\tshort\tmillimeter\tother={0} mm\n" +
@@ -9140,12 +10095,17 @@ const cldrUnitData = "" +
 	"sv-SE\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"sv-SE\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"sv-SE\tnarrow\tkilometer\tone={0}km;other={0}km\n" +
+	"sv-SE\tnarrow\tkilometer-per-hour\tone={0}km/h;other={0}km/h\n" +
 	"sv-SE\tnarrow\tliter\tone={0}l;other={0}l\n" +
+	"sv-SE\tnarrow\tliter-per-kilometer\tone={0}l/km;other={0}l/km\n" +
 	"sv-SE\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"sv-SE\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"sv-SE\tnarrow\tmeter\tone={0}m;other={0}m\n" +
+	"sv-SE\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"sv-SE\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"sv-SE\tnarrow\tmile\tone={0}mi;other={0}mi\n" +
+	"sv-SE\tnarrow\tmile-per-gallon\tone={0}mpg;other={0}mpg\n" +
+	"sv-SE\tnarrow\tmile-per-hour\tone={0}mi/h;other={0}mi/h\n" +
 	"sv-SE\tnarrow\tmile-scandinavian\tone={0}mil;other={0}mil\n" +
 	"sv-SE\tnarrow\tmilliliter\tone={0}ml;other={0}ml\n" +
 	"sv-SE\tnarrow\tmillimeter\tone={0}mm;other={0}mm\n" +
@@ -9186,12 +10146,17 @@ const cldrUnitData = "" +
 	"sw-KE\tlong\tkilobyte\tone=kilobaiti {0};other=kilobaiti {0}\n" +
 	"sw-KE\tlong\tkilogram\tone=kilogramu {0};other=kilogramu {0}\n" +
 	"sw-KE\tlong\tkilometer\tone=kilomita {0};other=kilomita {0}\n" +
+	"sw-KE\tlong\tkilometer-per-hour\tone=kilomita {0} kwa saa;other=kilomita {0} kwa saa\n" +
 	"sw-KE\tlong\tliter\tone=lita {0};other=lita {0}\n" +
+	"sw-KE\tlong\tliter-per-kilometer\tone=lita {0} kwa kilomita;other=lita {0} kwa kilomita\n" +
 	"sw-KE\tlong\tmegabit\tone=megabiti {0};other=megabiti {0}\n" +
 	"sw-KE\tlong\tmegabyte\tone=megabaiti {0};other=megabaiti {0}\n" +
 	"sw-KE\tlong\tmeter\tone=mita {0};other=mita {0}\n" +
+	"sw-KE\tlong\tmeter-per-second\tone=mita {0} kwa sekunde;other=mita {0} kwa sekunde\n" +
 	"sw-KE\tlong\tmicrosecond\tone=maikroseunde {0};other=maikrosekunde {0}\n" +
 	"sw-KE\tlong\tmile\tone=maili {0};other=maili {0}\n" +
+	"sw-KE\tlong\tmile-per-gallon\tone=maili {0} kwa kila galoni;other=maili {0} kwa kila galoni\n" +
+	"sw-KE\tlong\tmile-per-hour\tone=maili {0} kwa saa;other=maili {0} kwa saa\n" +
 	"sw-KE\tlong\tmile-scandinavian\tone=maili {0} ya skandinavia;other=maili {0} za skandinavia\n" +
 	"sw-KE\tlong\tmilliliter\tone=mililita {0};other=mililita {0}\n" +
 	"sw-KE\tlong\tmillimeter\tone=milimita {0};other=milimita {0}\n" +
@@ -9232,12 +10197,17 @@ const cldrUnitData = "" +
 	"sw-KE\tshort\tkilobyte\tone=kilobaiti {0};other=kilobaiti {0}\n" +
 	"sw-KE\tshort\tkilogram\tone=kg {0};other=kg {0}\n" +
 	"sw-KE\tshort\tkilometer\tone=km {0};other=km {0}\n" +
+	"sw-KE\tshort\tkilometer-per-hour\tone=km {0}/saa;other=km {0}/saa\n" +
 	"sw-KE\tshort\tliter\tone=lita {0};other=lita {0}\n" +
+	"sw-KE\tshort\tliter-per-kilometer\tone=lita {0} kwa kilomita;other=lita {0} kwa kilomita\n" +
 	"sw-KE\tshort\tmegabit\tone=megabiti {0};other=megabiti {0}\n" +
 	"sw-KE\tshort\tmegabyte\tone=MB {0};other=MB {0}\n" +
 	"sw-KE\tshort\tmeter\tone=mita {0};other=mita {0}\n" +
+	"sw-KE\tshort\tmeter-per-second\tone=m/s {0};other=m/s {0}\n" +
 	"sw-KE\tshort\tmicrosecond\tone=mikrosekunde {0};other=mikrosekunde {0}\n" +
 	"sw-KE\tshort\tmile\tone=maili {0};other=maili {0}\n" +
+	"sw-KE\tshort\tmile-per-gallon\tone=mpg {0};other=mpg {0}\n" +
+	"sw-KE\tshort\tmile-per-hour\tone=mph {0};other=mph {0}\n" +
 	"sw-KE\tshort\tmile-scandinavian\tone=smi {0};other=smi {0}\n" +
 	"sw-KE\tshort\tmilliliter\tone=mililita {0};other=mililita {0}\n" +
 	"sw-KE\tshort\tmillimeter\tone=milimita {0};other=milimita {0}\n" +
@@ -9278,12 +10248,17 @@ const cldrUnitData = "" +
 	"sw-KE\tnarrow\tkilobyte\tone=kilobaiti {0};other=kilobaiti {0}\n" +
 	"sw-KE\tnarrow\tkilogram\tone=kg {0};other=kg {0}\n" +
 	"sw-KE\tnarrow\tkilometer\tone=km {0};other=km {0}\n" +
+	"sw-KE\tnarrow\tkilometer-per-hour\tone=km {0}/saa;other=km {0}/saa\n" +
 	"sw-KE\tnarrow\tliter\tone=lita {0};other=lita {0}\n" +
+	"sw-KE\tnarrow\tliter-per-kilometer\tone=lita {0} kwa kilomita;other=lita {0} kwa kilomita\n" +
 	"sw-KE\tnarrow\tmegabit\tone=megabiti {0};other=megabiti {0}\n" +
 	"sw-KE\tnarrow\tmegabyte\tone=MB {0};other=MB {0}\n" +
 	"sw-KE\tnarrow\tmeter\tone=mita {0};other=mita {0}\n" +
+	"sw-KE\tnarrow\tmeter-per-second\tone=m {0}/s;other=m {0}/s\n" +
 	"sw-KE\tnarrow\tmicrosecond\tone=mikrosekunde {0};other=mikrosekunde {0}\n" +
 	"sw-KE\tnarrow\tmile\tone=maili {0};other=maili {0}\n" +
+	"sw-KE\tnarrow\tmile-per-gallon\tone=mpg {0};other=mpg {0}\n" +
+	"sw-KE\tnarrow\tmile-per-hour\tone=mi {0}/saa;other=mi {0}/saa\n" +
 	"sw-KE\tnarrow\tmile-scandinavian\tone=smi {0};other=smi {0}\n" +
 	"sw-KE\tnarrow\tmilliliter\tone=mililita {0};other=mililita {0}\n" +
 	"sw-KE\tnarrow\tmillimeter\tone=mm{0};other=mm{0}\n" +
@@ -9324,12 +10299,17 @@ const cldrUnitData = "" +
 	"sw-TZ\tlong\tkilobyte\tone=kilobaiti {0};other=kilobaiti {0}\n" +
 	"sw-TZ\tlong\tkilogram\tone=kilogramu {0};other=kilogramu {0}\n" +
 	"sw-TZ\tlong\tkilometer\tone=kilomita {0};other=kilomita {0}\n" +
+	"sw-TZ\tlong\tkilometer-per-hour\tone=kilomita {0} kwa saa;other=kilomita {0} kwa saa\n" +
 	"sw-TZ\tlong\tliter\tone=lita {0};other=lita {0}\n" +
+	"sw-TZ\tlong\tliter-per-kilometer\tone=lita {0} kwa kilomita;other=lita {0} kwa kilomita\n" +
 	"sw-TZ\tlong\tmegabit\tone=megabiti {0};other=megabiti {0}\n" +
 	"sw-TZ\tlong\tmegabyte\tone=megabaiti {0};other=megabaiti {0}\n" +
 	"sw-TZ\tlong\tmeter\tone=mita {0};other=mita {0}\n" +
+	"sw-TZ\tlong\tmeter-per-second\tone=mita {0} kwa sekunde;other=mita {0} kwa sekunde\n" +
 	"sw-TZ\tlong\tmicrosecond\tone=mikrosekunde {0};other=mikrosekunde {0}\n" +
 	"sw-TZ\tlong\tmile\tone=maili {0};other=maili {0}\n" +
+	"sw-TZ\tlong\tmile-per-gallon\tone=maili {0} kwa kila galoni;other=maili {0} kwa kila galoni\n" +
+	"sw-TZ\tlong\tmile-per-hour\tone=maili {0} kwa saa;other=maili {0} kwa saa\n" +
 	"sw-TZ\tlong\tmile-scandinavian\tone=maili {0} ya skandinavia;other=maili {0} za skandinavia\n" +
 	"sw-TZ\tlong\tmilliliter\tone=mililita {0};other=mililita {0}\n" +
 	"sw-TZ\tlong\tmillimeter\tone=milimita {0};other=milimita {0}\n" +
@@ -9370,12 +10350,17 @@ const cldrUnitData = "" +
 	"sw-TZ\tshort\tkilobyte\tone=kilobaiti {0};other=kilobaiti {0}\n" +
 	"sw-TZ\tshort\tkilogram\tone=kg {0};other=kg {0}\n" +
 	"sw-TZ\tshort\tkilometer\tone=km {0};other=km {0}\n" +
+	"sw-TZ\tshort\tkilometer-per-hour\tone=km {0}/saa;other=km {0}/saa\n" +
 	"sw-TZ\tshort\tliter\tone=lita {0};other=lita {0}\n" +
+	"sw-TZ\tshort\tliter-per-kilometer\tone=lita {0} kwa kilomita;other=lita {0} kwa kilomita\n" +
 	"sw-TZ\tshort\tmegabit\tone=megabiti {0};other=megabiti {0}\n" +
 	"sw-TZ\tshort\tmegabyte\tone=MB {0};other=MB {0}\n" +
 	"sw-TZ\tshort\tmeter\tone=mita {0};other=mita {0}\n" +
+	"sw-TZ\tshort\tmeter-per-second\tone=m/s {0};other=m/s {0}\n" +
 	"sw-TZ\tshort\tmicrosecond\tone=mikrosekunde {0};other=mikrosekunde {0}\n" +
 	"sw-TZ\tshort\tmile\tone=maili {0};other=maili {0}\n" +
+	"sw-TZ\tshort\tmile-per-gallon\tone=mpg {0};other=mpg {0}\n" +
+	"sw-TZ\tshort\tmile-per-hour\tone=mph {0};other=mph {0}\n" +
 	"sw-TZ\tshort\tmile-scandinavian\tone=smi {0};other=smi {0}\n" +
 	"sw-TZ\tshort\tmilliliter\tone=mililita {0};other=mililita {0}\n" +
 	"sw-TZ\tshort\tmillimeter\tone=milimita {0};other=milimita {0}\n" +
@@ -9416,12 +10401,17 @@ const cldrUnitData = "" +
 	"sw-TZ\tnarrow\tkilobyte\tone=kilobaiti {0};other=kilobaiti {0}\n" +
 	"sw-TZ\tnarrow\tkilogram\tone=kg {0};other=kg {0}\n" +
 	"sw-TZ\tnarrow\tkilometer\tone=km {0};other=km {0}\n" +
+	"sw-TZ\tnarrow\tkilometer-per-hour\tone=km {0}/saa;other=km {0}/saa\n" +
 	"sw-TZ\tnarrow\tliter\tone=lita {0};other=lita {0}\n" +
+	"sw-TZ\tnarrow\tliter-per-kilometer\tone=lita {0} kwa kilomita;other=lita {0} kwa kilomita\n" +
 	"sw-TZ\tnarrow\tmegabit\tone=megabiti {0};other=megabiti {0}\n" +
 	"sw-TZ\tnarrow\tmegabyte\tone=MB {0};other=MB {0}\n" +
 	"sw-TZ\tnarrow\tmeter\tone=mita {0};other=mita {0}\n" +
+	"sw-TZ\tnarrow\tmeter-per-second\tone=m {0}/s;other=m {0}/s\n" +
 	"sw-TZ\tnarrow\tmicrosecond\tone=mikrosekunde {0};other=mikrosekunde {0}\n" +
 	"sw-TZ\tnarrow\tmile\tone=maili {0};other=maili {0}\n" +
+	"sw-TZ\tnarrow\tmile-per-gallon\tone=mpg {0};other=mpg {0}\n" +
+	"sw-TZ\tnarrow\tmile-per-hour\tone=mi {0}/saa;other=mi {0}/saa\n" +
 	"sw-TZ\tnarrow\tmile-scandinavian\tone=smi {0};other=smi {0}\n" +
 	"sw-TZ\tnarrow\tmilliliter\tone=mililita {0};other=mililita {0}\n" +
 	"sw-TZ\tnarrow\tmillimeter\tone=mm {0};other=mm {0}\n" +
@@ -9462,12 +10452,17 @@ const cldrUnitData = "" +
 	"ta-IN\tlong\tkilobyte\tone={0} கிலோபைட்;other={0} கிலோபைட்கள்\n" +
 	"ta-IN\tlong\tkilogram\tone={0} கிலோகிராம்;other={0} கிலோகிராம்கள்\n" +
 	"ta-IN\tlong\tkilometer\tone={0} கிலோமீட்டர்;other={0} கிலோமீட்டர்கள்\n" +
+	"ta-IN\tlong\tkilometer-per-hour\tone={0} கிலோமீட்டர்/மணிநேரம்;other={0} கிலோமீட்டர்கள்/மணிநேரம்\n" +
 	"ta-IN\tlong\tliter\tone={0} லிட்டர்;other={0} லிட்டர்கள்\n" +
+	"ta-IN\tlong\tliter-per-kilometer\tone={0} லிட்டர்/கிலோமீட்டர்;other={0} லிட்டர்கள்/கிலோமீட்டர்\n" +
 	"ta-IN\tlong\tmegabit\tone={0} மெகாபிட்;other={0} மெகாபிட்கள்\n" +
 	"ta-IN\tlong\tmegabyte\tone={0} மெகாபைட்;other={0} மெகாபைட்கள்\n" +
 	"ta-IN\tlong\tmeter\tone={0} மீட்டர்;other={0} மீட்டர்கள்\n" +
+	"ta-IN\tlong\tmeter-per-second\tone={0} மீட்டர்/விநாடி;other={0} மீட்டர்கள்/விநாடி\n" +
 	"ta-IN\tlong\tmicrosecond\tone={0} மைக்ரோவிநாடி;other={0} மைக்ரோவிநாடிகள்\n" +
 	"ta-IN\tlong\tmile\tone={0} மைல்;other={0} மைல்கள்\n" +
+	"ta-IN\tlong\tmile-per-gallon\tone={0} மைல்/கேலன்;other={0} மைல்கள்/கேலன்\n" +
+	"ta-IN\tlong\tmile-per-hour\tone={0} மைல்/மணிநேரம்;other={0} மைல்கள்/மணிநேரம்\n" +
 	"ta-IN\tlong\tmile-scandinavian\tone={0} ஸ்கேண்டிநேவியன் மைல்;other={0} ஸ்கேண்டிநேவியன் மைல்கள்\n" +
 	"ta-IN\tlong\tmilliliter\tone={0} மில்லிலிட்டர்;other={0} மில்லிலிட்டர்கள்\n" +
 	"ta-IN\tlong\tmillimeter\tone={0} மில்லிமீட்டர்;other={0} மில்லிமீட்டர்கள்\n" +
@@ -9508,12 +10503,17 @@ const cldrUnitData = "" +
 	"ta-IN\tshort\tkilobyte\tother={0} kB\n" +
 	"ta-IN\tshort\tkilogram\tone={0} kg;other={0} kg\n" +
 	"ta-IN\tshort\tkilometer\tone={0} கி.மீ.;other={0} கி.மீ.\n" +
+	"ta-IN\tshort\tkilometer-per-hour\tone={0} கி.மீ./ம.நே.;other={0} கி.மீ./ம.நே.\n" +
 	"ta-IN\tshort\tliter\tone={0} லி.;other={0} லி.\n" +
+	"ta-IN\tshort\tliter-per-kilometer\tone={0} லி./கி.மீ.;other={0} லி./கி.மீ.\n" +
 	"ta-IN\tshort\tmegabit\tother={0} Mb\n" +
 	"ta-IN\tshort\tmegabyte\tother={0} MB\n" +
 	"ta-IN\tshort\tmeter\tone={0} மீ.;other={0} மீ.\n" +
+	"ta-IN\tshort\tmeter-per-second\tone={0} மீ/வி;other={0} மீ/வி\n" +
 	"ta-IN\tshort\tmicrosecond\tother={0} μs\n" +
 	"ta-IN\tshort\tmile\tone={0} mi;other={0} mi\n" +
+	"ta-IN\tshort\tmile-per-gallon\tone={0} மை./கே.;other={0} மை./கே.\n" +
+	"ta-IN\tshort\tmile-per-hour\tone={0} மை/ம.நே.;other={0} மை/ம.நே.\n" +
 	"ta-IN\tshort\tmile-scandinavian\tone={0} ஸ்.மை.;other={0} ஸ்.மை.\n" +
 	"ta-IN\tshort\tmilliliter\tone={0} மிலி;other={0} மிலி\n" +
 	"ta-IN\tshort\tmillimeter\tone={0} மி.மீ.;other={0} மி.மீ.\n" +
@@ -9554,12 +10554,17 @@ const cldrUnitData = "" +
 	"ta-IN\tnarrow\tkilobyte\tone={0}kB;other={0}kB\n" +
 	"ta-IN\tnarrow\tkilogram\tone={0}கி.கி.;other={0}கி.கி.\n" +
 	"ta-IN\tnarrow\tkilometer\tone={0}கி.மீ.;other={0}கி.மீ.\n" +
+	"ta-IN\tnarrow\tkilometer-per-hour\tone={0}கி.மீ./ம.;other={0}கி.மீ./ம.\n" +
 	"ta-IN\tnarrow\tliter\tone={0}லி.;other={0}லி.\n" +
+	"ta-IN\tnarrow\tliter-per-kilometer\tone={0}லி./கி.மீ.;other={0}லி./கி.மீ.\n" +
 	"ta-IN\tnarrow\tmegabit\tone={0}Mb;other={0}Mb\n" +
 	"ta-IN\tnarrow\tmegabyte\tone={0}MB;other={0}MB\n" +
 	"ta-IN\tnarrow\tmeter\tone={0}மீ.;other={0}மீ.\n" +
+	"ta-IN\tnarrow\tmeter-per-second\tone={0} மீ/வி;other={0} மீ/வி\n" +
 	"ta-IN\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"ta-IN\tnarrow\tmile\tone={0} mi;other={0} mi\n" +
+	"ta-IN\tnarrow\tmile-per-gallon\tone={0}மை./கே.;other={0}மை./கே.\n" +
+	"ta-IN\tnarrow\tmile-per-hour\tone={0} மை/ம.நே.;other={0} மை/ம.நே.\n" +
 	"ta-IN\tnarrow\tmile-scandinavian\tone={0} ஸ்.மை.;other={0} ஸ்.மை.\n" +
 	"ta-IN\tnarrow\tmilliliter\tone={0}மிலி;other={0}மிலி\n" +
 	"ta-IN\tnarrow\tmillimeter\tone={0}மி.மீ.;other={0}மி.மீ.\n" +
@@ -9600,12 +10605,17 @@ const cldrUnitData = "" +
 	"te-IN\tlong\tkilobyte\tone={0} కిలోబైట్;other={0} కిలోబైట్లు\n" +
 	"te-IN\tlong\tkilogram\tone={0} కిలోగ్రాము;other={0} కిలోగ్రాములు\n" +
 	"te-IN\tlong\tkilometer\tone={0} కిలోమీటరు;other={0} కిలోమీటర్లు\n" +
+	"te-IN\tlong\tkilometer-per-hour\tone=గంటకు {0} కిలోమీటరు;other=గంటకు {0} కిలోమీటర్లు\n" +
 	"te-IN\tlong\tliter\tone={0} లీటరు;other={0} లీటర్లు\n" +
+	"te-IN\tlong\tliter-per-kilometer\tone={0} లీటరు/కిలోమీటరు;other={0} లీటర్లు/కిలోమీటరు\n" +
 	"te-IN\tlong\tmegabit\tone={0} మెగాబిట్;other={0} మెగాబిట్లు\n" +
 	"te-IN\tlong\tmegabyte\tone={0} మెగాబైట్;other={0} మెగాబైట్లు\n" +
 	"te-IN\tlong\tmeter\tone={0} మీటరు;other={0} మీటర్లు\n" +
+	"te-IN\tlong\tmeter-per-second\tone=సెకనుకు {0} మీటరు;other=సెకనుకు {0} మీటర్లు\n" +
 	"te-IN\tlong\tmicrosecond\tone={0} మైక్రోసెకను;other={0} మైక్రోసెకన్లు\n" +
 	"te-IN\tlong\tmile\tone={0} మైలు;other={0} మైళ్లు\n" +
+	"te-IN\tlong\tmile-per-gallon\tone={0} మైలు/గ్యాలన్;other={0} మైళ్లు/గ్యాలన్\n" +
+	"te-IN\tlong\tmile-per-hour\tone=గంటకు {0} మైలు;other=గంటకు {0} మైళ్లు\n" +
 	"te-IN\tlong\tmile-scandinavian\tone={0} స్కాండినేవియన్ మైలు;other={0} స్కాండినేవియన్ మైళ్లు\n" +
 	"te-IN\tlong\tmilliliter\tone={0} మిల్లీలీటరు;other={0} మిల్లీలీటర్లు\n" +
 	"te-IN\tlong\tmillimeter\tone={0} మిల్లీమీటరు;other={0} మిల్లీమీటర్లు\n" +
@@ -9646,12 +10656,17 @@ const cldrUnitData = "" +
 	"te-IN\tshort\tkilobyte\tone={0} కేబీ;other={0} కేబీ\n" +
 	"te-IN\tshort\tkilogram\tone={0} కి.గ్రా.;other={0} కి.గ్రా.\n" +
 	"te-IN\tshort\tkilometer\tone={0} కి.మీ.;other={0} కి.మీ.\n" +
+	"te-IN\tshort\tkilometer-per-hour\tone={0} కి.మీ/గం;other={0} కి.మీ/గం\n" +
 	"te-IN\tshort\tliter\tone={0} లీ.;other={0} లీ.\n" +
+	"te-IN\tshort\tliter-per-kilometer\tone={0} లీ./కి.మీ;other={0} లీ./కి.మీ\n" +
 	"te-IN\tshort\tmegabit\tone={0} మె.బిట్;other={0} మె.బిట్లు\n" +
 	"te-IN\tshort\tmegabyte\tone={0} ఎమ్‌బి;other={0} ఎమ్‌బి\n" +
 	"te-IN\tshort\tmeter\tone={0} మీ.;other={0} మీ.\n" +
+	"te-IN\tshort\tmeter-per-second\tone={0} మీ/సె;other={0} మీ/సె\n" +
 	"te-IN\tshort\tmicrosecond\tone={0} మై.సె;other={0} మై.సె\n" +
 	"te-IN\tshort\tmile\tone={0} మై.;other={0} మై.\n" +
+	"te-IN\tshort\tmile-per-gallon\tone={0} మై./గ్యా.;other={0} మై./గ్యా.\n" +
+	"te-IN\tshort\tmile-per-hour\tone={0} మై/గం;other={0} మై/గం\n" +
 	"te-IN\tshort\tmile-scandinavian\tone={0} స్కాం.మై.;other={0} స్కాం.మై.\n" +
 	"te-IN\tshort\tmilliliter\tone={0} మి.లీ.;other={0} మి.లీ.\n" +
 	"te-IN\tshort\tmillimeter\tone={0} మి.మీ.;other={0} మి.మీ.\n" +
@@ -9692,12 +10707,17 @@ const cldrUnitData = "" +
 	"te-IN\tnarrow\tkilobyte\tone={0} కేబీ;other={0} కేబీ\n" +
 	"te-IN\tnarrow\tkilogram\tone={0}కి.గ్రా;other={0}కి.గ్రా\n" +
 	"te-IN\tnarrow\tkilometer\tone={0}కి.మీ;other={0}కి.మీ\n" +
+	"te-IN\tnarrow\tkilometer-per-hour\tone={0}కి.మీ/గం;other={0}కి.మీ/గం\n" +
 	"te-IN\tnarrow\tliter\tone={0}లీ;other={0}లీ\n" +
+	"te-IN\tnarrow\tliter-per-kilometer\tone={0} లీ./కి.మీ;other={0} లీ./కి.మీ\n" +
 	"te-IN\tnarrow\tmegabit\tone={0} మె.బిట్;other={0}మె.బి.\n" +
 	"te-IN\tnarrow\tmegabyte\tone={0} ఎమ్‌బి;other={0} ఎమ్‌బి\n" +
 	"te-IN\tnarrow\tmeter\tone={0}మీ;other={0}మీ\n" +
+	"te-IN\tnarrow\tmeter-per-second\tone={0} మీ/సె;other={0} మీ/సె\n" +
 	"te-IN\tnarrow\tmicrosecond\tone={0} మై.సె;other={0} మై.సె\n" +
 	"te-IN\tnarrow\tmile\tone={0} మై;other={0} మై\n" +
+	"te-IN\tnarrow\tmile-per-gallon\tone={0}మై./గ్యా.;other={0}మై./గ్యా.\n" +
+	"te-IN\tnarrow\tmile-per-hour\tone={0} మై/గం.;other={0} మై/గం.\n" +
 	"te-IN\tnarrow\tmile-scandinavian\tone={0} స్కాం.మై.;other={0} స్కాం.మై.\n" +
 	"te-IN\tnarrow\tmilliliter\tone={0} మి.లీ.;other={0} మి.లీ.\n" +
 	"te-IN\tnarrow\tmillimeter\tone={0}మి.మీ;other={0}మి.మీ\n" +
@@ -9738,12 +10758,17 @@ const cldrUnitData = "" +
 	"tr-TR\tlong\tkilobyte\tone={0} kilobayt;other={0} kilobayt\n" +
 	"tr-TR\tlong\tkilogram\tone={0} kilogram;other={0} kilogram\n" +
 	"tr-TR\tlong\tkilometer\tone={0} kilometre;other={0} kilometre\n" +
+	"tr-TR\tlong\tkilometer-per-hour\tone={0} kilometre/saat;other={0} kilometre/saat\n" +
 	"tr-TR\tlong\tliter\tone={0} litre;other={0} litre\n" +
+	"tr-TR\tlong\tliter-per-kilometer\tone={0} litre/kilometre;other={0} litre/kilometre\n" +
 	"tr-TR\tlong\tmegabit\tone={0} megabit;other={0} megabit\n" +
 	"tr-TR\tlong\tmegabyte\tone={0} megabayt;other={0} megabayt\n" +
 	"tr-TR\tlong\tmeter\tone={0} metre;other={0} metre\n" +
+	"tr-TR\tlong\tmeter-per-second\tone={0} metre/saniye;other={0} metre/saniye\n" +
 	"tr-TR\tlong\tmicrosecond\tone={0} mikrosaniye;other={0} mikrosaniye\n" +
 	"tr-TR\tlong\tmile\tone={0} mil;other={0} mil\n" +
+	"tr-TR\tlong\tmile-per-gallon\tone={0} mil/galon;other={0} mil/galon\n" +
+	"tr-TR\tlong\tmile-per-hour\tone={0} mil/saat;other={0} mil/saat\n" +
 	"tr-TR\tlong\tmile-scandinavian\tother={0} smi\n" +
 	"tr-TR\tlong\tmilliliter\tone={0} mililitre;other={0} mililitre\n" +
 	"tr-TR\tlong\tmillimeter\tone={0} milimetre;other={0} milimetre\n" +
@@ -9784,12 +10809,17 @@ const cldrUnitData = "" +
 	"tr-TR\tshort\tkilobyte\tother={0} kB\n" +
 	"tr-TR\tshort\tkilogram\tother={0} kg\n" +
 	"tr-TR\tshort\tkilometer\tother={0} km\n" +
+	"tr-TR\tshort\tkilometer-per-hour\tone={0} km/sa;other={0} km/sa\n" +
 	"tr-TR\tshort\tliter\tother={0} l\n" +
+	"tr-TR\tshort\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"tr-TR\tshort\tmegabit\tother={0} Mb\n" +
 	"tr-TR\tshort\tmegabyte\tother={0} MB\n" +
 	"tr-TR\tshort\tmeter\tother={0} m\n" +
+	"tr-TR\tshort\tmeter-per-second\tone={0} m/sn;other={0} m/sn\n" +
 	"tr-TR\tshort\tmicrosecond\tone={0} μsn;other={0} μsn\n" +
 	"tr-TR\tshort\tmile\tone={0} mil;other={0} mil\n" +
+	"tr-TR\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"tr-TR\tshort\tmile-per-hour\tone={0} mil/sa;other={0} mil/sa\n" +
 	"tr-TR\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"tr-TR\tshort\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"tr-TR\tshort\tmillimeter\tother={0} mm\n" +
@@ -9830,12 +10860,17 @@ const cldrUnitData = "" +
 	"tr-TR\tnarrow\tkilobyte\tother={0} kB\n" +
 	"tr-TR\tnarrow\tkilogram\tother={0} kg\n" +
 	"tr-TR\tnarrow\tkilometer\tother={0} km\n" +
+	"tr-TR\tnarrow\tkilometer-per-hour\tone={0} km/sa;other={0} km/sa\n" +
 	"tr-TR\tnarrow\tliter\tother={0} l\n" +
+	"tr-TR\tnarrow\tliter-per-kilometer\tone={0} l/km;other={0} l/km\n" +
 	"tr-TR\tnarrow\tmegabit\tother={0} Mb\n" +
 	"tr-TR\tnarrow\tmegabyte\tother={0} MB\n" +
 	"tr-TR\tnarrow\tmeter\tother={0} m\n" +
+	"tr-TR\tnarrow\tmeter-per-second\tone={0} m/sn;other={0} m/sn\n" +
 	"tr-TR\tnarrow\tmicrosecond\tone={0} μsn;other={0} μsn\n" +
 	"tr-TR\tnarrow\tmile\tone={0} mil;other={0} mil\n" +
+	"tr-TR\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"tr-TR\tnarrow\tmile-per-hour\tone={0} mil/sa;other={0} mil/sa\n" +
 	"tr-TR\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"tr-TR\tnarrow\tmilliliter\tone={0} ml;other={0} ml\n" +
 	"tr-TR\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -9876,12 +10911,17 @@ const cldrUnitData = "" +
 	"uk-UA\tlong\tkilobyte\tone={0} кілобайт;few={0} кілобайти;many={0} кілобайтів;other={0} кілобайта\n" +
 	"uk-UA\tlong\tkilogram\tone={0} кілограм;few={0} кілограми;many={0} кілограмів;other={0} кілограма\n" +
 	"uk-UA\tlong\tkilometer\tone={0} кілометр;few={0} кілометри;many={0} кілометрів;other={0} кілометра\n" +
+	"uk-UA\tlong\tkilometer-per-hour\tone={0} кілометр за годину;few={0} кілометри за годину;many={0} кілометрів за годину;other={0} кілометра за годину\n" +
 	"uk-UA\tlong\tliter\tone={0} літр;few={0} літри;many={0} літрів;other={0} літра\n" +
+	"uk-UA\tlong\tliter-per-kilometer\tone={0} літр на кілометр;few={0} літри на кілометр;many={0} літрів на кілометр;other={0} літра на кілометр\n" +
 	"uk-UA\tlong\tmegabit\tone={0} мегабіт;few={0} мегабіти;many={0} мегабітів;other={0} мегабіта\n" +
 	"uk-UA\tlong\tmegabyte\tone={0} мегабайт;few={0} мегабайти;many={0} мегабайтів;other={0} мегабайта\n" +
 	"uk-UA\tlong\tmeter\tone={0} метр;few={0} метри;many={0} метрів;other={0} метра\n" +
+	"uk-UA\tlong\tmeter-per-second\tone={0} метр за секунду;few={0} метри за секунду;many={0} метрів за секунду;other={0} метра за секунду\n" +
 	"uk-UA\tlong\tmicrosecond\tone={0} мікросекунда;few={0} мікросекунди;many={0} мікросекунд;other={0} мікросекунди\n" +
 	"uk-UA\tlong\tmile\tone={0} миля;few={0} милі;many={0} миль;other={0} милі\n" +
+	"uk-UA\tlong\tmile-per-gallon\tone={0} миля на галон;few={0} милі на галон;many={0} миль на галон;other={0} милі на галон\n" +
+	"uk-UA\tlong\tmile-per-hour\tone={0} миля за годину;few={0} милі за годину;many={0} миль за годину;other={0} милі за годину\n" +
 	"uk-UA\tlong\tmile-scandinavian\tone={0} скандинавська миля;few={0} скандинавські милі;many={0} скандинавських миль;other={0} скандинавської милі\n" +
 	"uk-UA\tlong\tmilliliter\tone={0} мілілітр;few={0} мілілітри;many={0} мілілітрів;other={0} мілілітра\n" +
 	"uk-UA\tlong\tmillimeter\tone={0} міліметр;few={0} міліметри;many={0} міліметрів;other={0} міліметра\n" +
@@ -9922,12 +10962,17 @@ const cldrUnitData = "" +
 	"uk-UA\tshort\tkilobyte\tone={0} кБ;few={0} кБ;many={0} кБ;other={0} кБ\n" +
 	"uk-UA\tshort\tkilogram\tone={0} кг;few={0} кг;many={0} кг;other={0} кг\n" +
 	"uk-UA\tshort\tkilometer\tone={0} км;few={0} км;many={0} км;other={0} км\n" +
+	"uk-UA\tshort\tkilometer-per-hour\tone={0} км/год;few={0} км/год;many={0} км/год;other={0} км/год\n" +
 	"uk-UA\tshort\tliter\tone={0} л;few={0} л;many={0} л;other={0} л\n" +
+	"uk-UA\tshort\tliter-per-kilometer\tone={0} л/км;few={0} л/км;many={0} л/км;other={0} л/км\n" +
 	"uk-UA\tshort\tmegabit\tone={0} Мб;few={0} Мб;many={0} Мб;other={0} Мб\n" +
 	"uk-UA\tshort\tmegabyte\tone={0} МБ;few={0} МБ;many={0} МБ;other={0} МБ\n" +
 	"uk-UA\tshort\tmeter\tone={0} м;few={0} м;many={0} м;other={0} м\n" +
+	"uk-UA\tshort\tmeter-per-second\tone={0} м/с;few={0} м/с;many={0} м/с;other={0} м/с\n" +
 	"uk-UA\tshort\tmicrosecond\tone={0} мкс;few={0} мкс;many={0} мкс;other={0} мкс\n" +
 	"uk-UA\tshort\tmile\tone={0} миля;few={0} милі;many={0} миль;other={0} милі\n" +
+	"uk-UA\tshort\tmile-per-gallon\tone={0} миля/гал;few={0} милі/гал;many={0} миль/гал;other={0} милі/гал\n" +
+	"uk-UA\tshort\tmile-per-hour\tone={0} миля/год;few={0} милі/год;many={0} миль/год;other={0} милі/год\n" +
 	"uk-UA\tshort\tmile-scandinavian\tone={0} сканд. миля;few={0} сканд. милі;many={0} сканд. миль;other={0} сканд. милі\n" +
 	"uk-UA\tshort\tmilliliter\tone={0} мл;few={0} мл;many={0} мл;other={0} мл\n" +
 	"uk-UA\tshort\tmillimeter\tone={0} мм;few={0} мм;many={0} мм;other={0} мм\n" +
@@ -9968,12 +11013,17 @@ const cldrUnitData = "" +
 	"uk-UA\tnarrow\tkilobyte\tone={0}кБ;few={0}кБ;many={0}кБ;other={0}кБ\n" +
 	"uk-UA\tnarrow\tkilogram\tone={0}кг;few={0}кг;many={0}кг;other={0}кг\n" +
 	"uk-UA\tnarrow\tkilometer\tone={0}км;few={0}км;many={0}км;other={0}км\n" +
+	"uk-UA\tnarrow\tkilometer-per-hour\tone={0}км/год;few={0}км/год;many={0}км/год;other={0}км/год\n" +
 	"uk-UA\tnarrow\tliter\tone={0}л;few={0}л;many={0}л;other={0}л\n" +
+	"uk-UA\tnarrow\tliter-per-kilometer\tone={0}л/км;few={0}л/км;many={0}л/км;other={0}л/км\n" +
 	"uk-UA\tnarrow\tmegabit\tone={0}Мб;few={0}Мб;many={0}Мб;other={0}Мб\n" +
 	"uk-UA\tnarrow\tmegabyte\tone={0}МБ;few={0}МБ;many={0}МБ;other={0}МБ\n" +
 	"uk-UA\tnarrow\tmeter\tone={0}м;few={0}м;many={0}м;other={0}м\n" +
+	"uk-UA\tnarrow\tmeter-per-second\tone={0}м/с;few={0}м/с;many={0}м/с;other={0}м/с\n" +
 	"uk-UA\tnarrow\tmicrosecond\tone={0}мкс;few={0}мкс;many={0}мкс;other={0}мкс\n" +
 	"uk-UA\tnarrow\tmile\tone={0}мл;few={0}мл;many={0}мл;other={0}мл\n" +
+	"uk-UA\tnarrow\tmile-per-gallon\tone={0}мл/гал;few={0}мл/гал;many={0}мл/гал;other={0}мл/гал\n" +
+	"uk-UA\tnarrow\tmile-per-hour\tone={0}мл/год;few={0}мл/год;many={0}мл/год;other={0}мл/год\n" +
 	"uk-UA\tnarrow\tmile-scandinavian\tone={0}ск.мл;few={0}ск.мл;many={0}ск.мл;other={0}ск.мл\n" +
 	"uk-UA\tnarrow\tmilliliter\tone={0}мл;few={0}мл;many={0}мл;other={0}мл\n" +
 	"uk-UA\tnarrow\tmillimeter\tone={0}мм;few={0}мм;many={0}мм;other={0}мм\n" +
@@ -10014,12 +11064,17 @@ const cldrUnitData = "" +
 	"ur-PK\tlong\tkilobyte\tone={0} کلوبائٹ;other={0} کلوبائٹس\n" +
 	"ur-PK\tlong\tkilogram\tone={0} کلو گرام;other={0} کلو گرام\n" +
 	"ur-PK\tlong\tkilometer\tone={0} کلو میٹر;other={0} کلو میٹر\n" +
+	"ur-PK\tlong\tkilometer-per-hour\tone={0} کلومیٹر فی گھنٹہ;other={0} کلومیٹر فی گھنٹہ\n" +
 	"ur-PK\tlong\tliter\tone={0} لیٹر;other={0} لیٹر\n" +
+	"ur-PK\tlong\tliter-per-kilometer\tone={0} لیٹر فی کلومیٹر;other={0} لیٹر فی کلومیٹر\n" +
 	"ur-PK\tlong\tmegabit\tone={0} میگابٹ;other={0} میگابٹس\n" +
 	"ur-PK\tlong\tmegabyte\tone={0} میگابائٹ;other={0} ميگابائٹس\n" +
 	"ur-PK\tlong\tmeter\tone={0} میٹر;other={0} میٹر\n" +
+	"ur-PK\tlong\tmeter-per-second\tone={0} میٹر فی سیکنڈ;other={0} میٹر فی سیکنڈ\n" +
 	"ur-PK\tlong\tmicrosecond\tone={0} مائیکرو سیکنڈ;other={0} مائیکرو سیکنڈز\n" +
 	"ur-PK\tlong\tmile\tone={0} میل;other={0} میل\n" +
+	"ur-PK\tlong\tmile-per-gallon\tone={0} میل فی گیلن;other={0} میل فی گیلن\n" +
+	"ur-PK\tlong\tmile-per-hour\tone={0} میل فی گھنٹہ;other={0} میل فی گھنٹہ\n" +
 	"ur-PK\tlong\tmile-scandinavian\tone={0} اسکینڈی نیویائی میل;other={0} اسکینڈی نیویائی میل\n" +
 	"ur-PK\tlong\tmilliliter\tone={0} ملی لیٹر;other={0} ملی لیٹر\n" +
 	"ur-PK\tlong\tmillimeter\tone={0} ملی میٹر;other={0} ملیمیٹر\n" +
@@ -10060,12 +11115,17 @@ const cldrUnitData = "" +
 	"ur-PK\tshort\tkilobyte\tother={0} kB\n" +
 	"ur-PK\tshort\tkilogram\tother={0} kg\n" +
 	"ur-PK\tshort\tkilometer\tone={0} کلو میٹر;other={0} کلو میٹر\n" +
+	"ur-PK\tshort\tkilometer-per-hour\tone={0} kph;other={0} kph\n" +
 	"ur-PK\tshort\tliter\tone={0} لیٹر;other={0} لیٹر\n" +
+	"ur-PK\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"ur-PK\tshort\tmegabit\tother={0} Mb\n" +
 	"ur-PK\tshort\tmegabyte\tother={0} MB\n" +
 	"ur-PK\tshort\tmeter\tone={0} میٹر;other={0} میٹر\n" +
+	"ur-PK\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"ur-PK\tshort\tmicrosecond\tone={0} مائیکرو سیکنڈ;other={0} مائیکرو سیکنڈ\n" +
 	"ur-PK\tshort\tmile\tone={0} میل;other={0} میل\n" +
+	"ur-PK\tshort\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"ur-PK\tshort\tmile-per-hour\tone={0} mph;other={0} mph\n" +
 	"ur-PK\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"ur-PK\tshort\tmilliliter\tother={0} mL\n" +
 	"ur-PK\tshort\tmillimeter\tone={0} ملی میٹر;other={0} ملیمیٹر\n" +
@@ -10106,12 +11166,17 @@ const cldrUnitData = "" +
 	"ur-PK\tnarrow\tkilobyte\tother={0} kB\n" +
 	"ur-PK\tnarrow\tkilogram\tone={0}kg;other={0}kg\n" +
 	"ur-PK\tnarrow\tkilometer\tone={0} کلو میٹر;other={0} کلو میٹر\n" +
+	"ur-PK\tnarrow\tkilometer-per-hour\tone={0}kph;other={0}kph\n" +
 	"ur-PK\tnarrow\tliter\tone={0} لیٹر;other={0} لیٹر\n" +
+	"ur-PK\tnarrow\tliter-per-kilometer\tother={0} L/km\n" +
 	"ur-PK\tnarrow\tmegabit\tother={0} Mb\n" +
 	"ur-PK\tnarrow\tmegabyte\tother={0} MB\n" +
 	"ur-PK\tnarrow\tmeter\tone={0} میٹر;other={0} میٹر\n" +
+	"ur-PK\tnarrow\tmeter-per-second\tone={0}m/s;other={0}m/s\n" +
 	"ur-PK\tnarrow\tmicrosecond\tone={0}μs;other={0}μs\n" +
 	"ur-PK\tnarrow\tmile\tone={0} میل;other={0} میل\n" +
+	"ur-PK\tnarrow\tmile-per-gallon\tone={0} mpg;other={0} mpg\n" +
+	"ur-PK\tnarrow\tmile-per-hour\tone={0}mph;other={0}mph\n" +
 	"ur-PK\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"ur-PK\tnarrow\tmilliliter\tother={0} mL\n" +
 	"ur-PK\tnarrow\tmillimeter\tone={0} ملی میٹر;other={0}ملی میٹر\n" +
@@ -10152,12 +11217,17 @@ const cldrUnitData = "" +
 	"uz-UZ\tlong\tkilobyte\tone={0} kilobayt;other={0} kilobayt\n" +
 	"uz-UZ\tlong\tkilogram\tone={0} kilogramm;other={0} kilogramm\n" +
 	"uz-UZ\tlong\tkilometer\tone={0} kilometr;other={0} kilometr\n" +
+	"uz-UZ\tlong\tkilometer-per-hour\tone={0} km/soat;other={0} km/soat\n" +
 	"uz-UZ\tlong\tliter\tone={0} litr;other={0} litr\n" +
+	"uz-UZ\tlong\tliter-per-kilometer\tone={0} litr/kilometr;other={0} litr/kilometr\n" +
 	"uz-UZ\tlong\tmegabit\tone={0} megabit;other={0} megabit\n" +
 	"uz-UZ\tlong\tmegabyte\tone={0} megabayt;other={0} megabayt\n" +
 	"uz-UZ\tlong\tmeter\tone={0} metr;other={0} metr\n" +
+	"uz-UZ\tlong\tmeter-per-second\tone={0} metr/soniya;other={0} metr/soniya\n" +
 	"uz-UZ\tlong\tmicrosecond\tone={0} mikrosoniya;other={0} mikrosoniya\n" +
 	"uz-UZ\tlong\tmile\tone={0} mil;other={0} mil\n" +
+	"uz-UZ\tlong\tmile-per-gallon\tone={0} mil/gallon;other={0} mil/gallon\n" +
+	"uz-UZ\tlong\tmile-per-hour\tone={0} mil/soat;other={0} mil/soat\n" +
 	"uz-UZ\tlong\tmile-scandinavian\tone={0} skandinav mili;other={0} skandinav mili\n" +
 	"uz-UZ\tlong\tmilliliter\tone={0} millilitr;other={0} millilitr\n" +
 	"uz-UZ\tlong\tmillimeter\tone={0} millimetr;other={0} millimetr\n" +
@@ -10198,12 +11268,17 @@ const cldrUnitData = "" +
 	"uz-UZ\tshort\tkilobyte\tother={0} kB\n" +
 	"uz-UZ\tshort\tkilogram\tother={0} kg\n" +
 	"uz-UZ\tshort\tkilometer\tother={0} km\n" +
+	"uz-UZ\tshort\tkilometer-per-hour\tone={0} km/soat;other={0} km/soat\n" +
 	"uz-UZ\tshort\tliter\tone={0} L;other={0} L\n" +
+	"uz-UZ\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"uz-UZ\tshort\tmegabit\tone={0} Mbit;other={0} Mbit\n" +
 	"uz-UZ\tshort\tmegabyte\tother={0} MB\n" +
 	"uz-UZ\tshort\tmeter\tother={0} m\n" +
+	"uz-UZ\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"uz-UZ\tshort\tmicrosecond\tone={0} mks;other={0} mks\n" +
 	"uz-UZ\tshort\tmile\tone={0} mil;other={0} mil\n" +
+	"uz-UZ\tshort\tmile-per-gallon\tone={0} mil/gal;other={0} mil/gal\n" +
+	"uz-UZ\tshort\tmile-per-hour\tone={0} mil/soat;other={0} mil/soat\n" +
 	"uz-UZ\tshort\tmile-scandinavian\tone={0} sk. mili;other={0} sk. mili\n" +
 	"uz-UZ\tshort\tmilliliter\tother={0} mL\n" +
 	"uz-UZ\tshort\tmillimeter\tother={0} mm\n" +
@@ -10244,12 +11319,17 @@ const cldrUnitData = "" +
 	"uz-UZ\tnarrow\tkilobyte\tother={0} kB\n" +
 	"uz-UZ\tnarrow\tkilogram\tother={0} kg\n" +
 	"uz-UZ\tnarrow\tkilometer\tother={0} km\n" +
+	"uz-UZ\tnarrow\tkilometer-per-hour\tone={0} km/soat;other={0} km/soat\n" +
 	"uz-UZ\tnarrow\tliter\tone={0}L;other={0}L\n" +
+	"uz-UZ\tnarrow\tliter-per-kilometer\tother={0} L/km\n" +
 	"uz-UZ\tnarrow\tmegabit\tone={0} Mbit;other={0} Mbit\n" +
 	"uz-UZ\tnarrow\tmegabyte\tother={0} MB\n" +
 	"uz-UZ\tnarrow\tmeter\tother={0} m\n" +
+	"uz-UZ\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"uz-UZ\tnarrow\tmicrosecond\tone={0} mks;other={0} mks\n" +
 	"uz-UZ\tnarrow\tmile\tone={0} mil;other={0} mil\n" +
+	"uz-UZ\tnarrow\tmile-per-gallon\tone={0} mil/gal;other={0} mil/gal\n" +
+	"uz-UZ\tnarrow\tmile-per-hour\tone={0} mi/h;other={0} mi/h\n" +
 	"uz-UZ\tnarrow\tmile-scandinavian\tone={0} sk. mili;other={0} sk. mili\n" +
 	"uz-UZ\tnarrow\tmilliliter\tother={0} mL\n" +
 	"uz-UZ\tnarrow\tmillimeter\tother={0} mm\n" +
@@ -10290,12 +11370,17 @@ const cldrUnitData = "" +
 	"vi-VN\tlong\tkilobyte\tother={0} kilobyte\n" +
 	"vi-VN\tlong\tkilogram\tother={0} kilôgam\n" +
 	"vi-VN\tlong\tkilometer\tother={0} kilômét\n" +
+	"vi-VN\tlong\tkilometer-per-hour\tother={0} kilômét/giờ\n" +
 	"vi-VN\tlong\tliter\tother={0} lít\n" +
+	"vi-VN\tlong\tliter-per-kilometer\tother={0} lít/km\n" +
 	"vi-VN\tlong\tmegabit\tother={0} megabit\n" +
 	"vi-VN\tlong\tmegabyte\tother={0} megabyte\n" +
 	"vi-VN\tlong\tmeter\tother={0} mét\n" +
+	"vi-VN\tlong\tmeter-per-second\tother={0} mét/giây\n" +
 	"vi-VN\tlong\tmicrosecond\tother={0} micrô giây\n" +
 	"vi-VN\tlong\tmile\tother={0} dặm\n" +
+	"vi-VN\tlong\tmile-per-gallon\tother={0} dặm/gallon\n" +
+	"vi-VN\tlong\tmile-per-hour\tother={0} dặm/giờ\n" +
 	"vi-VN\tlong\tmile-scandinavian\tother={0} dặm scandinavia\n" +
 	"vi-VN\tlong\tmilliliter\tother={0} mililít\n" +
 	"vi-VN\tlong\tmillimeter\tother={0} milimét\n" +
@@ -10336,12 +11421,17 @@ const cldrUnitData = "" +
 	"vi-VN\tshort\tkilobyte\tother={0} kB\n" +
 	"vi-VN\tshort\tkilogram\tother={0} kg\n" +
 	"vi-VN\tshort\tkilometer\tother={0} km\n" +
+	"vi-VN\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"vi-VN\tshort\tliter\tother={0} L\n" +
+	"vi-VN\tshort\tliter-per-kilometer\tother={0} l/km\n" +
 	"vi-VN\tshort\tmegabit\tother={0} Mb\n" +
 	"vi-VN\tshort\tmegabyte\tother={0} MB\n" +
 	"vi-VN\tshort\tmeter\tother={0} m\n" +
+	"vi-VN\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"vi-VN\tshort\tmicrosecond\tother={0} micrô giây\n" +
 	"vi-VN\tshort\tmile\tother={0} dặm\n" +
+	"vi-VN\tshort\tmile-per-gallon\tother={0} mpg\n" +
+	"vi-VN\tshort\tmile-per-hour\tother={0} mph\n" +
 	"vi-VN\tshort\tmile-scandinavian\tother={0} smi\n" +
 	"vi-VN\tshort\tmilliliter\tother={0} mL\n" +
 	"vi-VN\tshort\tmillimeter\tother={0} mm\n" +
@@ -10382,12 +11472,17 @@ const cldrUnitData = "" +
 	"vi-VN\tnarrow\tkilobyte\tother={0} kB\n" +
 	"vi-VN\tnarrow\tkilogram\tother={0} kg\n" +
 	"vi-VN\tnarrow\tkilometer\tother={0}km\n" +
+	"vi-VN\tnarrow\tkilometer-per-hour\tother={0} km/h\n" +
 	"vi-VN\tnarrow\tliter\tother={0}L\n" +
+	"vi-VN\tnarrow\tliter-per-kilometer\tother={0} l/km\n" +
 	"vi-VN\tnarrow\tmegabit\tother={0} Mb\n" +
 	"vi-VN\tnarrow\tmegabyte\tother={0} MB\n" +
 	"vi-VN\tnarrow\tmeter\tother={0}m\n" +
+	"vi-VN\tnarrow\tmeter-per-second\tother={0} m/s\n" +
 	"vi-VN\tnarrow\tmicrosecond\tother={0} micrô giây\n" +
 	"vi-VN\tnarrow\tmile\tother={0} dặm\n" +
+	"vi-VN\tnarrow\tmile-per-gallon\tother={0} mpg\n" +
+	"vi-VN\tnarrow\tmile-per-hour\tother={0} mph\n" +
 	"vi-VN\tnarrow\tmile-scandinavian\tother={0} smi\n" +
 	"vi-VN\tnarrow\tmilliliter\tother={0} mL\n" +
 	"vi-VN\tnarrow\tmillimeter\tother={0}mm\n" +
@@ -10428,12 +11523,17 @@ const cldrUnitData = "" +
 	"zh-CN\tlong\tkilobyte\tother={0}千字节\n" +
 	"zh-CN\tlong\tkilogram\tother={0}千克\n" +
 	"zh-CN\tlong\tkilometer\tother={0}公里\n" +
+	"zh-CN\tlong\tkilometer-per-hour\tother=每小时{0}公里\n" +
 	"zh-CN\tlong\tliter\tother={0}升\n" +
+	"zh-CN\tlong\tliter-per-kilometer\tother=每公里{0}升\n" +
 	"zh-CN\tlong\tmegabit\tother={0}兆比特\n" +
 	"zh-CN\tlong\tmegabyte\tother={0}兆字节\n" +
 	"zh-CN\tlong\tmeter\tother={0}米\n" +
+	"zh-CN\tlong\tmeter-per-second\tother=每秒{0}米\n" +
 	"zh-CN\tlong\tmicrosecond\tother={0}微秒\n" +
 	"zh-CN\tlong\tmile\tother={0}英里\n" +
+	"zh-CN\tlong\tmile-per-gallon\tother=每加仑{0}英里\n" +
+	"zh-CN\tlong\tmile-per-hour\tother=每小时{0}英里\n" +
 	"zh-CN\tlong\tmile-scandinavian\tother={0}斯堪的纳维亚英里\n" +
 	"zh-CN\tlong\tmilliliter\tother={0}毫升\n" +
 	"zh-CN\tlong\tmillimeter\tother={0}毫米\n" +
@@ -10474,12 +11574,17 @@ const cldrUnitData = "" +
 	"zh-CN\tshort\tkilobyte\tother={0} kB\n" +
 	"zh-CN\tshort\tkilogram\tother={0} kg\n" +
 	"zh-CN\tshort\tkilometer\tother={0}公里\n" +
+	"zh-CN\tshort\tkilometer-per-hour\tother={0} km/h\n" +
 	"zh-CN\tshort\tliter\tother={0}升\n" +
+	"zh-CN\tshort\tliter-per-kilometer\tother={0} L/km\n" +
 	"zh-CN\tshort\tmegabit\tother={0} Mb\n" +
 	"zh-CN\tshort\tmegabyte\tother={0} MB\n" +
 	"zh-CN\tshort\tmeter\tother={0}米\n" +
+	"zh-CN\tshort\tmeter-per-second\tother={0} m/s\n" +
 	"zh-CN\tshort\tmicrosecond\tother={0}微秒\n" +
 	"zh-CN\tshort\tmile\tother={0}英里\n" +
+	"zh-CN\tshort\tmile-per-gallon\tother={0} mpg US\n" +
+	"zh-CN\tshort\tmile-per-hour\tother={0} mi/h\n" +
 	"zh-CN\tshort\tmile-scandinavian\tother={0}斯堪的纳维亚英里\n" +
 	"zh-CN\tshort\tmilliliter\tother={0}毫升\n" +
 	"zh-CN\tshort\tmillimeter\tother={0}毫米\n" +
@@ -10520,12 +11625,17 @@ const cldrUnitData = "" +
 	"zh-CN\tnarrow\tkilobyte\tother={0} kB\n" +
 	"zh-CN\tnarrow\tkilogram\tother={0}kg\n" +
 	"zh-CN\tnarrow\tkilometer\tother={0}公里\n" +
+	"zh-CN\tnarrow\tkilometer-per-hour\tother={0}km/h\n" +
 	"zh-CN\tnarrow\tliter\tother={0}升\n" +
+	"zh-CN\tnarrow\tliter-per-kilometer\tother={0}L/km\n" +
 	"zh-CN\tnarrow\tmegabit\tother={0} Mb\n" +
 	"zh-CN\tnarrow\tmegabyte\tother={0} MB\n" +
 	"zh-CN\tnarrow\tmeter\tother={0}米\n" +
+	"zh-CN\tnarrow\tmeter-per-second\tother={0}m/s\n" +
 	"zh-CN\tnarrow\tmicrosecond\tother={0}μs\n" +
 	"zh-CN\tnarrow\tmile\tother={0}mi\n" +
+	"zh-CN\tnarrow\tmile-per-gallon\tother={0}mpg\n" +
+	"zh-CN\tnarrow\tmile-per-hour\tother={0}mph\n" +
 	"zh-CN\tnarrow\tmile-scandinavian\tother={0}smi\n" +
 	"zh-CN\tnarrow\tmilliliter\tother={0}mL\n" +
 	"zh-CN\tnarrow\tmillimeter\tother={0}毫米\n" +
@@ -10566,12 +11676,17 @@ const cldrUnitData = "" +
 	"zh-HK\tlong\tkilobyte\tother={0} kB\n" +
 	"zh-HK\tlong\tkilogram\tother={0} 公斤\n" +
 	"zh-HK\tlong\tkilometer\tother={0} 公里\n" +
+	"zh-HK\tlong\tkilometer-per-hour\tother=每小時 {0} 公里\n" +
 	"zh-HK\tlong\tliter\tother={0} 公升\n" +
+	"zh-HK\tlong\tliter-per-kilometer\tother={0} 公升/公里\n" +
 	"zh-HK\tlong\tmegabit\tother={0} Mb\n" +
 	"zh-HK\tlong\tmegabyte\tother={0} MB\n" +
 	"zh-HK\tlong\tmeter\tother={0} 米\n" +
+	"zh-HK\tlong\tmeter-per-second\tother={0} 米/秒\n" +
 	"zh-HK\tlong\tmicrosecond\tother={0} 微秒\n" +
 	"zh-HK\tlong\tmile\tother={0} 哩\n" +
+	"zh-HK\tlong\tmile-per-gallon\tother={0} 英里/加侖\n" +
+	"zh-HK\tlong\tmile-per-hour\tother=每小時 {0} 英里\n" +
 	"zh-HK\tlong\tmile-scandinavian\tother={0} 斯堪地那維亞里\n" +
 	"zh-HK\tlong\tmilliliter\tother={0} 毫升\n" +
 	"zh-HK\tlong\tmillimeter\tother={0} 毫米\n" +
@@ -10612,12 +11727,17 @@ const cldrUnitData = "" +
 	"zh-HK\tshort\tkilobyte\tother={0} kB\n" +
 	"zh-HK\tshort\tkilogram\tother={0} 公斤\n" +
 	"zh-HK\tshort\tkilometer\tother={0} 公里\n" +
+	"zh-HK\tshort\tkilometer-per-hour\tother={0} 公里每小時\n" +
 	"zh-HK\tshort\tliter\tother={0} 升\n" +
+	"zh-HK\tshort\tliter-per-kilometer\tother={0} 升每公里\n" +
 	"zh-HK\tshort\tmegabit\tother={0} Mb\n" +
 	"zh-HK\tshort\tmegabyte\tother={0} MB\n" +
 	"zh-HK\tshort\tmeter\tother={0} 米\n" +
+	"zh-HK\tshort\tmeter-per-second\tother={0} 米/秒\n" +
 	"zh-HK\tshort\tmicrosecond\tother={0} 微秒\n" +
 	"zh-HK\tshort\tmile\tother={0} 哩\n" +
+	"zh-HK\tshort\tmile-per-gallon\tother={0} 英里每加侖\n" +
+	"zh-HK\tshort\tmile-per-hour\tother={0} 英里每小時\n" +
 	"zh-HK\tshort\tmile-scandinavian\tother={0} 斯堪地那維亞里\n" +
 	"zh-HK\tshort\tmilliliter\tother={0} 毫升\n" +
 	"zh-HK\tshort\tmillimeter\tother={0} 毫米\n" +
@@ -10658,12 +11778,17 @@ const cldrUnitData = "" +
 	"zh-HK\tnarrow\tkilobyte\tother={0}kB\n" +
 	"zh-HK\tnarrow\tkilogram\tother={0}公斤\n" +
 	"zh-HK\tnarrow\tkilometer\tother={0}公里\n" +
+	"zh-HK\tnarrow\tkilometer-per-hour\tother={0}kph\n" +
 	"zh-HK\tnarrow\tliter\tother={0}升\n" +
+	"zh-HK\tnarrow\tliter-per-kilometer\tother={0}升/公里\n" +
 	"zh-HK\tnarrow\tmegabit\tother={0}Mb\n" +
 	"zh-HK\tnarrow\tmegabyte\tother={0}MB\n" +
 	"zh-HK\tnarrow\tmeter\tother={0}米\n" +
+	"zh-HK\tnarrow\tmeter-per-second\tother={0}m/s\n" +
 	"zh-HK\tnarrow\tmicrosecond\tother={0}μs\n" +
 	"zh-HK\tnarrow\tmile\tother={0}哩\n" +
+	"zh-HK\tnarrow\tmile-per-gallon\tother={0}英里/加侖\n" +
+	"zh-HK\tnarrow\tmile-per-hour\tother={0}mph\n" +
 	"zh-HK\tnarrow\tmile-scandinavian\tother={0}smi\n" +
 	"zh-HK\tnarrow\tmilliliter\tother={0}毫升\n" +
 	"zh-HK\tnarrow\tmillimeter\tother={0}毫米\n" +
@@ -10704,12 +11829,17 @@ const cldrUnitData = "" +
 	"zh-TW\tlong\tkilobyte\tother={0} kB\n" +
 	"zh-TW\tlong\tkilogram\tother={0} 公斤\n" +
 	"zh-TW\tlong\tkilometer\tother={0} 公里\n" +
+	"zh-TW\tlong\tkilometer-per-hour\tother=每小時 {0} 公里\n" +
 	"zh-TW\tlong\tliter\tother={0} 公升\n" +
+	"zh-TW\tlong\tliter-per-kilometer\tother=每公里 {0} 公升\n" +
 	"zh-TW\tlong\tmegabit\tother={0} Mb\n" +
 	"zh-TW\tlong\tmegabyte\tother={0} MB\n" +
 	"zh-TW\tlong\tmeter\tother={0} 公尺\n" +
+	"zh-TW\tlong\tmeter-per-second\tother=每秒 {0} 公尺\n" +
 	"zh-TW\tlong\tmicrosecond\tother={0} 微秒\n" +
 	"zh-TW\tlong\tmile\tother={0} 英里\n" +
+	"zh-TW\tlong\tmile-per-gallon\tother=每加侖 {0} 英里\n" +
+	"zh-TW\tlong\tmile-per-hour\tother=每小時 {0} 英里\n" +
 	"zh-TW\tlong\tmile-scandinavian\tother={0} 斯堪地那維亞里\n" +
 	"zh-TW\tlong\tmilliliter\tother={0} 毫升\n" +
 	"zh-TW\tlong\tmillimeter\tother={0} 公釐\n" +
@@ -10750,12 +11880,17 @@ const cldrUnitData = "" +
 	"zh-TW\tshort\tkilobyte\tother={0} kB\n" +
 	"zh-TW\tshort\tkilogram\tother={0} 公斤\n" +
 	"zh-TW\tshort\tkilometer\tother={0} 公里\n" +
+	"zh-TW\tshort\tkilometer-per-hour\tother={0} 公里/小時\n" +
 	"zh-TW\tshort\tliter\tother={0} 升\n" +
+	"zh-TW\tshort\tliter-per-kilometer\tother={0} 升/公里\n" +
 	"zh-TW\tshort\tmegabit\tother={0} Mb\n" +
 	"zh-TW\tshort\tmegabyte\tother={0} MB\n" +
 	"zh-TW\tshort\tmeter\tother={0} 公尺\n" +
+	"zh-TW\tshort\tmeter-per-second\tother={0} 公尺/秒\n" +
 	"zh-TW\tshort\tmicrosecond\tother={0} 微秒\n" +
 	"zh-TW\tshort\tmile\tother={0} 英里\n" +
+	"zh-TW\tshort\tmile-per-gallon\tother={0} 英里/加侖\n" +
+	"zh-TW\tshort\tmile-per-hour\tother={0} 英里/小時\n" +
 	"zh-TW\tshort\tmile-scandinavian\tother={0} 斯堪地那維亞里\n" +
 	"zh-TW\tshort\tmilliliter\tother={0} 毫升\n" +
 	"zh-TW\tshort\tmillimeter\tother={0} 公釐\n" +
@@ -10796,12 +11931,17 @@ const cldrUnitData = "" +
 	"zh-TW\tnarrow\tkilobyte\tother={0}kB\n" +
 	"zh-TW\tnarrow\tkilogram\tother={0}公斤\n" +
 	"zh-TW\tnarrow\tkilometer\tother={0}公里\n" +
+	"zh-TW\tnarrow\tkilometer-per-hour\tother={0}公里/小時\n" +
 	"zh-TW\tnarrow\tliter\tother={0}升\n" +
+	"zh-TW\tnarrow\tliter-per-kilometer\tother={0}升/公里\n" +
 	"zh-TW\tnarrow\tmegabit\tother={0}Mb\n" +
 	"zh-TW\tnarrow\tmegabyte\tother={0}MB\n" +
 	"zh-TW\tnarrow\tmeter\tother={0}公尺\n" +
+	"zh-TW\tnarrow\tmeter-per-second\tother={0}公尺/秒\n" +
 	"zh-TW\tnarrow\tmicrosecond\tother={0}μs\n" +
 	"zh-TW\tnarrow\tmile\tother={0}英里\n" +
+	"zh-TW\tnarrow\tmile-per-gallon\tother={0}英里/加侖\n" +
+	"zh-TW\tnarrow\tmile-per-hour\tother={0}英里/小時\n" +
 	"zh-TW\tnarrow\tmile-scandinavian\tother={0}smi\n" +
 	"zh-TW\tnarrow\tmilliliter\tother={0}毫升\n" +
 	"zh-TW\tnarrow\tmillimeter\tother={0}公釐\n" +

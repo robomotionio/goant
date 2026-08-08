@@ -448,11 +448,11 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 
 	if nan {
 		add("nan", li.nan)
-		return mapPartDigits(withStyleAffixes(n, li, out), n.numbering)
+		return mapPartDigits(withStyleAffixes(n, li, v, out), n.numbering)
 	}
 	if infinite {
 		add("infinity", li.inf)
-		return mapPartDigits(withStyleAffixes(n, li, out), n.numbering)
+		return mapPartDigits(withStyleAffixes(n, li, v, out), n.numbering)
 	}
 
 	grouped := intPart
@@ -506,7 +506,7 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 		}
 		add("exponentInteger", strconv.Itoa(e))
 	}
-	return mapPartDigits(withStyleAffixes(n, li, out), n.numbering)
+	return mapPartDigits(withStyleAffixes(n, li, v, out), n.numbering)
 }
 
 // mapPartDigits rewrites the digit spans into the resolved numbering system.
@@ -568,19 +568,8 @@ func currencyText(li localeInfo, code, display string) string {
 
 // withStyleAffixes puts the style's own marker around the number: the percent
 // sign after it, the currency symbol before it, the unit after it.
-func withStyleAffixes(n numberOptions, li localeInfo, parts []numberPart) []numberPart {
+func withStyleAffixes(n numberOptions, li localeInfo, value float64, parts []numberPart) []numberPart {
 	pat := cldrNumbers()[li.tag]
-	// English pluralises on "not one", which is what the unit spelling needs
-	// to know and the only thing it needs to know about the value.
-	plural := true
-	for _, p := range parts {
-		if p.typ == "integer" && p.val == "1" {
-			plural = false
-		}
-		if p.typ == "fraction" || p.typ == "group" {
-			plural = true
-		}
-	}
 	switch n.style {
 	case "percent":
 		if sep := percentSeparator(pat.percent); sep != "" {
@@ -634,11 +623,7 @@ func withStyleAffixes(n numberOptions, li localeInfo, parts []numberPart) []numb
 		}
 		return out
 	case "unit":
-		text, space := unitText(n.unit, n.unitDisplay, plural)
-		if space {
-			parts = append(parts, numberPart{"literal", " "})
-		}
-		return append(parts, numberPart{"unit", text})
+		return unitParts(li, n.unit, n.unitDisplay, value, parts)
 	}
 	return parts
 }
@@ -1131,4 +1116,91 @@ func patternAround(pattern, fallback string) string {
 		return s
 	}
 	return fallback
+}
+
+// unitPatternFor is a locale's pattern for one unit in one width, with {0}
+// where the number goes. A width the locale does not carry falls back to the
+// wider one, and a locale that carries none of it falls back to English.
+func unitPatternFor(tag, width, unit string, v float64) string {
+	widths := []string{width}
+	switch width {
+	case "narrow":
+		widths = append(widths, "short", "long")
+	case "short":
+		widths = append(widths, "long")
+	}
+	for _, t := range []string{tag, "en-US"} {
+		for _, w := range widths {
+			if m := cldrUnits()[t+"\t"+w+"\t"+unit]; m != nil {
+				return pluralPick(m, t, math.Abs(v))
+			}
+		}
+	}
+	return ""
+}
+
+// unitParts writes the number into the unit's pattern. The pattern carries its
+// own spacing and its own word order: German writes "-987 km/h" and Korean
+// writes the speed in front of it, "시속 -987킬로미터".
+func unitParts(li localeInfo, unit, display string, v float64, parts []numberPart) []numberPart {
+	pat := unitPatternFor(li.tag, display, unit, v)
+	if pat == "" {
+		// Two sanctioned units joined by "-per-" that CLDR has no ready-made
+		// spelling for: the numerator takes the number and the denominator is
+		// named after it, in the way the locale joins a compound.
+		num, den, ok := strings.Cut(unit, "-per-")
+		if !ok {
+			return append(parts, numberPart{"unit", unit})
+		}
+		if per := unitPatternFor(li.tag, display, den+"#per", 1); per != "" {
+			pat = strings.ReplaceAll(per, "{0}", unitPatternFor(li.tag, display, num, v))
+		} else {
+			join := unitPatternFor(li.tag, display, "per", 1)
+			if join == "" {
+				join = "{0}/{1}"
+			}
+			denName := strings.TrimSpace(strings.ReplaceAll(
+				unitPatternFor(li.tag, display, den, 1), "{0}", ""))
+			pat = strings.ReplaceAll(strings.ReplaceAll(join, "{1}", denName),
+				"{0}", unitPatternFor(li.tag, display, num, v))
+		}
+	}
+	i := strings.Index(pat, "{0}")
+	if i < 0 {
+		return append(parts, numberPart{"unit", pat})
+	}
+	before, after := unquoteCLDR(pat[:i]), unquoteCLDR(pat[i+3:])
+	var out []numberPart
+	out = append(out, splitUnitAffix(before, false)...)
+	out = append(out, parts...)
+	return append(out, splitUnitAffix(after, true)...)
+}
+
+// splitUnitAffix separates the spacing from the name, because a space beside a
+// unit is a literal and the unit is the word.
+func splitUnitAffix(s string, leading bool) []numberPart {
+	if s == "" {
+		return nil
+	}
+	const spaces = " \u00a0\u202f"
+	if leading {
+		name := strings.TrimLeft(s, spaces)
+		var out []numberPart
+		if gap := s[:len(s)-len(name)]; gap != "" {
+			out = append(out, numberPart{"literal", gap})
+		}
+		if name != "" {
+			out = append(out, numberPart{"unit", name})
+		}
+		return out
+	}
+	name := strings.TrimRight(s, spaces)
+	var out []numberPart
+	if name != "" {
+		out = append(out, numberPart{"unit", name})
+	}
+	if gap := s[len(name):]; gap != "" {
+		out = append(out, numberPart{"literal", gap})
+	}
+	return out
 }

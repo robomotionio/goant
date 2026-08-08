@@ -38,6 +38,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -103,6 +104,16 @@ var listTypes = []string{
 // widths. CLDR spells the widths as a suffix on the field name.
 var relFields = []string{
 	"year", "quarter", "month", "week", "day", "hour", "minute", "second",
+}
+
+// sanctioned reports whether an option may name this unit: one of the list, or
+// two of them joined by "-per-".
+func sanctioned(unit string) bool {
+	if slices.Contains(sanctionedUnits, unit) {
+		return true
+	}
+	num, den, ok := strings.Cut(unit, "-per-")
+	return ok && slices.Contains(sanctionedUnits, num) && slices.Contains(sanctionedUnits, den)
 }
 
 type fetcher struct {
@@ -367,21 +378,34 @@ func collectUnits(f *fetcher, tag, name string, units *[]string) error {
 				byUnit[key[i+1:]] = m
 			}
 		}
-		for _, unit := range sanctionedUnits {
+		names := make([]string, 0, len(byUnit))
+		for unit := range byUnit {
+			// A unit ECMA-402 sanctions, or a compound of two of them: CLDR
+			// spells out the common compounds, and "km/h" is not what the
+			// generic rule would build out of a kilometre and an hour.
+			if sanctioned(unit) {
+				names = append(names, unit)
+			}
+		}
+		sort.Strings(names)
+		for _, unit := range names {
 			m := byUnit[unit]
-			if m == nil {
-				continue
-			}
-			var got []string
-			for _, p := range plurals {
-				if v := str(m, "unitPattern-count-"+p); v != "" {
-					got = append(got, p+"="+v)
+			for _, kind := range []struct{ key, suffix string }{
+				{"unitPattern-count-", ""}, {"perUnitPattern-count-", "#per"},
+			} {
+				var got []string
+				for _, p := range plurals {
+					if v := str(m, kind.key+p); v != "" {
+						got = append(got, p+"="+v)
+					}
 				}
+				if len(got) == 0 {
+					continue
+				}
+				*units = append(*units, strings.Join([]string{
+					tag, width, unit + kind.suffix, strings.Join(got, ";"),
+				}, "\t"))
 			}
-			if len(got) == 0 {
-				continue
-			}
-			*units = append(*units, strings.Join([]string{tag, width, unit, strings.Join(got, ";")}, "\t"))
 		}
 	}
 	return nil
