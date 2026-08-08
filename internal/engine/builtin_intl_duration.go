@@ -11,6 +11,7 @@ package engine
 
 import (
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -234,7 +235,34 @@ func (rt *Runtime) durationRecord(v Value) ([10]float64, *ThrowError) {
 	if !any {
 		return out, rt.typeError("Duration must have at least one field")
 	}
+	if !validDuration(out) {
+		return out, rt.rangeError("Duration is out of range")
+	}
 	return out, nil
+}
+
+// validDuration is Temporal's IsValidDuration. The calendar fields are bounded
+// individually because a year is not a fixed number of seconds; the rest have
+// to add up to something a Number can still count exactly, which is why the
+// day limit is 104,249,991,374 -- one day more and days*86400 passes 2^53.
+func validDuration(rec [10]float64) bool {
+	for _, v := range rec[:3] { // years, months, weeks
+		if math.Abs(v) >= 1<<32 {
+			return false
+		}
+	}
+	// The sum is a mathematical value, not a float: the largest valid duration
+	// plus one nanosecond has to come out over the limit, and in float64 that
+	// addition is a no-op. So it is done in exact integer nanoseconds.
+	total := new(big.Int)
+	scale := []int64{0, 0, 0, 86400e9, 3600e9, 60e9, 1e9, 1e6, 1e3, 1}
+	term := new(big.Int)
+	for i := 3; i < 10; i++ {
+		big.NewFloat(rec[i]).Int(term)
+		total.Add(total, term.Mul(term, big.NewInt(scale[i])))
+	}
+	limit := new(big.Int).Mul(big.NewInt(1<<53), big.NewInt(1e9))
+	return total.Abs(total).Cmp(limit) < 0
 }
 
 // durationParts renders the duration as spans, each carrying the unit it
