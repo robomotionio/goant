@@ -354,6 +354,7 @@ func isAnnotationKeyLead(b byte) bool { return b >= 'a' && b <= 'z' || b == '_' 
 func isAnnotationKeyChar(b byte) bool {
 	return isAnnotationKeyLead(b) || isDigit(b) || b == '-'
 }
+
 // annotations reads the trailing [key=value] group. It answers the calendar it
 // found, and refuses a string whose critical annotation it does not understand.
 func (p *tparse) annotations() (calendar string, ok bool) {

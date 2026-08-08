@@ -1330,7 +1330,9 @@ func (c *compiler) compileExpr(n *Node) {
 		} else {
 			c.emit(OpUndef)
 		}
-		if n.Num == 1 {
+		if n.Num == 2 {
+			c.emit(OpImportDeferDyn)
+		} else if n.Num == 1 {
 			c.emit(OpImportSource)
 		} else {
 			c.emit(OpImport)

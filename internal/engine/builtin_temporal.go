@@ -85,8 +85,8 @@ func (rt *Runtime) newTemporalObject(kind temporalKind) (Value, *object, *ThrowE
 
 // ---- reading each kind back ----
 
-func tDate(o *object) isoDateRec       { return epochDaysToISODate(int(tnum(o, 0))) }
-func tTime(o *object) isoTimeRec       { return timeFromNanoseconds(int64(tnum(o, 0))) }
+func tDate(o *object) isoDateRec         { return epochDaysToISODate(int(tnum(o, 0))) }
+func tTime(o *object) isoTimeRec         { return timeFromNanoseconds(int64(tnum(o, 0))) }
 func tDateTimeDate(o *object) isoDateRec { return epochDaysToISODate(int(tnum(o, 0))) }
 func tDateTimeTime(o *object) isoTimeRec { return timeFromNanoseconds(int64(tnum(o, 1))) }
 

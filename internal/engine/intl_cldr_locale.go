@@ -251,7 +251,7 @@ func pluralPick(m map[string]string, tag string, n float64) string {
 }
 
 // unquoteCLDR removes the quoting CLDR uses to keep a literal out of the
-// pattern syntax: "Mio'.'" is "Mio.", and "''" is one apostrophe.
+// pattern syntax: "Mio'.'" is "Mio.", and "”" is one apostrophe.
 func unquoteCLDR(s string) string {
 	if !strings.ContainsRune(s, '\'') {
 		return s

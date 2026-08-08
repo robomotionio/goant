@@ -51,7 +51,13 @@ func (c *compiler) emitImportPrologue(stmts []*Node) {
 		// appearing at run time.
 		c.fn.moduleRequests = append(c.fn.moduleRequests,
 			moduleRequest{key: spec, deferred: s.Flags&importPhaseDefer != 0})
+		// The phase belongs in the hidden local's NAME, not just in the request:
+		// a file imported both ways has two namespaces, and one slot cannot hold
+		// both -- they would resolve to whichever declaration came last.
 		modName := "*mod:" + spec + "*"
+		if s.Flags&importPhaseDefer != 0 {
+			modName = "*moddefer:" + spec + "*"
+		}
 		slot := c.addLocal(modName, false)
 		c.emit(OpConst)
 		c.emitU32(uint32(c.constant(c.rt.internString(spec))))

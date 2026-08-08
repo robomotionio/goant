@@ -937,6 +937,63 @@ func (rt *Runtime) importModuleDynamic(spec, referrer string) Value {
 	return promise
 }
 
+// importModuleDeferDynamic is ContinueDynamicImport for the deferred phase. It
+// loads and links exactly as a dynamic import does and then stops: what settles
+// the promise is the deferred namespace, and the only thing evaluated is what
+// cannot be left until later -- the module's asynchronous transitive
+// dependencies, which need a turn of the event loop that a property read has
+// not got.
+func (rt *Runtime) importModuleDeferDynamic(spec, referrer string) Value {
+	promise, cap := rt.makePromise()
+	rt.enqueueMicrotask(func() {
+		m, se, e := rt.instantiateModule(spec, referrer)
+		if e != nil {
+			rt.rejectPromise(cap, e.Value)
+			return
+		}
+		if se == nil {
+			se = rt.linkModule(m, map[string]bool{})
+		}
+		if se != nil {
+			rt.rejectPromise(cap, rt.syntaxError(se.Msg).Value)
+			return
+		}
+		if he := rt.hoistModuleGraph(m, map[string]bool{}); he != nil {
+			rt.rejectPromise(cap, he.Value)
+			return
+		}
+		done := func() { rt.resolvePromise(promise, cap, rt.deferredNamespace(m)) }
+		var pend []Value
+		for _, d := range rt.gatherAsyncDeps(m, map[*moduleRecord]bool{}) {
+			pv := rt.moduleEvaluate(d)
+			if po := rt.objPtr(pv); po != nil && po.promise != nil {
+				pend = append(pend, pv)
+			}
+		}
+		if len(pend) == 0 {
+			done()
+			return
+		}
+		left := len(pend)
+		onOne := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			if left--; left == 0 {
+				done()
+			}
+			return mkundef(), nil
+		})
+		onFail := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {
+			rt.rejectPromise(cap, arg(a, 0))
+			return mkundef(), nil
+		})
+		rt.holdCaptures(onOne, []Value{promise})
+		rt.holdCaptures(onFail, []Value{promise})
+		for _, pv := range pend {
+			rt.promiseThen(onOne, onFail, rt.objPtr(pv))
+		}
+	}, promise)
+	return promise
+}
+
 // SetModuleBase sets the directory that import specifiers resolve against when
 // the importer is not itself a module (a script calling import()).
 func (rt *Runtime) SetModuleBase(dir string) { rt.moduleDir = dir }

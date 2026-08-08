@@ -61,9 +61,9 @@ var maxIncrement = [unitCount]int64{0, 0, 0, 0, 24, 60, 60, 1000, 1000, 1000}
 // durationRec is a duration as the JavaScript object holds it: ten values,
 // every one an integer, and all of one sign.
 type durationRec struct {
-	years, months, weeks, days             float64
-	hours, minutes, seconds                float64
-	ms, us, ns                             float64
+	years, months, weeks, days float64
+	hours, minutes, seconds    float64
+	ms, us, ns                 float64
 }
 
 func (d durationRec) fields() [10]float64 {

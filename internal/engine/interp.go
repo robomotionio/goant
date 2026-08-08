@@ -1699,6 +1699,23 @@ running:
 			}
 			push(ns)
 			ip++
+		case OpImportDeferDyn:
+			// `import.defer(spec, options)`: the same shape as a dynamic import,
+			// settling with the deferred namespace instead of the module's own.
+			dfOptions := pop()
+			dfSpec := pop()
+			switch spec, e := rt.toStringValue(dfSpec); {
+			case e != nil:
+				push(rt.rejectedPromise(e.Value))
+			default:
+				typ, oe := rt.validateImportOptions(dfOptions)
+				if oe != nil {
+					push(rt.rejectedPromise(oe.Value))
+				} else {
+					push(rt.importModuleDeferDynamic(joinModuleKey(rt.strGo(spec), typ), fn.filename))
+				}
+			}
+			ip++
 		case OpImportDefer:
 			// `import defer * as ns`: the module is linked already, so this only
 			// asks for its deferred namespace. Nothing runs until that namespace

@@ -1394,6 +1394,9 @@ func (p *parser) parseImportExpr() *Node {
 				return p.mk(NEmpty)
 			}
 			n := p.parseImportCallArgs()
+			if !source && n.Kind == NImport {
+				n.Num = 2 // the deferred phase
+			}
 			if source && n.Kind == NImport {
 				// The source phase asks for the module's SOURCE rather than
 				// its namespace, which is a different thing to hand back and

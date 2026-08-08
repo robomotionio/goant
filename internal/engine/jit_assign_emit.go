@@ -264,7 +264,7 @@ func jitAnalyze(fn *svFunc, start int, targets map[int]bool) (map[int]*jitBlock,
 			}
 			b := blocks[ip]
 			for _, p := range preds[ip] {
-					o := out(blocks[p])
+				o := out(blocks[p])
 				for i := range b.in {
 					if b.in[i] && !o[i] {
 						b.in[i] = false

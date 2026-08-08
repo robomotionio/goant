@@ -8,8 +8,8 @@ package engine
 // do not. Conformance is run with TZ=UTC so the two coincide there.
 
 import (
-	"math/big"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"

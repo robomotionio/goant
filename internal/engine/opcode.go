@@ -280,8 +280,12 @@ const (
 	// the deferred namespace, which runs the module the first time it is asked
 	// about a string key.
 	OpImportDefer
+	// OpImportDeferDyn is `import.defer(spec, options)`: like a dynamic import,
+	// except that what the promise settles with is the deferred namespace and
+	// only the module's asynchronous dependencies are evaluated.
+	OpImportDeferDyn
 
-	NumOpcodes = 217
+	NumOpcodes = 218
 )
 
 // Per-opcode JIT metadata flags (ant OP_FLAG / SV_OPF_*).
@@ -509,6 +513,7 @@ var opTable = [NumOpcodes]opInfo{
 	OpImportSource:                {Name: "IMPORT_SOURCE", Size: 1, NPop: 2, NPush: 1, Format: FmtNone, Flags: 0},
 	OpImportSync:                  {Name: "IMPORT_SYNC", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: 0},
 	OpImportDefer:                 {Name: "IMPORT_DEFER", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: 0},
+	OpImportDeferDyn:              {Name: "IMPORT_DEFER_DYN", Size: 1, NPop: 2, NPush: 1, Format: FmtNone, Flags: 0},
 	OpImportDefault:               {Name: "IMPORT_DEFAULT", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: OpfJitEligible},
 	OpImportNamed:                 {Name: "IMPORT_NAMED", Size: 5, NPop: 1, NPush: 1, Format: FmtAtom, Flags: OpfJitEligible},
 	OpExport:                      {Name: "EXPORT", Size: 5, NPop: 1, NPush: 0, Format: FmtAtom, Flags: OpfJitEligible},

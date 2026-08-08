@@ -379,12 +379,12 @@ func calendarViewOf(id string, iso isoDateRec) calendarView {
 		year: cd.year, month: cd.month, monthCode: cd.code, day: cd.day,
 		// Monday is 1 and Sunday is 7, and 1970-01-01 was a Thursday, so day
 		// zero has to come out as 4.
-		dayOfWeek:   floorMod(day+3, 7) + 1,
-		daysInWeek:  7,
-		daysInMonth: cal.daysInMonth(cd.year, cd.month),
-		daysInYear:  cal.daysInYear(cd.year),
+		dayOfWeek:    floorMod(day+3, 7) + 1,
+		daysInWeek:   7,
+		daysInMonth:  cal.daysInMonth(cd.year, cd.month),
+		daysInYear:   cal.daysInYear(cd.year),
 		monthsInYear: cal.monthsInYear(cd.year),
-		inLeapYear:  cal.inLeapYear(cd.year),
+		inLeapYear:   cal.inLeapYear(cd.year),
 	}
 	v.dayOfYear = day - cal.dayFromDate(cd.year, 1, 1) + 1
 	return v
