@@ -134,6 +134,17 @@ func (rt *Runtime) initIntl() {
 			}), nil
 		})
 		po.defineAccessor("format", getter, mkundef(), true, false, attrConfigurable)
+		rt.defMethod(po, "formatToParts", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			opts, e := rt.requireNumberFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			v, e := rt.toNumber(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.formatNumberParts(opts, rt.intlLocaleOf(this), v), nil
+		})
 		// The key order is the specification's and a test reads it back with
 		// Reflect.ownKeys.
 		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

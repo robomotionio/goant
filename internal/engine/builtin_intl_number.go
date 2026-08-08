@@ -266,87 +266,132 @@ func currencyDigits(code string) int {
 	return 2
 }
 
-// format renders a Number through the resolved options, on top of the
+// numberPart is one span of formatted output with the name formatToParts gives
+// it. format() is the concatenation of the values, which is what keeps the two
+// from ever disagreeing about what was written.
+type numberPart struct{ typ, val string }
+
+// numberParts renders a Number through the resolved options, on top of the
 // locale-aware grouping and separators intl_format.go already does.
-func (rt *Runtime) formatNumberWith(n numberOptions, li localeInfo, v float64) string {
-	switch {
-	case v != v:
-		return li.nan
-	case math.IsInf(v, 0):
-		s := li.inf
-		if v < 0 {
-			s = li.minus + s
+func numberParts(n numberOptions, li localeInfo, v float64) []numberPart {
+	var out []numberPart
+	add := func(typ, val string) {
+		if val != "" {
+			out = append(out, numberPart{typ, val})
 		}
-		return s
+	}
+	if v != v {
+		add("nan", li.nan)
+		return withStyleAffixes(n, out)
 	}
 	if n.style == "percent" {
 		v *= 100
 	}
 
 	neg := math.Signbit(v)
-	digits := strings.TrimPrefix(numberToString(math.Abs(v)), "-")
-	intPart, frac := expandDecimal(digits)
-	if n.digits.maxSig > 0 {
-		intPart, frac = roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig)
-	} else {
-		intPart, frac = roundFraction(intPart, frac, n.digits.maxFrac)
-		for len(frac) < n.digits.minFrac {
-			frac += "0"
+	var intPart, frac string
+	infinite := math.IsInf(v, 0)
+	if !infinite {
+		intPart, frac = expandDecimal(strings.TrimPrefix(numberToString(math.Abs(v)), "-"))
+		if n.digits.maxSig > 0 {
+			intPart, frac = roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig)
+		} else {
+			intPart, frac = roundFraction(intPart, frac, n.digits.maxFrac)
+			for len(frac) < n.digits.minFrac {
+				frac += "0"
+			}
+		}
+		for len(intPart) < n.digits.minInt {
+			intPart = "0" + intPart
 		}
 	}
-	for len(intPart) < n.digits.minInt {
-		intPart = "0" + intPart
-	}
 
-	var b strings.Builder
-	// Rounding can turn a negative number into a zero, and a signed zero is
-	// not what "-0.0000001 to two places" should print.
-	zero := strings.Trim(intPart, "0") == "" && strings.Trim(frac, "0") == ""
+	// Rounding can turn a small negative number into a zero, and a signed zero
+	// is not what "-0.0000001 to two places" should print.
+	zero := !infinite && strings.Trim(intPart, "0") == "" && strings.Trim(frac, "0") == ""
 	switch n.signDisplay {
 	case "never":
 	case "always":
 		if neg {
-			b.WriteString(li.minus)
+			add("minusSign", li.minus)
 		} else {
-			b.WriteString("+")
+			add("plusSign", "+")
 		}
 	case "exceptZero":
-		if zero {
-			break
-		}
-		if neg {
-			b.WriteString(li.minus)
-		} else {
-			b.WriteString("+")
+		if !zero {
+			if neg {
+				add("minusSign", li.minus)
+			} else {
+				add("plusSign", "+")
+			}
 		}
 	default: // "auto" and "negative"
 		if neg && !(zero && n.signDisplay == "negative") {
-			b.WriteString(li.minus)
+			add("minusSign", li.minus)
 		}
 	}
 
-	if n.useGrouping == "" {
-		b.WriteString(intPart)
-	} else if n.useGrouping == "min2" && len(intPart) <= li.minGroup+3 {
-		b.WriteString(intPart)
-	} else {
-		b.WriteString(li.groupInteger(intPart))
-	}
-	if frac != "" {
-		b.WriteString(li.decimal)
-		b.WriteString(frac)
+	if infinite {
+		add("infinity", li.inf)
+		return withStyleAffixes(n, out)
 	}
 
+	grouped := intPart
+	if n.useGrouping != "" && !(n.useGrouping == "min2" && len(intPart) <= li.minGroup+3) {
+		grouped = li.groupInteger(intPart)
+	}
+	// The grouped form is the ungrouped digits with separators inserted, so
+	// splitting on the separator recovers the runs the parts API asks for.
+	for i, run := range strings.Split(grouped, li.group) {
+		if i > 0 {
+			add("group", li.group)
+		}
+		add("integer", run)
+	}
+	if frac != "" {
+		add("decimal", li.decimal)
+		add("fraction", frac)
+	}
+	return withStyleAffixes(n, out)
+}
+
+// withStyleAffixes puts the style's own marker around the number: the percent
+// sign after it, the currency code or the unit beside it.
+func withStyleAffixes(n numberOptions, parts []numberPart) []numberPart {
 	switch n.style {
 	case "percent":
-		b.WriteString("%")
+		return append(parts, numberPart{"percentSign", "%"})
 	case "currency":
-		// Without CLDR's currency symbols and placement rules, the code is
-		// what gets written -- which is exactly `currencyDisplay: "code"`, and
-		// a truthful answer rather than a guessed symbol in a guessed position.
-		return n.currency + " " + b.String()
+		// Without CLDR's currency symbols and placement rules the code is what
+		// gets written -- which is exactly `currencyDisplay: "code"`, and a
+		// truthful answer rather than a guessed symbol in a guessed position.
+		return append([]numberPart{{"currency", n.currency}, {"literal", " "}}, parts...)
 	case "unit":
-		return b.String() + " " + n.unit
+		return append(parts, numberPart{"literal", " "}, numberPart{"unit", n.unit})
+	}
+	return parts
+}
+
+// formatNumberWith is the concatenation of the parts, so format() and
+// formatToParts() cannot drift apart.
+func (rt *Runtime) formatNumberWith(n numberOptions, li localeInfo, v float64) string {
+	var b strings.Builder
+	for _, p := range numberParts(n, li, v) {
+		b.WriteString(p.val)
 	}
 	return b.String()
+}
+
+// formatNumberParts is formatToParts: the same spans, as objects.
+func (rt *Runtime) formatNumberParts(n numberOptions, li localeInfo, v float64) Value {
+	arr := rt.newArray()
+	ao := rt.objPtr(arr)
+	for i, p := range numberParts(n, li, v) {
+		o := rt.newPlainObject()
+		oo := rt.objPtr(o)
+		oo.defineOwn("type", rt.newString(p.typ), attrDefault)
+		oo.defineOwn("value", rt.newString(p.val), attrDefault)
+		rt.arraySet(ao, uint32(i), o)
+	}
+	return arr
 }
