@@ -8,8 +8,8 @@
 | baseline | 216 / 3,357 | 42,739 / 42,740 |
 | A0 — `timeZone` | 226 / 3,357 | unchanged |
 | A1 — locales, `Intl.Locale` | 389 / 3,357 | unchanged |
-| A3 — Collator, PluralRules | (measuring) | unchanged |
-| A2 — NumberFormat options | (measuring) | unchanged |
+| A3 — Collator, PluralRules | 470 / 3,357 | unchanged |
+| A2 — NumberFormat, part 1 | (measuring) | unchanged |
 
 Companion to [TODO.md](../TODO.md) (the master port plan) and
 [docs/ecma-262-core-tests.md](./ecma-262-core-tests.md) (what `-core` excludes and why).
@@ -160,9 +160,14 @@ validation rather than arithmetic.
       which is `currencyDisplay: "code"` and truthful, but not what `"symbol"`
       promises. Needs CLDR currency data (`x/text/currency` carries some).
 - [ ] `notation: "compact"` and `"scientific"`/`"engineering"` output
-- [ ] `formatToParts`, `formatRange`, `formatRangeToParts` — 51 tests
-- [ ] Rounding modes other than `halfExpand`, `roundingIncrement`,
-      `trailingZeroDisplay`, `roundingPriority`
+- [x] `formatToParts` — the same spans `format()` concatenates, so the two
+      cannot drift apart
+- [ ] `formatRange`, `formatRangeToParts` — 17 tests
+- [x] All nine rounding modes, `roundingIncrement`, `trailingZeroDisplay` —
+      done on the digit string rather than the float, because 1.005 is not
+      1.005 in binary and "round it half away from zero" has one right answer
+      whatever the nearest double is
+- [ ] `roundingPriority` when significant and fraction digits are both given
 
 ### A3 — `Intl.Collator` and `Intl.PluralRules`  ▸ **done**, `884cce7` and `56b4a9b`
 
