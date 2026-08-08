@@ -632,20 +632,26 @@ func (rt *Runtime) initStringBuiltin() {
 		}
 		return mknum(float64(c.compare(string(b), string(other)))), nil
 	})
-	rt.defMethod(proto, "toLocaleLowerCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		_, b, e := rt.thisString(this)
-		if e != nil {
-			return mkundef(), e
+	// The locale-sensitive case methods are not the plain ones with a locale
+	// argument nailed on: Turkish maps "i" to "İ" and "I" to "ı", which is a
+	// different function, not a different rendering of the same one. A robot
+	// upper-casing a Turkish field name with the default mapping gets "I"
+	// where the language wants "İ".
+	localeCase := func(upper bool) nativeFunc {
+		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			_, b, e := rt.thisString(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			tags, e := rt.canonicalizeLocaleList(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.newStringBytes(localeCaseBytes(b, tags, upper)), nil
 		}
-		return rt.newStringBytes(jsToLowerCase(b)), nil
-	})
-	rt.defMethod(proto, "toLocaleUpperCase", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		_, b, e := rt.thisString(this)
-		if e != nil {
-			return mkundef(), e
-		}
-		return rt.newStringBytes(jsToUpperCase(b)), nil
-	})
+	}
+	rt.defMethod(proto, "toLocaleLowerCase", 0, localeCase(false))
+	rt.defMethod(proto, "toLocaleUpperCase", 0, localeCase(true))
 
 	pad := func(atStart bool) nativeFunc {
 		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {

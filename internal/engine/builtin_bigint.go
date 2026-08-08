@@ -217,7 +217,25 @@ func (rt *Runtime) initBigIntBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(bigIntToString(b, 10)), nil
+		// Specified as Intl.NumberFormat's format when ECMA-402 is present.
+		// The exact digits are handed over rather than a float: above 2^53 the
+		// float has already lost them, and a BigInt exists precisely so that
+		// they are not lost.
+		li, e := rt.resolveLocaleArg(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		requested, e := rt.canonicalizeLocaleList(arg(args, 0))
+		if e != nil {
+			return mkundef(), e
+		}
+		opts, e := rt.initNumberOptions(arg(args, 1), requested)
+		if e != nil {
+			return mkundef(), e
+		}
+		digits := bigIntToString(b, 10)
+		f, _ := new(big.Float).SetInt(b).Float64()
+		return rt.newString(rt.formatNumberOf(opts, li, f, digits)), nil
 	})
 
 	rt.defGlobal("BigInt", ctor)

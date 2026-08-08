@@ -314,6 +314,12 @@ type numberPart struct{ typ, val string }
 // numberParts renders a Number through the resolved options, on top of the
 // locale-aware grouping and separators intl_format.go already does.
 func numberParts(n numberOptions, li localeInfo, v float64) []numberPart {
+	return numberPartsOf(n, li, v, "")
+}
+
+// numberPartsOf is numberParts with an exact decimal spelling to use in place
+// of the float, which is how a BigInt keeps every digit it has.
+func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []numberPart {
 	var out []numberPart
 	add := func(typ, val string) {
 		if val != "" {
@@ -333,6 +339,11 @@ func numberParts(n numberOptions, li localeInfo, v float64) []numberPart {
 	infinite := math.IsInf(v, 0)
 	if !infinite {
 		intPart, frac = expandDecimal(strings.TrimPrefix(numberToString(math.Abs(v)), "-"))
+		if digits != "" {
+			// A BigInt arrives as its exact decimal digits rather than as a
+			// float, because above 2^53 the float has already lost them.
+			intPart, frac, neg = strings.TrimPrefix(digits, "-"), "", strings.HasPrefix(digits, "-")
+		}
 		if n.digits.maxSig > 0 {
 			intPart, frac = roundToSignificant(intPart, frac, n.digits.maxSig, n.digits.minSig)
 		} else {
@@ -420,8 +431,13 @@ func withStyleAffixes(n numberOptions, parts []numberPart) []numberPart {
 // formatNumberWith is the concatenation of the parts, so format() and
 // formatToParts() cannot drift apart.
 func (rt *Runtime) formatNumberWith(n numberOptions, li localeInfo, v float64) string {
+	return rt.formatNumberOf(n, li, v, "")
+}
+
+// formatNumberOf is formatNumberWith with an exact decimal spelling.
+func (rt *Runtime) formatNumberOf(n numberOptions, li localeInfo, v float64, digits string) string {
 	var b strings.Builder
-	for _, p := range numberParts(n, li, v) {
+	for _, p := range numberPartsOf(n, li, v, digits) {
 		b.WriteString(p.val)
 	}
 	return b.String()
