@@ -31,7 +31,27 @@ func (rt *Runtime) drainMicrotasks() {
 	for len(rt.microtasks) > 0 {
 		j := rt.microtasks[0]
 		rt.microtasks = rt.microtasks[1:]
+		done := rt.holdInFlight(j.roots)
 		j.run()
+		done()
+	}
+}
+
+// holdInFlight roots vals for as long as the returned function is uncalled.
+//
+// For the window where a queued job has been taken off the queue and is
+// running: the queue no longer refers to what it captured and nothing else
+// does either. See Runtime.inFlight.
+func (rt *Runtime) holdInFlight(vals []Value, extra ...Value) func() {
+	base := len(rt.inFlight)
+	rt.inFlight = append(rt.inFlight, vals...)
+	rt.inFlight = append(rt.inFlight, extra...)
+	return func() {
+		// Cleared, not just truncated: the backing array outlives the
+		// truncation, and a stale Value in it would keep a dead object marked
+		// for as long as the queue stays that deep.
+		clear(rt.inFlight[base:])
+		rt.inFlight = rt.inFlight[:base]
 	}
 }
 
@@ -76,7 +96,11 @@ func (rt *Runtime) runEventLoop() {
 		if rt.exitCode != nil {
 			return
 		}
+		// Same window as a microtask: a one-shot timer is off the list before
+		// its callback runs, so its function and arguments need holding.
+		done := rt.holdInFlight(t.args, t.fn)
 		rt.callValue(t.fn, mkundef(), t.args)
+		done()
 		rt.drainMicrotasks()
 	}
 }
