@@ -243,11 +243,12 @@ func (rt *Runtime) initTemporalPlainYearMonth(ns *object) {
 			}
 			// A year-month has no day for a smaller unit to land on, so a
 			// duration carrying one is refused rather than quietly ignored --
-			// even where it would not have changed the month.
-			for _, v := range []float64{d.days, d.hours, d.minutes, d.seconds, d.ms, d.us, d.ns} {
+			// even where it would not have changed the month. Years and months
+			// are the whole of what it can be moved by.
+			for _, v := range []float64{d.weeks, d.days, d.hours, d.minutes, d.seconds, d.ms, d.us, d.ns} {
 				if v != 0 {
 					return mkundef(), rt.rangeError(
-						"a year-month cannot be moved by a unit smaller than a week")
+						"a year-month can only be moved by years and months")
 				}
 			}
 			// Going backwards, the duration is measured from the end of the
@@ -263,6 +264,15 @@ func (rt *Runtime) initTemporalPlainYearMonth(ns *object) {
 			c := calendarFor(cal)
 			cd := c.dateFromDay(iso.epochDays())
 			day := c.dayFromDate(cd.year, cd.month, 1)
+			// The first of the month is where the measuring starts, so it has
+			// to be a date -- and the first of the earliest month there is
+			// falls before the earliest date. The month's END does not: that
+			// is derived from the first and is only ever walked through, which
+			// is why the last month there is can still be counted backwards
+			// from even though it runs out on the thirteenth.
+			if first := epochDaysToISODate(day); !isoDateWithinLimits(first) {
+				return mkundef(), rt.rangeError("date is outside the representable range")
+			}
 			if d.sign() < 0 {
 				day += c.daysInMonth(cd.year, cd.month) - 1
 			}

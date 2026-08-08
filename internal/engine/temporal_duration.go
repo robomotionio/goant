@@ -232,20 +232,17 @@ func (d durationRec) toInternal24() internalDuration {
 func durationFromInternal(d internalDuration, largestUnit int) (durationRec, bool) {
 	sign := int64(d.time.Sign())
 	n := new(big.Int).Abs(d.time)
-	var days, hours, minutes, seconds, ms, us int64
-	// A count that will not fit in an int64 is a duration out of range, not a
-	// duration of however many fit: clamping it to the largest int64 turned
-	// eighteen septillion nanoseconds into a valid-looking nine thousand
-	// billion seconds.
-	overflow := false
-	divmod := func(by int64) int64 {
+	var days, hours, minutes, seconds, ms, us float64
+	// Every count comes out as the float the field holds, taken from the exact
+	// value rather than from arithmetic done in floats. A field may be larger
+	// than an int64 -- eight sextillion microseconds is a number a double can
+	// carry -- and whether the whole duration is one a duration may be is
+	// isValidDuration's question, asked at the end, on the totals.
+	divmod := func(by int64) float64 {
 		q, r := new(big.Int).QuoRem(n, bigInt(by), new(big.Int))
 		n = r
-		if !q.IsInt64() {
-			overflow = true
-			return 0
-		}
-		return q.Int64()
+		f, _ := new(big.Float).SetInt(q).Float64()
+		return f
 	}
 	switch largestUnit {
 	case unitYear, unitMonth, unitWeek, unitDay:
@@ -276,16 +273,14 @@ func durationFromInternal(d internalDuration, largestUnit int) (durationRec, boo
 	case unitMicrosecond:
 		us = divmod(nsPerMicro)
 	}
-	if overflow || !n.IsInt64() {
-		return durationRec{}, false
-	}
-	ns := n.Int64()
+	ns, _ := new(big.Float).SetInt(n).Float64()
+	s := float64(sign)
 	out := durationRec{
 		years: float64(d.date.years), months: float64(d.date.months),
-		weeks: float64(d.date.weeks), days: float64(d.date.days + days*sign),
-		hours: float64(hours * sign), minutes: float64(minutes * sign),
-		seconds: float64(seconds * sign), ms: float64(ms * sign),
-		us: float64(us * sign), ns: float64(ns * sign),
+		weeks: float64(d.date.weeks), days: float64(d.date.days) + days*s,
+		hours: hours * s, minutes: minutes * s,
+		seconds: seconds * s, ms: ms * s,
+		us: us * s, ns: ns * s,
 	}
 	if !isValidDuration(out.fields()) {
 		return out, false

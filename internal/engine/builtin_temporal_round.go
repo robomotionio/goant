@@ -212,6 +212,11 @@ func (rt *Runtime) epochNsOf(dt isoDateTimeRec, tz string) (*big.Int, *ThrowErro
 	if !ok {
 		return nil, rt.rangeError("this local time does not exist in " + tz)
 	}
+	// The day after the last day is not a day, so the boundary that rounding
+	// wants to measure against is not an instant either.
+	if !epochNsWithinLimits(ns) {
+		return nil, rt.rangeError("instant is outside the representable range")
+	}
 	return ns, nil
 }
 
