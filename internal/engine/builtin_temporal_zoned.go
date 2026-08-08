@@ -283,9 +283,6 @@ func (rt *Runtime) initTemporalZonedDateTime(ns *object) {
 				return mkundef(), e
 			}
 			a, b := epoch, otherNs
-			if since {
-				a, b = b, a
-			}
 			var out durationRec
 			if s.largest > unitDay {
 				out, e = rt.differenceInstant(a, b, s)

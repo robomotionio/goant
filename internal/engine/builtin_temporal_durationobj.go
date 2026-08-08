@@ -412,6 +412,12 @@ func (rt *Runtime) totalDuration(d durationRec, rel relativeToRec, unit int) (*b
 		if e != nil {
 			return nil, e
 		}
+		if unit > unitDay {
+			// Nothing above a day was asked for, so the answer is simply how
+			// much time passed -- which in a zone is not a count of days.
+			return new(big.Rat).SetFrac(new(big.Int).Sub(target, rel.epochNs),
+				bigInt(nsPerUnit[unit])), nil
+		}
 		diff, e := rt.differenceZonedDateTime(rel.epochNs, target, rel.timeZone, rel.calendar, unit)
 		if e != nil {
 			return nil, e

@@ -138,9 +138,6 @@ func (rt *Runtime) initTemporalPlainTime(ns *object) {
 				return mkundef(), e
 			}
 			a, b := tTime(o), other
-			if since {
-				a, b = b, a
-			}
 			t := differenceTime(a, b)
 			t = roundNumberToIncrement(t, bigInt(nsPerUnit[s.smallest]*s.increment), s.mode)
 			out, ok := durationFromInternal(newInternal(dateDuration{}, t), s.largest)

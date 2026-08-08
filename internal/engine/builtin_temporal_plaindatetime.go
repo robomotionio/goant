@@ -193,9 +193,6 @@ func (rt *Runtime) initTemporalPlainDateTime(ns *object) {
 				return mkundef(), e
 			}
 			a, b := dt, other
-			if since {
-				a, b = b, a
-			}
 			out, e := rt.differencePlainDateTimeWithRounding(a, b, cal, s)
 			if e != nil {
 				return mkundef(), e

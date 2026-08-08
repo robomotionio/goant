@@ -306,9 +306,6 @@ func (rt *Runtime) initTemporalPlainDate(ns *object) {
 				return mkundef(), e
 			}
 			a, b := iso, otherISO
-			if since {
-				a, b = b, a
-			}
 			out, e := rt.differenceDate(a, b, cal, s)
 			if e != nil {
 				return mkundef(), e

@@ -13,8 +13,8 @@ func TestCalendarConversions(t *testing.T) {
 		eraYear          int
 	}{
 		// The Gregorian family: the year number moves, the months do not.
-		{"gregory", [3]int{2024, 2, 29}, 2024, 2, 29, "gregory", 2024},
-		{"gregory", [3]int{0, 1, 1}, 0, 1, 1, "gregory-inverse", 1},
+		{"gregory", [3]int{2024, 2, 29}, 2024, 2, 29, "ce", 2024},
+		{"gregory", [3]int{0, 1, 1}, 0, 1, 1, "bce", 1},
 		{"buddhist", [3]int{2024, 5, 22}, 2567, 5, 22, "be", 2567},
 		{"roc", [3]int{2024, 10, 10}, 113, 10, 10, "roc", 113},
 		{"roc", [3]int{1911, 10, 10}, 0, 10, 10, "broc", 1},
@@ -27,13 +27,13 @@ func TestCalendarConversions(t *testing.T) {
 		// 2024-09-11 is 1 Tout 1741 in the Coptic calendar and 1 Meskerem
 		// 2017 in the Ethiopic.
 		{"coptic", [3]int{2024, 9, 11}, 1741, 1, 1, "am", 1741},
-		{"ethiopic", [3]int{2024, 9, 11}, 2017, 1, 1, "ethiopic", 2017},
-		{"ethioaa", [3]int{2024, 9, 11}, 7517, 1, 1, "ethioaa", 7517},
+		{"ethiopic", [3]int{2024, 9, 11}, 2017, 1, 1, "am", 2017},
+		{"ethioaa", [3]int{2024, 9, 11}, 7517, 1, 1, "aa", 7517},
 
 		// Saka: year 1946 began on 2024-03-21, a leap year, so Chaitra has
 		// thirty-one days and starts a day early.
-		{"indian", [3]int{2024, 3, 21}, 1946, 1, 1, "saka", 1946},
-		{"indian", [3]int{2023, 3, 22}, 1945, 1, 1, "saka", 1945},
+		{"indian", [3]int{2024, 3, 21}, 1946, 1, 1, "shaka", 1946},
+		{"indian", [3]int{2023, 3, 22}, 1945, 1, 1, "shaka", 1945},
 
 		// Persian: Nowruz 1403 was 2024-03-20.
 		{"persian", [3]int{2024, 3, 20}, 1403, 1, 1, "ap", 1403},

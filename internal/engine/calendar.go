@@ -237,16 +237,16 @@ func (c gregorianCalendar) eraOf(y int) (string, int) {
 	}
 	// The proleptic Gregorian calendar has no year zero: ISO year 0 is 1 BC.
 	if y <= 0 {
-		return "gregory-inverse", 1 - y
+		return "bce", 1 - y
 	}
-	return "gregory", y
+	return "ce", y
 }
 
 func (c gregorianCalendar) yearFromEra(era string, eraYear int) (int, bool) {
 	switch era {
-	case "gregory", "ce", "ad":
+	case "ce", "ad":
 		return eraYear, true
-	case "gregory-inverse", "bce", "bc":
+	case "bce", "bc":
 		return 1 - eraYear, true
 	}
 	return 0, false
@@ -256,7 +256,7 @@ func (c gregorianCalendar) eras() []string {
 	if c.iso {
 		return nil
 	}
-	return []string{"gregory", "gregory-inverse"}
+	return []string{"bce", "ce"}
 }
 
 // ---- buddhist and roc: Gregorian months, a different year number ----
@@ -398,9 +398,9 @@ func (c japaneseCalendar) eraOf(y int) (string, int) {
 
 func (c japaneseCalendar) yearFromEra(era string, eraYear int) (int, bool) {
 	switch era {
-	case "ce", "ad", "gregory":
+	case "ce", "ad":
 		return eraYear, true
-	case "bce", "bc", "gregory-inverse":
+	case "bce", "bc":
 		return 1 - eraYear, true
 	}
 	for _, e := range japaneseEras {
@@ -489,27 +489,16 @@ func (c copticCalendar) monthFromCode(_ string, code string) (int, bool) {
 // The Coptic era runs backwards through zero rather than turning into a second
 // era: a year before the Era of Martyrs is a negative year in it, which is what
 // every calendar with only one era does.
-func (c copticCalendar) eraOf(y int) (string, int) {
-	if c.era == "aa" {
-		return "ethioaa", y
-	}
-	return c.era, y
-}
+func (c copticCalendar) eraOf(y int) (string, int) { return c.era, y }
 
 func (c copticCalendar) yearFromEra(era string, eraYear int) (int, bool) {
-	switch era {
-	case c.era, "ethioaa", "coptic", "ethiopic":
+	if era == c.era {
 		return eraYear, true
 	}
 	return 0, false
 }
 
-func (c copticCalendar) eras() []string {
-	if c.era == "aa" {
-		return []string{"ethioaa"}
-	}
-	return []string{c.era}
-}
+func (c copticCalendar) eras() []string { return []string{c.era} }
 
 // ethiopicCalendar is the Coptic arithmetic with the Ethiopic epoch, and with
 // the Amete Alem years before year 1 of the Incarnation counted in their own
@@ -517,15 +506,15 @@ func (c copticCalendar) eras() []string {
 type ethiopicCalendar struct{}
 
 func (c ethiopicCalendar) base() copticCalendar {
-	return copticCalendar{epoch: ethiopicEpoch, era: "ethiopic"}
+	return copticCalendar{epoch: ethiopicEpoch, era: "am"}
 }
 
 func (c ethiopicCalendar) dateFromDay(day int) calendarDate {
 	d := c.base().dateFromDay(day)
 	if d.year <= 0 {
-		d.era, d.eraYear = "ethioaa", d.year+5500
+		d.era, d.eraYear = "aa", d.year+5500
 	} else {
-		d.era, d.eraYear = "ethiopic", d.year
+		d.era, d.eraYear = "am", d.year
 	}
 	return d
 }
@@ -543,22 +532,22 @@ func (c ethiopicCalendar) monthFromCode(y string, code string) (int, bool) {
 
 func (c ethiopicCalendar) eraOf(y int) (string, int) {
 	if y <= 0 {
-		return "ethioaa", y + 5500
+		return "aa", y + 5500
 	}
-	return "ethiopic", y
+	return "am", y
 }
 
 func (c ethiopicCalendar) yearFromEra(era string, eraYear int) (int, bool) {
 	switch era {
-	case "ethiopic":
+	case "am":
 		return eraYear, true
-	case "ethioaa", "ethiopic-amete-alem":
+	case "aa":
 		return eraYear - 5500, true
 	}
 	return 0, false
 }
 
-func (c ethiopicCalendar) eras() []string { return []string{"ethiopic", "ethioaa"} }
+func (c ethiopicCalendar) eras() []string { return []string{"aa", "am"} }
 
 // ---- indian: the Saka era, on a Gregorian leap rule ----
 
@@ -615,14 +604,14 @@ func (c indianCalendar) dateFromDay(day int) calendarDate {
 		rest -= c.daysInMonth(y, m)
 		m++
 	}
-	return calendarDate{era: "saka", eraYear: y, year: y, month: m, day: rest + 1,
+	return calendarDate{era: "shaka", eraYear: y, year: y, month: m, day: rest + 1,
 		code: simpleMonthCode(m)}
 }
 
 func (c indianCalendar) monthsInYear(int) int      { return 12 }
 func (c indianCalendar) monthCode(_, m int) string { return simpleMonthCode(m) }
-func (c indianCalendar) eraOf(y int) (string, int) { return "saka", y }
-func (c indianCalendar) eras() []string            { return []string{"saka"} }
+func (c indianCalendar) eraOf(y int) (string, int) { return "shaka", y }
+func (c indianCalendar) eras() []string            { return []string{"shaka"} }
 
 func (c indianCalendar) monthFromCode(_ string, code string) (int, bool) {
 	m, leap, ok := parseMonthCode(code)
@@ -633,7 +622,7 @@ func (c indianCalendar) monthFromCode(_ string, code string) (int, bool) {
 }
 
 func (c indianCalendar) yearFromEra(era string, eraYear int) (int, bool) {
-	if era == "saka" {
+	if era == "shaka" {
 		return eraYear, true
 	}
 	return 0, false
@@ -806,12 +795,12 @@ func (c islamicCalendar) eraOf(y int) (string, int) {
 	// There is no year zero: the year before 1 AH is 1 BH, on the other side
 	// of the Hijra.
 	if y <= 0 {
-		return "ah-inverse", 1 - y
+		return "bh", 1 - y
 	}
 	return "ah", y
 }
 
-func (c islamicCalendar) eras() []string { return []string{"ah", "ah-inverse"} }
+func (c islamicCalendar) eras() []string { return []string{"bh", "ah"} }
 
 func (c islamicCalendar) monthFromCode(_ string, code string) (int, bool) {
 	m, leap, ok := parseMonthCode(code)
@@ -825,7 +814,7 @@ func (c islamicCalendar) yearFromEra(era string, eraYear int) (int, bool) {
 	switch era {
 	case "ah":
 		return eraYear, true
-	case "ah-inverse":
+	case "bh":
 		return 1 - eraYear, true
 	}
 	return 0, false

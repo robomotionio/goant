@@ -123,9 +123,6 @@ func (rt *Runtime) initTemporalInstant(ns *object) {
 				return mkundef(), e
 			}
 			a, b := tEpochNs(o), other
-			if since {
-				a, b = b, a
-			}
 			out, e := rt.differenceInstant(a, b, s)
 			if e != nil {
 				return mkundef(), e

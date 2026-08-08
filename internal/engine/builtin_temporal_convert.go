@@ -190,6 +190,8 @@ func (rt *Runtime) throwFor(err error) *ThrowError {
 		return rt.typeError("the fields do not name a date")
 	case errCalendarRange:
 		return rt.rangeError("date is outside the representable range")
+	case errCalendarValue:
+		return rt.rangeError("the fields contradict one another")
 	}
 	return rt.rangeError("date is outside the range of its month")
 }

@@ -16,6 +16,7 @@ var (
 	errCalendarOverflow = errors.New("date is outside the range of its month")
 	errCalendarFields   = errors.New("the fields do not name a date")
 	errCalendarRange    = errors.New("date is outside the representable range")
+	errCalendarValue    = errors.New("the fields contradict one another")
 )
 
 // calFieldSet is the set of calendar fields a caller supplied. Which of them
@@ -62,10 +63,10 @@ func resolveCalendarYear(id string, cal calendar, f calFieldSet) (int, error) {
 	if hasEraPair {
 		y, ok := cal.yearFromEra(f.era, f.eraYear)
 		if !ok {
-			return 0, errCalendarFields
+			return 0, errCalendarValue
 		}
 		if f.got(fYear) && f.year != y {
-			return 0, errCalendarFields
+			return 0, errCalendarValue
 		}
 		return y, nil
 	}
@@ -89,15 +90,15 @@ func resolveCalendarMonth(cal calendar, year int, f calFieldSet, overflow string
 			}
 			base, leap, good := parseMonthCode(f.monthCode)
 			if !good || !leap {
-				return 0, errCalendarFields
+				return 0, errCalendarValue
 			}
 			m, ok = cal.monthFromCode(ys, simpleMonthCode(base))
 			if !ok {
-				return 0, errCalendarFields
+				return 0, errCalendarValue
 			}
 		}
 		if f.got(fMonth) && f.month != m {
-			return 0, errCalendarFields
+			return 0, errCalendarValue
 		}
 		return m, nil
 	}
@@ -374,7 +375,7 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 	// Overshooting by a year is normal when the months are the other way round.
 	for years != 0 {
 		mid, err := calendarDateAdd(id, one, dateDuration{years: years}, "constrain")
-		if err != nil || sign*compareISODate(mid, two) < 0 {
+		if err != nil || sign*compareISODate(mid, two) > 0 {
 			years -= int64(sign)
 			continue
 		}
@@ -385,7 +386,7 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 	for {
 		mid, err := calendarDateAdd(id, one,
 			dateDuration{years: years, months: months + int64(sign)}, "constrain")
-		if err != nil || sign*compareISODate(mid, two) < 0 {
+		if err != nil || sign*compareISODate(mid, two) > 0 {
 			break
 		}
 		months += int64(sign)

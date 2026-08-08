@@ -351,9 +351,6 @@ func (rt *Runtime) initTemporalPlainYearMonth(ns *object) {
 			if e != nil {
 				return mkundef(), e
 			}
-			if since {
-				a, b = b, a
-			}
 			dd := calendarDateUntil(cal, a, b, s.largest)
 			dd.weeks, dd.days = 0, 0
 			var out durationRec
