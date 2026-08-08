@@ -84,11 +84,11 @@ func (rt *Runtime) readCalendarFields(item Value, want, required int, requireAny
 		f.present |= bit
 		switch bit {
 		case keyEra:
-			s, e := rt.toStringValue(v)
+			s, e := rt.requireStringField(v, name)
 			if e != nil {
 				return f, e
 			}
-			f.cal.era = rt.strGo(s)
+			f.cal.era = s
 			f.cal.has |= fEra
 		case keyEraYear:
 			n, e := rt.toIntegerWithTruncation(v)
@@ -112,11 +112,16 @@ func (rt *Runtime) readCalendarFields(item Value, want, required int, requireAny
 			f.cal.month = n
 			f.cal.has |= fMonth
 		case keyMonthCode:
-			s, e := rt.toStringValue(v)
+			s, e := rt.requireStringField(v, name)
 			if e != nil {
 				return f, e
 			}
-			f.cal.monthCode = rt.strGo(s)
+			// The SHAPE of the code is settled here, as it is read; whether
+			// such a month exists waits until the calendar is known.
+			if !isMonthCodeSyntax(s) {
+				return f, rt.rangeError("monthCode is not a month code: " + s)
+			}
+			f.cal.monthCode = s
 			f.cal.has |= fMonthCode
 		case keyDay:
 			n, e := rt.toPositiveIntegerWithTruncation(v)
@@ -126,11 +131,11 @@ func (rt *Runtime) readCalendarFields(item Value, want, required int, requireAny
 			f.cal.day = n
 			f.cal.has |= fDay
 		case keyOffset:
-			s, e := rt.toStringValue(v)
+			s, e := rt.requireStringField(v, name)
 			if e != nil {
 				return f, e
 			}
-			f.offset, f.hasOffset = rt.strGo(s), true
+			f.offset, f.hasOffset = s, true
 		case keyTimeZone:
 			f.timeZone, f.hasTimeZone = v, true
 		default: // the six time fields
@@ -159,6 +164,22 @@ func (rt *Runtime) readCalendarFields(item Value, want, required int, requireAny
 		return f, rt.typeError("no recognised fields were given")
 	}
 	return f, nil
+}
+
+// requireStringField is ToPrimitiveAndRequireString: the three fields that name
+// something rather than count it -- era, monthCode and offset -- take a string
+// and nothing else. A number is not a month code that is out of range, it is
+// the wrong kind of value altogether, and the difference is a TypeError against
+// a RangeError. An object may still convert, because ToPrimitive runs first.
+func (rt *Runtime) requireStringField(v Value, name string) (string, *ThrowError) {
+	prim, e := rt.toPrimitive(v, "string")
+	if e != nil {
+		return "", e
+	}
+	if !prim.IsString() {
+		return "", rt.typeError(name + " must be a string")
+	}
+	return rt.strGo(prim), nil
 }
 
 // calendarOf reads the calendar property of a bag of fields, which defaults to

@@ -180,6 +180,20 @@ func simpleMonthCode(month int) string {
 
 // parseMonthCode reads "M05" or "M05L" into a month number and whether it was
 // marked as a leap month.
+// isMonthCodeSyntax is the shape of a month code -- "M", two digits, and an
+// optional "L" -- with nothing said about whether such a month exists. The two
+// questions are asked at different times: the shape as the field is read, and
+// the existence once the calendar is known, which is why "M99L" gets as far as
+// coercing the year and "L99M" does not.
+func isMonthCodeSyntax(code string) bool {
+	body := code
+	if len(body) > 0 && body[len(body)-1] == 'L' {
+		body = body[:len(body)-1]
+	}
+	return len(body) == 3 && body[0] == 'M' &&
+		body[1] >= '0' && body[1] <= '9' && body[2] >= '0' && body[2] <= '9'
+}
+
 func parseMonthCode(code string) (month int, leap bool, ok bool) {
 	if len(code) < 3 || code[0] != 'M' {
 		return 0, false, false
