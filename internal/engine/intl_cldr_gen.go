@@ -2097,6 +2097,257 @@ const cldrKeywordAliasData = "" +
 	"tz/zulu utc\n" +
 	""
 
+// cldrRegionZonesData = IANA zones per ISO 3166 region, from zone.tab, space-separated.
+const cldrRegionZonesData = "" +
+	"AD Europe/Andorra\n" +
+	"AE Asia/Dubai\n" +
+	"AF Asia/Kabul\n" +
+	"AG America/Antigua\n" +
+	"AI America/Anguilla\n" +
+	"AL Europe/Tirane\n" +
+	"AM Asia/Yerevan\n" +
+	"AO Africa/Luanda\n" +
+	"AQ Antarctica/Casey Antarctica/Davis Antarctica/DumontDUrville Antarctica/Mawson Antarctica/McMurdo Antarctica/Palmer Antarctica/Rothera Antarctica/Syowa Antarctica/Troll Antarctica/Vostok\n" +
+	"AR America/Argentina/Buenos_Aires America/Argentina/Catamarca America/Argentina/Cordoba America/Argentina/Jujuy America/Argentina/La_Rioja America/Argentina/Mendoza America/Argentina/Rio_Gallegos America/Argentina/Salta America/Argentina/San_Juan America/Argentina/San_Luis America/Argentina/Tucuman America/Argentina/Ushuaia\n" +
+	"AS Pacific/Pago_Pago\n" +
+	"AT Europe/Vienna\n" +
+	"AU Antarctica/Macquarie Australia/Adelaide Australia/Brisbane Australia/Broken_Hill Australia/Darwin Australia/Eucla Australia/Hobart Australia/Lindeman Australia/Lord_Howe Australia/Melbourne Australia/Perth Australia/Sydney\n" +
+	"AW America/Aruba\n" +
+	"AX Europe/Mariehamn\n" +
+	"AZ Asia/Baku\n" +
+	"BA Europe/Sarajevo\n" +
+	"BB America/Barbados\n" +
+	"BD Asia/Dhaka\n" +
+	"BE Europe/Brussels\n" +
+	"BF Africa/Ouagadougou\n" +
+	"BG Europe/Sofia\n" +
+	"BH Asia/Bahrain\n" +
+	"BI Africa/Bujumbura\n" +
+	"BJ Africa/Porto-Novo\n" +
+	"BL America/St_Barthelemy\n" +
+	"BM Atlantic/Bermuda\n" +
+	"BN Asia/Brunei\n" +
+	"BO America/La_Paz\n" +
+	"BQ America/Kralendijk\n" +
+	"BR America/Araguaina America/Bahia America/Belem America/Boa_Vista America/Campo_Grande America/Cuiaba America/Eirunepe America/Fortaleza America/Maceio America/Manaus America/Noronha America/Porto_Velho America/Recife America/Rio_Branco America/Santarem America/Sao_Paulo\n" +
+	"BS America/Nassau\n" +
+	"BT Asia/Thimphu\n" +
+	"BW Africa/Gaborone\n" +
+	"BY Europe/Minsk\n" +
+	"BZ America/Belize\n" +
+	"CA America/Atikokan America/Blanc-Sablon America/Cambridge_Bay America/Creston America/Dawson America/Dawson_Creek America/Edmonton America/Fort_Nelson America/Glace_Bay America/Goose_Bay America/Halifax America/Inuvik America/Iqaluit America/Moncton America/Rankin_Inlet America/Regina America/Resolute America/St_Johns America/Swift_Current America/Toronto America/Vancouver America/Whitehorse America/Winnipeg\n" +
+	"CC Indian/Cocos\n" +
+	"CD Africa/Kinshasa Africa/Lubumbashi\n" +
+	"CF Africa/Bangui\n" +
+	"CG Africa/Brazzaville\n" +
+	"CH Europe/Zurich\n" +
+	"CI Africa/Abidjan\n" +
+	"CK Pacific/Rarotonga\n" +
+	"CL America/Coyhaique America/Punta_Arenas America/Santiago Pacific/Easter\n" +
+	"CM Africa/Douala\n" +
+	"CN Asia/Shanghai Asia/Urumqi\n" +
+	"CO America/Bogota\n" +
+	"CR America/Costa_Rica\n" +
+	"CU America/Havana\n" +
+	"CV Atlantic/Cape_Verde\n" +
+	"CW America/Curacao\n" +
+	"CX Indian/Christmas\n" +
+	"CY Asia/Famagusta Asia/Nicosia\n" +
+	"CZ Europe/Prague\n" +
+	"DE Europe/Berlin Europe/Busingen\n" +
+	"DJ Africa/Djibouti\n" +
+	"DK Europe/Copenhagen\n" +
+	"DM America/Dominica\n" +
+	"DO America/Santo_Domingo\n" +
+	"DZ Africa/Algiers\n" +
+	"EC America/Guayaquil Pacific/Galapagos\n" +
+	"EE Europe/Tallinn\n" +
+	"EG Africa/Cairo\n" +
+	"EH Africa/El_Aaiun\n" +
+	"ER Africa/Asmara\n" +
+	"ES Africa/Ceuta Atlantic/Canary Europe/Madrid\n" +
+	"ET Africa/Addis_Ababa\n" +
+	"FI Europe/Helsinki\n" +
+	"FJ Pacific/Fiji\n" +
+	"FK Atlantic/Stanley\n" +
+	"FM Pacific/Chuuk Pacific/Kosrae Pacific/Pohnpei\n" +
+	"FO Atlantic/Faroe\n" +
+	"FR Europe/Paris\n" +
+	"GA Africa/Libreville\n" +
+	"GB Europe/London\n" +
+	"GD America/Grenada\n" +
+	"GE Asia/Tbilisi\n" +
+	"GF America/Cayenne\n" +
+	"GG Europe/Guernsey\n" +
+	"GH Africa/Accra\n" +
+	"GI Europe/Gibraltar\n" +
+	"GL America/Danmarkshavn America/Nuuk America/Scoresbysund America/Thule\n" +
+	"GM Africa/Banjul\n" +
+	"GN Africa/Conakry\n" +
+	"GP America/Guadeloupe\n" +
+	"GQ Africa/Malabo\n" +
+	"GR Europe/Athens\n" +
+	"GS Atlantic/South_Georgia\n" +
+	"GT America/Guatemala\n" +
+	"GU Pacific/Guam\n" +
+	"GW Africa/Bissau\n" +
+	"GY America/Guyana\n" +
+	"HK Asia/Hong_Kong\n" +
+	"HN America/Tegucigalpa\n" +
+	"HR Europe/Zagreb\n" +
+	"HT America/Port-au-Prince\n" +
+	"HU Europe/Budapest\n" +
+	"ID Asia/Jakarta Asia/Jayapura Asia/Makassar Asia/Pontianak\n" +
+	"IE Europe/Dublin\n" +
+	"IL Asia/Jerusalem\n" +
+	"IM Europe/Isle_of_Man\n" +
+	"IN Asia/Kolkata\n" +
+	"IO Indian/Chagos\n" +
+	"IQ Asia/Baghdad\n" +
+	"IR Asia/Tehran\n" +
+	"IS Atlantic/Reykjavik\n" +
+	"IT Europe/Rome\n" +
+	"JE Europe/Jersey\n" +
+	"JM America/Jamaica\n" +
+	"JO Asia/Amman\n" +
+	"JP Asia/Tokyo\n" +
+	"KE Africa/Nairobi\n" +
+	"KG Asia/Bishkek\n" +
+	"KH Asia/Phnom_Penh\n" +
+	"KI Pacific/Kanton Pacific/Kiritimati Pacific/Tarawa\n" +
+	"KM Indian/Comoro\n" +
+	"KN America/St_Kitts\n" +
+	"KP Asia/Pyongyang\n" +
+	"KR Asia/Seoul\n" +
+	"KW Asia/Kuwait\n" +
+	"KY America/Cayman\n" +
+	"KZ Asia/Almaty Asia/Aqtau Asia/Aqtobe Asia/Atyrau Asia/Oral Asia/Qostanay Asia/Qyzylorda\n" +
+	"LA Asia/Vientiane\n" +
+	"LB Asia/Beirut\n" +
+	"LC America/St_Lucia\n" +
+	"LI Europe/Vaduz\n" +
+	"LK Asia/Colombo\n" +
+	"LR Africa/Monrovia\n" +
+	"LS Africa/Maseru\n" +
+	"LT Europe/Vilnius\n" +
+	"LU Europe/Luxembourg\n" +
+	"LV Europe/Riga\n" +
+	"LY Africa/Tripoli\n" +
+	"MA Africa/Casablanca\n" +
+	"MC Europe/Monaco\n" +
+	"MD Europe/Chisinau\n" +
+	"ME Europe/Podgorica\n" +
+	"MF America/Marigot\n" +
+	"MG Indian/Antananarivo\n" +
+	"MH Pacific/Kwajalein Pacific/Majuro\n" +
+	"MK Europe/Skopje\n" +
+	"ML Africa/Bamako\n" +
+	"MM Asia/Yangon\n" +
+	"MN Asia/Hovd Asia/Ulaanbaatar\n" +
+	"MO Asia/Macau\n" +
+	"MP Pacific/Saipan\n" +
+	"MQ America/Martinique\n" +
+	"MR Africa/Nouakchott\n" +
+	"MS America/Montserrat\n" +
+	"MT Europe/Malta\n" +
+	"MU Indian/Mauritius\n" +
+	"MV Indian/Maldives\n" +
+	"MW Africa/Blantyre\n" +
+	"MX America/Bahia_Banderas America/Cancun America/Chihuahua America/Ciudad_Juarez America/Hermosillo America/Matamoros America/Mazatlan America/Merida America/Mexico_City America/Monterrey America/Ojinaga America/Tijuana\n" +
+	"MY Asia/Kuala_Lumpur Asia/Kuching\n" +
+	"MZ Africa/Maputo\n" +
+	"NA Africa/Windhoek\n" +
+	"NC Pacific/Noumea\n" +
+	"NE Africa/Niamey\n" +
+	"NF Pacific/Norfolk\n" +
+	"NG Africa/Lagos\n" +
+	"NI America/Managua\n" +
+	"NL Europe/Amsterdam\n" +
+	"NO Europe/Oslo\n" +
+	"NP Asia/Kathmandu\n" +
+	"NR Pacific/Nauru\n" +
+	"NU Pacific/Niue\n" +
+	"NZ Pacific/Auckland Pacific/Chatham\n" +
+	"OM Asia/Muscat\n" +
+	"PA America/Panama\n" +
+	"PE America/Lima\n" +
+	"PF Pacific/Gambier Pacific/Marquesas Pacific/Tahiti\n" +
+	"PG Pacific/Bougainville Pacific/Port_Moresby\n" +
+	"PH Asia/Manila\n" +
+	"PK Asia/Karachi\n" +
+	"PL Europe/Warsaw\n" +
+	"PM America/Miquelon\n" +
+	"PN Pacific/Pitcairn\n" +
+	"PR America/Puerto_Rico\n" +
+	"PS Asia/Gaza Asia/Hebron\n" +
+	"PT Atlantic/Azores Atlantic/Madeira Europe/Lisbon\n" +
+	"PW Pacific/Palau\n" +
+	"PY America/Asuncion\n" +
+	"QA Asia/Qatar\n" +
+	"RE Indian/Reunion\n" +
+	"RO Europe/Bucharest\n" +
+	"RS Europe/Belgrade\n" +
+	"RU Asia/Anadyr Asia/Barnaul Asia/Chita Asia/Irkutsk Asia/Kamchatka Asia/Khandyga Asia/Krasnoyarsk Asia/Magadan Asia/Novokuznetsk Asia/Novosibirsk Asia/Omsk Asia/Sakhalin Asia/Srednekolymsk Asia/Tomsk Asia/Ust-Nera Asia/Vladivostok Asia/Yakutsk Asia/Yekaterinburg Europe/Astrakhan Europe/Kaliningrad Europe/Kirov Europe/Moscow Europe/Samara Europe/Saratov Europe/Ulyanovsk Europe/Volgograd\n" +
+	"RW Africa/Kigali\n" +
+	"SA Asia/Riyadh\n" +
+	"SB Pacific/Guadalcanal\n" +
+	"SC Indian/Mahe\n" +
+	"SD Africa/Khartoum\n" +
+	"SE Europe/Stockholm\n" +
+	"SG Asia/Singapore\n" +
+	"SH Atlantic/St_Helena\n" +
+	"SI Europe/Ljubljana\n" +
+	"SJ Arctic/Longyearbyen\n" +
+	"SK Europe/Bratislava\n" +
+	"SL Africa/Freetown\n" +
+	"SM Europe/San_Marino\n" +
+	"SN Africa/Dakar\n" +
+	"SO Africa/Mogadishu\n" +
+	"SR America/Paramaribo\n" +
+	"SS Africa/Juba\n" +
+	"ST Africa/Sao_Tome\n" +
+	"SV America/El_Salvador\n" +
+	"SX America/Lower_Princes\n" +
+	"SY Asia/Damascus\n" +
+	"SZ Africa/Mbabane\n" +
+	"TC America/Grand_Turk\n" +
+	"TD Africa/Ndjamena\n" +
+	"TF Indian/Kerguelen\n" +
+	"TG Africa/Lome\n" +
+	"TH Asia/Bangkok\n" +
+	"TJ Asia/Dushanbe\n" +
+	"TK Pacific/Fakaofo\n" +
+	"TL Asia/Dili\n" +
+	"TM Asia/Ashgabat\n" +
+	"TN Africa/Tunis\n" +
+	"TO Pacific/Tongatapu\n" +
+	"TR Europe/Istanbul\n" +
+	"TT America/Port_of_Spain\n" +
+	"TV Pacific/Funafuti\n" +
+	"TW Asia/Taipei\n" +
+	"TZ Africa/Dar_es_Salaam\n" +
+	"UA Europe/Kyiv Europe/Simferopol\n" +
+	"UG Africa/Kampala\n" +
+	"UM Pacific/Midway Pacific/Wake\n" +
+	"US America/Adak America/Anchorage America/Boise America/Chicago America/Denver America/Detroit America/Indiana/Indianapolis America/Indiana/Knox America/Indiana/Marengo America/Indiana/Petersburg America/Indiana/Tell_City America/Indiana/Vevay America/Indiana/Vincennes America/Indiana/Winamac America/Juneau America/Kentucky/Louisville America/Kentucky/Monticello America/Los_Angeles America/Menominee America/Metlakatla America/New_York America/Nome America/North_Dakota/Beulah America/North_Dakota/Center America/North_Dakota/New_Salem America/Phoenix America/Sitka America/Yakutat Pacific/Honolulu\n" +
+	"UY America/Montevideo\n" +
+	"UZ Asia/Samarkand Asia/Tashkent\n" +
+	"VA Europe/Vatican\n" +
+	"VC America/St_Vincent\n" +
+	"VE America/Caracas\n" +
+	"VG America/Tortola\n" +
+	"VI America/St_Thomas\n" +
+	"VN Asia/Ho_Chi_Minh\n" +
+	"VU Pacific/Efate\n" +
+	"WF Pacific/Wallis\n" +
+	"WS Pacific/Apia\n" +
+	"YE Asia/Aden\n" +
+	"YT Indian/Mayotte\n" +
+	"ZA Africa/Johannesburg\n" +
+	"ZM Africa/Lusaka\n" +
+	"ZW Africa/Harare\n" +
+	""
+
 // cldrLikelyData = likely subtags. The value is the full tag when the language changes and
 // the script-region remainder when it does not, which is the common case.
 const cldrLikelyData = "" +

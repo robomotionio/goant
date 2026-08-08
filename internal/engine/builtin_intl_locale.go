@@ -230,6 +230,77 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 		}
 		return rt.newString(t.String()), nil
 	})
+	// The Locale-info methods. What each of them can honestly say is limited by
+	// the CLDR tables this engine does not carry yet: the calendar and
+	// numbering system are the only ones implemented anywhere in it, and the
+	// week and text data below is the rule plus the handful of exceptions that
+	// matter, not the whole per-locale table.
+	list := func(name string, f func(t *langTag) []string) {
+		rt.defMethod(po, name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			t, e := rt.requireLocale(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.newArrayOfStrings(f(t)), nil
+		})
+	}
+	// A value the tag asked for comes first, which is what
+	// CreateArrayFromListAndPreferred is for.
+	preferred := func(t *langTag, key string, rest []string) []string {
+		v, ok := t.uKeyword(key)
+		if !ok || v == "" || tagContains(rest, v) {
+			return rest
+		}
+		return append([]string{v}, rest...)
+	}
+	list("getCalendars", func(t *langTag) []string { return preferred(t, "ca", []string{"gregory"}) })
+	list("getCollations", func(t *langTag) []string { return preferred(t, "co", []string{"emoji", "eor"}) })
+	list("getNumberingSystems", func(t *langTag) []string { return preferred(t, "nu", []string{"latn"}) })
+	list("getHourCycles", func(t *langTag) []string {
+		li, _ := lookupLocale(t.String())
+		return preferred(t, "hc", []string{li.hourCycle})
+	})
+	rt.defMethod(po, "getTimeZones", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		t, e := rt.requireLocale(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		// Undefined for a locale with no region, which is the specification's
+		// answer rather than an empty list: "the zones of nowhere" is not a
+		// question with an answer.
+		if t.region == "" {
+			return mkundef(), nil
+		}
+		return rt.newArrayOfStrings(zonesForRegion(t.region)), nil
+	})
+	rt.defMethod(po, "getTextInfo", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		t, e := rt.requireLocale(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		o := rt.newPlainObject()
+		rt.objPtr(o).defineOwn("direction", rt.newString(textDirection(t.lang)), attrDefault)
+		return o, nil
+	})
+	rt.defMethod(po, "getWeekInfo", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		t, e := rt.requireLocale(this)
+		if e != nil {
+			return mkundef(), e
+		}
+		first, weekend, minimal := weekInfo(t.region)
+		o := rt.newPlainObject()
+		oo := rt.objPtr(o)
+		oo.defineOwn("firstDay", mknum(float64(first)), attrDefault)
+		arr := rt.newArray()
+		ao := rt.objPtr(arr)
+		for i, d := range weekend {
+			rt.arraySet(ao, uint32(i), mknum(float64(d)))
+		}
+		oo.defineOwn("weekend", arr, attrDefault)
+		oo.defineOwn("minimalDays", mknum(float64(minimal)), attrDefault)
+		return o, nil
+	})
+
 	rt.defMethod(po, "maximize", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return rt.localeDerive(this, proto, (*langTag).maximized)
 	})
@@ -322,4 +393,71 @@ func weekdayKeyword(s string) string {
 		return "sun"
 	}
 	return ""
+}
+
+// textDirection is the writing direction of a language. The right-to-left
+// scripts are a closed and short list; everything else is left to right.
+func textDirection(lang string) string {
+	switch lang {
+	case "ar", "arc", "az", "ckb", "dv", "fa", "he", "iw", "ku", "ps", "sd",
+		"ug", "ur", "yi", "ji":
+		return "rtl"
+	}
+	return "ltr"
+}
+
+// weekInfo is CLDR's week data: the first day of the week, which days are the
+// weekend, and how many days of a week must fall in a year for it to count as
+// that year's first. The values are ISO weekday numbers, so Monday is 1 and
+// Sunday is 7. Monday-start with a Saturday-Sunday weekend is the rule; the
+// regions listed are the exceptions that a European or American script is
+// likely to meet.
+func weekInfo(region string) (first int, weekend []int, minimalDays int) {
+	switch region {
+	case "US", "CA", "JP", "IL", "PH", "BR", "MX", "KR", "TW", "ZA", "HK", "MO":
+		first = 7
+	case "AE", "AF", "BH", "DZ", "EG", "IQ", "IR", "JO", "KW", "LY", "OM",
+		"QA", "SA", "SD", "SY", "YE":
+		first = 6
+	case "MV":
+		first = 5
+	default:
+		first = 1
+	}
+	switch region {
+	case "AE", "BH", "DZ", "EG", "IL", "IQ", "JO", "KW", "LY", "OM", "QA",
+		"SA", "SD", "SY", "YE":
+		weekend = []int{5, 6}
+	case "AF", "IR":
+		weekend = []int{5}
+	case "IN", "NP":
+		weekend = []int{7}
+	default:
+		weekend = []int{6, 7}
+	}
+	// Four is the ISO rule and CLDR's default for most of Europe; one is
+	// CLDR's default everywhere else.
+	switch region {
+	case "AD", "AN", "AT", "AX", "BE", "BG", "CH", "CZ", "DE", "DK", "EE",
+		"ES", "FI", "FJ", "FO", "FR", "GB", "GF", "GG", "GI", "GP", "GR",
+		"GU", "HU", "IE", "IM", "IS", "IT", "JE", "LI", "LT", "LU", "MC",
+		"MQ", "NL", "NO", "PL", "PT", "RE", "RU", "SE", "SJ", "SK", "SM",
+		"TR", "UA", "VA":
+		minimalDays = 4
+	default:
+		minimalDays = 1
+	}
+	return
+}
+
+// zonesForRegion is the IANA zones of an ISO 3166 region, from the database's
+// own zone.tab (see tools/gencldr). An identifier names a continent and a city
+// rather than a country, so this cannot be read off the names -- Europe/Zurich
+// is Swiss and Europe/Busingen is German, and nothing in either string says so.
+func zonesForRegion(region string) []string {
+	zones, ok := cldrRegionZones()[region]
+	if !ok {
+		return nil
+	}
+	return strings.Split(zones, " ")
 }

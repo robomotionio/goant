@@ -118,6 +118,14 @@ package engine
 	emit(&b, "cldrKeywordAliasData",
 		"keyword value aliases, keyed \"<key>/<deprecated value>\".", kw)
 
+	// zone.tab is the IANA database's own country-to-zone mapping, and it is
+	// the only honest source for Intl.Locale.prototype.getTimeZones: an
+	// identifier names a continent and a city, not a country, so the answer
+	// cannot be read off the names.
+	emit(&b, "cldrRegionZonesData",
+		"IANA zones per ISO 3166 region, from zone.tab, space-separated.",
+		regionZones(filepath.Join(*dir, "zone.tab")))
+
 	// The likely-subtags value is written as a script+region pair whenever the
 	// language is unchanged, which it is for all but the und-* entries. That is
 	// most of the table and about a third of its bytes.
@@ -301,6 +309,38 @@ func keywordAliases(dir string) [][2]string {
 				}
 			}
 		}
+	}
+	return out
+}
+
+// regionZones reads zone.tab: a country code, coordinates, a zone name, and an
+// optional comment, one line per zone.
+func regionZones(path string) [][2]string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	byRegion := map[string][]string{}
+	var order []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		if _, seen := byRegion[f[0]]; !seen {
+			order = append(order, f[0])
+		}
+		byRegion[f[0]] = append(byRegion[f[0]], f[2])
+	}
+	out := make([][2]string, 0, len(order))
+	for _, r := range order {
+		zones := byRegion[r]
+		sort.Strings(zones)
+		out = append(out, [2]string{r, strings.Join(zones, " ")})
 	}
 	return out
 }

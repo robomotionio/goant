@@ -62,6 +62,7 @@ var (
 	cldrRegionAlias   = sync.OnceValue(func() map[string]string { return parseAliasTable(cldrRegionAliasData) })
 	cldrVariantAlias  = sync.OnceValue(func() map[string]string { return parseAliasTable(cldrVariantAliasData) })
 	cldrLikely        = sync.OnceValue(func() map[string]string { return parseAliasTable(cldrLikelyData) })
+	cldrRegionZones   = sync.OnceValue(func() map[string]string { return parseAliasTable(cldrRegionZonesData) })
 )
 
 // ---- subtag shapes ----
