@@ -213,7 +213,11 @@ func (rt *Runtime) initIntlLocale(intl *object) {
 		}
 
 		t.canonicalize()
-		inst := rt.newObject(rt.newTargetProto(proto))
+		np, e := rt.newTargetProtoE(proto)
+		if e != nil {
+			return mkundef(), e
+		}
+		inst := rt.newObject(np)
 		rt.objPtr(inst).setSlot(slotLocaleTag, rt.newString(t.String()))
 		return inst, nil
 	})

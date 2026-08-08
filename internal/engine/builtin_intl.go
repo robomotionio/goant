@@ -47,6 +47,14 @@ func (rt *Runtime) initIntl() {
 			if requireNew && !rt.constructing() {
 				return mkundef(), rt.typeError("Constructor Intl." + name + " requires 'new'")
 			}
+			// GetOptionsObject: the constructors added since ES2015 take an
+			// object or nothing. A primitive is a mistake rather than a bag
+			// with no properties, and they say so.
+			if requireNew {
+				if o := arg(args, 1); !o.IsUndefined() && !o.IsObjectType() {
+					return mkundef(), rt.typeError("Options must be an object")
+				}
+			}
 			requested, e := rt.canonicalizeLocaleList(arg(args, 0))
 			if e != nil {
 				return mkundef(), e
@@ -58,7 +66,13 @@ func (rt *Runtime) initIntl() {
 			// A fresh instance whose [[Prototype]] honours new.target (both `new
 			// Intl.X()` and `Intl.X()` return an instance). The tag it resolved to
 			// rides along in a slot so format() and resolvedOptions() agree.
-			inst := rt.newObject(rt.newTargetProto(proto))
+			// newTarget.prototype is an observable [[Get]] and may throw; the
+			// exception is the caller's, not something to fall back from.
+			np, e := rt.newTargetProtoE(proto)
+			if e != nil {
+				return mkundef(), e
+			}
+			inst := rt.newObject(np)
 			insto := rt.objPtr(inst)
 			insto.setSlot(slotIntlLocale, rt.newString(tag))
 			if initOpts != nil {
