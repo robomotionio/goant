@@ -1,0 +1,263 @@
+name: verify
+
+# The six platforms goant ships on, running the three things that have actually
+# found bugs in it:
+#
+#   - the unit suite, with the tier off and on. This is what found `SUB is not
+#     SUBS`, which twelve hours of fuzzing on arm64 could not: every loop the
+#     generator emits is bounded by a literal, so none of them ever needed the
+#     back edge to exit.
+#   - test262, twice per platform, gated on the DIFFERENCE between the two runs
+#     rather than on either score. A tier bug is a test that fails only with the
+#     tier on; a pass count cannot see that and a fixed threshold goes stale.
+#   - the differential fuzzer, with the interpreter as the oracle, so a
+#     disagreement is a tier bug by construction rather than a judgement call.
+#
+# Everything is CGO_ENABLED=0 except the race detector, which requires cgo.
+
+# Only on main, and only when a human puts something there.
+#
+# There is no pull_request trigger. This repository is public, so a
+# pull_request trigger runs a stranger's code on every fork's say-so, and the
+# thing being protected is not worth the ceremony of protecting it: pre-merge
+# checking is done by hand on a branch, and workflow_dispatch runs this whole
+# file against any ref when a run is wanted before a merge. What lands here is
+# what has already been merged, and this says whether main is still good.
+#
+# linux/arm64 is not here. It is covered on real Raspberry Pi hardware over
+# ssh, which is a machine this repository does not have to be trusted by.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Nightly, because the fuzzer finds more the longer it is left alone and a
+    # nightly run is the only one whose corpus is not competing with a push.
+    - cron: "0 3 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CGO_ENABLED: "0"
+  GO_VERSION: "1.26"
+  # Pinned, so a test262 change cannot turn a green run red without a commit
+  # here saying so.
+  T262_SHA: b363f29d3c43c626dc852744ad64a0b48a003693
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unit / ${{ matrix.name }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-22.04 amd64
+            runs-on: ubuntu-22.04
+          - name: ubuntu-24.04 amd64
+            runs-on: ubuntu-24.04
+          - name: windows amd64
+            runs-on: windows-latest
+          - name: macos arm64
+            runs-on: macos-15
+          - name: macos intel
+            runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # linux/arm64 has no runner here, so the least this can do is prove it
+      # still builds. What it actually does on that architecture is checked on
+      # real hardware over ssh -- `SUB is not SUBS` compiled perfectly.
+      - name: Cross-compile every shipping target
+        if: matrix.runs-on == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${t%/*} GOARCH=${t#*/} go build ./... || exit 1
+            echo "  ok $t"
+          done
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test, tier off
+        run: go test ./...
+
+      - name: Test, tier on
+        env:
+          GOANT_JIT: "1"
+          GOANT_JIT_THRESHOLD: "2"
+        run: go test -count=1 ./...
+
+      # Threshold 1 compiles on the first entry, so no site has any type
+      # feedback yet and every element access takes the generic path. It is a
+      # different program from threshold 2 and has found bugs that 2 did not.
+      - name: Test, tier on at threshold 1
+        env:
+          GOANT_JIT: "1"
+          GOANT_JIT_THRESHOLD: "1"
+        run: go test -count=1 ./...
+
+      - name: Test under GC poisoning, tier on
+        env:
+          GOANT_GC_POISON: "1"
+          GOANT_JIT: "1"
+          GOANT_JIT_THRESHOLD: "2"
+        run: go test -count=1 ./internal/engine/
+
+      - name: Race detector, tier on
+        env:
+          CGO_ENABLED: "1"
+          GOANT_JIT: "1"
+          GOANT_JIT_THRESHOLD: "2"
+        run: go test -count=1 -race ./internal/engine/
+
+  test262:
+    name: test262 / ${{ matrix.name }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-22.04 amd64
+            runs-on: ubuntu-22.04
+          - name: ubuntu-24.04 amd64
+            runs-on: ubuntu-24.04
+          - name: windows amd64
+            runs-on: windows-latest
+          - name: macos arm64
+            runs-on: macos-15
+          - name: macos intel
+            runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: goant
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # The corpus is large and pinned, so it is worth caching by the SHA it is
+      # pinned to: a cache miss costs one shallow fetch, a hit costs nothing,
+      # and moving the pin invalidates it automatically.
+      - name: Restore test262
+        id: t262-cache
+        uses: actions/cache@v4
+        with:
+          path: test262
+          key: test262-${{ env.T262_SHA }}
+
+      - name: Fetch test262
+        if: steps.t262-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          git init test262
+          cd test262
+          git remote add origin https://github.com/tc39/test262.git
+          git fetch --depth 1 origin "$T262_SHA"
+          git checkout FETCH_HEAD
+
+      - name: Build the runner
+        shell: bash
+        working-directory: goant
+        run: |
+          go build -o goant ./cmd/goant
+          go build -o goant-t262 ./cmd/goant-t262
+
+      - name: test262, tier off
+        shell: bash
+        working-directory: goant
+        run: ./goant-t262 -core -t262 ../test262 -failures ../off.txt | tail -3
+
+      - name: test262, tier on
+        shell: bash
+        working-directory: goant
+        env:
+          GOANT_JIT: "1"
+          GOANT_JIT_THRESHOLD: "2"
+        run: ./goant-t262 -core -t262 ../test262 -failures ../on.txt | tail -3
+
+      # The gate. Not the score: a score has to be kept up to date by hand and
+      # goes stale the first time someone fixes a test. What must be zero is the
+      # set of tests that fail ONLY with the tier on, because the tier is meant
+      # to change how fast a program runs and not what it computes.
+      - name: No test may fail only with the tier on
+        shell: bash
+        run: |
+          cut -f1 off.txt | sort > off.paths
+          cut -f1 on.txt  | sort > on.paths
+          if ! comm -13 off.paths on.paths | grep -q .; then
+            echo "0 tier-only failures"
+            exit 0
+          fi
+          echo "::error::tests failing only with the tier on:"
+          comm -13 off.paths on.paths | sed 's/^/  /'
+          exit 1
+
+      - name: Keep the failure lists
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test262-${{ matrix.runs-on }}
+          path: |
+            off.txt
+            on.txt
+          retention-days: 14
+
+  fuzz:
+    name: fuzz / ${{ matrix.name }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-22.04 amd64
+            runs-on: ubuntu-22.04
+          - name: ubuntu-24.04 amd64
+            runs-on: ubuntu-24.04
+          - name: windows amd64
+            runs-on: windows-latest
+          - name: macos arm64
+            runs-on: macos-15
+          - name: macos intel
+            runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Carried between runs so coverage accumulates instead of starting cold
+      # every time. Keyed by run id so each run writes its own entry and restores
+      # the most recent one — the corpus only ever grows.
+      - name: Restore the fuzz corpus
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build/fuzz
+          key: fuzz-${{ matrix.runs-on }}-${{ github.run_id }}
+          restore-keys: fuzz-${{ matrix.runs-on }}-
+
+      - name: Differential fuzz, 5 minutes
+        run: go test ./internal/engine/ -run xxx -fuzz FuzzJITAgreesWithTheInterpreter -fuzztime=5m -parallel=4
+
+      # A crasher is written under testdata/fuzz and is the whole value of the
+      # run. Without this it dies with the runner.
+      - name: Keep any failing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crasher-${{ matrix.runs-on }}
+          path: internal/engine/testdata/fuzz/**
+          if-no-files-found: ignore
+          retention-days: 30
