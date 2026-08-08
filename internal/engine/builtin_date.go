@@ -10,6 +10,7 @@ package engine
 import (
 	"math"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -294,29 +295,37 @@ func (rt *Runtime) initDateBuiltin() {
 	// fixed string: the spec constructs the formatter before it looks at the
 	// time value, so `new Date(NaN).toLocaleString("en", {timeZone: "Nope"})`
 	// throws rather than answering "Invalid Date".
-	localeFmt := func(kind dateTimeKind) func(*Runtime, Value, []Value) (Value, *ThrowError) {
+	// Specified as an Intl.DateTimeFormat built per call, so this goes through
+	// the same option handling and the same renderer rather than keeping a
+	// second one that would drift. `required` and `defaults` are what make
+	// toLocaleDateString show only a date and toLocaleTimeString only a time.
+	localeFmt := func(required, defaults string) func(*Runtime, Value, []Value) (Value, *ThrowError) {
 		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			v, e := rt.dateMs(this)
 			if e != nil {
 				return mkundef(), e
 			}
-			li, e := rt.resolveLocaleArg(arg(args, 0))
+			tags, e := rt.canonicalizeLocaleList(arg(args, 0))
 			if e != nil {
 				return mkundef(), e
 			}
-			zone, e := rt.optionTimeZone(arg(args, 1))
+			d, e := rt.initDateTimeOptionsFor(arg(args, 1), tags, required, defaults)
 			if e != nil {
 				return mkundef(), e
 			}
 			if math.IsNaN(v.Number()) {
 				return rt.internString("Invalid Date"), nil
 			}
-			return rt.newString(li.formatDateTime(kind, msInZone(v.Number(), zoneFor(zone)))), nil
+			var b strings.Builder
+			for _, p := range d.dateTimeParts(msInZone(v.Number(), zoneFor(d.timeZone))) {
+				b.WriteString(p.val)
+			}
+			return rt.newString(b.String()), nil
 		}
 	}
-	rt.defMethod(proto, "toLocaleString", 0, localeFmt(dtDateTime))
-	rt.defMethod(proto, "toLocaleDateString", 0, localeFmt(dtDate))
-	rt.defMethod(proto, "toLocaleTimeString", 0, localeFmt(dtTime))
+	rt.defMethod(proto, "toLocaleString", 0, localeFmt("any", "all"))
+	rt.defMethod(proto, "toLocaleDateString", 0, localeFmt("date", "date"))
+	rt.defMethod(proto, "toLocaleTimeString", 0, localeFmt("time", "time"))
 	// Annex-B legacy methods.
 	rt.defMethod(proto, "getYear", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		v, e := rt.dateMs(this)

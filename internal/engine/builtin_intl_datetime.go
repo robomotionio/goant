@@ -95,6 +95,14 @@ func (rt *Runtime) requireDateTimeFormat(this Value) (dateTimeOptions, *ThrowErr
 
 // initDateTimeOptions is CreateDateTimeFormat's option half.
 func (rt *Runtime) initDateTimeOptions(options Value, requested []string) (dateTimeOptions, *ThrowError) {
+	return rt.initDateTimeOptionsFor(options, requested, "any", "date")
+}
+
+// initDateTimeOptionsFor is CreateDateTimeFormat with the `required` and
+// `defaults` that Date.prototype.toLocaleDateString and toLocaleTimeString
+// pass: a formatter asked for no field of the required kind gets the default
+// set for it, which is what makes toLocaleTimeString show a time.
+func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, required, defaults string) (dateTimeOptions, *ThrowError) {
 	d := dateTimeOptions{tag: defaultLocale, numbering: "latn", calendar: "gregory", comps: map[string]string{}}
 	if len(requested) > 0 {
 		d.tag = requested[0]
@@ -212,12 +220,34 @@ func (rt *Runtime) initDateTimeOptions(options Value, requested []string) (dateT
 		d.dateStyle, d.timeStyle = dateStyle, timeStyle
 		return d, nil
 	}
-	if len(d.comps) == 0 {
-		// ToDateTimeOptions' defaults: a formatter that was asked for nothing
-		// formats the date.
-		d.comps["year"] = "numeric"
-		d.comps["month"] = "numeric"
-		d.comps["day"] = "numeric"
+	// ToDateTimeOptions: a formatter asked for no field of the required kind
+	// gets the defaults for it.
+	dateFields := []string{"weekday", "year", "month", "day"}
+	timeFields := []string{"dayPeriod", "hour", "minute", "second", "fractionalSecondDigits"}
+	has := func(fields []string) bool {
+		for _, f := range fields {
+			if _, ok := d.comps[f]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	needed := false
+	switch required {
+	case "date":
+		needed = !has(dateFields)
+	case "time":
+		needed = !has(timeFields)
+	default:
+		needed = !has(dateFields) && !has(timeFields)
+	}
+	if needed {
+		if defaults == "date" || defaults == "all" {
+			d.comps["year"], d.comps["month"], d.comps["day"] = "numeric", "numeric", "numeric"
+		}
+		if defaults == "time" || defaults == "all" {
+			d.comps["hour"], d.comps["minute"], d.comps["second"] = "numeric", "numeric", "numeric"
+		}
 	}
 	return d, nil
 }
