@@ -104,6 +104,7 @@ func (rt *Runtime) initDateTimeOptions(options Value, requested []string) (dateT
 // set for it, which is what makes toLocaleTimeString show a time.
 func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, required, defaults string) (dateTimeOptions, *ThrowError) {
 	d := dateTimeOptions{tag: defaultLocale, numbering: "latn", calendar: "gregory", comps: map[string]string{}}
+	tagHC := ""
 	if len(requested) > 0 {
 		d.tag = requested[0]
 		if t, ok := parseLangTag(requested[0]); ok {
@@ -111,7 +112,7 @@ func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, req
 				d.calendar = v
 			}
 			if v, has := t.uKeyword("hc"); has && tagContains([]string{"h11", "h12", "h23", "h24"}, v) {
-				d.hourCycle = v
+				d.hourCycle, tagHC = v, v
 			}
 		}
 	}
@@ -170,6 +171,15 @@ func (rt *Runtime) initDateTimeOptionsFor(options Value, requested []string, req
 			if li.hourCycle == "h24" {
 				d.hourCycle = "h24"
 			}
+		}
+	}
+	// -u-hc survives into the resolved locale on the same rule as -u-nu: it
+	// does when the value in use is the one the tag asked for. An hour12 or
+	// hourCycle option that changes it takes it out.
+	if tagHC != "" && d.hourCycle == tagHC {
+		if t, ok := parseLangTag(d.tag); ok {
+			t.setUKeyword("hc", tagHC)
+			d.tag = t.String()
 		}
 	}
 	id, e := rt.optionTimeZone(options)
