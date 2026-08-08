@@ -594,6 +594,61 @@ func (rt *Runtime) initIntl() {
 		})
 	})
 
+	defineService("DurationFormat", true, func(inst *object, options Value, requested []string) *ThrowError {
+		d, e := rt.initDurationOptions(options, requested)
+		if e != nil {
+			return e
+		}
+		inst.setSlot(slotIntlDurationOpts, rt.newString(d.String()))
+		return nil
+	}, func(po *object) {
+		rt.defMethod(po, "format", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			d, e := rt.requireDurationFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			rec, e := rt.durationRecord(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			var b strings.Builder
+			for _, p := range rt.durationParts(d, rt.intlLocaleOf(this), rec) {
+				b.WriteString(p.val)
+			}
+			return rt.newString(b.String()), nil
+		})
+		rt.defMethod(po, "formatToParts", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			d, e := rt.requireDurationFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			rec, e := rt.durationRecord(arg(args, 0))
+			if e != nil {
+				return mkundef(), e
+			}
+			return rt.partsArray(rt.durationParts(d, rt.intlLocaleOf(this), rec)), nil
+		})
+		rt.defMethod(po, "resolvedOptions", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			d, e := rt.requireDurationFormat(this)
+			if e != nil {
+				return mkundef(), e
+			}
+			o := rt.newPlainObject()
+			oo := rt.objPtr(o)
+			oo.defineOwn("locale", rt.newString(d.tag), attrDefault)
+			oo.defineOwn("numberingSystem", rt.newString("latn"), attrDefault)
+			oo.defineOwn("style", rt.newString(d.style), attrDefault)
+			for i, unit := range durationUnits {
+				oo.defineOwn(unit, rt.newString(d.unitStyle[i]), attrDefault)
+				oo.defineOwn(unit+"Display", rt.newString(d.display[i]), attrDefault)
+			}
+			if d.fracDigits >= 0 {
+				oo.defineOwn("fractionalDigits", mknum(float64(d.fracDigits)), attrDefault)
+			}
+			return o, nil
+		})
+	})
+
 	rt.defMethod(io, "getCanonicalLocales", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		tags, e := rt.canonicalizeLocaleList(arg(args, 0))
 		if e != nil {
