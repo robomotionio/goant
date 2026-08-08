@@ -86,16 +86,14 @@ func (p *tparse) digits(n int) (int, bool) {
 
 // ---- the pieces ----
 
-// signHere reads a sign, accepting the real minus sign as well as the hyphen
-// where the grammar allows it.
-func (p *tparse) signHere(unicodeMinus bool) (int, bool) {
+// signHere reads a sign. The typographic minus is not one: Temporal's grammar
+// says ASCII, and the suite checks that "\u2212009999-11-18" is a RangeError
+// rather than the year 9999 BC.
+func (p *tparse) signHere() (int, bool) {
 	switch {
 	case p.accept('+'):
 		return 1, true
 	case p.accept('-'):
-		return -1, true
-	case unicodeMinus && strings.HasPrefix(p.s[p.i:], "−"):
-		p.i += len("−")
 		return -1, true
 	}
 	return 1, false
@@ -104,7 +102,7 @@ func (p *tparse) signHere(unicodeMinus bool) (int, bool) {
 // year reads a four-digit year or a signed six-digit one.
 func (p *tparse) year() (int, bool) {
 	start := p.i
-	if sign, ok := p.signHere(true); ok {
+	if sign, ok := p.signHere(); ok {
 		v, good := p.digits(6)
 		if !good {
 			p.i = start
@@ -227,7 +225,7 @@ func (p *tparse) timeSpec() (t isoTimeRec, fields int, sep bool, ok bool) {
 // the offset in nanoseconds and the text it was written as.
 func (p *tparse) utcOffset(subMinute bool) (ns int64, text string, ok bool) {
 	start := p.i
-	sign, has := p.signHere(true)
+	sign, has := p.signHere()
 	if !has {
 		return 0, "", false
 	}
@@ -346,7 +344,7 @@ func isAnnotationKeyChar(b byte) bool {
 // annotations reads the trailing [key=value] group. It answers the calendar it
 // found, and refuses a string whose critical annotation it does not understand.
 func (p *tparse) annotations() (calendar string, ok bool) {
-	seenCalendar := false
+	calendars, criticalCalendar := 0, false
 	for p.peek() == '[' {
 		start := p.i
 		p.i++
@@ -385,12 +383,15 @@ func (p *tparse) annotations() (calendar string, ok bool) {
 			return "", false
 		}
 		if key == "u-ca" {
-			// A second calendar is allowed but ignored; a second one marked
-			// critical is a contradiction and the string is rejected.
-			if !seenCalendar {
+			// A second calendar is allowed and ignored, but only where none of
+			// them was marked critical: a string that insists on a calendar
+			// and then names another one is asking for two things at once,
+			// whichever order they were written in.
+			calendars++
+			criticalCalendar = criticalCalendar || critical
+			if calendars == 1 {
 				calendar = value
-				seenCalendar = true
-			} else if critical {
+			} else if criticalCalendar {
 				return "", false
 			}
 		} else if critical {
@@ -446,6 +447,12 @@ func parseTemporalDateString(s string) (temporalParse, bool) {
 	if !ok {
 		return r, false
 	}
+	// A Z says the reading was taken in UTC, which is a fact about an instant
+	// and not about a date. The types that carry no zone reject it rather than
+	// quietly dropping it.
+	if r.z {
+		return r, false
+	}
 	if !isValidISODate(r.year, r.month, r.day) {
 		return r, false
 	}
@@ -456,7 +463,7 @@ func parseTemporalDateString(s string) (temporalParse, bool) {
 // of which it keeps the time.
 func parseTemporalTimeString(s string) (temporalParse, bool) {
 	if r, ok := parseISODateTime(s); ok {
-		if !r.hasTime {
+		if !r.hasTime || r.z {
 			return r, false
 		}
 		return r, true
@@ -620,7 +627,7 @@ func parseTimeZoneIdentifier(s string) (name string, offsetNs int64, isOffset bo
 func parseTemporalDurationString(s string) (fields [10]float64, ok bool) {
 	p := &tparse{s: s}
 	sign := 1.0
-	if sg, has := p.signHere(true); has {
+	if sg, has := p.signHere(); has {
 		sign = float64(sg)
 	}
 	if !p.accept('P') && !p.accept('p') {
