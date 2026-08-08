@@ -61,6 +61,12 @@ func isExtender(r rune) bool {
 
 func isRegionalIndicator(r rune) bool { return r >= 0x1F1E6 && r <= 0x1F1FF }
 
+// The Hangul jamo classes of UAX #29. A syllable is L* V+ T* and counts as one
+// grapheme however many code points spell it.
+func isHangulLead(r rune) bool  { return r >= 0x1100 && r <= 0x115F }
+func isHangulVowel(r rune) bool { return r >= 0x1160 && r <= 0x11A7 }
+func isHangulTrail(r rune) bool { return r >= 0x11A8 && r <= 0x11FF }
+
 func isWordChar(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' ||
 		unicode.In(r, unicode.Mn, unicode.Mc)
@@ -73,21 +79,25 @@ func segmentEnd(units []rune, i int, granularity string) (int, bool) {
 	case "word":
 		r, w := codePointAt(units, i)
 		if isWordChar(r) {
-			j := i + w
+			j, prev := i+w, r
 			for j < len(units) {
 				r2, w2 := codePointAt(units, j)
-				// An apostrophe inside a word ("don't") belongs to it; one at
-				// the end does not.
 				if isWordChar(r2) {
-					j += w2
+					j, prev = j+w2, r2
 					continue
 				}
-				// An apostrophe or a decimal point inside a run keeps it one
-				// word: "don't" and "1.23" are each one thing.
-				if r2 == '\'' || r2 == 0x2019 || r2 == '.' || r2 == ',' {
+				// An apostrophe inside a word keeps it one word, and a point
+				// or a comma does the same BETWEEN DIGITS: "don't" and "1.23"
+				// are each one thing, and "a,b" is two. One at the end of a
+				// run belongs to neither side.
+				joins := r2 == '\'' || r2 == 0x2019
+				if (r2 == '.' || r2 == ',') && unicode.IsDigit(prev) {
+					joins = true
+				}
+				if joins {
 					if k := j + w2; k < len(units) {
 						if r3, _ := codePointAt(units, k); isWordChar(r3) {
-							j += w2
+							j, prev = j+w2, r2
 							continue
 						}
 					}
@@ -139,6 +149,25 @@ func segmentEnd(units []rune, i int, granularity string) (int, bool) {
 		}
 		if isRegionalIndicator(r) && j < len(units) {
 			if r2, w2 := codePointAt(units, j); isRegionalIndicator(r2) {
+				j += w2
+			}
+		}
+		// A Hangul syllable written as jamo is one grapheme: a leading
+		// consonant, then vowels, then trailing consonants, in that order.
+		if isHangulLead(r) {
+			for j < len(units) {
+				r2, w2 := codePointAt(units, j)
+				if !isHangulVowel(r2) && !isHangulTrail(r2) {
+					break
+				}
+				j += w2
+			}
+		} else if isHangulVowel(r) {
+			for j < len(units) {
+				r2, w2 := codePointAt(units, j)
+				if !isHangulVowel(r2) && !isHangulTrail(r2) {
+					break
+				}
 				j += w2
 			}
 		}

@@ -293,28 +293,23 @@ func (rt *Runtime) initNumberOptions(options Value, requested []string) (numberO
 			return n, e
 		}
 		if !v.IsUndefined() {
-			switch {
-			case v.IsNull():
-				// null and false are the same answer here: no grouping.
+			// The order is the specification's: `true` first, then anything
+			// falsy, then the strings. "true" and "false" as STRINGS are the
+			// default rather than an error, which is a compatibility rule for
+			// code written before the option took strings at all.
+			switch s, e := rt.toStringValue(v); {
+			case e != nil:
+				return n, e
+			case v.Type() == TBool && rt.toBoolean(v):
+				n.useGrouping = "always"
+			case !rt.toBoolean(v):
 				n.useGrouping = ""
-			case v.Type() == TBool:
-				if rt.toBoolean(v) {
-					n.useGrouping = "always"
-				} else {
-					n.useGrouping = ""
-				}
-			case v.IsString() && rt.strGo(v) == "":
-				n.useGrouping = ""
+			case rt.strGo(s) == "true" || rt.strGo(s) == "false":
+				n.useGrouping = "auto"
+			case tagContains([]string{"auto", "always", "min2"}, rt.strGo(s)):
+				n.useGrouping = rt.strGo(s)
 			default:
-				s, e := rt.toStringValue(v)
-				if e != nil {
-					return n, e
-				}
-				got := rt.strGo(s)
-				if !tagContains([]string{"auto", "always", "min2"}, got) {
-					return n, rt.rangeError("Invalid value " + got + " for option useGrouping")
-				}
-				n.useGrouping = got
+				return n, rt.rangeError("Invalid value " + rt.strGo(s) + " for option useGrouping")
 			}
 		}
 	}
