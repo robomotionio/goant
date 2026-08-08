@@ -354,7 +354,7 @@ repository; see [Reproducing](#reproducing).
 
 Read the pure-Go engines against each other. node, deno and bun are here as the
 JIT reference, not as peers — the distance to them is what a bytecode
-interpreter costs, and closing it is what the JIT tier is for.
+interpreter costs, and how much of it the compiled tier closes.
 
 ### Octane 2.0
 
@@ -362,54 +362,75 @@ The suite the cross-engine comparisons standardise on, and what
 [ahaoboy/js-engine-benchmark](https://github.com/ahaoboy/js-engine-benchmark)
 scores. Higher is better.
 
-| Benchmark    |    goant |     goja |   node |   deno |    bun | goant vs fastest JIT |
-| ------------ | -------: | -------: | -----: | -----: | -----: | -------------------: |
-| Richards     |      199 |  **216** |  34924 |  34352 |  41889 |                 210× |
-| DeltaBlue    |      232 |  **273** |  99554 |  99851 |  58488 |                 430× |
-| Crypto       |  **134** |      129 |  39846 |  42729 |  46841 |                 350× |
-| RayTrace     |  **382** |      298 |  73333 |  77477 | 115956 |                 304× |
-| EarleyBoyer  |  **597** |      537 |  65363 |  62784 |  72582 |                 122× |
-| RegExp       |      145 |  **215** |   9346 |   9748 |  10776 |                  74× |
-| Splay        |     1925 | **2201** |  43982 |  43465 |  43845 |                  23× |
-| NavierStokes |  **312** |      205 |  32467 |  32550 |  34178 |                 110× |
+| Benchmark    |    goant | goant+JIT |     goja |   node |   deno |    bun | goant+JIT vs fastest |
+| ------------ | -------: | --------: | -------: | -----: | -----: | -----: | -------------------: |
+| Richards     |  **218** |      1393 |      216 |  34924 |  34352 |  41889 |                  30× |
+| DeltaBlue    |      251 |      1049 |  **273** |  99554 |  99851 |  58488 |                  95× |
+| Crypto       |  **241** |      2371 |      129 |  39846 |  42729 |  46841 |                  20× |
+| RayTrace     |  **467** |       647 |      298 |  73333 |  77477 | 115956 |                 179× |
+| EarleyBoyer  |  **617** |       967 |      537 |  65363 |  62784 |  72582 |                  75× |
+| RegExp       |  **255** |       302 |      215 |   9346 |   9748 |  10776 |                  36× |
+| Splay        |     1989 |      2414 | **2201** |  43982 |  43465 |  43845 |                  18× |
+| NavierStokes |  **427** |      6123 |      205 |  32467 |  32550 |  34178 |                 5.6× |
 
-**goant and goja are level**: four each, and a geometric mean of 1.005 across
-the eight. goant's lead is largest on NavierStokes (+52%) and RayTrace (+28%),
-which are float and allocation heavy; goja's is largest on RegExp (+48%), where
-goant's remaining cost is the per-match glue rather than the matcher itself.
+`goant` is the interpreter, which is what runs unless a host asks for
+[the tier](#the-compiled-tier); `goant+JIT` is the same binary with
+`WithJIT(true)`. Bold marks the higher of the two pure-Go interpreters, the only
+like-for-like pair here. The two goant columns are a within-machine A/B measured
+together; the other four are the earlier run on an identically specified
+instance, and the environment note below says exactly what differs.
 
-Against the JIT engines the gap runs from 23× (Splay, which is dominated by
-allocation and GC) to 430× (DeltaBlue, which is polymorphic dispatch a JIT can
-inline and an interpreter cannot). That is the honest shape of an interpreter
-against a tiered JIT.
+Against goja the interpreter is now ahead on six of the eight, by a geometric
+mean of **1.27×**, with Richards a tie inside run-to-run noise. The lead is
+largest on NavierStokes (2.1×) and Crypto (1.9×). goja keeps DeltaBlue and
+Splay, the two most allocation-dominated workloads in the set. With the tier on,
+goant is **4.1×** ahead of goja across the eight.
 
-#### With the compiled tier on
+What the tier is worth varies by an order of magnitude inside one suite:
+NavierStokes 14×, Crypto 9.8×, Richards 6.4×, DeltaBlue 4.2× — then EarleyBoyer
+1.6×, RayTrace 1.4×, Splay 1.2×, RegExp 1.2×. The pattern is not subtle. A
+baseline compiler makes arithmetic, property access and calls cheaper; it does
+not make the regex matcher faster and it does not make the collector faster, so
+a matcher benchmark and a GC benchmark barely move.
 
-The table above is the interpreter, which is what runs unless a host asks for
-[the tier](#the-compiled-tier). Turned on, measured as a within-machine A/B on
-one idle 8-core VM — so these are ratios against the same binary on the same
-box, not entries in the table above, which was measured elsewhere:
+Against the JIT engines the remaining gap runs from **5.6×** on NavierStokes to
+**179×** on RayTrace, against 22× to 398× for the interpreter alone. Still an
+order of magnitude, and still the reason to reach for one of them when the work
+is genuinely compute-bound — but no longer the two orders it was.
+
+#### The other seven workloads
+
+Octane has fifteen. The table above is the eight that
+[ahaoboy/js-engine-benchmark](https://github.com/ahaoboy/js-engine-benchmark)
+scores, which is what makes it comparable with what other engines publish. The
+remaining seven, from the same two runs, goant only:
+
+| Benchmark  |  goant | goant+JIT |  tier |
+| ---------- | -----: | --------: | ----: |
+| zlib       |    315 |      2820 |  9.0× |
+| mandreel   |    417 |      3205 |  7.7× |
+| gbemu      |   1252 |      4946 |  4.0× |
+| box2d      |    945 |      2715 |  2.9× |
+| pdfjs      |   1129 |      1974 |  1.7× |
+| typescript |   3026 |      4887 |  1.6× |
+| code-load  |  12760 |     11876 | 0.93× |
+
+zlib, mandreel and gbemu are emscripten output over typed arrays — the shape a
+template JIT does best on, and not what most hand-written JavaScript looks like.
+Worth reporting apart from the rest for that reason:
 
 | | tier on vs off |
 | --- | ---: |
-| asm.js-shaped (zlib, mandreel, gbemu) | **6.5×** |
+| the three asm.js-shaped workloads | **6.5×** |
 | the other twelve | **2.6×** |
 | all fifteen | **3.1×** |
 
-Reported split because the three asm.js workloads are emscripten output over
-typed arrays, which is the shape a template JIT does best on and not what most
-hand-written JavaScript looks like. `code-load` is 0.93× — the tier makes it
-slightly worse, which is what a benchmark that measures parsing and compiling
-rather than running should do.
+`code-load` is the one workload the tier makes worse, which is what a benchmark
+that measures parsing and compiling rather than running should do.
 
 On the workload this engine was actually built for — short flows on a pooled
-`Runtime`, with an `Invocation` per run — it measured **2.9×**, and the default
-threshold needed no tuning.
-
-Multiply through and the distance to the JIT engines becomes roughly 8× to 140×
-rather than 23× to 430×. Still an order of magnitude, and still the reason to
-reach for a JIT engine when the work is genuinely compute-bound — but no longer
-the two orders it was.
+`Runtime`, with an `Invocation` per run — the tier measured **2.9×**, and the
+default threshold needed no tuning.
 
 On tight-loop microbenchmarks (`./goant-bench`, our own workloads rather than a
 neutral suite) goja is ahead of goant on most, by roughly 1.3–1.8×. Octane is
@@ -467,6 +488,15 @@ scale.
 Octane scores are the best of two runs (the suite already repeats internally to
 a stable score); the JIT engines carry more run-to-run variance than the two
 interpreters do.
+
+The `goant` and `goant+JIT` columns were measured later and separately, on a
+second `Standard_D8s_v5` of the same image with Go 1.26.3: one build, run with
+the tier off and on, best of five each, `-refresh` on both arms so neither could
+read a cached score. Two independent runs of the tier-on arm eighty minutes
+apart agreed to within 2.5% on fourteen of the fifteen workloads and 6.5% on
+Splay. They are commit `98a82b4`; the only commit after it that touches amd64
+code at all is the per-Runtime JIT flag, which turns one global read into one
+field read at three sites.
 
 </details>
 
