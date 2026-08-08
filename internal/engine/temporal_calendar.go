@@ -452,9 +452,10 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 
 	// candidate is where the start lands after so many years and months, with
 	// the day left as it was however long the month turns out to be.
-	candidate := func(years, months int64) (int, int, int) {
+	candidate := func(years, months int64) (int, int, int, bool) {
 		y := c1.year + int(years)
 		m, ok := cal.monthFromCode(strconv.Itoa(y), c1.code)
+		exact := ok
 		if !ok {
 			if fallback, good := leapMonthFallback(id, c1.code); good {
 				m, ok = cal.monthFromCode(strconv.Itoa(y), fallback)
@@ -476,17 +477,33 @@ func calendarDateUntil(id string, one, two isoDateRec, largestUnit int) dateDura
 			y--
 			m += cal.monthsInYear(y)
 		}
-		return y, m, c1.day
+		return y, m, c1.day, exact
 	}
-	// past reports whether a candidate has gone beyond the far end.
+	// past reports whether a candidate has gone beyond the far end. A month the
+	// target year has not got counts as beyond it: a year from a leap month is
+	// not a year, it is the twelve months that reach the month standing in its
+	// place.
 	past := func(years, months int64) bool {
-		y, m, d := candidate(years, months)
+		y, m, d, exact := candidate(years, months)
+		// A leap month the target year has not got sits beside the month that
+		// stands in for it rather than on it: half a month after the one it
+		// repeats, or -- for Adar I, which is not a repeat -- half a month
+		// before the Adar that takes its place. Months are doubled so the half
+		// is a whole number.
+		mine, theirs := 2*m, 2*c2.month
+		if !exact && months == 0 {
+			if id == "hebrew" {
+				mine--
+			} else {
+				mine++
+			}
+		}
 		c := 0
 		switch {
 		case y != c2.year:
 			c = sign64(int64(y - c2.year))
-		case m != c2.month:
-			c = sign64(int64(m - c2.month))
+		case mine != theirs:
+			c = sign64(int64(mine - theirs))
 		default:
 			c = sign64(int64(d - c2.day))
 		}

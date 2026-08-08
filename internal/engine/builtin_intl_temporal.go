@@ -72,6 +72,11 @@ func withTemporalDefaults(d dateTimeOptions, kind temporalKind) dateTimeOptions 
 	case "all":
 		set("year", "month", "day", "hour", "minute", "second")
 	}
+	if kind == kindZonedDateTime {
+		// A zoned reading says where it was read, or it says nothing that
+		// distinguishes it from a plain one.
+		out.comps["timeZoneName"] = "short"
+	}
 	return out
 }
 

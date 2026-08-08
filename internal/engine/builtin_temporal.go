@@ -492,12 +492,23 @@ func (rt *Runtime) toCalendarID(v Value) (string, *ThrowError) {
 		return "", rt.typeError("calendar must be a string")
 	}
 	s := rt.strGo(v)
-	// A calendar may also arrive as a whole date string with a [u-ca=] on it.
-	id, ok := canonicalCalendarID(s)
-	if !ok {
-		return "", rt.rangeError("invalid calendar identifier: " + s)
+	if id, ok := canonicalCalendarID(s); ok {
+		return id, nil
 	}
-	return id, nil
+	// It may instead be a whole Temporal string with a [u-ca=] on the end,
+	// which names its calendar the same way.
+	for _, parse := range []func(string) (temporalParse, bool){
+		parseISODateTime, parseTemporalTimeString,
+		parseTemporalYearMonthString, parseTemporalMonthDayString,
+	} {
+		if p, ok := parse(s); ok {
+			if id, good := calendarFromParse(p); good {
+				return id, nil
+			}
+			break
+		}
+	}
+	return "", rt.rangeError("invalid calendar identifier: " + s)
 }
 
 // canonicalCalendarID accepts the identifier in any case and answers the one
