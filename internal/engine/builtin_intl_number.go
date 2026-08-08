@@ -432,7 +432,9 @@ func numberPartsOf(n numberOptions, li localeInfo, v float64, digits string) []n
 			add("plusSign", "+")
 		}
 	case "exceptZero":
-		if !zero {
+		// NaN is not a number that is above or below nothing, so it takes no
+		// sign here either.
+		if !zero && !nan {
 			if neg {
 				add("minusSign", li.minus)
 			} else {
@@ -539,12 +541,13 @@ func withStyleAffixes(n numberOptions, parts []numberPart) []numberPart {
 		// sign writes a negative amount in parentheses instead of with a minus
 		// -- which means taking the minus back out. Both are en's rules; CLDR
 		// carries a pattern per locale.
-		neg := false
-		if len(parts) > 0 && parts[0].typ == "minusSign" {
-			neg = true
+		neg, signed := false, false
+		if len(parts) > 0 && (parts[0].typ == "minusSign" || parts[0].typ == "plusSign") {
+			signed = true
+			neg = parts[0].typ == "minusSign"
 		}
 		if n.currencySign == "accounting" && neg {
-			parts = parts[1:]
+			parts, signed = parts[1:], false
 		}
 		text := currencyText(n.currency, n.currencyDisplay)
 		out := []numberPart{{"currency", text}}
@@ -555,8 +558,9 @@ func withStyleAffixes(n numberOptions, parts []numberPart) []numberPart {
 			out = append([]numberPart{{"literal", "("}}, out...)
 			return append(append(out, parts...), numberPart{"literal", ")"})
 		}
-		if neg {
-			// The minus belongs outside the symbol: -$987.00, not $-987.00.
+		if signed {
+			// The sign belongs outside the symbol: -$987.00 and +$0.00, not
+			// $-987.00 and $+0.00.
 			return append(append([]numberPart{parts[0]}, out...), parts[1:]...)
 		}
 		return append(out, parts...)

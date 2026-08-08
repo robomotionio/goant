@@ -212,6 +212,11 @@ func roundToSignificant(intPart, frac string, maxSig, minSig int) (string, strin
 			sig = 0
 		}
 	}
+	// Zero has one significant digit and it is already written: padding it out
+	// to the minimum would make "0" into "0.0", which says no more than "0".
+	if sig == 0 {
+		return intPart, strings.TrimRight(frac, "0")
+	}
 	for sig < minSig {
 		frac += "0"
 		sig++
