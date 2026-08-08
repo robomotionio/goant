@@ -202,10 +202,14 @@ func lunisolarID(id string) bool { return id == "chinese" || id == "dangi" }
 // names a leap month may not occur for decades, so the search runs backwards
 // from the reference year first and then forwards -- which is how M09L in the
 // Chinese calendar comes to be dated 2014 when every other month is dated 1972.
+// The window is the one the suite states outright: a leap month and day that
+// has not occurred since 1900 and will not occur before 2035 is one the
+// calendar does not offer, whatever an astronomical calculation says about
+// 2052. Past that the implementations stop agreeing.
 const (
 	monthDayRefDay   = 1972
 	monthDaySearchLo = 1900
-	monthDaySearchHi = 2100
+	monthDaySearchHi = 2034
 )
 
 // calendarMonthDayFromFields is a month and a day with no year. The result

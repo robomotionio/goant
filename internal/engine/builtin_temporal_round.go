@@ -427,7 +427,12 @@ func (rt *Runtime) differenceISODateTime(a, b isoDateTimeRec, calendar string,
 	dateSign := compareISODate(b.date, a.date)
 	adjusted := a.date
 	if dateSign == -timeSign && timeSign != 0 {
-		adjusted = epochDaysToISODate(a.date.epochDays() + timeSign)
+		// The clock reading runs the other way from the dates, so the start
+		// borrows a day and the time duration is paid it back: from the sixth
+		// at eleven to the seventh at nine is not a day and minus two hours,
+		// it is twenty-two hours. The day borrowed moves the start towards the
+		// end, which is the direction the dates run.
+		adjusted = epochDaysToISODate(a.date.epochDays() - timeSign)
 		timeDur = add24HourDays(timeDur, int64(-timeSign))
 	}
 	dateLargest := largerUnit(unitDay, largestUnit)
