@@ -38,6 +38,18 @@ func buildRunner(t *testing.T) string {
 // directories. Encoding it into the filename does not work: zone names contain
 // both "/" and "_", so America/New_York and America/New/York would collide.
 func TestMatchesV8(t *testing.T) {
+	// Not on Windows: Go does not consult TZ there. time.Local comes from the
+	// OS through GetDynamicTimeZoneInformation, so setting TZ per case — which
+	// is the only way this test can put the child process in a given zone —
+	// changes nothing, and every case compares the runner's own zone against a
+	// New York expectation.
+	//
+	// The engine is not what is unportable here; the harness is. These
+	// expectations pin goant's Date and Intl output against the V8 the robot
+	// used to run, and that comparison is just as valid measured on unix.
+	if runtime.GOOS == "windows" {
+		t.Skip("Go ignores TZ on Windows, so this harness cannot select a zone there")
+	}
 	runner := buildRunner(t)
 
 	var cases [][2]string // {zone, script}
