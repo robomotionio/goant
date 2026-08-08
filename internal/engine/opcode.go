@@ -250,6 +250,7 @@ const (
 	OpIsUndef
 	OpIsNull
 	OpImport
+	OpImportSource
 	OpImportSync
 	OpImportDefault
 	OpImportNamed
@@ -275,7 +276,7 @@ const (
 	// is an Object or null (the protoParent check).
 	OpChkProto
 
-	NumOpcodes = 215
+	NumOpcodes = 216
 )
 
 // Per-opcode JIT metadata flags (ant OP_FLAG / SV_OPF_*).
@@ -500,6 +501,7 @@ var opTable = [NumOpcodes]opInfo{
 	OpIsUndef:                     {Name: "IS_UNDEF", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: OpfJitEligible | OpfJitInlineable},
 	OpIsNull:                      {Name: "IS_NULL", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: OpfJitEligible | OpfJitInlineable},
 	OpImport:                      {Name: "IMPORT", Size: 1, NPop: 2, NPush: 1, Format: FmtNone, Flags: 0},
+	OpImportSource:                {Name: "IMPORT_SOURCE", Size: 1, NPop: 2, NPush: 1, Format: FmtNone, Flags: 0},
 	OpImportSync:                  {Name: "IMPORT_SYNC", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: 0},
 	OpImportDefault:               {Name: "IMPORT_DEFAULT", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: OpfJitEligible},
 	OpImportNamed:                 {Name: "IMPORT_NAMED", Size: 5, NPop: 1, NPush: 1, Format: FmtAtom, Flags: OpfJitEligible},

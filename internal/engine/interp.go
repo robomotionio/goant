@@ -1673,6 +1673,21 @@ running:
 				}
 			}
 			ip++
+		case OpImportSource:
+			// import.source() asks for the module's source rather than its
+			// namespace. This engine has no source phase, so the honest answer
+			// is a rejected promise -- handing back the namespace instead
+			// would be a different module object wearing the right shape. The
+			// specifier is still coerced first, because that is observable.
+			pop() // options
+			specifier := pop()
+			if _, e := rt.toStringValue(specifier); e != nil {
+				push(rt.rejectedPromise(e.Value))
+			} else {
+				push(rt.rejectedPromise(rt.syntaxError(
+					"import.source is not supported: this module has no source phase").Value))
+			}
+			ip++
 		case OpImportSync:
 			// Static import: load the requested module and leave its namespace
 			// object on the stack for the importing frame to keep in a local.

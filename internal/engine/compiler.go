@@ -1329,7 +1329,11 @@ func (c *compiler) compileExpr(n *Node) {
 		} else {
 			c.emit(OpUndef)
 		}
-		c.emit(OpImport)
+		if n.Num == 1 {
+			c.emit(OpImportSource)
+		} else {
+			c.emit(OpImport)
+		}
 	case NSpread:
 		// A spread element (`...x`) is only valid inside an array literal, argument
 		// list, or object literal (all handled before reaching here). Anywhere else

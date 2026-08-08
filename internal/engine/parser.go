@@ -1387,12 +1387,22 @@ func (p *parser) parseImportExpr() *Node {
 		// import.defer(...) / import.source(...) — the deferred-module and
 		// module-source ImportCall proposals; both parse as a dynamic import.
 		if p.next() == TokIdentifier && ((p.tlen() == 5 && p.tokStr() == "defer") || (p.tlen() == 6 && p.tokStr() == "source")) {
+			source := p.tlen() == 6
 			p.consume() // 'defer' | 'source'
 			if p.next() != TokLParen {
 				p.errorf("import.defer / import.source must be called with a specifier")
 				return p.mk(NEmpty)
 			}
-			return p.parseImportCallArgs()
+			n := p.parseImportCallArgs()
+			if source && n.Kind == NImport {
+				// The source phase asks for the module's SOURCE rather than
+				// its namespace, which is a different thing to hand back and
+				// one this engine has not got. Deferred evaluation, on the
+				// other hand, still ends in a namespace, so import.defer is a
+				// fair enough plain import.
+				n.Num = 1
+			}
+			return n
 		}
 		p.errorf("'import.meta' may only appear in a module")
 		return p.mk(NEmpty)
