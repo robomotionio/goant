@@ -240,6 +240,10 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 			break
 		}
 	}
+	// The sign belongs to the first unit that gets written, as a minusSign
+	// part inside its number -- not as a literal in front of the whole thing.
+	// "-1 hr, 30 min" is one negative duration, not a minus and a duration.
+	signPending := neg
 	for i, unit := range durationUnits {
 		v := math.Abs(rec[i])
 		style := d.unitStyle[i]
@@ -253,6 +257,11 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 			}
 		}
 		singular := strings.TrimSuffix(unit, "s")
+		signed := v
+		if signPending {
+			signed = -v
+			signPending = false
+		}
 		if isNumericStyle(style) {
 			n := defaultNumberOptions()
 			n.tag = d.tag
@@ -263,7 +272,7 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 			if len(numericRun) > 0 {
 				numericRun = append(numericRun, relPart{numberPart{"literal", ":"}, ""})
 			}
-			for _, p := range numberParts(n, li, v) {
+			for _, p := range numberParts(n, li, signed) {
 				numericRun = append(numericRun, relPart{p, singular})
 			}
 			continue
@@ -275,7 +284,7 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 		n.unit = singular
 		n.unitDisplay = style
 		var group []relPart
-		for _, p := range numberParts(n, li, v) {
+		for _, p := range numberParts(n, li, signed) {
 			group = append(group, relPart{p, singular})
 		}
 		groups = append(groups, group)
@@ -289,11 +298,7 @@ func (rt *Runtime) durationParts(d durationOptions, li localeInfo, rec [10]float
 	if d.style == "narrow" {
 		l.style = "narrow"
 	}
-	parts := joinDurationGroups(l, groups)
-	if neg && len(parts) > 0 {
-		parts = append([]relPart{{numberPart{"literal", li.minus}, ""}}, parts...)
-	}
-	return parts
+	return joinDurationGroups(l, groups)
 }
 
 // joinDurationGroups puts the list patterns' literals between the per-unit

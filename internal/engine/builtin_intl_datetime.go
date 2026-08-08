@@ -282,10 +282,28 @@ func (d dateTimeOptions) dtFieldText(comp, style string, t time.Time) string {
 		}
 		return strconv.Itoa(t.Day())
 	case "dayPeriod":
-		if t.Hour() < 12 {
-			return "AM"
+		// The standalone dayPeriod component is not AM/PM: CLDR names the
+		// parts of the day, and English has six of them plus the two exact
+		// moments. AM/PM is what goes after an hour, and that is emitted
+		// separately.
+		// Noon is a moment with a name of its own; midnight is not one in
+		// English -- CLDR calls 00:00 "at night", and only the `b` skeleton,
+		// which this option is not, ever says "midnight".
+		h, m, sec := t.Hour(), t.Minute(), t.Second()
+		if h == 12 && m == 0 && sec == 0 && t.Nanosecond() == 0 {
+			return "noon"
 		}
-		return "PM"
+		switch {
+		case h < 6:
+			return "at night"
+		case h < 12:
+			return "in the morning"
+		case h < 18:
+			return "in the afternoon"
+		case h < 21:
+			return "in the evening"
+		}
+		return "at night"
 	case "hour":
 		h := t.Hour()
 		switch d.resolvedHourCycle() {
@@ -469,9 +487,14 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 			out = append(out, numberPart{"fractionalSecond",
 				d.dtFieldText("fractionalSecondDigits", d.comps["fractionalSecondDigits"], t)})
 		}
-		// The day period says which half of the day the HOUR is in. A pattern
-		// with no hour in it has nothing for it to qualify.
-		if hc := d.resolvedHourCycle(); hasHour && (hc == "h11" || hc == "h12") {
+		// A day period that was asked for by name replaces AM/PM rather than
+		// joining it: "12 at night", not "12 AM at night". And AM/PM itself
+		// says which half of the day the HOUR is in, so a pattern with no hour
+		// has nothing for it to qualify.
+		if style, named := d.comps["dayPeriod"]; named && hasHour {
+			lit(" ")
+			out = append(out, numberPart{"dayPeriod", d.dtFieldText("dayPeriod", style, t)})
+		} else if hc := d.resolvedHourCycle(); hasHour && (hc == "h11" || hc == "h12") {
 			lit(" ")
 			out = append(out, numberPart{"dayPeriod", d.dtFieldText("dayPeriod", "short", t)})
 		}
@@ -481,6 +504,7 @@ func (d dateTimeOptions) dateTimeParts(t time.Time) []numberPart {
 		}
 		field("dayPeriod")
 	}
+
 	if _, ok := d.comps["timeZoneName"]; ok {
 		lit(" ")
 		field("timeZoneName")
