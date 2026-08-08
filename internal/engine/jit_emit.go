@@ -2909,6 +2909,29 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 				// Not routed through jitCatch, unlike a throw: termination is a
 				// control throw precisely so a script cannot swallow its own
 				// cancellation in a catch or resume itself in a finally.
+				//
+				// Collecting is the other half of what the comment above claims
+				// and the half that was missing. The interpreter's back edge does
+				// exactly this — backEdgeWantsGC, then collect — and a compiled
+				// loop did neither, so it never triggered a sweep at all.
+				//
+				// That is what let a compiled loop outrun the memory limit. The
+				// limit is judged on liveBytes, which is what SURVIVED the last
+				// sweep, precisely so that a script allocating a great deal and
+				// keeping almost none of it still passes. No sweep means
+				// liveBytes never moves, so reserveBytes compares every new
+				// allocation against a stale figure from before the loop began
+				// and never finds the budget exhausted. `held.push(...)` twenty
+				// million times ran to the host's timeout instead of stopping,
+				// and the host reported a timeout, which sends whoever reads it
+				// looking for the wrong problem.
+				//
+				// Ordering matters: collect first, because the collection is what
+				// recomputes liveBytes and sets the memory interrupt, and the
+				// test below is what acts on it.
+				if rt.backEdgeWantsGC() {
+					rt.collect()
+				}
 				if rt.interruptPending() {
 					rt.jitDepth = base
 					rt.dropOpenUpvals(rt.frameDepth)
