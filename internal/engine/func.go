@@ -69,7 +69,7 @@ type svFunc struct {
 	moduleExports  map[string]int
 	moduleStarFrom []string
 	moduleImports  []moduleImport
-	moduleRequests []string // every specifier imported, bindings or not
+	moduleRequests []moduleRequest // every module named, bindings or not
 	moduleIndirect map[string]indirectExport
 	// moduleHoistFn is the module's InitializeEnvironment prologue split off as
 	// its own function: the import bindings, the temporal dead zones, and the

@@ -275,8 +275,13 @@ const (
 	// OpChkProto pops a superclass's .prototype and throws a TypeError unless it
 	// is an Object or null (the protoParent check).
 	OpChkProto
+	// OpImportDefer is `import defer * as ns`: the module is already linked, so
+	// this only asks for its namespace WITHOUT evaluating it. What comes back is
+	// the deferred namespace, which runs the module the first time it is asked
+	// about a string key.
+	OpImportDefer
 
-	NumOpcodes = 216
+	NumOpcodes = 217
 )
 
 // Per-opcode JIT metadata flags (ant OP_FLAG / SV_OPF_*).
@@ -503,6 +508,7 @@ var opTable = [NumOpcodes]opInfo{
 	OpImport:                      {Name: "IMPORT", Size: 1, NPop: 2, NPush: 1, Format: FmtNone, Flags: 0},
 	OpImportSource:                {Name: "IMPORT_SOURCE", Size: 1, NPop: 2, NPush: 1, Format: FmtNone, Flags: 0},
 	OpImportSync:                  {Name: "IMPORT_SYNC", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: 0},
+	OpImportDefer:                 {Name: "IMPORT_DEFER", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: 0},
 	OpImportDefault:               {Name: "IMPORT_DEFAULT", Size: 1, NPop: 1, NPush: 1, Format: FmtNone, Flags: OpfJitEligible},
 	OpImportNamed:                 {Name: "IMPORT_NAMED", Size: 5, NPop: 1, NPush: 1, Format: FmtAtom, Flags: OpfJitEligible},
 	OpExport:                      {Name: "EXPORT", Size: 5, NPop: 1, NPush: 0, Format: FmtAtom, Flags: OpfJitEligible},

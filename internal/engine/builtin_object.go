@@ -401,6 +401,11 @@ func (rt *Runtime) initObjectBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if o := rt.objPtr(obj); o != nil {
+			if de := rt.deferredAt(o, ""); de != nil {
+				return mkundef(), de
+			}
+		}
 		res := rt.newArray()
 		ra := rt.objPtr(res)
 		if o := rt.objPtr(obj); o != nil {
@@ -1456,6 +1461,12 @@ func (rt *Runtime) makeDataDescriptor(v Value, w, e, c bool) Value {
 // ownPropertyNames returns own keys (including non-enumerable when all=false
 // means include-all). Integer indices come first.
 func (rt *Runtime) ownPropertyNames(v Value, enumerableOnly bool) (Value, *ThrowError) {
+	// [[OwnPropertyKeys]] on a deferred namespace asks about every key at once.
+	if o := rt.objPtr(v); o != nil {
+		if e := rt.deferredAt(o, ""); e != nil {
+			return mkundef(), e
+		}
+	}
 	arr := rt.newArray()
 	if v.IsString() {
 		ao := rt.objPtr(arr)

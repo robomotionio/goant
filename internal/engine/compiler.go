@@ -639,7 +639,7 @@ func (rt *Runtime) compileProgram(prog *Node, filename, source string, isEval, i
 		c.fn.moduleStarFrom = moduleStarSpecifiers(moduleStmts)
 		// Replace the list emitImportPrologue built (imports only, in its own
 		// order) with the full source-ordered one.
-		c.fn.moduleRequests = moduleRequestSpecifiers(moduleStmts)
+		c.fn.moduleRequests = moduleRequestList(moduleStmts)
 	}
 	// Return the completion value.
 	if isModule {

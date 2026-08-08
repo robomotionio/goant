@@ -346,6 +346,9 @@ func (rt *Runtime) initReflectBuiltin() {
 		if o == nil {
 			return mkundef(), rt.typeError("Reflect.ownKeys called on non-object")
 		}
+		if e := rt.deferredAt(o, ""); e != nil {
+			return mkundef(), e
+		}
 		if o.proxy != nil {
 			keys, e := rt.proxyOwnKeys(o.proxy)
 			if e != nil {

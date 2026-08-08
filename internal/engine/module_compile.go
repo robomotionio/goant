@@ -4,6 +4,15 @@ package engine
 // requested module into a hidden local, and the export table that maps an
 // exported name to the top-level slot holding it.
 
+// moduleRequest is one entry of [[RequestedModules]]: the registry key, and the
+// phase it was asked for in. A deferred request links the module with the rest
+// of the graph and then leaves it alone -- what evaluates it is the first touch
+// of its namespace, or another request for it that is not deferred.
+type moduleRequest struct {
+	key      string
+	deferred bool
+}
+
 // moduleImport is one requested binding of a static import, kept so the link
 // phase can resolve it (and reject an unresolvable or ambiguous one) before the
 // module is evaluated.
@@ -39,12 +48,17 @@ func (c *compiler) emitImportPrologue(stmts []*Node) {
 		// side effects only): the module is still a request, so it must be
 		// instantiated and linked with the rest of the graph rather than first
 		// appearing at run time.
-		c.fn.moduleRequests = append(c.fn.moduleRequests, spec)
+		c.fn.moduleRequests = append(c.fn.moduleRequests,
+			moduleRequest{key: spec, deferred: s.Flags&importPhaseDefer != 0})
 		modName := "*mod:" + spec + "*"
 		slot := c.addLocal(modName, false)
 		c.emit(OpConst)
 		c.emitU32(uint32(c.constant(c.rt.internString(spec))))
-		c.emit(OpImportSync)
+		if s.Flags&importPhaseDefer != 0 {
+			c.emit(OpImportDefer)
+		} else {
+			c.emit(OpImportSync)
+		}
 		c.emitOpU16(OpPutLocal, uint16(slot))
 		for _, sp := range s.Args {
 			if sp == nil || sp.Right == nil {
@@ -158,18 +172,25 @@ func moduleIndirectExports(stmts []*Node) map[string]indirectExport {
 	return out
 }
 
-// moduleRequestSpecifiers lists [[RequestedModules]] in SOURCE order — every
+// moduleRequestList lists [[RequestedModules]] in SOURCE order — every
 // `import … from` and every `export … from`, interleaved as written. The order
 // is observable: Evaluate() runs the requested modules in it, so a module named
 // by an `export … from` between two imports evaluates between them.
-func moduleRequestSpecifiers(stmts []*Node) []string {
-	var out []string
+//
+// Duplicates are kept, because the same module named twice may be named in two
+// different phases, and it is the eager one that decides where it evaluates:
+// `import defer * as a from "x"; import "y"; import "x"` runs y first.
+func moduleRequestList(stmts []*Node) []moduleRequest {
+	var out []moduleRequest
 	for _, s := range stmts {
 		if s == nil || s.Right == nil {
 			continue
 		}
 		if s.Kind == NImportDecl || (s.Kind == NExport && s.Flags&exFrom != 0) {
-			out = append(out, joinModuleKey(s.Right.Str, s.Str))
+			out = append(out, moduleRequest{
+				key:      joinModuleKey(s.Right.Str, s.Str),
+				deferred: s.Flags&importPhaseDefer != 0,
+			})
 		}
 	}
 	return out

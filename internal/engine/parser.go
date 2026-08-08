@@ -2921,6 +2921,11 @@ func (p *parser) skipImportStmt() *Node {
 const (
 	importBindDefault   = 1 << 0
 	importBindNamespace = 1 << 1
+	// importPhaseDefer marks `import defer * as ns from "m"`: the module is
+	// linked with the rest of the graph but not evaluated until the namespace is
+	// touched. It sits on the DECLARATION, not on a binding, because the phase
+	// is a property of the request.
+	importPhaseDefer = 1 << 3
 	// exportNameFromString marks a ModuleExportName written as a StringLiteral
 	// rather than an IdentifierName.
 	exportNameFromString = 1 << 2
@@ -2965,6 +2970,15 @@ func (p *parser) parseImportStmt() *Node {
 		return decl
 	}
 	sawClause := false
+	// `defer` names a phase only when a namespace import follows it. Written any
+	// other way it is an ordinary binding identifier, which is what makes
+	// `import defer from "m"` bind the default export to a variable called defer
+	// and `import defer x from "m"` a syntax error -- one default binding cannot
+	// be followed by another. Nothing here needs to reject those separately.
+	if p.next() == TokIdentifier && p.tokIdentStr() == "defer" && p.la() == TokMul {
+		decl.Flags |= importPhaseDefer
+		p.consume()
+	}
 	if isIdentLikeTok(p.next()) {
 		sawClause = true
 		local := p.tokIdentStr()

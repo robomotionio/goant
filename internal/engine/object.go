@@ -699,6 +699,9 @@ func (rt *Runtime) hasProp(obj Value, key string) bool {
 			has, _ := rt.proxyHas(o.proxy, rt.internString(key))
 			return has
 		}
+		// The answer does not depend on the module having run -- the keys are
+		// known at link time -- but the asking still runs it.
+		_ = rt.deferredAt(o, key)
 		if isIdx && rt.hasOwnIndex(cur, o, idx) {
 			return true
 		}
@@ -734,6 +737,9 @@ func (rt *Runtime) hasPropE(obj Value, key string) (bool, *ThrowError) {
 		}
 		if o.proxy != nil {
 			return rt.proxyHas(o.proxy, rt.internString(key))
+		}
+		if e := rt.deferredAt(o, key); e != nil {
+			return false, e
 		}
 		if isIdx && rt.hasOwnIndex(cur, o, idx) {
 			return true, nil

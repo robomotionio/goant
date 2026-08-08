@@ -48,9 +48,13 @@ type moduleRecord struct {
 	starFrom  []string                  // specifiers of `export * from` re-exports
 	namespace Value
 	hasNS     bool // namespace built; the zero Value decodes as 0, not undefined
-	hoisted   bool // InitializeEnvironment has run; m.locals is the environment
-	status    moduleStatus
-	evalErr   *ThrowError
+	// deferredNS is the namespace an `import defer` hands back -- a different
+	// object from the one above, since the two are observably not equal.
+	deferredNS    Value
+	hasDeferredNS bool
+	hoisted       bool // InitializeEnvironment has run; m.locals is the environment
+	status        moduleStatus
+	evalErr       *ThrowError
 	// evalPromise/evalCap are [[TopLevelCapability]]: present only on a module
 	// Evaluate() was called on directly (an entry point or a dynamic import), and
 	// settled when that module's whole subgraph has finished.
@@ -329,10 +333,10 @@ func (rt *Runtime) linkModule(m *moduleRecord, seen map[string]bool) *SyntaxErro
 	if m.fn == nil {
 		return nil // a synthetic module has no imports to link
 	}
-	for _, spec := range m.fn.moduleRequests {
-		dep, ok := rt.modules[rt.resolveSpecifier(spec, m.path)]
+	for _, req := range m.fn.moduleRequests {
+		dep, ok := rt.modules[rt.resolveSpecifier(req.key, m.path)]
 		if !ok {
-			return &SyntaxError{Msg: "cannot resolve module '" + spec + "'"}
+			return &SyntaxError{Msg: "cannot resolve module '" + req.key + "'"}
 		}
 		if e := rt.linkModule(dep, seen); e != nil {
 			return e
@@ -412,8 +416,8 @@ func (m *moduleRecord) requestedSpecifiers() []string {
 			out = append(out, s)
 		}
 	}
-	for _, spec := range m.fn.moduleRequests {
-		add(spec)
+	for _, req := range m.fn.moduleRequests {
+		add(req.key)
 	}
 	for _, imp := range m.fn.moduleImports {
 		add(imp.specifier)
@@ -423,6 +427,96 @@ func (m *moduleRecord) requestedSpecifiers() []string {
 	}
 	for _, s := range m.starFrom {
 		add(s)
+	}
+	return out
+}
+
+// requestedWith lists [[RequestedModules]] with the phase each was asked for,
+// in source order and WITHOUT deduplication. The duplicates are the point: the
+// same module may be named twice in two phases, and it is the eager naming that
+// decides where it evaluates.
+func (m *moduleRecord) requestedWith() []moduleRequest {
+	if m.fn == nil {
+		return nil // a synthetic module (JSON, text) requests nothing
+	}
+	out := append([]moduleRequest(nil), m.fn.moduleRequests...)
+	named := map[string]bool{}
+	for _, r := range out {
+		named[r.key] = true
+	}
+	// Belt and braces: every import binding and re-export is already a request,
+	// but anything that somehow is not is an eager one.
+	add := func(s string) {
+		if !named[s] {
+			named[s] = true
+			out = append(out, moduleRequest{key: s})
+		}
+	}
+	for _, imp := range m.fn.moduleImports {
+		add(imp.specifier)
+	}
+	for _, ind := range m.indirect {
+		add(ind.specifier)
+	}
+	for _, s := range m.starFrom {
+		add(s)
+	}
+	return out
+}
+
+// gatherAsyncDeps is GatherAsynchronousTransitiveDependencies: the modules under
+// a deferred one that cannot be left until later. A top-level await has to be
+// started while there is still a turn of the event loop to finish it in, and the
+// touch that triggers a deferred module is an ordinary property read with no way
+// to wait -- so an async module below a deferred one runs anyway, eagerly, and
+// only the synchronous ones wait.
+//
+// A module with a top-level await ends the walk and is itself the answer:
+// evaluating it will reach everything below it.
+func (rt *Runtime) gatherAsyncDeps(m *moduleRecord, visited map[*moduleRecord]bool) []*moduleRecord {
+	if m == nil || visited[m] || m.fn == nil || m.status.settled() {
+		return nil
+	}
+	visited[m] = true
+	if m.fn.usesAwait {
+		return []*moduleRecord{m}
+	}
+	var out []*moduleRecord
+	for _, req := range m.requestedWith() {
+		dep, ok := rt.modules[rt.resolveSpecifier(req.key, m.path)]
+		if !ok {
+			continue
+		}
+		out = append(out, rt.gatherAsyncDeps(dep, visited)...)
+	}
+	return out
+}
+
+// evaluationList is what InnerModuleEvaluation actually walks: the modules this
+// one evaluates, each named once, in source order. An eager request contributes
+// the module it names; a deferred one contributes not that module but the
+// asynchronous dependencies underneath it.
+func (rt *Runtime) evaluationList(m *moduleRecord) []*moduleRecord {
+	var out []*moduleRecord
+	seen := map[*moduleRecord]bool{}
+	add := func(d *moduleRecord) {
+		if d != nil && !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	for _, req := range m.requestedWith() {
+		dep, ok := rt.modules[rt.resolveSpecifier(req.key, m.path)]
+		if !ok {
+			continue
+		}
+		if req.deferred {
+			for _, a := range rt.gatherAsyncDeps(dep, map[*moduleRecord]bool{}) {
+				add(a)
+			}
+			continue
+		}
+		add(dep)
 	}
 	return out
 }
@@ -529,11 +623,7 @@ func (rt *Runtime) innerModuleEvaluation(m *moduleRecord, stack []*moduleRecord,
 	index++
 	stack = append(stack, m)
 
-	for _, req := range m.requestedSpecifiers() {
-		dep, ok := rt.modules[rt.resolveSpecifier(req, m.path)]
-		if !ok {
-			continue
-		}
+	for _, dep := range rt.evaluationList(m) {
 		var err *ThrowError
 		if stack, index, err = rt.innerModuleEvaluation(dep, stack, index); err != nil {
 			return stack, index, err
@@ -774,6 +864,24 @@ func (rt *Runtime) importModuleNamespace(spec, referrer string) (Value, *ThrowEr
 	return rt.moduleNamespace(m), nil
 }
 
+// importModuleNamespaceDeferred is the runtime half of `import defer * as ns`.
+// The module is in the registry already -- instantiating and linking the graph
+// happens for a deferred request like any other -- so this only has to hand back
+// the namespace that will run it.
+func (rt *Runtime) importModuleNamespaceDeferred(spec, referrer string) (Value, *ThrowError) {
+	m, ok := rt.modules[rt.resolveSpecifier(spec, referrer)]
+	if !ok {
+		var e *ThrowError
+		if m, e = rt.loadModule(spec, referrer); e != nil {
+			return mkundef(), e
+		}
+	}
+	if m.status == modErrored {
+		return mkundef(), m.evalErr
+	}
+	return rt.deferredNamespace(m), nil
+}
+
 // importModuleDynamic is ContinueDynamicImport: load and link the graph, then
 // return a promise for the namespace that settles when evaluation does. Unlike
 // a static import this must NOT drive the loop — the importer is itself running
@@ -884,7 +992,16 @@ func (rt *Runtime) validateImportOptions(options Value) (string, *ThrowError) {
 // throw propagates.
 func (rt *Runtime) namespaceDescriptor(ns Value, name string) (Value, bool, *ThrowError) {
 	o := rt.objPtr(ns)
-	if o == nil || !rt.moduleNamespaces[o] || !o.hasOwn(name) {
+	if o == nil || !rt.moduleNamespaces[o] {
+		return mkundef(), false, nil
+	}
+	// Asked before hasOwn, because a key this namespace does not export is still
+	// a question about it: what a deferred module answers is "no such export",
+	// and it has to have run to say so.
+	if e := rt.deferredAt(o, name); e != nil {
+		return mkundef(), false, e
+	}
+	if !o.hasOwn(name) {
 		return mkundef(), false, nil
 	}
 	v, e := rt.getField(ns, name)
@@ -908,7 +1025,13 @@ func (rt *Runtime) namespaceDescriptor(ns Value, name string) (Value, bool, *Thr
 // a [[Set]] whose receiver is the namespace — inherits that.
 func (rt *Runtime) namespaceTDZ(ns Value, name string) *ThrowError {
 	o := rt.objPtr(ns)
-	if o == nil || !rt.moduleNamespaces[o] || !o.hasOwn(name) {
+	if o == nil || !rt.moduleNamespaces[o] {
+		return nil
+	}
+	if e := rt.deferredAt(o, name); e != nil {
+		return e
+	}
+	if !o.hasOwn(name) {
 		return nil
 	}
 	_, e := rt.getField(ns, name)
@@ -921,6 +1044,11 @@ func (rt *Runtime) namespaceTDZAll(ns Value) *ThrowError {
 	o := rt.objPtr(ns)
 	if o == nil || !rt.moduleNamespaces[o] {
 		return nil
+	}
+	// [[OwnPropertyKeys]] asks about every key at once, so it triggers whatever
+	// the keys turn out to be.
+	if e := rt.deferredAt(o, ""); e != nil {
+		return e
 	}
 	for _, k := range o.ownKeys() {
 		if e := rt.namespaceTDZ(ns, k); e != nil {
@@ -943,6 +1071,11 @@ func (rt *Runtime) isModuleNamespace(v Value) bool {
 // value. Anything else is rejected, which Reflect.defineProperty reports as
 // false and Object.defineProperty throws.
 func (rt *Runtime) namespaceDefineProperty(ns, key, descVal Value) *ThrowError {
+	if rt.isModuleNamespace(ns) && !key.IsSymbol() {
+		if e := rt.deferredAt(rt.objPtr(ns), rt.strGo(key)); e != nil {
+			return e
+		}
+	}
 	if !rt.isModuleNamespace(ns) || key.IsSymbol() {
 		// A symbol key is not an export name: it takes the ordinary path, which is
 		// what makes @@toStringTag definable.

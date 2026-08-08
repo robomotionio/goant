@@ -317,6 +317,10 @@ type Runtime struct {
 	// are stored as accessors so reads see the live binding, but they must be
 	// REPORTED as data properties, so descriptor queries consult this set.
 	moduleNamespaces map[*object]bool
+	// deferredNamespaces maps a deferred namespace to the module it will run.
+	// Nil until an `import defer` appears, which is what keeps the trigger off
+	// every property path that never meets one.
+	deferredNamespaces map[*object]*moduleRecord
 
 	// errors holds the NativeError constructors/prototypes for internal throws.
 	errors errorCtors

@@ -63,6 +63,9 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 			if o.proxy != nil {
 				return rt.proxyGet(o.proxy, rt.internString(name), obj)
 			}
+			if e := rt.deferredAt(o, name); e != nil {
+				return mkundef(), e
+			}
 			// An index in a prototype's element backing store (e.g. Array.prototype[0])
 			// is inherited too — the shape lookup below only sees named properties.
 			if isIdx {

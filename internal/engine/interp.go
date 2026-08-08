@@ -1699,6 +1699,18 @@ running:
 			}
 			push(ns)
 			ip++
+		case OpImportDefer:
+			// `import defer * as ns`: the module is linked already, so this only
+			// asks for its deferred namespace. Nothing runs until that namespace
+			// is asked about a key.
+			spec := pop()
+			ns, e := rt.importModuleNamespaceDeferred(rt.strGo(spec), fn.filename)
+			if e != nil {
+				thrown = e
+				goto unwind
+			}
+			push(ns)
+			ip++
 		case OpImportNamed:
 			// Read one binding out of a namespace object. This runs on every
 			// reference to an imported name, which is what keeps the binding live.
