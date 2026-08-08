@@ -12,10 +12,10 @@ func (rt *Runtime) initTemporalPlainDateTime(ns *object) {
 			var f [9]int
 			for i := 0; i < 9; i++ {
 				v := arg(args, i)
-				if v.IsUndefined() {
-					if i == 1 || i == 2 {
-						f[i] = 1
-					}
+				// The year, the month and the day are required: leaving one
+				// out is not asking for the first of January, it is not naming
+				// a date. Everything below them defaults to zero.
+				if v.IsUndefined() && i >= 3 {
 					continue
 				}
 				n, e := rt.toIntegerWithTruncation(v)

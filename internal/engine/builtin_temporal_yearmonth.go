@@ -555,11 +555,13 @@ func (rt *Runtime) initTemporalPlainMonthDay(ns *object) {
 		if e != nil {
 			return mkundef(), e
 		}
+		// The merge only ever carries the month CODE across from the existing
+		// month-day, never its number, so there is no stale month to strip --
+		// and stripping one took away the month the caller had just asked for.
 		merged := mergeCalendarFields(fieldsOfDate(cal, iso), f.cal)
 		if !f.cal.got(fYear) && !f.cal.got(fEra) {
 			merged.has &^= fYear | fEra | fEraYear
 		}
-		merged.has &^= fMonth
 		out, err := calendarMonthDayFromFields(cal, merged, overflow)
 		if err != nil {
 			return mkundef(), rt.throwFor(err)

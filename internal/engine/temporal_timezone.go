@@ -139,6 +139,12 @@ func addNsToDateTime(dt isoDateTimeRec, ns int64) isoDateTimeRec {
 func (z temporalZone) startOfDay(d isoDateRec) (*big.Int, bool) {
 	dt := isoDateTimeRec{d, midnightTime()}
 	if p := z.possibleInstants(dt); len(p) > 0 {
+		// A day that begins after the last instant does not begin: the day
+		// after the last one is not a day this engine can hand back the start
+		// of, which is what makes hoursInDay unanswerable there.
+		if !epochNsWithinLimits(p[0]) {
+			return nil, false
+		}
 		return p[0], true
 	}
 	// Midnight never happened, so the day begins at the moment the clocks

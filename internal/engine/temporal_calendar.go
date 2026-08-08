@@ -233,8 +233,12 @@ func calendarMonthDayFromFields(id string, f calFieldSet, overflow string) (isoD
 	// With a year in hand the date is fully determined, and the month-day is
 	// read back off it.
 	if hasYear {
+		// The year is here to settle what the overflow option should do with a
+		// day the month has not got -- a leap day in a common year -- and for
+		// nothing else. A month-day keeps no year of its own, so a year outside
+		// the representable range is not a reason to refuse one.
 		iso, err := calendarDateFromFields(id, f, overflow)
-		if err != nil {
+		if err != nil && err != errCalendarRange {
 			return iso, err
 		}
 		cd := cal.dateFromDay(iso.epochDays())
