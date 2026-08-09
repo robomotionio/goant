@@ -293,7 +293,23 @@ jobs:
           restore-keys: fuzz-${{ matrix.runs-on }}-
 
       - name: Differential fuzz, 5 minutes
-        run: go test ./internal/engine/ -run xxx -fuzz FuzzJITAgreesWithTheInterpreter -fuzztime=5m -parallel=4
+        # The VERDICT is whether a crasher was written, not the exit code.
+        # `go test -fuzz` exits NON-ZERO with "context deadline exceeded" when
+        # -fuzztime expires while a worker is mid-execution, so a clean run comes
+        # back red -- it cost a false alarm on a four-hour arm64 run, and a red
+        # build nobody can reproduce is worse than no build. A real disagreement
+        # writes the failing input into testdata/fuzz/ and says so; nothing else
+        # does, which is what the upload step below already assumes.
+        run: |
+          go test ./internal/engine/ -run xxx -fuzz FuzzJITAgreesWithTheInterpreter -fuzztime=5m -parallel=4 > fuzz.log 2>&1 || true
+          tail -5 fuzz.log
+          if git status --porcelain internal/engine/testdata/fuzz/ | grep -q . \
+             || grep -qi "Failing input written\|failure while testing seed" fuzz.log; then
+            echo "::error::the fuzzer found a disagreement"
+            git status --porcelain internal/engine/testdata/fuzz/
+            exit 1
+          fi
+          echo "fuzz clean: no crasher written"
 
       # A crasher is written under testdata/fuzz and is the whole value of the
       # run. Without this it dies with the runner.
