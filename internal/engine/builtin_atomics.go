@@ -187,7 +187,7 @@ func (rt *Runtime) initAtomics() {
 	rmw("exchange", func(a, b int64) int64 { return b }, func(a, b *big.Int) *big.Int { return b })
 
 	rt.defMethod(ao, "load", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o, e := rt.atomicsView(arg(args, 0), false)
+		o, e := rt.atomicsView(arg(args, 0), false, atomicsRead)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -199,7 +199,7 @@ func (rt *Runtime) initAtomics() {
 		return v, nil
 	})
 	rt.defMethod(ao, "store", 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o, e := rt.atomicsView(arg(args, 0), false)
+		o, e := rt.atomicsView(arg(args, 0), false, atomicsWrite)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -234,7 +234,7 @@ func (rt *Runtime) initAtomics() {
 		return mknum(f), nil
 	})
 	rt.defMethod(ao, "compareExchange", 4, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o, e := rt.atomicsView(arg(args, 0), false)
+		o, e := rt.atomicsView(arg(args, 0), false, atomicsWrite)
 		if e != nil {
 			return mkundef(), e
 		}
@@ -298,7 +298,7 @@ func (rt *Runtime) initAtomics() {
 		return out, nil
 	})
 	rt.defMethod(ao, "notify", 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o, e := rt.atomicsView(arg(args, 0), true)
+		o, e := rt.atomicsView(arg(args, 0), true, atomicsRead)
 		if e != nil {
 			return mkundef(), e
 		}

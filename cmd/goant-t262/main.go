@@ -158,6 +158,9 @@ type meta struct {
 	isAsync  bool
 	onlyStr  bool
 	noStrict bool
+	// canBlockFalse is the CanBlockIsFalse flag: the test is written for a host
+	// whose Agent Record has [[CanBlock]] false. See skipReason.
+	canBlockFalse bool
 }
 
 // parseMeta extracts the /*--- … ---*/ YAML frontmatter. Test262's frontmatter is
@@ -205,6 +208,8 @@ func parseMeta(src string) meta {
 					m.onlyStr = true
 				case "noStrict":
 					m.noStrict = true
+				case "CanBlockIsFalse":
+					m.canBlockFalse = true
 				}
 			}
 		case "includes":
@@ -354,6 +359,18 @@ var coreSkipFeatures = map[string]bool{
 var coreSkipDirs = []string{"intl402/", "staging/"}
 
 func (m meta) skipReason() string {
+	// CanBlockIsFalse names a property of the HOST's Agent Record, and a host has
+	// one value for it: a browser's main thread cannot block, a shell agent can.
+	// goant's can, so these two are not tests goant fails — they are tests
+	// written for the other kind of host, and INTERPRETING.md says a host runs
+	// only the variant that matches it.
+	//
+	// Deliberately ahead of the -all check. -all removes goant's judgement calls
+	// about which features are in scope; this is not one of those, and pretending
+	// to be both kinds of agent at once would make the number mean less, not more.
+	if m.canBlockFalse {
+		return "flag:CanBlockIsFalse (this agent can block)"
+	}
 	if skipNothing {
 		return ""
 	}

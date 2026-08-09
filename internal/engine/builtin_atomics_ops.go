@@ -15,16 +15,29 @@ package engine
 
 import "math/big"
 
+// atomicsAccess is ValidateTypedArray's accessMode. It exists for one case: an
+// immutable buffer refuses a write, and it refuses it here -- before the index
+// and before the operand -- so neither one's valueOf runs.
+type atomicsAccess bool
+
+const (
+	atomicsRead  atomicsAccess = false // load, wait, notify
+	atomicsWrite atomicsAccess = true  // store, compareExchange, every RMW
+)
+
 // atomicsView is ValidateIntegerTypedArray. `waitable` narrows it to the two
 // element types an agent can wait on: waiting is defined in terms of a lock
 // held on one 32- or 64-bit word, and nothing else is one.
-func (rt *Runtime) atomicsView(v Value, waitable bool) (*object, *ThrowError) {
+func (rt *Runtime) atomicsView(v Value, waitable bool, mode atomicsAccess) (*object, *ThrowError) {
 	o := rt.objPtr(v)
 	if o == nil || o.ta == nil {
 		return nil, rt.typeError("Atomics operation requires an integer TypedArray")
 	}
 	if rt.taDetached(o) {
 		return nil, rt.typeError("Atomics operation on a detached ArrayBuffer")
+	}
+	if mode == atomicsWrite && rt.abIsImmutable(rt.objPtr(o.ta.buf)) {
+		return nil, rt.typeError("Cannot modify an immutable ArrayBuffer")
 	}
 	switch k := o.ta.kind; {
 	case waitable && (k == taInt32 || k == taBigInt64):
@@ -40,12 +53,19 @@ func (rt *Runtime) atomicsView(v Value, waitable bool) (*object, *ThrowError) {
 
 // atomicsIndex is ValidateAtomicAccess: an index outside the array is a
 // RangeError, not a silent undefined the way an ordinary element read would be.
+//
+// The length is read BEFORE the index is coerced, and the order is the whole
+// point: coercing can run a valueOf, a valueOf can grow the buffer, and the
+// bound the index is judged against is the one that held when the operation
+// started. A length-tracking view of an empty growable SharedArrayBuffer whose
+// index.valueOf grows it to four still has no element 0.
 func (rt *Runtime) atomicsIndex(o *object, v Value) (int, *ThrowError) {
+	length := rt.taCurrentLen(o)
 	i, e := rt.toIndex(v)
 	if e != nil {
 		return 0, e
 	}
-	if i >= rt.taCurrentLen(o) {
+	if i >= length {
 		return 0, rt.rangeError("Atomics index is out of range")
 	}
 	return i, nil
@@ -85,7 +105,7 @@ func atomicsReadBig(rt *Runtime, o *object, i int) *big.Int {
 // element types need big.Int because they are not.
 func (rt *Runtime) atomicsRMW(args []Value, small func(old, v int64) int64,
 	large func(old, v *big.Int) *big.Int) (Value, *ThrowError) {
-	o, e := rt.atomicsView(arg(args, 0), false)
+	o, e := rt.atomicsView(arg(args, 0), false, atomicsWrite)
 	if e != nil {
 		return mkundef(), e
 	}
@@ -161,7 +181,7 @@ func atomicsNarrow(k taKind, n int64) int64 {
 // change the cell. A wait on a buffer no one else can see is not a wait at all,
 // which is why it is a TypeError rather than a very long pause.
 func (rt *Runtime) atomicsWaitResult(args []Value) (string, *ThrowError) {
-	o, e := rt.atomicsView(arg(args, 0), true)
+	o, e := rt.atomicsView(arg(args, 0), true, atomicsRead)
 	if e != nil {
 		return "", e
 	}
