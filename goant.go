@@ -131,6 +131,26 @@ func WithJIT(on bool) Option {
 	return func(rt *Runtime) { rt.e.SetJITEnabled(on) }
 }
 
+// WithHostAPI installs the Test262 host object $262 and the two global
+// capabilities behind it, evalScript and createRealm.
+//
+// Off by default, and the default is the one to keep unless you are running a
+// conformance suite. These are capabilities rather than language features:
+// $262.detachArrayBuffer invalidates an ArrayBuffer's bytes, createRealm
+// allocates a realm per call with nothing bounding how many, evalScript makes
+// non-configurable global bindings, and merely reading $262.IsHTMLDDA turns the
+// compiled tier off for the Runtime and leaves it off.
+//
+// They used to be installed unconditionally, so every Runtime this package has
+// ever returned carried them.
+func WithHostAPI(on bool) Option {
+	return func(rt *Runtime) {
+		if on {
+			rt.e.EnableHostAPI()
+		}
+	}
+}
+
 // New creates a Runtime with the standard globals installed.
 func New(opts ...Option) *Runtime {
 	rt := &Runtime{e: engine.New(), namer: JSONFieldNamer}

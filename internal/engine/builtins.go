@@ -43,104 +43,10 @@ func (rt *Runtime) initBuiltins() {
 	// print (a bare stdout printer, convenient for conformance harnesses)
 	g.defineOwn("print", rt.newNativeFunc("print", 0, logFn(os.Stdout)), attrWritable|attrConfigurable)
 
-	// evalScript(source): evaluate source as a new SCRIPT in this realm. This is a
-	// host capability rather than an ECMAScript one, and it is NOT eval: a
-	// Script's top-level `var` and function declarations become NON-configurable
-	// global properties, and its top-level let/const/class join the global lexical
-	// environment where the next Script still sees them.
-	g.defineOwn("evalScript", rt.newNativeFunc("evalScript", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		sv, e := rt.toStringValue(arg(args, 0))
-		if e != nil {
-			return mkundef(), e
-		}
-		return rt.evalScriptSource(rt.strGo(sv))
-	}), attrWritable|attrConfigurable)
-
-	// createRealm(): a second realm on the same value pools — a fresh global with
-	// its own intrinsics, while objects still pass freely between the two. A host
-	// capability, like evalScript, and the one Test262's $262.createRealm needs.
-	// The returned object carries the new realm's global and an evalScript bound
-	// to IT (a native is otherwise handed the CALLING runtime, which would compile
-	// into the wrong realm).
-	g.defineOwn("createRealm", rt.newNativeFunc("createRealm", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		realm := rt.NewRealm()
-		out := rt.newObject(rt.objectProto)
-		oo := rt.objPtr(out)
-		oo.defineOwn("global", realm.global, attrWritable|attrEnumerable|attrConfigurable)
-		oo.defineOwn("evalScript", rt.newNativeFunc("evalScript", 1, func(caller *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			sv, e := caller.toStringValue(arg(args, 0))
-			if e != nil {
-				return mkundef(), e
-			}
-			return realm.evalScriptSource(string(caller.strBytes(sv)))
-		}), attrWritable|attrEnumerable|attrConfigurable)
-		cr, _ := realm.getField(realm.global, "createRealm")
-		oo.defineOwn("createRealm", cr, attrWritable|attrEnumerable|attrConfigurable)
-		return out, nil
-	}), attrWritable|attrConfigurable)
-
-	// $262: the object Test262 expects a host to provide. Every capability it
-	// names already exists on the global here; this gathers them under the name
-	// the suite looks for, which is what makes the cross-realm tests runnable
-	// rather than skippable.
-	h262 := rt.newObject(rt.objectProto)
-	ho := rt.objPtr(h262)
-	ho.defineOwn("global", rt.global, attrWritable|attrEnumerable|attrConfigurable)
-	for _, name := range []string{"createRealm", "evalScript", "gc"} {
-		if v, ok := g.getOwn(name); ok {
-			ho.defineOwn(name, v, attrWritable|attrEnumerable|attrConfigurable)
-		}
-	}
-	// IsHTMLDDA: document.all, the [[IsHTMLDDA]] exotic object. The one object
-	// the language pretends is undefined -- typeof says so, it is falsy, and it
-	// is loosely equal to both null and undefined -- while staying an ordinary
-	// Object to everything else, which is what these tests exist to check. It is
-	// callable and answers null when called with nothing or with "", so that an
-	// algorithm which calls document.all can be told apart from one that does not.
-	//
-	// Handing one out turns the compiled tier OFF for this realm, and the reason
-	// is worth saying plainly. The tier decides truthiness from the Value's tag
-	// alone -- an object is truthy, no load, no branch -- and emits `x == null`
-	// the same way. Neither can represent an object that is falsy and loosely
-	// null, so with one in play the tier and the interpreter give different
-	// answers, which is the worst kind of wrong. Teaching them would cost a load
-	// and a test on the hottest branch shape in the engine, for an object that
-	// exists in a legacy DOM and nowhere else.
-	//
-	// So it is a getter: a realm that never asks keeps its tier, and a realm that
-	// asks has said it cares more about document.all than about speed.
-	ho.defineAccessor("IsHTMLDDA", rt.newNativeFunc("get IsHTMLDDA", 0,
-		func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			if rt.hasHTMLDDA {
-				return rt.htmlDDA, nil
-			}
-			dda := rt.newNativeFunc("", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-				if len(args) == 0 {
-					return mknull(), nil
-				}
-				if a := args[0]; a.IsString() && len(rt.strBytes(a)) == 0 {
-					return mknull(), nil
-				}
-				return mkundef(), nil
-			})
-			rt.objPtr(dda).extend().isHTMLDDA = true
-			rt.htmlDDA, rt.hasHTMLDDA = dda, true
-			rt.SetJITEnabled(false)
-			return dda, nil
-		}), mkundef(), true, false, attrEnumerable|attrConfigurable)
-
-	// detachArrayBuffer(buffer): the suite's way of reaching DetachArrayBuffer,
-	// which JavaScript itself can only do by transferring the bytes away.
-	ho.defineOwn("detachArrayBuffer", rt.newNativeFunc("detachArrayBuffer", 1,
-		func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			o := rt.objPtr(arg(args, 0))
-			if o == nil || o.ta != nil || o.dv() != nil {
-				return mkundef(), rt.typeError("detachArrayBuffer takes an ArrayBuffer")
-			}
-			o.abuf = nil
-			return mkundef(), nil
-		}), attrWritable|attrEnumerable|attrConfigurable)
-	g.defineOwn("$262", h262, attrWritable|attrConfigurable)
+	// evalScript, createRealm and $262 used to be defined here, which put
+	// $262.detachArrayBuffer on every global this engine has ever built. They
+	// are capabilities a conformance runner needs and a production embedder does
+	// not; see EnableHostAPI.
 
 	// Timers (HTML setTimeout/setInterval). goant runs a virtual clock: callbacks
 	// fire from the host event loop in (delay, scheduling-order), after the

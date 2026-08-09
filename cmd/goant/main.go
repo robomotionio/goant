@@ -68,9 +68,16 @@ func main() {
 	}
 
 	rt := engine.New()
-	// $262.agent is a capability, not a language feature: it starts goroutines
-	// that run scripts. A host asks for it explicitly, and the conformance
-	// runner is the only thing here that does. See Runtime.EnableAgents.
+	// $262 is a set of capabilities, not language features: detachArrayBuffer
+	// invalidates a buffer's bytes, createRealm allocates realms without bound,
+	// and reading IsHTMLDDA turns the compiled tier off for the realm. A host
+	// asks for them explicitly, and the conformance runner is the only thing
+	// here that does. See Runtime.EnableHostAPI.
+	if os.Getenv("GOANT_262") == "1" {
+		rt.EnableHostAPI()
+	}
+	// $262.agent is a separate grant, for the same reason: it starts goroutines
+	// that run scripts. See Runtime.EnableAgents.
 	if os.Getenv("GOANT_AGENTS") == "1" {
 		rt.EnableAgents()
 	}

@@ -601,9 +601,11 @@ func execRunnerArgs(runner string, args []string, timeout time.Duration) execRes
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, runner, args...)
-	// $262.agent is off unless a host asks. An engine that does not know the
-	// variable ignores it, so pointing -runner at another engine still works.
-	cmd.Env = append(os.Environ(), "TZ=UTC", "GOANT_AGENTS=1")
+	// $262 and $262.agent are off unless a host asks: both are capabilities a
+	// production embedder must not hand a script, and the suite is the one thing
+	// that needs them. An engine that does not know these variables ignores
+	// them, so pointing -runner at another engine still works.
+	cmd.Env = append(os.Environ(), "TZ=UTC", "GOANT_262=1", "GOANT_AGENTS=1")
 	var so, se strings.Builder
 	cmd.Stdout = &so
 	cmd.Stderr = &se

@@ -392,11 +392,10 @@ func (rt *Runtime) EnableAgents() {
 // present: an agent that was started receives broadcasts and reports, and the
 // one that started it broadcasts and collects.
 func (rt *Runtime) installAgentHost(child bool) {
-	h262, ok := rt.objPtr(rt.global).getOwn("$262")
-	if !ok {
-		return
-	}
-	ho := rt.objPtr(h262)
+	// $262 is only there when the host granted EnableHostAPI, and agents are a
+	// separate grant: host262Object makes an empty namespace when it has to, so
+	// asking for agents does not also hand out detachArrayBuffer.
+	ho := rt.objPtr(rt.host262Object())
 	if ho == nil {
 		return
 	}

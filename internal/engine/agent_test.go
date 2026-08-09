@@ -172,18 +172,36 @@ func TestAgentWaitAsyncTimesOut(t *testing.T) {
 
 // Without EnableAgents there is no $262.agent at all: starting one is a host
 // capability, and a Runtime that was not given it cannot be talked into
-// spawning goroutines.
+// spawning goroutines. With no grants at all there is no $262 either.
 func TestAgentsAreOffByDefault(t *testing.T) {
 	rt := New()
-	sc, err := rt.CompileScript("agents_test.js", `typeof $262.agent`)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	v, err := rt.RunScript(sc)
+	v, err := rt.RunString("agents_test.js", `typeof globalThis.$262 + " " + typeof globalThis.$262?.agent`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if got := rt.strGo(v); got != "undefined" {
-		t.Fatalf("$262.agent without EnableAgents = %q, want undefined", got)
+	if got := rt.strGo(v); got != "undefined undefined" {
+		t.Fatalf("$262/$262.agent on a bare Runtime = %q, want %q", got, "undefined undefined")
+	}
+}
+
+// EnableAgents grants agents and nothing else. It needs somewhere to hang
+// $262.agent, and the namespace it creates for that must not come with the
+// capabilities EnableHostAPI grants.
+func TestEnablingAgentsDoesNotGrantTheRestOfTheHostAPI(t *testing.T) {
+	rt := New()
+	rt.EnableAgents()
+	v, err := rt.RunString("agents_test.js", `[
+		typeof $262.agent,
+		typeof $262.detachArrayBuffer,
+		typeof $262.createRealm,
+		typeof $262.evalScript,
+		typeof globalThis.createRealm,
+		typeof globalThis.evalScript
+	].join(",")`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got, want := rt.strGo(v), "object,undefined,undefined,undefined,undefined,undefined"; got != want {
+		t.Fatalf("after EnableAgents = %q, want %q", got, want)
 	}
 }
