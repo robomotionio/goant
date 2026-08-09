@@ -147,14 +147,14 @@ func (rt *Runtime) cancelTimer(id Value) {
 // isPromise reports whether v is a promise object (carries settlement state).
 func (rt *Runtime) isPromise(v Value) bool {
 	o := rt.objPtr(v)
-	return o != nil && o.promise != nil
+	return o != nil && o.promise() != nil
 }
 
 // makePromise allocates a fresh pending promise with Promise.prototype.
 func (rt *Runtime) makePromise() (Value, *object) {
 	v := rt.newObject(rt.promiseProto)
 	o := rt.objPtr(v)
-	o.promise = &promiseState{state: 0}
+	o.extend().promise = &promiseState{state: 0}
 	return v, o
 }
 
@@ -184,7 +184,7 @@ func (rt *Runtime) newPromiseCapability(C Value) (promise, resolve, reject Value
 
 // fulfillPromise settles o as fulfilled and schedules its reactions.
 func (rt *Runtime) fulfillPromise(o *object, value Value) {
-	st := o.promise
+	st := o.promise()
 	if st.state != 0 {
 		return
 	}
@@ -195,7 +195,7 @@ func (rt *Runtime) fulfillPromise(o *object, value Value) {
 
 // rejectPromise settles o as rejected and schedules its reactions.
 func (rt *Runtime) rejectPromise(o *object, reason Value) {
-	st := o.promise
+	st := o.promise()
 	if st.state != 0 {
 		return
 	}
@@ -216,7 +216,7 @@ func (rt *Runtime) flushReactions(st *promiseState) {
 // otherwise the promise fulfills with value. p is o's own Value (for the
 // self-resolution cycle check).
 func (rt *Runtime) resolvePromise(p Value, o *object, value Value) {
-	if o.promise.state != 0 {
+	if o.promise().state != 0 {
 		return
 	}
 	if value == p {
@@ -316,7 +316,7 @@ func (rt *Runtime) promiseThen(onF, onR Value, o *object) Value {
 // directly otherwise.
 func (rt *Runtime) promiseThenCap(onF, onR Value, o *object, result, capResolve, capReject Value) Value {
 	r := promiseReaction{onFulfilled: onF, onRejected: onR, result: result, capResolve: capResolve, capReject: capReject}
-	st := o.promise
+	st := o.promise()
 	switch st.state {
 	case 0:
 		st.handlers = append(st.handlers, r)
@@ -423,7 +423,7 @@ func (rt *Runtime) initPromiseBuiltin() {
 
 	rt.defMethod(po, "then", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || o.promise == nil {
+		if o == nil || o.promise() == nil {
 			return mkundef(), rt.typeError("Promise.prototype.then called on incompatible receiver")
 		}
 		return rt.promiseThenSpecies(this, o, arg(args, 0), arg(args, 1))
@@ -507,7 +507,7 @@ func (rt *Runtime) initPromiseBuiltin() {
 			return mkundef(), e
 		}
 		o.proto = pr
-		o.promise = &promiseState{state: 0}
+		o.extend().promise = &promiseState{state: 0}
 		p := this
 		done := false
 		resolve := rt.newNativeFunc("", 1, func(rt *Runtime, _ Value, a []Value) (Value, *ThrowError) {

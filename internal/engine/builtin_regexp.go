@@ -129,10 +129,10 @@ func (rt *Runtime) initRegExpBuiltin() {
 		}
 		pattern := ""
 		flags := ""
-		if o := rt.objPtr(p); o != nil && o.regex != nil {
+		if o := rt.objPtr(p); o != nil && o.regex() != nil {
 			// A native RegExp: use its compiled source/flags directly.
-			pattern = o.regex.Source
-			flags = o.regex.Flags
+			pattern = o.regex().Source
+			flags = o.regex().Flags
 		} else if patternIsRegExp {
 			// A RegExp-like object (or Proxy): read source (and flags, unless
 			// overridden) via [[Get]] rather than coercing the object to a string.
@@ -406,12 +406,12 @@ func (rt *Runtime) initRegExpBuiltin() {
 		// — otherwise RegExpExec would hand the matching to user code, which the
 		// internal splitter cannot do. Chosen only AFTER Construct, whose IsRegExp
 		// step reads @@match: that getter may recompile the pattern.
-		if re := rt.objPtr(this); re != nil && re.regex != nil && C == rt.regexpCtor &&
+		if re := rt.objPtr(this); re != nil && re.regex() != nil && C == rt.regexpCtor &&
 			rt.hasBuiltinExec(this) && rt.hasBuiltinExec(splitter) {
 			// The receiver's own compiled regex, re-read here so a recompile during
 			// Construct is honoured; the splitter differs only by the `y` flag, which
 			// the internal splitter supplies itself.
-			return rt.stringSplitRegexp(arg(args, 0), re.regex, arg(args, 1))
+			return rt.stringSplitRegexp(arg(args, 0), re.regex(), arg(args, 1))
 		}
 		// The splitter is driven through RegExpExec and its own lastIndex — it is
 		// sticky by construction, and the internal split has no way to honour either
@@ -506,7 +506,7 @@ func (rt *Runtime) newRegExp(pattern, flags string) (Value, *ThrowError) {
 	}
 	v := rt.newObject(rt.regexpProto)
 	o := rt.objPtr(v)
-	o.regex = re
+	o.extend().regex = re
 	o.setSlot(slotBrand, mknum(brandRegExp))
 	// source/flags/global/… are accessor getters on RegExp.prototype (installed
 	// in initRegExpAccessors); only lastIndex is an own data property.
@@ -536,16 +536,16 @@ func (rt *Runtime) initRegExpAccessors() {
 			if o == nil {
 				return mkundef(), realm.typeError("RegExp.prototype." + name + " getter called on non-object")
 			}
-			if o.regex == nil {
+			if o.regex() == nil {
 				if this == realm.regexpProto {
 					return mkundef(), nil
 				}
 				return mkundef(), realm.typeError("RegExp.prototype." + name + " getter called on incompatible receiver")
 			}
 			if read != nil {
-				return mkbool(read(o.regex)), nil
+				return mkbool(read(o.regex())), nil
 			}
-			return mkbool(strings.IndexByte(o.regex.Flags, ch) >= 0), nil
+			return mkbool(strings.IndexByte(o.regex().Flags, ch) >= 0), nil
 		})
 		po.defineAccessor(name, g, mkundef(), true, false, attrConfigurable)
 	}
@@ -565,13 +565,13 @@ func (rt *Runtime) initRegExpAccessors() {
 		if o == nil {
 			return mkundef(), realm.typeError("RegExp.prototype.source getter called on non-object")
 		}
-		if o.regex == nil {
+		if o.regex() == nil {
 			if this == realm.regexpProto {
 				return realm.internString("(?:)"), nil
 			}
 			return mkundef(), realm.typeError("RegExp.prototype.source getter called on incompatible receiver")
 		}
-		return realm.internString(nonEmptySource(o.regex.Source)), nil
+		return realm.internString(nonEmptySource(o.regex().Source)), nil
 	})
 	po.defineAccessor("source", srcGetter, mkundef(), true, false, attrConfigurable)
 
@@ -617,7 +617,7 @@ func (rt *Runtime) isRegExp(v Value) (bool, *ThrowError) {
 		}
 	}
 	o := rt.objPtr(v)
-	return o != nil && o.regex != nil, nil
+	return o != nil && o.regex() != nil, nil
 }
 
 // regexpStrIterState is the internal state of a RegExp String iterator
@@ -953,7 +953,7 @@ func (rt *Runtime) buildLegacyRegExpStrings() {
 
 func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 	o := rt.objPtr(this)
-	if o == nil || o.regex == nil {
+	if o == nil || o.regex() == nil {
 		return mkundef(), rt.typeError("Method RegExp.prototype.exec called on incompatible receiver")
 	}
 	s, e := rt.toStringValue(strVal)
@@ -961,7 +961,7 @@ func (rt *Runtime) regexpExec(this, strVal Value) (Value, *ThrowError) {
 		return mkundef(), e
 	}
 	slen := rt.strLen16(s)
-	re := o.regex
+	re := o.regex()
 
 	// lastIndex = ToLength(Get(R, "lastIndex")) — always read (observable via a
 	// getter), used as the search start only for a global/sticky regexp.
@@ -1359,8 +1359,8 @@ func (rt *Runtime) initStringRegexpMethods() {
 				return rt.callValue(m, sep, []Value{this, arg(args, 1)})
 			}
 		}
-		if o := rt.objPtr(sep); o != nil && o.regex != nil {
-			return rt.stringSplitRegexp(this, o.regex, arg(args, 1))
+		if o := rt.objPtr(sep); o != nil && o.regex() != nil {
+			return rt.stringSplitRegexp(this, o.regex(), arg(args, 1))
 		}
 		return rt.stringSplitString(this, args)
 	})
@@ -1432,8 +1432,8 @@ func (rt *Runtime) symbolDescription(sym Value) string {
 
 // coerceRegExp turns a value into a compiled regex (compiling a string pattern).
 func (rt *Runtime) coerceRegExp(v Value) (*regexpjs.Regexp, *ThrowError) {
-	if o := rt.objPtr(v); o != nil && o.regex != nil {
-		return o.regex, nil
+	if o := rt.objPtr(v); o != nil && o.regex() != nil {
+		return o.regex(), nil
 	}
 	pat := ""
 	if !v.IsUndefined() {
@@ -1452,7 +1452,7 @@ func (rt *Runtime) coerceRegExp(v Value) (*regexpjs.Regexp, *ThrowError) {
 
 // regexpArg returns a RegExp object (wrapping a string pattern if needed).
 func (rt *Runtime) regexpArg(v Value) (Value, *ThrowError) {
-	if o := rt.objPtr(v); o != nil && o.regex != nil {
+	if o := rt.objPtr(v); o != nil && o.regex() != nil {
 		return v, nil
 	}
 	pat := ""
@@ -1836,8 +1836,8 @@ func (rt *Runtime) stringReplace(this, pattern, repl Value) (Value, *ThrowError)
 	}
 
 	o := rt.objPtr(pattern)
-	if o != nil && o.regex != nil {
-		re := o.regex
+	if o != nil && o.regex() != nil {
+		re := o.regex()
 		input := []rune(subject)
 		var out strings.Builder
 		pos := 0

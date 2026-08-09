@@ -3888,7 +3888,7 @@ func jitHelper(rt *Runtime, fn *svFunc, cl *closure, args, locals []Value, ctx *
 			// The map points into the locals and the object can outlive the
 			// call, so this depth gives up its buffer — the same commitment a
 			// capture makes, and for the same reason.
-			ao.argMap = newArgumentsMap(locals, fn.paramCount, len(own))
+			ao.extend().argMap = newArgumentsMap(locals, fn.paramCount, len(own))
 			rt.dropFrameLocals(rt.frameDepth)
 		}
 		ao.defineOwn("length", mknum(float64(len(own))), attrWritable|attrConfigurable)

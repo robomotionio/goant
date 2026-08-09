@@ -193,10 +193,10 @@ const (
 // false if v is not a promise. For a pending promise the value is undefined.
 func (rt *Runtime) PromiseState(v Value) (state int, result Value, ok bool) {
 	o := rt.objPtr(v)
-	if o == nil || o.promise == nil {
+	if o == nil || o.promise() == nil {
 		return PromisePending, mkundef(), false
 	}
-	return o.promise.state, o.promise.value, true
+	return o.promise().state, o.promise().value, true
 }
 
 // ToBool applies ToBoolean.
@@ -538,7 +538,7 @@ func (rt *Runtime) NewUint8Array(b []byte) Value {
 	buf := rt.newObject(rt.arrayBufferProto)
 	bo := rt.objPtr(buf)
 	bo.abuf = b
-	bo.abMax = len(b)
+	bo.extend().abMax = len(b)
 	bo.abObj = true
 
 	h, o := rt.objects.alloc()

@@ -256,7 +256,7 @@ func (rt *Runtime) icFillGet(ic *propIC, o *object, name string) {
 	// of its shape, so they must not be recorded as a miss — doing so would poison
 	// the site for every other object that happens to share the shape. All are
 	// pointer compares made before the expensive lookup, so re-checking is free.
-	if o.proxy != nil || o.ta != nil || o.dv != nil || o.argMap != nil {
+	if o.proxy != nil || o.ta != nil || o.viewOrMapped() {
 		return
 	}
 	// From here the answer follows from the shape and the (constant) name, so a
@@ -299,7 +299,7 @@ func (rt *Runtime) icProtoHolder(o *object, name string) (*object, uint32, bool)
 		if next == nil {
 			return nil, 0, false
 		}
-		if next.proxy != nil || next.ta != nil || next.dv != nil || next.argMap != nil {
+		if next.proxy != nil || next.ta != nil || next.viewOrMapped() {
 			return nil, 0, false
 		}
 		next.flags.usedAsProto = true
@@ -344,7 +344,7 @@ func (rt *Runtime) icFillPut(ic *propIC, o *object, name string) {
 	if o == nil || ic.known(o) {
 		return
 	}
-	if o.proxy != nil || o.ta != nil || o.dv != nil || o.argMap != nil {
+	if o.proxy != nil || o.ta != nil || o.viewOrMapped() {
 		return
 	}
 	if _, isIdx := canonicalIndex(name); isIdx {
@@ -382,7 +382,7 @@ func (rt *Runtime) icFillPutTransition(ic *propIC, o *object, pre *shape, name s
 	if o == nil || pre == nil || o.shape == pre {
 		return
 	}
-	if o.proxy != nil || o.ta != nil || o.dv != nil || o.argMap != nil || o.typeTag == TArr {
+	if o.proxy != nil || o.ta != nil || o.viewOrMapped() || o.typeTag == TArr {
 		return
 	}
 	if _, isIdx := canonicalIndex(name); isIdx {
@@ -423,7 +423,7 @@ func (rt *Runtime) icProtoChainClean(o *object, name string) bool {
 		if next == nil {
 			return true // reached the end of the chain
 		}
-		if next.proxy != nil || next.ta != nil || next.dv != nil || next.argMap != nil {
+		if next.proxy != nil || next.ta != nil || next.viewOrMapped() {
 			return false
 		}
 		next.flags.usedAsProto = true

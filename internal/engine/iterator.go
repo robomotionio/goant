@@ -338,7 +338,7 @@ func (rt *Runtime) isIterable(v Value) bool {
 	case TArr, TStr, TTypedArray:
 		return true
 	}
-	if o := rt.objPtr(v); o != nil && o.coll != nil {
+	if o := rt.objPtr(v); o != nil && o.coll() != nil {
 		return true
 	}
 	if (v.IsObjectType() || v.Type() == TTypedArray) && rt.symIterator != 0 {
@@ -409,10 +409,10 @@ func (rt *Runtime) iterateProtocol(v Value) ([]Value, bool, *ThrowError) {
 // nil for non-iterables. Map yields [key,value] pairs; Set yields values.
 func (rt *Runtime) objectIterableValues(v Value) []Value {
 	o := rt.objPtr(v)
-	if o == nil || o.coll == nil {
+	if o == nil || o.coll() == nil {
 		return nil
 	}
-	c := o.coll
+	c := o.coll()
 	var out []Value
 	for i := 0; i < len(c.keys); i++ {
 		if c.keys[i].IsEmpty() {

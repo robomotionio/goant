@@ -1,7 +1,7 @@
 package engine
 
 // Private class elements (`#x` fields, `#m()` methods, and `get/set #m`
-// accessors). They are stored per-object in object.priv rather than as ordinary
+// accessors). They are stored per-object in object.priv() rather than as ordinary
 // shape properties, so they are invisible to reflection and never collide with
 // an ordinary "#x" string property. Access to a private name the object's class
 // did not declare (the "brand check") throws a TypeError.
@@ -94,9 +94,9 @@ type privElem struct {
 // constructor return override installs a second one), and those are distinct
 // Private Names — only the one from an evaluation this code is inside counts.
 func (o *object) findPriv(name string, env *privScope) *privElem {
-	for i := range o.priv {
-		if o.priv[i].name == name && env.has(o.priv[i].env) {
-			return &o.priv[i]
+	for i := range o.priv() {
+		if o.priv()[i].name == name && env.has(o.priv()[i].env) {
+			return &o.priv()[i]
 		}
 	}
 	return nil
@@ -109,7 +109,7 @@ func (o *object) definePrivateField(name string, env *privScope, v Value) bool {
 	if o.findPriv(name, env) != nil {
 		return false
 	}
-	o.priv = append(o.priv, privElem{name: name, env: env.tagOf(), kind: privField, value: v})
+	o.extend().priv = append(o.priv(), privElem{name: name, env: env.tagOf(), kind: privField, value: v})
 	return true
 }
 
@@ -122,7 +122,7 @@ func (o *object) definePrivateMethod(name string, env *privScope, fn Value) bool
 	if o.findPriv(name, env) != nil {
 		return false
 	}
-	o.priv = append(o.priv, privElem{name: name, env: env.tagOf(), kind: privMethod, value: fn})
+	o.extend().priv = append(o.priv(), privElem{name: name, env: env.tagOf(), kind: privMethod, value: fn})
 	return true
 }
 
@@ -154,7 +154,7 @@ func (o *object) definePrivateAccessor(name string, env *privScope, fn Value, is
 	} else {
 		pe.setter = fn
 	}
-	o.priv = append(o.priv, pe)
+	o.extend().priv = append(o.priv(), pe)
 	return true
 }
 

@@ -227,7 +227,7 @@ func (rt *Runtime) yieldTurn() {
 // different objects over the same array, and this is what they have in common.
 func waitBlock(o *object) (*byte, bool) {
 	b := o.ta.bufPtr
-	if b == nil || !b.abShared || len(b.abuf) == 0 {
+	if b == nil || !b.abShared() || len(b.abuf) == 0 {
 		return nil, false
 	}
 	return &b.abuf[0], true
@@ -460,7 +460,7 @@ func (rt *Runtime) installAgentHost(child bool) {
 		})
 		rt.defMethod(ao, "broadcast", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			o := rt.objPtr(arg(args, 0))
-			if o == nil || !o.abObj || !o.abShared {
+			if o == nil || !o.abObj || !o.abShared() {
 				return mkundef(), rt.typeError("$262.agent.broadcast expects a SharedArrayBuffer")
 			}
 			rt.agentBroadcast(o.abuf)
@@ -552,9 +552,9 @@ func (rt *Runtime) agentBroadcast(block []byte) {
 func (rt *Runtime) newSharedBufOver(block []byte) Value {
 	v := rt.newObject(rt.sabProto)
 	o := rt.objPtr(v)
-	o.abObj, o.abShared = true, true
+	o.abObj, o.extend().abShared = true, true
 	o.abuf = block
-	o.abMax = len(block)
+	o.extend().abMax = len(block)
 	return v
 }
 

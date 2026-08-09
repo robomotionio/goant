@@ -75,6 +75,78 @@ type object struct {
 	// boxed primitive / misc data cell (ant u.data.value).
 	boxed Value
 
+	// lazy is set on an object or array parsed out of a JSON document that has
+	// not been built yet (json_lazy.go). It is the document those slots holding
+	// an unparsed span refer to; every other object leaves it nil.
+	//
+	// Inline, though nothing generated reads it, because a host message arrives
+	// as one of these documents and every object in it carries the pointer. Move
+	// it into ext and a million-row message is a million exotic objects, each
+	// with an extension allocated for one field — which measured slower and no
+	// smaller than leaving the whole struct alone.
+	lazy *lazyDoc
+
+	// native is set for built-in functions implemented in Go (ant cfunc).
+	//
+	// Inline, though generated code does not read it, because every call to a
+	// built-in tests it and then calls through it. Behind ext that is two
+	// dereferences on the call path, and a script that spends its time in
+	// toUpperCase, push and sort — which is what a Function node does — measured
+	// 30% slower for it.
+	native nativeFunc
+
+	// ext is everything an exotic object needs and an ordinary one does not.
+	// Nil for a plain object, an array, or a function, which is nearly all of
+	// them; see objectExt.
+	ext *objectExt
+
+	// proxy is set for Proxy objects (their target + trap handler).
+	//
+	// Inline rather than in ext because generated code reads it: every compiled
+	// property access tests it before touching a slot, at an offset baked into
+	// the machine code (jitOffObjProxy). A pointer hop there is on the hottest
+	// path in the engine.
+	proxy *proxyState
+
+	// abuf is the backing byte store for an ArrayBuffer object; nil once the
+	// buffer is detached. For a resizable buffer, len(abuf) is the current byte
+	// length and cap(abuf) is abMax, so resize() only re-slices (the storage
+	// never moves and existing views stay valid).
+	abuf []byte
+	// abObj brands an object as an ArrayBuffer (the [[ArrayBufferData]] slot),
+	// staying true after detach so the prototype getters can require the slot on
+	// their receiver while still distinguishing a detached buffer from a non-buffer.
+	//
+	// Inline beside abuf, which generated code reads by offset, and one byte in
+	// a run of bools that is already there.
+	abObj bool
+
+	// ta is set for TypedArray views (element kind + window into an
+	// ArrayBuffer). Inline for the same reason as proxy: an element read
+	// reaches through it at a baked-in offset, and that read is what typed-array
+	// code spends its time on.
+	ta *typedArray
+
+	typeTag Type
+	flags   objFlags
+}
+
+// objectExt is the part of an object that only an exotic one has.
+//
+// The struct was 312 bytes and four inline property slots, and 234 of those
+// bytes were fields that a plain object, an array or an ordinary function never
+// touches: the private-element list, the JSON document a lazily parsed value
+// came out of, the compiled pattern behind a RegExp, a Map's entries, a
+// Promise's settlement, a generator's coroutine. Every record in a million-row
+// message paid for all of it, and cell storage is never given back, so it was
+// paid resident for the life of the runtime.
+//
+// What stayed inline stayed for a reason and not by omission. proxy, ta, abuf
+// and the fast-array fields are read by generated code at offsets baked into
+// machine code; the closure and the boxed value are on the call and wrapper
+// paths. Everything here is reached only after something has already
+// established that this object is of a kind that has it.
+type objectExt struct {
 	// internal slots (ant extra_slots sidecar).
 	extra []extraSlot
 
@@ -83,14 +155,6 @@ type object struct {
 	// appear in reflection (getOwnPropertyNames, hasOwnProperty, for-in, …) and
 	// cannot collide with an ordinary "#x" string property.
 	priv []privElem
-
-	// lazy is set on an object or array parsed out of a JSON document that has
-	// not been built yet (json_lazy.go). It is the document those slots holding
-	// an unparsed span refer to; every other object leaves it nil.
-	lazy *lazyDoc
-
-	// native is set for built-in functions implemented in Go (ant cfunc).
-	native nativeFunc
 
 	// regex is set for RegExp objects (the compiled pattern).
 	regex *regexpjs.Regexp
@@ -104,44 +168,110 @@ type object struct {
 	// gen is set for generator objects (their suspended coroutine).
 	gen *genState
 
-	// proxy is set for Proxy objects (their target + trap handler).
-	proxy *proxyState
+	// argMap is the [[ParameterMap]] of a mapped arguments object: the indices
+	// that alias their function's formal parameters (see arguments.go).
+	argMap *argumentsMap
 
-	// abuf is the backing byte store for an ArrayBuffer object; nil once the
-	// buffer is detached. For a resizable buffer, len(abuf) is the current byte
-	// length and cap(abuf) is abMax, so resize() only re-slices (the storage
-	// never moves and existing views stay valid).
-	abuf []byte
+	// dv marks a DataView over a buffer.
+	dv *dataView
+
 	// abMax is the maximum byte length; abResizable marks a resizable buffer.
 	// For a non-resizable buffer abMax equals its fixed byte length.
 	abMax       int
 	abResizable bool
-	// abObj brands an object as an ArrayBuffer (the [[ArrayBufferData]] slot),
-	// staying true after detach so the prototype getters can require the slot on
-	// their receiver while still distinguishing a detached buffer from a non-buffer.
-	abObj bool
+
 	// isHTMLDDA marks the [[IsHTMLDDA]] exotic object -- document.all, the one
 	// object the language pretends is undefined. It is still an Object: only
 	// typeof, ToBoolean and loose equality against null/undefined are lied to,
 	// and === is not, which is why a switch on it matches its own case.
 	isHTMLDDA bool
+
 	// abShared marks a SharedArrayBuffer. It is an ArrayBuffer as far as anything
 	// that VIEWS one is concerned -- a TypedArray or a DataView over it is the
 	// point of it existing -- and not one at all to the methods that would detach,
 	// transfer or resize it, since it is not any single agent's to take away.
 	abShared bool
-	// argMap is the [[ParameterMap]] of a mapped arguments object: the indices
-	// that alias their function's formal parameters (see arguments.go).
-	argMap *argumentsMap
-
-	// ta is set for TypedArray views (element kind + window into an ArrayBuffer);
-	// dv marks a DataView over a buffer.
-	ta *typedArray
-	dv *dataView
-
-	typeTag Type
-	flags   objFlags
 }
+
+// extend returns this object's extension, creating it on the first exotic
+// thing it is asked to hold. Every write to an ext field goes through here;
+// every read goes through the accessors below, which answer with the zero
+// value when there is no extension, exactly as the inline fields did.
+func (o *object) extend() *objectExt {
+	if o.ext == nil {
+		o.ext = &objectExt{}
+	}
+	return o.ext
+}
+
+// viewOrMapped reports whether this object is a DataView or a mapped arguments
+// object — the two ext-borne kinds the property caches have to decline.
+//
+// One test rather than two accessors, because this is on the property path: it
+// runs before every cached read and write in the engine, and the pair of calls
+// it replaces cost two dereferences each time the extension existed. Reading
+// o.ext once and answering no is the common case and the whole point.
+func (o *object) viewOrMapped() bool {
+	return o.ext != nil && (o.ext.dv != nil || o.ext.argMap != nil)
+}
+
+func (o *object) extra() []extraSlot {
+	if o.ext == nil {
+		return nil
+	}
+	return o.ext.extra
+}
+func (o *object) priv() []privElem {
+	if o.ext == nil {
+		return nil
+	}
+	return o.ext.priv
+}
+func (o *object) regex() *regexpjs.Regexp {
+	if o.ext == nil {
+		return nil
+	}
+	return o.ext.regex
+}
+func (o *object) coll() *collection {
+	if o.ext == nil {
+		return nil
+	}
+	return o.ext.coll
+}
+func (o *object) promise() *promiseState {
+	if o.ext == nil {
+		return nil
+	}
+	return o.ext.promise
+}
+func (o *object) gen() *genState {
+	if o.ext == nil {
+		return nil
+	}
+	return o.ext.gen
+}
+func (o *object) argMap() *argumentsMap {
+	if o.ext == nil {
+		return nil
+	}
+	return o.ext.argMap
+}
+func (o *object) dv() *dataView {
+	if o.ext == nil {
+		return nil
+	}
+	return o.ext.dv
+}
+func (o *object) abMax() int {
+	if o.ext == nil {
+		return 0
+	}
+	return o.ext.abMax
+}
+func (o *object) abResizable() bool { return o.ext != nil && o.ext.abResizable }
+func (o *object) isHTMLDDA() bool   { return o.ext != nil && o.ext.isHTMLDDA }
+func (o *object) abShared() bool    { return o.ext != nil && o.ext.abShared }
 
 // promiseState is a Promise's settlement state (ant ant_promise_state_t).
 type promiseState struct {
@@ -335,22 +465,22 @@ func (o *object) ensureUniqueShape() {
 // ---- internal slots ----
 
 func (o *object) getSlot(slot internalSlot) Value {
-	for i := range o.extra {
-		if o.extra[i].slot == slot {
-			return o.extra[i].value
+	for i := range o.extra() {
+		if o.extra()[i].slot == slot {
+			return o.extra()[i].value
 		}
 	}
 	return mkundef()
 }
 
 func (o *object) setSlot(slot internalSlot, v Value) {
-	for i := range o.extra {
-		if o.extra[i].slot == slot {
-			o.extra[i].value = v
+	for i := range o.extra() {
+		if o.extra()[i].slot == slot {
+			o.extra()[i].value = v
 			return
 		}
 	}
-	o.extra = append(o.extra, extraSlot{slot, v})
+	o.extend().extra = append(o.extra(), extraSlot{slot, v})
 }
 
 func (o *object) brandID() int {
@@ -884,8 +1014,8 @@ func (o *object) ownDescriptor(key string) ownDesc {
 		d.value = o.slotGet(uint32(slot))
 		// A mapped arguments index reports the CURRENT value of the parameter it
 		// aliases, not the one stored when the object was made.
-		if i := o.argMap.index(key); i >= 0 {
-			d.value = o.argMap.get(i)
+		if i := o.argMap().index(key); i >= 0 {
+			d.value = o.argMap().get(i)
 		}
 	}
 	return d
@@ -1065,8 +1195,8 @@ func (rt *Runtime) setProp(receiver Value, key string, v Value) bool {
 		if holder == ro {
 			holder.slotSet(slot, v)
 			// A mapped index writes through to the parameter it aliases.
-			if i := ro.argMap.index(key); i >= 0 {
-				ro.argMap.set(i, v)
+			if i := ro.argMap().index(key); i >= 0 {
+				ro.argMap().set(i, v)
 			}
 			return true
 		}

@@ -1063,10 +1063,10 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 	// definition is applied, since a rejected definition changes nothing.
 	argIdx := -1
 	if !sym {
-		argIdx = o.argMap.index(name)
+		argIdx = o.argMap().index(name)
 	}
 	if argIdx >= 0 && (hasVal || hasW) && !hasVal && hasW && !rt.toBoolean(wV) {
-		valV, hasVal = o.argMap.get(argIdx), true
+		valV, hasVal = o.argMap().get(argIdx), true
 	}
 	applyArgMap := func() {
 		if argIdx < 0 {
@@ -1074,13 +1074,13 @@ func (rt *Runtime) objectDefinePropertyKey(obj Value, key Value, descVal Value) 
 		}
 		switch {
 		case hasGet || hasSet:
-			o.argMap.unmap(name) // an accessor is no longer an alias
+			o.argMap().unmap(name) // an accessor is no longer an alias
 		default:
 			if hasVal {
-				o.argMap.set(argIdx, valV)
+				o.argMap().set(argIdx, valV)
 			}
 			if hasW && !rt.toBoolean(wV) {
-				o.argMap.unmap(name)
+				o.argMap().unmap(name)
 			}
 		}
 	}
@@ -1731,7 +1731,7 @@ func (rt *Runtime) objectToStringTag(v Value) (string, *ThrowError) {
 				builtin = "Function"
 			case o.brandID() == brandDate:
 				builtin = "Date"
-			case o.regex != nil:
+			case o.regex() != nil:
 				builtin = "RegExp"
 			case o.brandID() == brandError:
 				builtin = "Error"

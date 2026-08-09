@@ -253,12 +253,12 @@ func (rt *Runtime) initAsyncIterator() {
 	drive := func(kind genResumeKind) nativeFunc {
 		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			o := rt.objPtr(this)
-			if o == nil || o.gen == nil || o.gen.fn == nil || !o.gen.fn.isAsync {
+			if o == nil || o.gen() == nil || o.gen().fn == nil || !o.gen().fn.isAsync {
 				return rt.rejectedPromise(rt.makeError(rt.errors.typeProto, "TypeError", "not an async generator")), nil
 			}
 			p, po := rt.makePromise()
-			o.gen.asyncReqs = append(o.gen.asyncReqs, asyncGenReq{kind: kind, val: arg(args, 0), p: p, po: po})
-			rt.asyncGenDrain(o.gen)
+			o.gen().asyncReqs = append(o.gen().asyncReqs, asyncGenReq{kind: kind, val: arg(args, 0), p: p, po: po})
+			rt.asyncGenDrain(o.gen())
 			return p, nil
 		}
 	}

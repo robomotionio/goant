@@ -560,9 +560,9 @@ func (rt *Runtime) hoistModuleGraph(m *moduleRecord, seen map[string]bool) *Thro
 func (rt *Runtime) evaluateModule(m *moduleRecord) *ThrowError {
 	p := rt.moduleEvaluate(m)
 	rt.runEventLoop()
-	if po := rt.objPtr(p); po != nil && po.promise != nil && po.promise.state == 2 {
+	if po := rt.objPtr(p); po != nil && po.promise() != nil && po.promise().state == 2 {
 		if m.evalErr == nil {
-			m.evalErr = &ThrowError{Value: po.promise.value, rt: rt}
+			m.evalErr = &ThrowError{Value: po.promise().value, rt: rt}
 		}
 		return m.evalErr
 	}
@@ -701,7 +701,7 @@ func (rt *Runtime) executeAsyncModule(m *moduleRecord) {
 	body := rt.runAsync(m.fn, nil, mkundef(), mkundef(), nil)
 	rt.pendingModule = nil
 	bo := rt.objPtr(body)
-	if bo == nil || bo.promise == nil {
+	if bo == nil || bo.promise() == nil {
 		rt.asyncModuleExecutionFulfilled(m)
 		return
 	}
@@ -916,7 +916,7 @@ func (rt *Runtime) importModuleDynamic(spec, referrer string) Value {
 		}
 		done := func() { rt.resolvePromise(promise, cap, rt.moduleNamespace(m)) }
 		po := rt.objPtr(rt.moduleEvaluate(m))
-		if po == nil || po.promise == nil {
+		if po == nil || po.promise() == nil {
 			done()
 			return
 		}
@@ -966,7 +966,7 @@ func (rt *Runtime) importModuleDeferDynamic(spec, referrer string) Value {
 		var pend []Value
 		for _, d := range rt.gatherAsyncDeps(m, map[*moduleRecord]bool{}) {
 			pv := rt.moduleEvaluate(d)
-			if po := rt.objPtr(pv); po != nil && po.promise != nil {
+			if po := rt.objPtr(pv); po != nil && po.promise() != nil {
 				pend = append(pend, pv)
 			}
 		}

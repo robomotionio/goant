@@ -329,7 +329,7 @@ func (rt *Runtime) taFixedLength(o *object) bool {
 		return false
 	}
 	b := t.bufPtr
-	return b == nil || !b.abResizable
+	return b == nil || !b.abResizable()
 }
 
 // validateTypedArray implements ValidateTypedArray(O): O must be a TypedArray
@@ -466,7 +466,7 @@ func (rt *Runtime) newArrayBuffer(byteLen int) Value {
 	// is actually USED is caught at the next collection, and one that is never
 	// touched costs untouched zero pages and no resident memory.
 	o.abuf = make([]byte, byteLen)
-	o.abMax = byteLen
+	o.extend().abMax = byteLen
 	o.abObj = true
 	rt.chargeBytes(uint64(byteLen))
 	return v
@@ -488,8 +488,8 @@ func (rt *Runtime) newResizableArrayBuffer(byteLen, maxLen int) Value {
 	// is actually USED is caught at the next collection, and one that is never
 	// touched costs untouched zero pages and no resident memory.
 	o.abuf = make([]byte, byteLen)
-	o.abMax = maxLen
-	o.abResizable = true
+	o.extend().abMax = maxLen
+	o.extend().abResizable = true
 	o.abObj = true
 	rt.chargeBytes(uint64(byteLen))
 	return v
@@ -563,7 +563,7 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 		var viewLen int
 		var track bool
 		switch {
-		case lenArg.IsUndefined() && bo.abResizable:
+		case lenArg.IsUndefined() && bo.abResizable():
 			if offset > bufLen {
 				return mkundef(), rt.rangeError("Start offset is outside the bounds of the buffer")
 			}
@@ -681,7 +681,7 @@ func (rt *Runtime) newTypedArray(kind taKind, args []Value) (Value, *ThrowError)
 
 func (rt *Runtime) isArrayBufferValue(v Value) bool {
 	o := rt.objPtr(v)
-	return o != nil && o.abuf != nil && o.ta == nil && o.dv == nil
+	return o != nil && o.abuf != nil && o.ta == nil && o.dv() == nil
 }
 
 // abIsImmutable reports whether an ArrayBuffer object carries the
@@ -896,7 +896,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	po := rt.objPtr(proto)
 	po.defineAccessor("byteLength", rt.newNativeFunc("get byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj || o.abShared {
+		if o == nil || !o.abObj || o.abShared() {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.byteLength getter called on a non-ArrayBuffer")
 		}
 		return mknum(float64(len(o.abuf))), nil // 0 when detached
@@ -904,7 +904,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	// detached: an ArrayBuffer whose bytes have been transferred away (abuf nil).
 	po.defineAccessor("detached", rt.newNativeFunc("get detached", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj || o.abShared {
+		if o == nil || !o.abObj || o.abShared() {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.detached getter called on a non-ArrayBuffer")
 		}
 		return mkbool(o.abuf == nil), nil
@@ -915,7 +915,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	transfer := func(preserveResizability bool) nativeFunc {
 		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			o := rt.objPtr(this)
-			if o == nil || (o.ta != nil || o.dv != nil) {
+			if o == nil || (o.ta != nil || o.dv() != nil) {
 				return mkundef(), rt.typeError("ArrayBuffer.prototype.transfer on incompatible receiver")
 			}
 			newLen := len(o.abuf)
@@ -933,8 +933,8 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 				return mkundef(), rt.typeError("Cannot transfer an immutable ArrayBuffer")
 			}
 			var nb Value
-			if preserveResizability && o.abResizable {
-				max := o.abMax
+			if preserveResizability && o.abResizable() {
+				max := o.abMax()
 				if newLen > max {
 					return mkundef(), rt.rangeError("Transfer length exceeds maxByteLength")
 				}
@@ -954,7 +954,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	// buffer (zero-filling any growth) and detach the source.
 	rt.defMethod(po, "transferToImmutable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj || o.abShared {
+		if o == nil || !o.abObj || o.abShared() {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.transferToImmutable on incompatible receiver")
 		}
 		newLen := len(o.abuf)
@@ -986,7 +986,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	// the detached check and a currentLen<final RangeError happen after.
 	rt.defMethod(po, "sliceToImmutable", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj || o.abShared {
+		if o == nil || !o.abObj || o.abShared() {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.sliceToImmutable on incompatible receiver")
 		}
 		// Non-detachment is verified before the index arguments are coerced.
@@ -1025,7 +1025,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	})
 	rt.defMethod(po, "resize", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj || o.abShared || !o.abResizable {
+		if o == nil || !o.abObj || o.abShared() || !o.abResizable() {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.resize called on a non-resizable ArrayBuffer")
 		}
 		n, e := rt.toIndex(arg(args, 0))
@@ -1035,7 +1035,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 		if o.abuf == nil {
 			return mkundef(), rt.typeError("Cannot resize a detached ArrayBuffer")
 		}
-		if n > o.abMax {
+		if n > o.abMax() {
 			return mkundef(), rt.rangeError("ArrayBuffer.prototype.resize length exceeds maxByteLength")
 		}
 		// Reallocate and copy min(old, new) bytes; grown bytes start zeroed, and
@@ -1047,7 +1047,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	})
 	rt.defMethod(po, "slice", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj || o.abShared {
+		if o == nil || !o.abObj || o.abShared() {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.slice on incompatible receiver")
 		}
 		if o.abuf == nil {
@@ -1124,25 +1124,25 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	})
 	po.defineAccessor("maxByteLength", rt.newNativeFunc("get maxByteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj || o.abShared {
+		if o == nil || !o.abObj || o.abShared() {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.maxByteLength on incompatible receiver")
 		}
 		if o.abuf == nil {
 			return mknum(0), nil // detached
 		}
-		return mknum(float64(o.abMax)), nil
+		return mknum(float64(o.abMax())), nil
 	}), mkundef(), true, false, attrConfigurable)
 	po.defineAccessor("resizable", rt.newNativeFunc("get resizable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj || o.abShared {
+		if o == nil || !o.abObj || o.abShared() {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.resizable on incompatible receiver")
 		}
-		return mkbool(o.abResizable), nil
+		return mkbool(o.abResizable()), nil
 	}), mkundef(), true, false, attrConfigurable)
 	// immutable getter (Immutable ArrayBuffer proposal): IsImmutableBuffer.
 	po.defineAccessor("immutable", rt.newNativeFunc("get immutable", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || !o.abObj || o.abShared {
+		if o == nil || !o.abObj || o.abShared() {
 			return mkundef(), rt.typeError("ArrayBuffer.prototype.immutable on incompatible receiver")
 		}
 		return mkbool(rt.abIsImmutable(o)), nil
@@ -1206,7 +1206,7 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 	cobj.defineOwn("prototype", proto, 0)
 	rt.defMethod(cobj, "isView", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(arg(args, 0))
-		return mkbool(o != nil && (o.ta != nil || o.dv != nil)), nil
+		return mkbool(o != nil && (o.ta != nil || o.dv() != nil)), nil
 	})
 	po.defineOwn("constructor", ctor, attrWritable|attrConfigurable)
 	rt.defSpeciesGetter(ctor)
@@ -1215,16 +1215,16 @@ func (rt *Runtime) initArrayBufferBuiltin() {
 
 // dvDetached reports whether DataView o's backing ArrayBuffer has been detached.
 func (rt *Runtime) dvDetached(o *object) bool {
-	if o == nil || o.dv == nil {
+	if o == nil || o.dv() == nil {
 		return false
 	}
-	b := rt.objPtr(o.dv.buf)
+	b := rt.objPtr(o.dv().buf)
 	return b == nil || b.abuf == nil
 }
 
 // dvBytes returns the DataView's current backing byte store (nil if detached).
 func (rt *Runtime) dvBytes(o *object) []byte {
-	if b := rt.objPtr(o.dv.buf); b != nil {
+	if b := rt.objPtr(o.dv().buf); b != nil {
 		return b.abuf
 	}
 	return nil
@@ -1233,7 +1233,7 @@ func (rt *Runtime) dvBytes(o *object) []byte {
 // dvOutOfBounds implements IsViewOutOfBounds: detached, or a resizable buffer
 // shrank so the view's window no longer fits.
 func (rt *Runtime) dvOutOfBounds(o *object) bool {
-	d := o.dv
+	d := o.dv()
 	b := rt.objPtr(d.buf)
 	if b == nil || b.abuf == nil {
 		return true
@@ -1251,7 +1251,7 @@ func (rt *Runtime) dvOutOfBounds(o *object) bool {
 // dvCurrentLen implements GetViewByteLength: the effective byte length now
 // (recomputed from the buffer for a length-tracking view).
 func (rt *Runtime) dvCurrentLen(o *object) int {
-	d := o.dv
+	d := o.dv()
 	if d.track {
 		b := rt.objPtr(d.buf)
 		return len(b.abuf) - d.byteOffset
@@ -1291,7 +1291,7 @@ func (rt *Runtime) initDataViewBuiltin() {
 		t := t
 		rt.defMethod(po, "get"+t.name, 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			o := rt.objPtr(this)
-			if o == nil || o.dv == nil {
+			if o == nil || o.dv() == nil {
 				return mkundef(), rt.typeError("DataView.prototype.get" + t.name + " on incompatible receiver")
 			}
 			idx, e := rt.toIndex(arg(args, 0))
@@ -1305,16 +1305,16 @@ func (rt *Runtime) initDataViewBuiltin() {
 			if idx+t.size > rt.dvCurrentLen(o) {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
-			return mknum(t.dec(rt.dvBytes(o), o.dv.byteOffset+idx, le)), nil
+			return mknum(t.dec(rt.dvBytes(o), o.dv().byteOffset+idx, le)), nil
 		})
 		rt.defMethod(po, "set"+t.name, 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			o := rt.objPtr(this)
-			if o == nil || o.dv == nil {
+			if o == nil || o.dv() == nil {
 				return mkundef(), rt.typeError("DataView.prototype.set" + t.name + " on incompatible receiver")
 			}
 			// SetViewValue step 3: reject an immutable viewed buffer before coercing
 			// the byteOffset and value arguments.
-			if rt.abIsImmutable(rt.objPtr(o.dv.buf)) {
+			if rt.abIsImmutable(rt.objPtr(o.dv().buf)) {
 				return mkundef(), rt.typeError("Cannot set a value on an immutable ArrayBuffer")
 			}
 			idx, e := rt.toIndex(arg(args, 0))
@@ -1332,7 +1332,7 @@ func (rt *Runtime) initDataViewBuiltin() {
 			if idx+t.size > rt.dvCurrentLen(o) {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
-			t.enc(rt.dvBytes(o), o.dv.byteOffset+idx, val, le)
+			t.enc(rt.dvBytes(o), o.dv().byteOffset+idx, val, le)
 			return mkundef(), nil
 		})
 	}
@@ -1344,7 +1344,7 @@ func (rt *Runtime) initDataViewBuiltin() {
 		bt := bt
 		rt.defMethod(po, "get"+bt.name, 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			o := rt.objPtr(this)
-			if o == nil || o.dv == nil {
+			if o == nil || o.dv() == nil {
 				return mkundef(), rt.typeError("DataView.prototype.get" + bt.name + " on incompatible receiver")
 			}
 			idx, e := rt.toIndex(arg(args, 0))
@@ -1358,7 +1358,7 @@ func (rt *Runtime) initDataViewBuiltin() {
 			if idx+8 > rt.dvCurrentLen(o) {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
-			off := o.dv.byteOffset + idx
+			off := o.dv().byteOffset + idx
 			u := order(le).Uint64(rt.dvBytes(o)[off:])
 			if bt.signed {
 				return rt.newBigInt(big.NewInt(int64(u))), nil
@@ -1367,10 +1367,10 @@ func (rt *Runtime) initDataViewBuiltin() {
 		})
 		rt.defMethod(po, "set"+bt.name, 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			o := rt.objPtr(this)
-			if o == nil || o.dv == nil {
+			if o == nil || o.dv() == nil {
 				return mkundef(), rt.typeError("DataView.prototype.set" + bt.name + " on incompatible receiver")
 			}
-			if rt.abIsImmutable(rt.objPtr(o.dv.buf)) {
+			if rt.abIsImmutable(rt.objPtr(o.dv().buf)) {
 				return mkundef(), rt.typeError("Cannot set a value on an immutable ArrayBuffer")
 			}
 			idx, e := rt.toIndex(arg(args, 0))
@@ -1388,13 +1388,13 @@ func (rt *Runtime) initDataViewBuiltin() {
 			if idx+8 > rt.dvCurrentLen(o) {
 				return mkundef(), rt.rangeError("Offset is outside the bounds of the DataView")
 			}
-			order(le).PutUint64(rt.dvBytes(o)[o.dv.byteOffset+idx:], bigIntAsUintN(64, bi).Uint64())
+			order(le).PutUint64(rt.dvBytes(o)[o.dv().byteOffset+idx:], bigIntAsUintN(64, bi).Uint64())
 			return mkundef(), nil
 		})
 	}
 	po.defineAccessor("byteLength", rt.newNativeFunc("get byteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || o.dv == nil {
+		if o == nil || o.dv() == nil {
 			return mkundef(), rt.typeError("DataView.prototype.byteLength on incompatible receiver")
 		}
 		if rt.dvOutOfBounds(o) {
@@ -1404,20 +1404,20 @@ func (rt *Runtime) initDataViewBuiltin() {
 	}), mkundef(), true, false, attrConfigurable)
 	po.defineAccessor("byteOffset", rt.newNativeFunc("get byteOffset", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || o.dv == nil {
+		if o == nil || o.dv() == nil {
 			return mkundef(), rt.typeError("DataView.prototype.byteOffset on incompatible receiver")
 		}
 		if rt.dvOutOfBounds(o) {
 			return mkundef(), rt.typeError("Cannot read byteOffset of a detached ArrayBuffer")
 		}
-		return mknum(float64(o.dv.byteOffset)), nil
+		return mknum(float64(o.dv().byteOffset)), nil
 	}), mkundef(), true, false, attrConfigurable)
 	po.defineAccessor("buffer", rt.newNativeFunc("get buffer", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || o.dv == nil {
+		if o == nil || o.dv() == nil {
 			return mkundef(), rt.typeError("DataView.prototype.buffer on incompatible receiver")
 		}
-		return o.dv.buf, nil
+		return o.dv().buf, nil
 	}), mkundef(), true, false, attrConfigurable)
 	rt.setStringTag(proto, "DataView")
 
@@ -1447,7 +1447,7 @@ func (rt *Runtime) initDataViewBuiltin() {
 		}
 		// An omitted length over a resizable buffer makes a length-tracking view.
 		lv := arg(args, 2)
-		track := lv.IsUndefined() && bo.abResizable
+		track := lv.IsUndefined() && bo.abResizable()
 		viewLen := bufLen - offset
 		if !lv.IsUndefined() {
 			viewLen, e = rt.toIndex(lv)
@@ -1472,7 +1472,7 @@ func (rt *Runtime) initDataViewBuiltin() {
 			return mkundef(), rt.typeError("Cannot construct DataView on a detached ArrayBuffer")
 		}
 		v := rt.newObject(viewProto)
-		rt.objPtr(v).dv = &dataView{buf: bufV, byteOffset: offset, byteLength: viewLen, track: track}
+		rt.objPtr(v).extend().dv = &dataView{buf: bufV, byteOffset: offset, byteLength: viewLen, track: track}
 		return v, nil
 	})
 	rt.objPtr(ctor).defineOwn("prototype", proto, 0)

@@ -242,14 +242,14 @@ func (rt *Runtime) newGenerator(fn *svFunc, cl *closure, fnVal, thisVal Value, a
 	}
 	v := rt.newObject(proto)
 	o := rt.objPtr(v)
-	o.gen = rt.newGenState(fn, cl, fnVal, thisVal, args)
+	o.extend().gen = rt.newGenState(fn, cl, fnVal, thisVal, args)
 	// FunctionDeclarationInstantiation (parameter destructuring / defaults) runs
 	// eagerly at call time: drive the coroutine up to the body barrier the
 	// compiler emits (OpEmpty;OpYield) right after parameter binding. A parameter
 	// error therefore throws synchronously at the call, and the generator is left
 	// suspended at the start of its body (the body proper runs on the first
 	// resume). The tEmpty sentinel value marks the barrier yield.
-	if m := rt.genDrive(o.gen, genNext, mkundef()); m.err != nil {
+	if m := rt.genDrive(o.gen(), genNext, mkundef()); m.err != nil {
 		return mkundef(), m.err
 	}
 	// OrdinaryCreateFromConstructor reads the function's .prototype AFTER
@@ -282,10 +282,10 @@ func (rt *Runtime) initGeneratorBuiltin() {
 	drive := func(kind genResumeKind) nativeFunc {
 		return func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			o := rt.objPtr(this)
-			if o == nil || o.gen == nil {
+			if o == nil || o.gen() == nil {
 				return mkundef(), rt.typeError("not a generator")
 			}
-			m := rt.genDrive(o.gen, kind, arg(args, 0))
+			m := rt.genDrive(o.gen(), kind, arg(args, 0))
 			if m.err != nil {
 				return mkundef(), m.err
 			}
@@ -298,14 +298,14 @@ func (rt *Runtime) initGeneratorBuiltin() {
 	rt.defMethod(po, "next", 1, drive(genNext))
 	rt.defMethod(po, "return", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
-		if o == nil || o.gen == nil {
+		if o == nil || o.gen() == nil {
 			return mkundef(), rt.typeError("not a generator")
 		}
-		if !o.gen.started || o.gen.completed {
-			o.gen.completed = true
+		if !o.gen().started || o.gen().completed {
+			o.gen().completed = true
 			return rt.genResult(arg(args, 0), true), nil
 		}
-		m := rt.genDrive(o.gen, genReturn, arg(args, 0))
+		m := rt.genDrive(o.gen(), genReturn, arg(args, 0))
 		if m.err != nil {
 			return mkundef(), m.err
 		}

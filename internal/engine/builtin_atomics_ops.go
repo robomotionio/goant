@@ -199,7 +199,7 @@ func (rt *Runtime) atomicsWaitCheck(args []Value) (atomicsWaitPlan, *ThrowError)
 	if e != nil {
 		return p, e
 	}
-	if b := o.ta.bufPtr; b == nil || !b.abShared {
+	if b := o.ta.bufPtr; b == nil || !b.abShared() {
 		return p, rt.typeError("Atomics.wait requires a SharedArrayBuffer")
 	}
 	i, e := rt.atomicsIndex(o, arg(args, 1))

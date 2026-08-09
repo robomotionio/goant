@@ -156,7 +156,7 @@ func finalSigma(rs []rune, i int) bool {
 }
 
 // isRegExpValue implements ES IsRegExp: an object whose Symbol.match is truthy
-// is "regexp-like", otherwise the real [[RegExpMatcher]] (o.regex) decides.
+// is "regexp-like", otherwise the real [[RegExpMatcher]] (o.regex()) decides.
 func (rt *Runtime) isRegExpValue(v Value) bool {
 	o := rt.objPtr(v)
 	if o == nil {
@@ -167,7 +167,7 @@ func (rt *Runtime) isRegExpValue(v Value) bool {
 			return rt.toBoolean(m)
 		}
 	}
-	return o.regex != nil
+	return o.regex() != nil
 }
 
 // thisString coerces a method receiver to a string, returning both the string

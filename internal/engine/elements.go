@@ -81,8 +81,8 @@ func (rt *Runtime) getField(obj Value, name string) (Value, *ThrowError) {
 					}
 					return rt.callValue(p.getter, obj, nil)
 				}
-				if i := o.argMap.index(name); i >= 0 {
-					return o.argMap.get(i), nil
+				if i := o.argMap().index(name); i >= 0 {
+					return o.argMap().get(i), nil
 				}
 				return o.slotGet(uint32(slot)), nil
 			}

@@ -387,6 +387,12 @@ func (rt *Runtime) liveePayload() uint64 {
 			}
 			o := &chunk[s].elem
 			n += uint64(cap(o.arr))*uint64(unsafe.Sizeof(Value(0))) + uint64(cap(o.abuf))
+			if o.ext != nil {
+				// The exotic half, which hangs off the cell rather than living
+				// in it. Counted here so that moving it out of the struct did
+				// not quietly stop it being counted at all.
+				n += uint64(unsafe.Sizeof(objectExt{}))
+			}
 		}
 	}
 	return n
@@ -572,26 +578,26 @@ func (rt *Runtime) traceObject(o *object) {
 	}
 	rt.markSlice(o.overflow)
 	rt.markSlice(o.arr)
-	for i := range o.extra {
-		rt.markValue(o.extra[i].value)
+	for i := range o.extra() {
+		rt.markValue(o.extra()[i].value)
 	}
 	// Accessor getters and setters live in the shape, not in a slot, so an
 	// object's own shape has to be walked even though shapes are Go-managed.
 	rt.traceShape(o.shape)
-	for i := range o.priv {
-		rt.tracePrivElem(&o.priv[i])
+	for i := range o.priv() {
+		rt.tracePrivElem(&o.priv()[i])
 	}
 	if o.closure != nullHandle {
 		rt.traceClosure(o.closure)
 	}
-	if o.coll != nil {
-		rt.markSlice(o.coll.keys)
-		rt.markSlice(o.coll.vals)
+	if o.coll() != nil {
+		rt.markSlice(o.coll().keys)
+		rt.markSlice(o.coll().vals)
 	}
-	if o.promise != nil {
-		rt.markValue(o.promise.value)
-		for i := range o.promise.handlers {
-			h := &o.promise.handlers[i]
+	if o.promise() != nil {
+		rt.markValue(o.promise().value)
+		for i := range o.promise().handlers {
+			h := &o.promise().handlers[i]
 			rt.markValue(h.onFulfilled)
 			rt.markValue(h.onRejected)
 			rt.markValue(h.result)
@@ -599,24 +605,24 @@ func (rt *Runtime) traceObject(o *object) {
 			rt.markValue(h.capReject)
 		}
 	}
-	if o.gen != nil {
-		rt.traceGen(o.gen)
+	if o.gen() != nil {
+		rt.traceGen(o.gen())
 	}
 	if o.proxy != nil {
 		rt.traceAny(reflect.ValueOf(o.proxy))
 	}
-	if o.argMap != nil {
-		rt.markSlice(o.argMap.locals)
+	if o.argMap() != nil {
+		rt.markSlice(o.argMap().locals)
 	}
-	if o.ta != nil || o.dv != nil {
+	if o.ta != nil || o.dv() != nil {
 		// A view's own fields are handles into Go-owned storage plus the buffer
 		// object it reads through; reflection covers both without this file
 		// having to track the view layouts.
 		if o.ta != nil {
 			rt.traceAny(reflect.ValueOf(o.ta))
 		}
-		if o.dv != nil {
-			rt.traceAny(reflect.ValueOf(o.dv))
+		if o.dv() != nil {
+			rt.traceAny(reflect.ValueOf(o.dv()))
 		}
 	}
 }

@@ -123,7 +123,7 @@ func (rt *Runtime) initBuiltins() {
 				}
 				return mkundef(), nil
 			})
-			rt.objPtr(dda).isHTMLDDA = true
+			rt.objPtr(dda).extend().isHTMLDDA = true
 			rt.htmlDDA, rt.hasHTMLDDA = dda, true
 			rt.SetJITEnabled(false)
 			return dda, nil
@@ -134,7 +134,7 @@ func (rt *Runtime) initBuiltins() {
 	ho.defineOwn("detachArrayBuffer", rt.newNativeFunc("detachArrayBuffer", 1,
 		func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 			o := rt.objPtr(arg(args, 0))
-			if o == nil || o.ta != nil || o.dv != nil {
+			if o == nil || o.ta != nil || o.dv() != nil {
 				return mkundef(), rt.typeError("detachArrayBuffer takes an ArrayBuffer")
 			}
 			o.abuf = nil

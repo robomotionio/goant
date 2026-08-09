@@ -157,10 +157,10 @@ func (rt *Runtime) initFinalizationRegistryBuiltin() {
 // weakCollOf returns the receiver's weak collection, or a TypeError.
 func (rt *Runtime) weakCollOf(this Value, wantSet bool, name string) (*collection, *ThrowError) {
 	o := rt.objPtr(this)
-	if o == nil || o.coll == nil || !o.coll.weak || o.coll.isSet != wantSet {
+	if o == nil || o.coll() == nil || !o.coll().weak || o.coll().isSet != wantSet {
 		return nil, rt.typeError("method called on incompatible receiver (not a " + name + ")")
 	}
-	return o.coll, nil
+	return o.coll(), nil
 }
 
 // canBeHeldWeakly implements CanBeHeldWeakly: an Object, or a Symbol that is not
@@ -288,7 +288,7 @@ func (rt *Runtime) initWeakMapBuiltin() {
 		if o == nil {
 			return mkundef(), rt.typeError("Constructor WeakMap requires 'new'")
 		}
-		o.coll = &collection{index: map[string]int{}, weak: true}
+		o.extend().coll = &collection{index: map[string]int{}, weak: true}
 		pr, e := rt.newTargetProtoE(proto)
 		if e != nil {
 			return mkundef(), e
@@ -372,7 +372,7 @@ func (rt *Runtime) initWeakSetBuiltin() {
 		if o == nil {
 			return mkundef(), rt.typeError("Constructor WeakSet requires 'new'")
 		}
-		o.coll = &collection{index: map[string]int{}, isSet: true, weak: true}
+		o.extend().coll = &collection{index: map[string]int{}, isSet: true, weak: true}
 		pr, e := rt.newTargetProtoE(proto)
 		if e != nil {
 			return mkundef(), e

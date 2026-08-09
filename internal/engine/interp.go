@@ -897,7 +897,7 @@ running:
 					// The parameter map writes through to the frame's locals and
 					// the object can outlive the call, so this depth gives up
 					// its buffer.
-					ao.argMap = newArgumentsMap(locals, fn.paramCount, len(args))
+					ao.extend().argMap = newArgumentsMap(locals, fn.paramCount, len(args))
 					rt.dropFrameLocals(rt.frameDepth)
 				}
 				ao.defineOwn("length", mknum(float64(len(args))), attrWritable|attrConfigurable)
@@ -3031,12 +3031,12 @@ func (rt *Runtime) abstractEquals(a, b Value) (bool, *ThrowError) {
 	// document.all == null and == undefined, though it is neither and is not
 	// strictly equal to either.
 	if ta == TNull || ta == TUndef {
-		if o := rt.objPtr(b); o != nil && o.isHTMLDDA {
+		if o := rt.objPtr(b); o != nil && o.isHTMLDDA() {
 			return true, nil
 		}
 	}
 	if tb == TNull || tb == TUndef {
-		if o := rt.objPtr(a); o != nil && o.isHTMLDDA {
+		if o := rt.objPtr(a); o != nil && o.isHTMLDDA() {
 			return true, nil
 		}
 	}

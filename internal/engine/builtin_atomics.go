@@ -14,7 +14,7 @@ import (
 // refused over there: the two are different types that happen to hold bytes.
 func (rt *Runtime) sharedBuf(this Value, member string) (*object, *ThrowError) {
 	o := rt.objPtr(this)
-	if o == nil || !o.abObj || !o.abShared {
+	if o == nil || !o.abObj || !o.abShared() {
 		return nil, rt.typeError("SharedArrayBuffer.prototype." + member + " on incompatible receiver")
 	}
 	return o, nil
@@ -38,15 +38,15 @@ func (rt *Runtime) initSharedArrayBuffer() {
 		if e != nil {
 			return mkundef(), e
 		}
-		return mkbool(o.abResizable), nil
+		return mkbool(o.abResizable()), nil
 	}), mkundef(), true, false, attrConfigurable)
 	po.defineAccessor("maxByteLength", rt.newNativeFunc("get maxByteLength", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o, e := rt.sharedBuf(this, "maxByteLength")
 		if e != nil {
 			return mkundef(), e
 		}
-		if o.abResizable {
-			return mknum(float64(o.abMax)), nil
+		if o.abResizable() {
+			return mknum(float64(o.abMax())), nil
 		}
 		return mknum(float64(len(o.abuf))), nil
 	}), mkundef(), true, false, attrConfigurable)
@@ -55,14 +55,14 @@ func (rt *Runtime) initSharedArrayBuffer() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if !o.abResizable {
+		if !o.abResizable() {
 			return mkundef(), rt.typeError("SharedArrayBuffer.prototype.grow on a non-growable buffer")
 		}
 		n, e := rt.toIndex(arg(args, 0))
 		if e != nil {
 			return mkundef(), e
 		}
-		if n > o.abMax || n < len(o.abuf) {
+		if n > o.abMax() || n < len(o.abuf) {
 			return mkundef(), rt.rangeError("SharedArrayBuffer.prototype.grow: invalid length")
 		}
 		// Grown in place where the capacity allows, so that a view another agent
@@ -93,9 +93,9 @@ func (rt *Runtime) initSharedArrayBuffer() {
 		}
 		nb := rt.newObject(proto)
 		no := rt.objPtr(nb)
-		no.abObj, no.abShared = true, true
+		no.abObj, no.extend().abShared = true, true
 		no.abuf = make([]byte, end-start)
-		no.abMax = end - start
+		no.extend().abMax = end - start
 		rt.chargeBytes(uint64(end - start))
 		copy(no.abuf, o.abuf[start:end])
 		return nb, nil
@@ -148,15 +148,15 @@ func (rt *Runtime) initSharedArrayBuffer() {
 		}
 		v := rt.newObject(proto)
 		vo := rt.objPtr(v)
-		vo.abObj, vo.abShared = true, true
+		vo.abObj, vo.extend().abShared = true, true
 		if maxLen >= 0 {
 			// Reserved to its maximum up front. Growing must not move the bytes:
 			// another agent's view is a window onto them and cannot be told.
 			vo.abuf = make([]byte, n, maxLen)
-			vo.abMax, vo.abResizable = maxLen, true
+			vo.extend().abMax, vo.extend().abResizable = maxLen, true
 		} else {
 			vo.abuf = make([]byte, n)
-			vo.abMax = n
+			vo.extend().abMax = n
 		}
 		rt.chargeBytes(uint64(n))
 		if ntProto.IsObjectType() {
@@ -350,7 +350,7 @@ func (rt *Runtime) initAtomics() {
 		}
 		// Notifying a non-shared buffer is not an error; there is simply nobody
 		// on the list, because only a shared one can be waited on.
-		if b := o.ta.bufPtr; b == nil || !b.abShared {
+		if b := o.ta.bufPtr; b == nil || !b.abShared() {
 			return mknum(0), nil
 		}
 		return mknum(float64(rt.atomicsWake(o, i, count))), nil

@@ -231,19 +231,19 @@ func (rt *Runtime) initAnnexBRegExp() {
 		// RequireInternalSlot(O, [[RegExpMatcher]]); and legacy features are enabled
 		// only for a direct %RegExp% instance, not a subclass instance (approximated
 		// by its [[Prototype]] being %RegExp.prototype%). Both cases are a TypeError.
-		if o == nil || o.regex == nil || o.proto != realm.regexpProto {
+		if o == nil || o.regex() == nil || o.proto != realm.regexpProto {
 			return mkundef(), realm.typeError("RegExp.prototype.compile called on an incompatible receiver")
 		}
 		var pattern, flags string
 		p := arg(args, 0)
-		if po := rt.objPtr(p); po != nil && po.regex != nil {
+		if po := rt.objPtr(p); po != nil && po.regex() != nil {
 			// The pattern is a RegExp: its [[OriginalSource]]/[[OriginalFlags]] are
 			// adopted and a supplied flags argument is a TypeError.
 			if !arg(args, 1).IsUndefined() {
 				return mkundef(), rt.typeError("RegExp.prototype.compile: flags may not be supplied when the pattern is a RegExp")
 			}
-			pattern = po.regex.Source
-			flags = po.regex.Flags
+			pattern = po.regex().Source
+			flags = po.regex().Flags
 		} else {
 			if !p.IsUndefined() {
 				pv, e := rt.toStringValue(p)
@@ -266,7 +266,7 @@ func (rt *Runtime) initAnnexBRegExp() {
 		}
 		// Adopt the freshly compiled regex + descriptor fields into `this`.
 		no := rt.objPtr(nv)
-		o.regex = no.regex
+		o.extend().regex = no.regex()
 		for _, k := range []string{"source", "flags", "global", "ignoreCase", "multiline"} {
 			if v, ok := no.getOwn(k); ok {
 				o.defineOwn(k, v, 0)

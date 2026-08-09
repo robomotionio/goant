@@ -59,14 +59,14 @@ func (rt *Runtime) collOf(this Value, wantSet bool) (*collection, *ThrowError) {
 	o := rt.objPtr(this)
 	// A weak collection (WeakMap/WeakSet) has a coll but no [[MapData]]/[[SetData]]
 	// slot, so a strong Map/Set method must reject it.
-	if o == nil || o.coll == nil || o.coll.weak || o.coll.isSet != wantSet {
+	if o == nil || o.coll() == nil || o.coll().weak || o.coll().isSet != wantSet {
 		name := "Map"
 		if wantSet {
 			name = "Set"
 		}
 		return nil, rt.typeError("method called on incompatible receiver (not a " + name + ")")
 	}
-	return o.coll, nil
+	return o.coll(), nil
 }
 
 func (rt *Runtime) initMapBuiltin() {
@@ -225,7 +225,7 @@ func (rt *Runtime) initMapBuiltin() {
 		if o == nil {
 			return mkundef(), rt.typeError("Constructor Map requires 'new'")
 		}
-		o.coll = &collection{index: map[string]int{}}
+		o.extend().coll = &collection{index: map[string]int{}}
 		if it := arg(args, 0); !it.IsNullish() {
 			setFn, e := rt.getField(this, "set")
 			if e != nil {
@@ -271,7 +271,7 @@ func (rt *Runtime) initMapBuiltin() {
 		}
 		res := rt.newObject(proto)
 		c := &collection{index: map[string]int{}}
-		rt.objPtr(res).coll = c
+		rt.objPtr(res).extend().coll = c
 		for i, it := range items {
 			key, e := rt.callValue(cb, mkundef(), []Value{it, mknum(float64(i))})
 			if e != nil {
@@ -391,7 +391,7 @@ func (rt *Runtime) initSetBuiltin() {
 		if o == nil {
 			return mkundef(), rt.typeError("Constructor Set requires 'new'")
 		}
-		o.coll = &collection{index: map[string]int{}, isSet: true}
+		o.extend().coll = &collection{index: map[string]int{}, isSet: true}
 		if it := arg(args, 0); !it.IsNullish() {
 			addFn, e := rt.getField(this, "add")
 			if e != nil {
@@ -496,8 +496,8 @@ func (rt *Runtime) setLikeElements(v Value) ([]Value, *ThrowError) {
 		return nil, rt.typeError("Set operation argument has no callable 'keys' method")
 	}
 	// Native Set fast path: keys() would yield exactly these values.
-	if o := rt.objPtr(v); o != nil && o.coll != nil && o.coll.isSet {
-		return rt.setElements(o.coll), nil
+	if o := rt.objPtr(v); o != nil && o.coll() != nil && o.coll().isSet {
+		return rt.setElements(o.coll()), nil
 	}
 	iter, e := rt.callValue(keysFn, v, nil)
 	if e != nil {
@@ -540,7 +540,7 @@ func (rt *Runtime) setLikeElements(v Value) ([]Value, *ThrowError) {
 func (rt *Runtime) newSetFrom(elems []Value) Value {
 	v := rt.newObject(rt.setProto)
 	c := &collection{index: map[string]int{}, isSet: true}
-	rt.objPtr(v).coll = c
+	rt.objPtr(v).extend().coll = c
 	for _, e := range elems {
 		ck := rt.canonicalKey(e)
 		if _, ok := c.index[ck]; !ok {

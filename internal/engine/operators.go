@@ -7,7 +7,7 @@ package engine
 func (rt *Runtime) typeofString(v Value) string {
 	// Asked before the type is, because document.all is CALLABLE and would
 	// otherwise answer "function" on its way past.
-	if o := rt.objPtr(v); o != nil && o.isHTMLDDA {
+	if o := rt.objPtr(v); o != nil && o.isHTMLDDA() {
 		return "undefined"
 	}
 	switch v.Type() {
@@ -131,7 +131,7 @@ func (rt *Runtime) deleteElement(obj, key Value) (bool, *ThrowError) {
 	ok := o.deleteOwn(name)
 	if ok {
 		// A deleted index stops aliasing its parameter (10.4.4.5 step 3).
-		o.argMap.unmap(name)
+		o.argMap().unmap(name)
 	}
 	return ok, nil
 }
