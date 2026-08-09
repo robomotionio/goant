@@ -1159,10 +1159,17 @@ func (rt *Runtime) initIteratorHelpers() {
 		if e != nil {
 			return mkundef(), e
 		}
+		// Rooted from here, not from newZipIterator's holdCaptures at the end.
+		// Everything below can run user JavaScript — a `next`, a Symbol.iterator,
+		// a getter — and until the helper exists these are the only reference to
+		// the input iterator, the sub-iterators, and their `next` methods.
+		drv := rt.beginDriver(inputIter)
+		defer rt.endDriver(drv)
 		inputNext, e := rt.getField(inputIter, "next")
 		if e != nil {
 			return mkundef(), e
 		}
+		*drv = append(*drv, inputNext)
 		var iters, nexts []Value
 		for {
 			v, d, se := rt.iterStepValue(inputIter, inputNext)
@@ -1189,6 +1196,7 @@ func (rt *Runtime) initIteratorHelpers() {
 			}
 			iters = append(iters, it)
 			nexts = append(nexts, nx)
+			*drv = append(*drv, it, nx)
 		}
 		padding, pe := rt.zipResolvePadding(mode, paddingOption, len(iters))
 		if pe != nil {
@@ -1219,7 +1227,13 @@ func (rt *Runtime) initIteratorHelpers() {
 		if e != nil {
 			return mkundef(), e
 		}
-		var keys, iters, nexts []Value
+		// Same window as zip, and wider: reading a property here can run a
+		// getter, so everything gathered below is held across user JavaScript
+		// until the helper exists to own it. The keys included — they are Go
+		// values too, and `finish` is the only other thing that will hold them.
+		drv := rt.beginDriver(allKeys...)
+		defer rt.endDriver(drv)
+		var keys, iters, nexts, padding []Value
 		for _, key := range allKeys {
 			en, exists, de := rt.ownKeyEnumerable(iterablesArg, key)
 			if de != nil {
@@ -1250,10 +1264,11 @@ func (rt *Runtime) initIteratorHelpers() {
 			keys = append(keys, key)
 			iters = append(iters, it)
 			nexts = append(nexts, nx)
+			*drv = append(*drv, key, it, nx)
 		}
 		// Longest-mode padding is read by key from the padding object (Get), not
 		// drained from an iterator.
-		padding := make([]Value, len(iters))
+		padding = make([]Value, len(iters))
 		for i := range padding {
 			padding[i] = mkundef()
 		}
@@ -1265,6 +1280,7 @@ func (rt *Runtime) initIteratorHelpers() {
 					return mkundef(), pe
 				}
 				padding[i] = pv
+				*drv = append(*drv, pv)
 			}
 		}
 		finish := func(results []Value) Value {
@@ -1355,19 +1371,32 @@ func (rt *Runtime) zipResolvePadding(mode string, paddingOption Value, iterCount
 	if e != nil {
 		return nil, e
 	}
+	// The padding iterator, its `next`, and the values drained so far are held
+	// in Go locals and nowhere else, across a call that runs user JavaScript.
+	//
+	// test262's basic-longest.js passes an object whose Symbol.iterator is a
+	// generator looping `while (true)`, and a loop back edge is a safepoint that
+	// collects — so the iterator this function is in the middle of driving was
+	// swept out from under it. It surfaced far away, as ordinary JavaScript
+	// calling a value that was no longer a function, with no zip frame anywhere
+	// on the stack to point at the cause.
+	d := rt.beginDriver(pit)
+	defer rt.endDriver(d)
 	pnext, e := rt.getField(pit, "next")
 	if e != nil {
 		return nil, e
 	}
+	*d = append(*d, pnext)
 	for i := 0; i < iterCount; i++ {
-		v, d, se := rt.iterStepValue(pit, pnext)
+		v, de, se := rt.iterStepValue(pit, pnext)
 		if se != nil {
 			return nil, se
 		}
-		if d {
+		if de {
 			return padding, nil // remaining stay undefined; iterator already exhausted
 		}
 		padding[i] = v
+		*d = append(*d, v)
 	}
 	// Not exhausted: close it. A close error (normal completion) propagates.
 	if ce := rt.iteratorCloseE(pit); ce != nil {

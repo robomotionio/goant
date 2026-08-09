@@ -161,6 +161,19 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 	// the driver reuses, and the collector reads both sets.
 	mainFrames := rt.frames
 	rt.frames = g.frames
+	// Both of those are now reachable only from the Go locals above, and the
+	// collector walks the Runtime, not this stack frame. Park them where it can
+	// see them for as long as the coroutine has the engine.
+	//
+	// Without this the DRIVER's whole frame chain is invisible while a coroutine
+	// runs — every local of every function between the top level and the
+	// `for … of` — and a coroutine that loops reaches a back edge, which
+	// collects. test262's Iterator/zip basic-longest.js is one line of the
+	// consequence: `for (var p of prefixes("abcd")) test([...])` swept `test`,
+	// the sibling function declaration sitting in the driver's own locals, and
+	// the failure surfaced as ordinary JavaScript calling a value that was no
+	// longer a function, with nothing on the stack to say why.
+	rt.parked = append(rt.parked, parkedFrames{frames: mainFrames, slabs: mainSlabs})
 	// And the same for the compiled frames' contexts, which are addressed by
 	// depth like the two above and stay live for the same reason.
 	mainJIT := rt.jitFrames
@@ -174,6 +187,7 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 	m := <-g.fromGen
 	g.running = false
 	g.genDepth = rt.frameDepth
+	rt.parked = rt.parked[:len(rt.parked)-1]
 	g.slabs = rt.swapSlabs(mainSlabs)
 	g.frames, rt.frames = rt.frames, mainFrames
 	g.jitFrames, rt.jitFrames = rt.jitFrames, mainJIT

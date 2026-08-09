@@ -565,6 +565,13 @@ func (rt *Runtime) markSlice(vs []Value) {
 	}
 }
 
+// parkedFrames is one driver's frame state, set aside while a coroutine runs on
+// its behalf. See Runtime.parked and genDrive.
+type parkedFrames struct {
+	frames []vmFrame
+	slabs  []frameSlab
+}
+
 func (rt *Runtime) markSlabs(slabs []frameSlab) {
 	for i := range slabs {
 		s := &slabs[i]
@@ -627,6 +634,15 @@ func (rt *Runtime) markRoots() {
 		// cannot see (past the published range, or one that allocated its own) may
 		// still be running.
 		rt.markSlabs(r.slabs)
+
+		// And the frames of every driver that has handed the engine to a
+		// coroutine. rt.frames above is whichever set is CURRENT — while a
+		// generator runs, that is the generator's, and the chain that called it
+		// is here. Missing these swept the caller's own locals out from under it.
+		for i := range r.parked {
+			rt.markFrames(r.parked[i].frames)
+			rt.markSlabs(r.parked[i].slabs)
+		}
 
 		// The intern table maps text to a string cell by Handle, not by Value, so
 		// the reflective walk cannot see it — a Handle is a bare uint32 and looks

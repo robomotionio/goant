@@ -269,6 +269,14 @@ type Runtime struct {
 	// them. Keyed by the owning object and swept with it; see holdCaptures.
 	natCaptures map[*object][][]Value
 
+	// parked is the driver-side frame state swapped out while a coroutine has
+	// the engine. genDrive hands rt.frames and rt.slabs over to the generator
+	// and keeps the driver's in Go locals; the collector walks the Runtime, so
+	// without this the whole calling chain is invisible for as long as the
+	// coroutine runs — and a coroutine that loops collects. A stack, because
+	// genDrive nests: a generator driven from inside another one parks again.
+	parked []parkedFrames
+
 	// indexedProtoIntercept becomes true once any integer-indexed accessor or
 	// non-writable indexed data property is defined anywhere (it may sit on a
 	// prototype). While false, an array-index [[Set]] to an absent index can skip
