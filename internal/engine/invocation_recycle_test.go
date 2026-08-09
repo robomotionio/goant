@@ -17,33 +17,55 @@ import "testing"
 // away its warm engine after every message large enough to collect, which is
 // exactly the messages where warmth was worth something.
 func TestARunThatCollectsIsNotDirty(t *testing.T) {
-	rt := New()
-
-	// Enough allocation to cross the collection threshold several times over,
-	// and nothing shared touched: every object is made and dropped inside the
-	// run.
-	const src = `
-		let n = 0;
-		for (let i = 0; i < 60000; i++) {
-			const o = {};
-			o["k" + (i % 4)] = i;
-			n += o["k" + (i % 4)];
+	// Both arms, because a compiled property store does the watermark
+	// comparison in machine code rather than calling out, and fixing only the
+	// Go path leaves the tier reporting every large run dirty — which shows up
+	// as the host not getting its memory back, and nowhere else.
+	for _, jit := range []bool{false, true} {
+		name := "interpreter"
+		if jit {
+			name = "tier"
 		}
-		n;
-	`
+		t.Run(name, func(t *testing.T) {
+			saved := jitEnabled
+			defer func() { jitEnabled = saved }()
+			jitEnabled = jit
 
-	inv := rt.BeginInvocation()
-	if _, err := rt.RunString("recycle_test.js", src); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if rt.gc.cycles == 0 {
-		t.Fatal("the script did not collect, so this proves nothing — raise the loop count")
-	}
-	if inv.Dirty() {
-		t.Error("reported as having modified shared state; it modified nothing shared")
-	}
-	if !inv.Release() {
-		t.Error("Release refused")
+			rt := New()
+
+			// Enough allocation to cross the collection threshold several times
+			// over, and nothing shared touched: every object is made and dropped
+			// inside the run. Wrapped in a function entered often enough to be
+			// compiled, so the stores go through emitted code in the tier arm.
+			const src = `
+				function build(n) {
+					let s = 0;
+					for (let i = 0; i < n; i++) {
+						const o = {};
+						o["k" + (i % 4)] = i;
+						s += o["k" + (i % 4)];
+					}
+					return s;
+				}
+				let n = 0;
+				for (let k = 0; k < 12; k++) n += build(5000);
+				n;
+			`
+
+			inv := rt.BeginInvocation()
+			if _, err := rt.RunString("recycle_test.js", src); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if rt.gc.cycles == 0 {
+				t.Fatal("the script did not collect, so this proves nothing — raise the loop count")
+			}
+			if inv.Dirty() {
+				t.Error("reported as having modified shared state; it modified nothing shared")
+			}
+			if !inv.Release() {
+				t.Error("Release refused")
+			}
+		})
 	}
 }
 

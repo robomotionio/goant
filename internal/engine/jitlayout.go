@@ -45,8 +45,8 @@ const (
 	// invocation's watermark, so the object in it is the run's own however low
 	// its handle is. Read relative to the OBJECT pointer, which is why the elem
 	// offset comes off it: compiled code holds the object, not the cell.
-	jitOffObjBorn  = jitOffCellBorn - jitOffCellElem
 	jitOffCellBorn = unsafe.Offsetof(poolCell[object]{}.born)
+	jitOffObjBorn  = jitOffCellBorn - jitOffCellElem
 
 	// The object header fields a property read touches before the value.
 	jitOffObjSelf  = unsafe.Offsetof(object{}.self)

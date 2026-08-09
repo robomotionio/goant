@@ -159,7 +159,7 @@ func jitEmitNoteSharedMutation(a *jitasm.Asm, recv, obj, t jitasm.Reg) {
 	a.CmpRegReg(scratch, t)
 	a.Jcc(jitasm.CondAE, clean) // this run's own object
 
-	a.MovzxRegMem8(t, obj, int32(jitOffObjBorn))
+	a.MovzxRegMem8(t, obj, int32(jitOffObjBorn)) // TestARunThatCollectsIsNotDirty/tier covers this
 	a.TestRegReg(t, t)
 	a.Jcc(jitasm.CondNE, clean) // recycled into this run: new, not shared
 
