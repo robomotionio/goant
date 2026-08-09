@@ -50,6 +50,36 @@ type pool[T any] struct {
 	next     Handle   // next never-used handle (starts at 1)
 	liveN    int
 
+	// holdBelow is the handle below which a freed cell must not be handed out
+	// again yet, and held is where those cells wait.
+	//
+	// This exists to keep one invariant true: that a handle below the running
+	// invocation's watermark names an object older than the invocation. The
+	// whole of region reclamation rests on it — Invocation.Release frees the
+	// region without tracing anything, and it is allowed to only because a
+	// handle comparison proved the run never wrote to something that predates
+	// it (see invocation_dirty.go).
+	//
+	// A collection breaks that invariant. The realm's own construction leaves
+	// garbage behind, the first sweep inside a run reclaims it, and those low
+	// handles go on the free list — so the very next object the SCRIPT allocates
+	// is handed one, and writing to it reads as writing to shared state. The run
+	// is then reported dirty, Release refuses, and the pools keep everything.
+	// A pooled host sees that as the reclamation silently not happening, and
+	// only on the large messages, because only they collect at all.
+	//
+	// The cost is a compare in free, which runs per collected cell rather than
+	// per allocation, and a slice that is almost always empty: the only cells it
+	// can hold are pre-existing ones that died mid-run.
+	holdBelow Handle
+	held      []Handle
+
+	// Armed and disarmed by writing these fields directly from invocation.go,
+	// rather than through methods here. Adding a method to this generic type
+	// changes the code the compiler generates for the pool as a whole,
+	// including alloc and free, which are the hottest routines in the engine;
+	// see the note on liveePayload, where that measured about 7%.
+
 	// poisoned records cells the collector freed, under gcPoison only.
 	poisoned map[Handle]bool
 }
@@ -150,7 +180,11 @@ func (p *pool[T]) free(h Handle) {
 	cl.gen++
 	var zero T
 	cl.elem = zero
-	p.freeList = append(p.freeList, h)
+	if h < p.holdBelow {
+		p.held = append(p.held, h)
+	} else {
+		p.freeList = append(p.freeList, h)
+	}
 	p.liveN--
 }
 

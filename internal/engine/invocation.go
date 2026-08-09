@@ -45,6 +45,7 @@ type Invocation struct {
 	prevLex      map[string]*globalLexBinding
 	prevWatermrk Handle
 	prevInterned []string
+	prevHold     Handle
 	marks        poolMarks
 	ended        bool
 }
@@ -82,6 +83,34 @@ func (rt *Runtime) BeginInvocation() *Invocation {
 	rt.beginDirtyTracking()
 	rt.invInterned = nil
 
+	// Stop the object pool recycling cells from below the watermark for as long
+	// as this run lasts, so that "handle below the watermark" keeps meaning "made
+	// before this run". Without it the first collection inside a run hands the
+	// script a recycled realm cell, the script writes to it, and the run is
+	// reported as having modified shared state when it did nothing of the kind
+	// — which costs the caller the whole of region reclamation, and only on the
+	// messages big enough to collect. See the pool fields.
+	//
+	// It makes the comparison sound rather than merely quieter. Before this, a
+	// low handle proved nothing; now every object the run allocates has a handle
+	// at or above the watermark, so low means old and the test can only be wrong
+	// in the direction it was always right in.
+	inv.prevHold = rt.objects.holdBelow
+	rt.objects.holdBelow = inv.marks.objects
+
+	// Cells that were already free when the run began are the same hazard, and
+	// every one of them qualifies: a free handle is always below next, and next
+	// is the watermark. So the whole list stands aside until End puts it back.
+	//
+	// It is a short list in the shape this is for — after a Release it holds
+	// only the realm's own dead scaffolding — and standing it aside costs the
+	// run nothing, because the cells it would have reused are ones Release is
+	// about to reclaim wholesale anyway. A Runtime kept in service after a run
+	// reported dirty, which the contract says to discard, can accumulate a
+	// longer one and will allocate fresh cells rather than reuse it.
+	rt.objects.held = append(rt.objects.held, rt.objects.freeList...)
+	rt.objects.freeList = rt.objects.freeList[:0]
+
 	// The fresh global inherits from the shared one, so every builtin resolves
 	// through the prototype chain while assignments land here and are dropped at
 	// End.
@@ -117,6 +146,15 @@ func (inv *Invocation) End() {
 	icEpochBump()
 	inv.rt.invWatermark = inv.prevWatermrk
 	inv.rt.invInterned = inv.prevInterned
+
+	// The cells held back during the run can be reused again: there is no longer
+	// a watermark for them to be mistaken for the far side of.
+	p := inv.rt.objects
+	p.holdBelow = inv.prevHold
+	if len(p.held) > 0 {
+		p.freeList = append(p.freeList, p.held...)
+		p.held = p.held[:0]
+	}
 }
 
 // Release ends the invocation and frees everything it allocated, in one step
@@ -177,6 +215,29 @@ func (inv *Invocation) Release() bool {
 	rt.symbols.truncate(inv.marks.symbols)
 	rt.closures.truncate(inv.marks.closures)
 	rt.bigints.truncate(inv.marks.bigints)
+
+	// The collection threshold is a multiple of what was live, and what was live
+	// has just gone. Left alone it stays sized for the heap this run built, so
+	// the NEXT run allocates that whole peak again before it collects once —
+	// and a run that collects late finds more still reachable, which raises the
+	// threshold again. Over thirteen messages that ratchet took the threshold
+	// from sixteen thousand cells to a hundred and eighty-four thousand, and
+	// since the pools never shrink, every step of it was paid resident for good.
+	//
+	// So re-derive it from what survived the rewind, which is the same thing a
+	// collection would have set it to. A pooled runtime then starts each message
+	// where a fresh one would, instead of inheriting the worst message it has
+	// ever run.
+	rt.gc.next = rt.objects.liveN * gcGrowthFactor
+	if rt.gc.next < gcFloor {
+		rt.gc.next = gcFloor
+	}
+	rt.allocBytes = 0
+	if rt.heapLimit != 0 {
+		// Not zero: chargeBytes trips when allocBytes reaches nextBytes, and
+		// zero means the first byte the next run allocates is over budget.
+		rt.nextBytes = gcByteFloor
+	}
 	return true
 }
 
