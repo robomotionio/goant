@@ -1646,6 +1646,24 @@ func (rt *Runtime) arrIterNext(this Value) (Value, *ThrowError) {
 	if o := rt.objPtr(st.src); o != nil && o.ta != nil && rt.taOutOfBounds(o) {
 		return mkundef(), rt.typeError("Cannot iterate a TypedArray backed by a detached buffer")
 	}
+	// A plain array yielding values -- which is `for (const v of arr)`, and most
+	// of what iteration is -- needs neither of the two generic steps below.
+	// lengthOf is a [[Get]] of "length" and getElement re-derives the very
+	// conditions tested here, and a for-of pays both on EVERY element. The guard
+	// is getElement's own, so a hole, a proxy, a typed array or an index defined
+	// with attributes still takes the general path and is answered identically.
+	if st.kind == iterValues && st.src.Type() == TArr {
+		if o := rt.objPtr(st.src); o != nil && o.proxy == nil {
+			if st.index >= int(o.arrLen) {
+				st.done = true
+				return rt.genResult(mkundef(), true), nil
+			}
+			if i := st.index; i < len(o.arr) && !o.arr[i].IsEmpty() {
+				st.index++
+				return rt.genResult(o.arrAt(uint32(i)), false), nil
+			}
+		}
+	}
 	n, _ := rt.lengthOf(st.src)
 	if st.index >= n {
 		st.done = true
