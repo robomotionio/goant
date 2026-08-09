@@ -150,15 +150,19 @@ func (inv *Invocation) Release() bool {
 	// Side tables keyed by object pointer hold state for iterators, registries
 	// and namespaces created during the run. Their keys are about to be recycled
 	// cells, so a stale entry could be matched by a future object at the same
-	// address.
-	rt.collIterStates = nil
-	rt.arrIterStates = nil
-	rt.strIterStates = nil
-	rt.regexpStrIterStates = nil
-	rt.finRegistries = nil
-	rt.moduleNamespaces = nil
-	rt.natCaptures = nil
-	rt.nativeDrivers = nil
+	// address. The iterator tables are the agent's, so one clear does them; the
+	// rest are per realm, and a realm the script itself made (createRealm) holds
+	// keys into the same pools — dropping only this realm's left those behind.
+	rt.agent.collIterStates = nil
+	rt.agent.arrIterStates = nil
+	rt.agent.strIterStates = nil
+	rt.agent.regexpStrIterStates = nil
+	rt.forEachRealm(func(r *Runtime) {
+		r.finRegistries = nil
+		r.moduleNamespaces = nil
+		r.natCaptures = nil
+		r.nativeDrivers = nil
+	})
 
 	// The intern table outlives the invocation; drop what this run added.
 	for _, k := range rt.invInterned {

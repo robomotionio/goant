@@ -872,32 +872,42 @@ func (rt *Runtime) sweepWeakTables() {
 }
 
 func (rt *Runtime) markLiveEntries() {
+	rt.markAgentLiveEntries()
 	rt.forEachRealm(rt.markRealmLiveEntries)
+}
+
+// markAgentLiveEntries settles the tables the whole agent shares — one pass, not
+// one per realm, since every realm names the same map.
+func (rt *Runtime) markAgentLiveEntries() {
+	a := rt.agent
+	if a == nil {
+		return
+	}
+	for o, st := range a.arrIterStates {
+		if rt.objAlive(o) {
+			rt.markValue(st.src)
+		}
+	}
+	for o, st := range a.collIterStates {
+		if rt.objAlive(o) {
+			rt.traceAny(reflect.ValueOf(st).Elem())
+		}
+	}
+	for o, st := range a.strIterStates {
+		if rt.objAlive(o) {
+			rt.traceAny(reflect.ValueOf(st).Elem())
+		}
+	}
+	for o, st := range a.regexpStrIterStates {
+		if rt.objAlive(o) {
+			rt.traceAny(reflect.ValueOf(st).Elem())
+		}
+	}
 }
 
 // markRealmLiveEntries settles one realm's weak tables. The marks belong to the
 // Runtime driving the collection, the tables to the realm being scanned.
 func (rt *Runtime) markRealmLiveEntries(r *Runtime) {
-	for o, st := range r.arrIterStates {
-		if rt.objAlive(o) {
-			rt.markValue(st.src)
-		}
-	}
-	for o, st := range r.collIterStates {
-		if rt.objAlive(o) {
-			rt.traceAny(reflect.ValueOf(st).Elem())
-		}
-	}
-	for o, st := range r.strIterStates {
-		if rt.objAlive(o) {
-			rt.traceAny(reflect.ValueOf(st).Elem())
-		}
-	}
-	for o, st := range r.regexpStrIterStates {
-		if rt.objAlive(o) {
-			rt.traceAny(reflect.ValueOf(st).Elem())
-		}
-	}
 	for o, cells := range r.finRegistries {
 		if rt.objAlive(o) {
 			rt.traceAny(reflect.ValueOf(cells))
@@ -913,30 +923,40 @@ func (rt *Runtime) markRealmLiveEntries(r *Runtime) {
 }
 
 func (rt *Runtime) dropDeadEntries() {
+	rt.dropAgentDeadEntries()
 	rt.forEachRealm(rt.dropRealmDeadEntries)
 }
 
+// dropAgentDeadEntries is dropDeadEntries for the agent-wide tables; see
+// markAgentLiveEntries.
+func (rt *Runtime) dropAgentDeadEntries() {
+	a := rt.agent
+	if a == nil {
+		return
+	}
+	for o := range a.arrIterStates {
+		if !rt.objAlive(o) {
+			delete(a.arrIterStates, o)
+		}
+	}
+	for o := range a.collIterStates {
+		if !rt.objAlive(o) {
+			delete(a.collIterStates, o)
+		}
+	}
+	for o := range a.strIterStates {
+		if !rt.objAlive(o) {
+			delete(a.strIterStates, o)
+		}
+	}
+	for o := range a.regexpStrIterStates {
+		if !rt.objAlive(o) {
+			delete(a.regexpStrIterStates, o)
+		}
+	}
+}
+
 func (rt *Runtime) dropRealmDeadEntries(r *Runtime) {
-	for o := range r.arrIterStates {
-		if !rt.objAlive(o) {
-			delete(r.arrIterStates, o)
-		}
-	}
-	for o := range r.collIterStates {
-		if !rt.objAlive(o) {
-			delete(r.collIterStates, o)
-		}
-	}
-	for o := range r.strIterStates {
-		if !rt.objAlive(o) {
-			delete(r.strIterStates, o)
-		}
-	}
-	for o := range r.regexpStrIterStates {
-		if !rt.objAlive(o) {
-			delete(r.regexpStrIterStates, o)
-		}
-	}
 	for o := range r.finRegistries {
 		if !rt.objAlive(o) {
 			delete(r.finRegistries, o)

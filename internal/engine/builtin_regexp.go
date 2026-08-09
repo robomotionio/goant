@@ -623,7 +623,7 @@ func (rt *Runtime) isRegExp(v Value) (bool, *ThrowError) {
 // regexpStrIterState is the internal state of a RegExp String iterator
 // (%RegExpStringIterator% instance): the matcher R, the subject string S, the
 // global/unicode flags, and whether it is exhausted. Held in
-// rt.regexpStrIterStates keyed by the iterator object so a shared
+// rt.agent.regexpStrIterStates keyed by the iterator object so a shared
 // %RegExpStringIteratorPrototype%.next reads it and the brand check works.
 type regexpStrIterState struct {
 	r       Value
@@ -639,10 +639,10 @@ type regexpStrIterState struct {
 // with a user-supplied exec (or a Proxy) is honored.
 func (rt *Runtime) createRegExpStringIterator(r, s Value, global, unicode bool) Value {
 	v := rt.newObject(rt.regexpStrIterProto)
-	if rt.regexpStrIterStates == nil {
-		rt.regexpStrIterStates = map[*object]*regexpStrIterState{}
+	if rt.agent.regexpStrIterStates == nil {
+		rt.agent.regexpStrIterStates = map[*object]*regexpStrIterState{}
 	}
-	rt.regexpStrIterStates[rt.objPtr(v)] = &regexpStrIterState{r: r, s: s, global: global, unicode: unicode}
+	rt.agent.regexpStrIterStates[rt.objPtr(v)] = &regexpStrIterState{r: r, s: s, global: global, unicode: unicode}
 	return v
 }
 
@@ -654,7 +654,7 @@ func (rt *Runtime) regexpStrIterNext(this Value) (Value, *ThrowError) {
 	if !this.IsObjectType() {
 		return mkundef(), rt.typeError("RegExp String Iterator.prototype.next called on a non-object")
 	}
-	st := rt.regexpStrIterStates[rt.objPtr(this)]
+	st := rt.agent.regexpStrIterStates[rt.objPtr(this)]
 	if st == nil {
 		return mkundef(), rt.typeError("RegExp String Iterator.prototype.next called on an incompatible receiver")
 	}

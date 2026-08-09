@@ -199,24 +199,6 @@ type Runtime struct {
 	// and its brand check are program-observable.
 	finRegistries map[*object][]finCell
 
-	// collIterStates holds the iteration state of Set/Map iterator objects, keyed
-	// by the iterator object, so a shared %<Kind>IteratorPrototype%.next (rather
-	// than a per-instance closure) reads it and the missing-brand check works.
-	collIterStates map[*object]*collIterState
-
-	// arrIterStates holds the iteration state of Array/TypedArray iterator objects
-	// (same shared-prototype-next / brand-check purpose as collIterStates).
-	arrIterStates map[*object]*arrIterState
-
-	// strIterStates holds the iteration state of String iterator objects (a
-	// code-point snapshot + index) for a shared %StringIteratorPrototype%.next.
-	strIterStates map[*object]*strIterState
-
-	// regexpStrIterStates holds the iteration state of RegExp String iterator
-	// objects (the matcher, the string, the global/unicode flags, and done) for a
-	// shared %RegExpStringIteratorPrototype%.next that steps RegExpExec lazily.
-	regexpStrIterStates map[*object]*regexpStrIterState
-
 	// objMemo is a direct-mapped handle-to-object translation cache; see objPtr.
 	// Cleared wherever a handle can stop naming its cell.
 	objMemo [objMemoSize]objMemoEntry
@@ -633,6 +615,24 @@ func (rt *Runtime) NewRealm() *Runtime {
 // collector may sweep without tracing all of them.
 type agentState struct {
 	realms []*Runtime
+
+	// The iterator side tables, keyed by the iterator OBJECT. They live here and
+	// not on the Runtime because the state belongs to the object, and an object
+	// belongs to the agent: `for (const c of str)` where the loop is in one realm
+	// and the string iterator came from another is ordinary cross-realm code, and
+	// a per-realm table answered it with "called on an incompatible receiver" —
+	// the brand check failing on an object that has the brand. Realms share the
+	// pools, so the *object key means the same thing in all of them.
+	//
+	// collIterStates is Set/Map, arrIterStates Array/TypedArray, strIterStates
+	// String (a code-point snapshot + index), regexpStrIterStates the RegExp
+	// String iterator (matcher, subject, flags, done). Each exists so that
+	// %<Kind>IteratorPrototype%.next can be ONE shared function that reads state
+	// off its receiver, rather than a closure per instance.
+	collIterStates      map[*object]*collIterState
+	arrIterStates       map[*object]*arrIterState
+	strIterStates       map[*object]*strIterState
+	regexpStrIterStates map[*object]*regexpStrIterState
 }
 
 func (rt *Runtime) initRealm() {

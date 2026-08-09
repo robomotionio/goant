@@ -269,11 +269,11 @@ func TestCollectDropsDeadIteratorState(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if n := len(rt.arrIterStates); n < 100 {
+	if n := len(rt.agent.arrIterStates); n < 100 {
 		t.Fatalf("expected the side table to have accumulated entries, got %d", n)
 	}
 	rt.Collect()
-	if n := len(rt.arrIterStates); n > 8 {
+	if n := len(rt.agent.arrIterStates); n > 8 {
 		t.Errorf("dead iterator state survived: %d entries left", n)
 	}
 }

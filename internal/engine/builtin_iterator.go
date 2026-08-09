@@ -52,7 +52,7 @@ func (rt *Runtime) initIteratorProto() {
 		return rt.arrIterNext(this)
 	})
 	rt.defMethod(rt.objPtr(rt.stringIterProto), "next", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		st := rt.strIterStates[rt.objPtr(this)]
+		st := rt.agent.strIterStates[rt.objPtr(this)]
 		if st == nil {
 			return mkundef(), rt.typeError("String Iterator.prototype.next called on an incompatible receiver")
 		}
@@ -76,10 +76,10 @@ type strIterState struct {
 // storing its state for the shared %StringIteratorPrototype%.next.
 func (rt *Runtime) newStringIterator(vals []Value) Value {
 	v := rt.newObject(rt.stringIterProto)
-	if rt.strIterStates == nil {
-		rt.strIterStates = map[*object]*strIterState{}
+	if rt.agent.strIterStates == nil {
+		rt.agent.strIterStates = map[*object]*strIterState{}
 	}
-	rt.strIterStates[rt.objPtr(v)] = &strIterState{vals: vals}
+	rt.agent.strIterStates[rt.objPtr(v)] = &strIterState{vals: vals}
 	return v
 }
 
@@ -155,13 +155,20 @@ func (rt *Runtime) iterStepValue(iter, nextMethod Value) (Value, bool, *ThrowErr
 // iterHelperCallback validates the receiver (an Object) and a callback (must be
 // callable — else the source iterator is closed and a TypeError thrown), then
 // performs GetIteratorDirect, returning the source's next method and the callback.
-func (rt *Runtime) iterHelperCallback(this, cb Value, name string) (Value, Value, *ThrowError) {
+//
+// `realm` is the realm that DEFINED the helper, and it exists only to construct
+// the TypeErrors: the spec creates them in the built-in's realm, which is not
+// the `rt` a native is handed (that one is the caller's). Everything that
+// executes — the iterator close, the "next" read — stays on `rt`, because
+// frameDepth, thrownValue and the microtask queue are per-Runtime and running a
+// frame on another realm's stack is not a thing this engine can do.
+func (rt *Runtime) iterHelperCallback(realm *Runtime, this, cb Value, name string) (Value, Value, *ThrowError) {
 	if !this.IsObjectType() {
-		return mkundef(), mkundef(), rt.typeError("Iterator.prototype." + name + " called on a non-object")
+		return mkundef(), mkundef(), realm.typeError("Iterator.prototype." + name + " called on a non-object")
 	}
 	if !rt.isCallable(cb) {
 		rt.iteratorClose(this)
-		return mkundef(), mkundef(), rt.typeError("Iterator.prototype." + name + " callback is not a function")
+		return mkundef(), mkundef(), realm.typeError("Iterator.prototype." + name + " callback is not a function")
 	}
 	next, e := rt.getField(this, "next")
 	if e != nil {
@@ -361,6 +368,9 @@ func (rt *Runtime) sliceIterator(vs []Value) Value {
 // every/find). Values are materialized eagerly.
 func (rt *Runtime) initIteratorHelpers() {
 	proto := rt.objPtr(rt.iteratorProto)
+	// The realm these helpers belong to, captured because every closure below
+	// shadows `rt` with the CALLING realm. See iterHelperCallback.
+	realm := rt
 	// drain materializes an iterator via GetIteratorDirect (read "next" on the
 	// receiver and step it) rather than @@iterator: the reducer-style helpers
 	// (toArray/forEach/reduce/some/every/find) operate on `this` as the iterator
@@ -465,7 +475,10 @@ func (rt *Runtime) initIteratorHelpers() {
 		if e != nil {
 			return mkundef(), e
 		}
-		res := rt.newArray()
+		// The array is CreateArrayFromList in the built-in's realm, so
+		// `otherRealm.Iterator.prototype.toArray.call(it)` yields an
+		// otherRealm.Array. Only the [[Prototype]] differs; the pools are shared.
+		res := realm.newArray()
 		ro := rt.objPtr(res)
 		for i, v := range vs {
 			rt.arraySet(ro, uint32(i), v)
@@ -477,7 +490,7 @@ func (rt *Runtime) initIteratorHelpers() {
 	// read the source's `next` once (GetIteratorDirect), and pull one value per
 	// step. A callback that throws closes the source.
 	rt.defMethod(proto, "map", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "map")
+		next, cb, e := rt.iterHelperCallback(realm, this, arg(args, 0), "map")
 		if e != nil {
 			return mkundef(), e
 		}
@@ -502,7 +515,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		}, []Value{next, cb}), nil
 	})
 	rt.defMethod(proto, "filter", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "filter")
+		next, cb, e := rt.iterHelperCallback(realm, this, arg(args, 0), "filter")
 		if e != nil {
 			return mkundef(), e
 		}
@@ -694,7 +707,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		}, []Value{next}, buf), nil
 	})
 	rt.defMethod(proto, "flatMap", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "flatMap")
+		next, cb, e := rt.iterHelperCallback(realm, this, arg(args, 0), "flatMap")
 		if e != nil {
 			return mkundef(), e
 		}
@@ -767,7 +780,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		return helper, nil
 	})
 	rt.defMethod(proto, "reduce", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "reduce")
+		next, cb, e := rt.iterHelperCallback(realm, this, arg(args, 0), "reduce")
 		if e != nil {
 			return mkundef(), e
 		}
@@ -803,7 +816,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		}
 	})
 	rt.defMethod(proto, "forEach", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "forEach")
+		next, cb, e := rt.iterHelperCallback(realm, this, arg(args, 0), "forEach")
 		if e != nil {
 			return mkundef(), e
 		}
@@ -825,7 +838,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		}
 	})
 	rt.defMethod(proto, "some", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "some")
+		next, cb, e := rt.iterHelperCallback(realm, this, arg(args, 0), "some")
 		if e != nil {
 			return mkundef(), e
 		}
@@ -853,7 +866,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		}
 	})
 	rt.defMethod(proto, "every", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "every")
+		next, cb, e := rt.iterHelperCallback(realm, this, arg(args, 0), "every")
 		if e != nil {
 			return mkundef(), e
 		}
@@ -881,7 +894,7 @@ func (rt *Runtime) initIteratorHelpers() {
 		}
 	})
 	rt.defMethod(proto, "find", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		next, cb, e := rt.iterHelperCallback(this, arg(args, 0), "find")
+		next, cb, e := rt.iterHelperCallback(realm, this, arg(args, 0), "find")
 		if e != nil {
 			return mkundef(), e
 		}
@@ -1613,7 +1626,7 @@ const (
 
 // newIndexIterator builds an Array/TypedArray iterator over live length.
 // arrIterState is the internal state of an Array/TypedArray iterator: its source,
-// current index, and kind. Held in rt.arrIterStates keyed by the iterator object.
+// current index, and kind. Held in rt.agent.arrIterStates keyed by the iterator object.
 type arrIterState struct {
 	src   Value
 	index int
@@ -1623,10 +1636,10 @@ type arrIterState struct {
 
 func (rt *Runtime) newIndexIterator(src Value, kind iterKind) Value {
 	v := rt.newObject(rt.arrayIterProto)
-	if rt.arrIterStates == nil {
-		rt.arrIterStates = map[*object]*arrIterState{}
+	if rt.agent.arrIterStates == nil {
+		rt.agent.arrIterStates = map[*object]*arrIterState{}
 	}
-	rt.arrIterStates[rt.objPtr(v)] = &arrIterState{src: src, kind: kind}
+	rt.agent.arrIterStates[rt.objPtr(v)] = &arrIterState{src: src, kind: kind}
 	return v
 }
 
@@ -1634,7 +1647,7 @@ func (rt *Runtime) newIndexIterator(src Value, kind iterKind) Value {
 // iteration state (a TypeError if absent — the missing-brand check) and yields the
 // next index/value/entry over the source's live length.
 func (rt *Runtime) arrIterNext(this Value) (Value, *ThrowError) {
-	st := rt.arrIterStates[rt.objPtr(this)]
+	st := rt.agent.arrIterStates[rt.objPtr(this)]
 	if st == nil {
 		return mkundef(), rt.typeError("Array Iterator.prototype.next called on an incompatible receiver")
 	}
@@ -1695,7 +1708,7 @@ func (rt *Runtime) arrIterNext(this Value) (Value, *ThrowError) {
 
 // newCollectionIterator builds a Map/Set iterator over a snapshot of entries.
 // collIterState is the internal state of a Set/Map iterator: its target
-// collection, the current index, and the iteration kind. Held in rt.collIterStates
+// collection, the current index, and the iteration kind. Held in rt.agent.collIterStates
 // (keyed by the iterator object) so a shared prototype next can read it.
 type collIterState struct {
 	c     *collection
@@ -1706,10 +1719,10 @@ type collIterState struct {
 
 func (rt *Runtime) newCollectionIterator(c *collection, kind iterKind, proto Value) Value {
 	v := rt.newObject(proto)
-	if rt.collIterStates == nil {
-		rt.collIterStates = map[*object]*collIterState{}
+	if rt.agent.collIterStates == nil {
+		rt.agent.collIterStates = map[*object]*collIterState{}
 	}
-	rt.collIterStates[rt.objPtr(v)] = &collIterState{c: c, kind: kind}
+	rt.agent.collIterStates[rt.objPtr(v)] = &collIterState{c: c, kind: kind}
 	return v
 }
 
@@ -1717,7 +1730,7 @@ func (rt *Runtime) newCollectionIterator(c *collection, kind iterKind, proto Val
 // wantSet brand-checks the receiver: a Set-iterator next rejects a Map iterator
 // (and vice versa) and any non-iterator, throwing a TypeError.
 func (rt *Runtime) collIterNext(this Value, wantSet bool) (Value, *ThrowError) {
-	st := rt.collIterStates[rt.objPtr(this)]
+	st := rt.agent.collIterStates[rt.objPtr(this)]
 	if st == nil || st.c.isSet != wantSet {
 		return mkundef(), rt.typeError("next called on an incompatible iterator receiver")
 	}
