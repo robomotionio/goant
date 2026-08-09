@@ -220,6 +220,17 @@ func (rt *Runtime) suspendRaw(result Value) (resumed Value, inject *genResume) {
 
 func (rt *Runtime) suspendMsg(msg genMsg) (resumed Value, inject *genResume) {
 	g := rt.curGen
+	if g == nil {
+		// Nothing to suspend into: this frame is not a coroutine. The parser
+		// rejects every source form that could ask for one — `for await` and
+		// `await using` outside an async context are SyntaxErrors, see
+		// requireAwaitContext — so arriving here is an engine bug and not a
+		// script's doing. It still may not be a dead process: an embedder
+		// running someone else's JavaScript gets a catchable throw, which the
+		// yield/await opcode and disposeEntriesAsync both already unwind on.
+		e := rt.typeError("await is not available in this context")
+		return mkundef(), &genResume{kind: genThrow, val: e.Value}
+	}
 	g.fromGen <- msg
 	r := <-g.toGen
 	if r.kind == genNext {

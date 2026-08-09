@@ -290,6 +290,9 @@ func (rt *Runtime) createListFromArrayLike(a Value) ([]Value, *ThrowError) {
 	if e != nil {
 		return nil, e
 	}
+	if n > maxArrayLikeList {
+		return nil, rt.rangeError("Array-like is too long to build a list from")
+	}
 	list := make([]Value, n)
 	for i := 0; i < n; i++ {
 		v, e := rt.getElement(a, mknum(float64(i)))
@@ -299,6 +302,35 @@ func (rt *Runtime) createListFromArrayLike(a Value) ([]Value, *ThrowError) {
 		list[i] = v
 	}
 	return list, nil
+}
+
+// maxArrayLikeList bounds a list built from an array-like: an argument list for
+// `f.apply(null, obj)` and `Reflect.apply`, and the key list a Proxy ownKeys
+// trap returns.
+//
+// The length comes from ToLength, so `Reflect.apply(f, null, {length: 2**53-1})`
+// asked make for a hundred million megabytes and Go answered "makeslice: len out
+// of range", which no recover catches. Every engine has a limit on the argument
+// side and every engine states it as a RangeError; the number is arbitrary in
+// the same way theirs are (V8 stops near 124,000, SpiderMonkey at 500,000) and
+// is set above both, well past any list a program means to build.
+const maxArrayLikeList = 1 << 20
+
+// allocHint bounds a preallocation whose size came from a script.
+//
+// A length from ToLength goes to 2^53-1 and describes what an array-like CLAIMS
+// rather than what it holds — `{length: 2**53-1}` holds nothing at all. Sizing a
+// buffer from it kills the process at the allocator before the first element is
+// read. append grows from a smaller start at amortised O(1), so the hint is
+// worth having and is not worth trusting.
+func allocHint(n, most int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > most {
+		return most
+	}
+	return n
 }
 
 // hasFastElem reports whether index i is a live element of obj's fast array
@@ -366,6 +398,23 @@ func (rt *Runtime) inspect(v Value, quoted bool) string {
 		return "false"
 	case TNum:
 		return numberToString(v.Number())
+	case TBigInt:
+		// Without these two the default arm below names the TYPE, so
+		// console.log(1n) prints "bigint" and console.log(Symbol("s")) prints
+		// "symbol".
+		return rt.bigIntVal(v).String() + "n"
+	case TSymbol:
+		// SymbolDescriptiveString, spelled against the symbol's own slot rather
+		// than by reading .description off it. symbolDescription (the one for
+		// error messages) does the latter, and answers "method" when the lookup
+		// comes back empty — the wrong word entirely for console.log(Symbol()),
+		// and a lookup that runs whatever a script has left on Symbol.prototype.
+		// Printing a value should not be able to call back into the script.
+		d := rt.symbolDesc(v)
+		if !d.IsString() {
+			return "Symbol()"
+		}
+		return "Symbol(" + rt.strGo(d) + ")"
 	case TStr:
 		s := rt.strGo(v)
 		if quoted {

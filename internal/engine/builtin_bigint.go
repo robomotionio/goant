@@ -173,6 +173,9 @@ func (rt *Runtime) initBigIntBuiltin() {
 		if e != nil {
 			return mkundef(), e
 		}
+		if bigIntWrapTooWide(bits, bi) {
+			return mkundef(), rt.rangeError("Maximum BigInt size exceeded")
+		}
 		return rt.newBigInt(bigIntAsUintN(bits, bi)), nil
 	})
 
@@ -348,9 +351,20 @@ func (rt *Runtime) bigIntBinaryOp(op Opcode, x, y *big.Int) (Value, *ThrowError)
 }
 
 // bigIntAsIntN wraps v to a signed two's-complement integer of `bits` bits.
+//
+// `bits` reaches the builtin through ToIndex, so a script names as many as
+// 2^53-1 of them and the modulus 2^bits is not a number this process can hold.
+// It never has to: a value already inside the range is its own answer, and one
+// that is not bounds `bits` below the width of v itself. Without the early
+// return, BigInt.asIntN(2**53-1, -1n) asks math/big for a petabyte and Go
+// answers "makeslice: len out of range", which no recover catches.
 func bigIntAsIntN(bits int, v *big.Int) *big.Int {
 	if bits == 0 {
 		return big.NewInt(0)
+	}
+	if bits > v.BitLen()+1 {
+		// |v| < 2^(bits-2) < 2^(bits-1), so v is already in [-2^(bits-1), 2^(bits-1)).
+		return new(big.Int).Set(v)
 	}
 	mod := new(big.Int).Lsh(big.NewInt(1), uint(bits)) // 2^bits
 	r := new(big.Int).Mod(v, mod)                      // 0..2^bits-1
@@ -361,13 +375,26 @@ func bigIntAsIntN(bits int, v *big.Int) *big.Int {
 	return r
 }
 
-// bigIntAsUintN wraps v to an unsigned integer of `bits` bits.
+// bigIntAsUintN wraps v to an unsigned integer of `bits` bits. A non-negative v
+// that already fits is its own answer; a negative one wraps to 2^bits - |v|,
+// which genuinely has `bits` bits in it, so the caller must first ask
+// bigIntWrapTooWide whether a number that size may be built at all.
 func bigIntAsUintN(bits int, v *big.Int) *big.Int {
 	if bits == 0 {
 		return big.NewInt(0)
 	}
+	if v.Sign() >= 0 && bits > v.BitLen() {
+		return new(big.Int).Set(v) // 0 <= v < 2^bits
+	}
 	mod := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 	return new(big.Int).Mod(v, mod)
+}
+
+// bigIntWrapTooWide reports whether BigInt.asUintN(bits, v) would have to build
+// a number wider than this engine builds at all. Only the negative case can:
+// every other result is bounded by v.
+func bigIntWrapTooWide(bits int, v *big.Int) bool {
+	return v.Sign() < 0 && bits > maxBigIntBits
 }
 
 // maxBigIntBits is how large a BigInt this engine will build. The value is

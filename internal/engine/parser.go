@@ -222,6 +222,26 @@ func (p *parser) errorf(format string, args ...any) {
 	}
 }
 
+// requireAwaitContext records a SyntaxError unless an `await` operator is
+// allowed here. `for await` and `await using` are [+Await] productions, so
+// outside an async function or module top level they are not merely
+// unimplemented — `await` is an identifier there and the head does not exist.
+// Letting one through compiles a suspend into a frame that has no coroutine to
+// suspend into, which is not a spec deviation but a dead process.
+//
+// The error is recorded and parsing continues: the first error is the one
+// reported, and carrying on gives the rest of the tree a chance to be sane
+// rather than cascading from a half-consumed head.
+func (p *parser) requireAwaitContext(what string) {
+	switch {
+	case p.inAsync:
+	case p.inStaticBlock:
+		p.errorf("'await' is not allowed in a class static block")
+	default:
+		p.errorf("%s is only valid in async functions and at the top level of modules", what)
+	}
+}
+
 // maxNestDepth bounds how deeply the parser will descend. The parser is
 // recursive descent, so source nesting maps onto the Go stack, and source
 // nesting is attacker-controlled — but it is also just what generated code
@@ -3341,6 +3361,7 @@ func (p *parser) parseStmtBody() *Node {
 				p.errorf("'await using' declarations are not allowed in this position")
 				return p.mk(NEmpty)
 			}
+			p.requireAwaitContext("'await using'")
 			p.consume()
 			n := p.parseVarDecl(VarAwaitUsing, false)
 			p.semicolon()
@@ -3544,6 +3565,7 @@ func (p *parser) parseFor() *Node {
 	if p.next() == TokAwait {
 		p.consume()
 		isForAwait = true
+		p.requireAwaitContext("'for await'")
 	}
 	p.expect(TokLParen)
 	var initNode *Node
@@ -3554,6 +3576,7 @@ func (p *parser) parseFor() *Node {
 		p.consume()
 		p.next()
 		if p.tok() == TokUsing {
+			p.requireAwaitContext("'await using'")
 			p.consume()
 			p.noIn = true
 			initNode = p.parseVarDecl(VarAwaitUsing, true)

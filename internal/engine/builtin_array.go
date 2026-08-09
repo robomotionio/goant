@@ -708,7 +708,10 @@ func (rt *Runtime) initArrayBuiltin() {
 			}
 			sep = rt.strGo(s)
 		}
-		out := make([]byte, 0, n*4)
+		// Four bytes an element is a good guess and a bad promise: n is what the
+		// array-like claims, so `Array.prototype.join.call({length: 2**53-1})`
+		// asked make for a capacity Go rejects outright. See allocHint.
+		out := make([]byte, 0, allocHint(n, 1<<18)*4)
 		for i := 0; i < n; i++ {
 			if i > 0 {
 				out = append(out, sep...)
@@ -1956,7 +1959,9 @@ func (rt *Runtime) initArrayBuiltin() {
 		// sort, write them back with Set, then Delete the trailing holes. This runs
 		// entirely through the ordinary property protocol (getters/setters, the
 		// prototype chain, Proxy traps) unlike an in-place dense sort.
-		items := make([]Value, 0, n)
+		// Capacity for what is present, which is at most n and is nothing at all
+		// for a `{length: 2**53-1}` that holds no elements. See allocHint.
+		items := make([]Value, 0, allocHint(n, 1<<20))
 		for k := 0; k < n; k++ {
 			present, e := rt.hasElemE(obj, k)
 			if e != nil {
