@@ -303,6 +303,35 @@ func (rt *Runtime) HeapUsage() (cells int, bytes uint64) {
 	return n, b
 }
 
+// HeapReserved reports the high-water mark instead of the current occupancy:
+// the cell storage the pools hold, whether or not anything is in it.
+//
+// It is a different question from HeapUsage and for this engine the more
+// important one, because THE CELL POOLS NEVER SHRINK. A chunk allocated at the
+// peak is held for the life of the Runtime — free and truncate both keep it —
+// so what a host pays resident is set by the worst moment the program ever had
+// and not by what it is holding now. Two runs with identical live sets can
+// differ by a factor if one let more garbage pile up before collecting, and
+// only this number says so.
+//
+// Counted from the chunk vectors, which is why it survives region reclamation
+// while a watermark handle does not: Invocation.Release rewinds the allocator
+// but keeps the chunks, deliberately, so the next invocation allocates into
+// memory that is already there. Chunk granularity is 4096 cells.
+func (rt *Runtime) HeapReserved() (cells int, bytes uint64) {
+	if rt == nil {
+		return 0, 0
+	}
+	n := (len(rt.objects.chunks) + len(rt.strings.chunks) + len(rt.symbols.chunks) +
+		len(rt.closures.chunks) + len(rt.bigints.chunks)) * poolChunkSize
+	b := uint64(len(rt.objects.chunks))*poolChunkSize*uint64(unsafe.Sizeof(poolCell[object]{})) +
+		uint64(len(rt.strings.chunks))*poolChunkSize*uint64(unsafe.Sizeof(poolCell[flatString]{})) +
+		uint64(len(rt.symbols.chunks))*poolChunkSize*uint64(unsafe.Sizeof(poolCell[symbol]{})) +
+		uint64(len(rt.closures.chunks))*poolChunkSize*uint64(unsafe.Sizeof(poolCell[closure]{})) +
+		uint64(len(rt.bigints.chunks))*poolChunkSize*uint64(unsafe.Sizeof(poolCell[bigIntCell]{}))
+	return n, b
+}
+
 // InternedCount returns how many strings are in this runtime's intern table.
 //
 // The table is permanent and shared by every realm, so this number only rises.

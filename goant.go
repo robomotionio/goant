@@ -521,6 +521,18 @@ type Stats struct {
 	// allocated and not released, which is the number worth retiring on.
 	Bytes uint64
 
+	// ReservedCells and ReservedBytes are the high-water mark rather than the
+	// current occupancy: the cell storage the pools hold, whether or not
+	// anything is in it.
+	//
+	// Worth watching separately from Bytes because the pools never shrink, so
+	// this is what the process pays resident for the rest of the Runtime's life
+	// however little it is holding now. A gap between the two is garbage that
+	// was in flight at the worst moment, and it is the figure that moves when
+	// collection timing changes.
+	ReservedCells int
+	ReservedBytes uint64
+
 	// Interned is how many strings are pinned in the intern table. The table is
 	// permanent, so this only rises; watching it separates memory that is merely
 	// uncollected from memory that can never be freed. Host data never lands
@@ -558,15 +570,18 @@ func (rt *Runtime) Stats() Stats {
 		return Stats{}
 	}
 	cells, bytes := e.HeapUsage()
+	peak, reserved := e.HeapReserved()
 	blocks, codeBytes, _ := engine.JITCodeMemory()
 	return Stats{
-		Cells:       cells,
-		Bytes:       bytes,
-		Interned:    e.InternedCount(),
-		Collections: e.GCCycles(),
-		Limit:       e.HeapLimit(),
-		CodeBytes:   uint64(codeBytes),
-		CodeBlocks:  int(blocks),
+		Cells:         cells,
+		Bytes:         bytes,
+		ReservedCells: peak,
+		ReservedBytes: reserved,
+		Interned:      e.InternedCount(),
+		Collections:   e.GCCycles(),
+		Limit:         e.HeapLimit(),
+		CodeBytes:     uint64(codeBytes),
+		CodeBlocks:    int(blocks),
 	}
 }
 

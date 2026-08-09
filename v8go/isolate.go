@@ -25,11 +25,19 @@ import (
 	"github.com/robomotionio/goant/internal/engine"
 )
 
-// IsolateOptions mirrors the V8 heap-sizing options. goant has no separately
-// managed heap — allocation goes to the Go heap and the Go GC — so these
-// values are recorded and reported back by GetHeapStatistics but do not cap
-// anything. A caller that relies on the cap to bound memory should keep its own
-// accounting; see HeapStatistics.
+// IsolateOptions mirrors the V8 heap-sizing options.
+//
+// MaxOldSpaceBytes is honoured: it becomes a budget on the live heap, checked
+// after a collection, and a script that retains more than it is stopped with
+// ErrMemoryLimit. The others are recorded and reported back by
+// GetHeapStatistics without capping anything, because they describe a
+// generational layout this engine does not have.
+//
+// Setting it also changes how collection is SCHEDULED, not only when a script
+// is stopped: with a budget the collector paces itself on payload bytes rather
+// than on cell count. That is the configuration every host that runs this
+// engine in production is in, and a measurement taken without one is measuring
+// a configuration nobody ships.
 type IsolateOptions struct {
 	InitialOldSpaceBytes uint64
 	MaxOldSpaceBytes     uint64
@@ -233,14 +241,18 @@ func (i *Isolate) apply(o *contextOptions) { o.iso = i }
 // It is still the right signal for retirement, because it tracks how much a
 // script has allocated and never released.
 //
-// It also only rises. goant has no collector yet (PLAN.md Phase 7): cells are
-// reclaimed when the whole isolate is dropped and Go collects its pools, so a
-// long-lived pooled isolate accumulates everything every script it ran ever
-// allocated. Retiring on this number is not a nicety here — it is the only
-// reclamation mechanism there is.
-//
 // TotalHeapSize reports the process figure so a caller that wants overall
 // pressure can still see it.
+//
+// TotalPhysicalSize is the one to watch for a pooled isolate. It is the cell
+// storage the pools hold rather than what is live in it, and the pools never
+// shrink: a chunk allocated at the peak is held for the isolate's life. So it
+// is what the process pays resident however little the isolate is holding now,
+// and the gap between it and UsedHeapSize is garbage that was in flight at the
+// worst moment. UsedHeapSize falls after a collection; this does not.
+//
+// TotalHeapSizeExecutable is the compiled tier's code memory, which is
+// process-wide rather than per isolate and lives outside the budget entirely.
 func (i *Isolate) GetHeapStatistics() HeapStatistics {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
@@ -250,15 +262,19 @@ func (i *Isolate) GetHeapStatistics() HeapStatistics {
 	rt := i.rt
 	i.mu.Unlock()
 
-	var used uint64
+	var used, reserved uint64
 	if rt != nil {
 		_, used = rt.HeapUsage()
+		_, reserved = rt.HeapReserved()
 	}
+	_, codeBytes, _ := engine.JITCodeMemory()
 	return HeapStatistics{
-		TotalHeapSize:          ms.HeapSys,
-		UsedHeapSize:           used,
-		HeapSizeLimit:          i.opts.MaxOldSpaceBytes,
-		NumberOfNativeContexts: n,
+		TotalHeapSize:           ms.HeapSys,
+		TotalHeapSizeExecutable: uint64(codeBytes),
+		TotalPhysicalSize:       reserved,
+		UsedHeapSize:            used,
+		HeapSizeLimit:           i.opts.MaxOldSpaceBytes,
+		NumberOfNativeContexts:  n,
 	}
 }
 
