@@ -548,7 +548,11 @@ var ErrNotImplemented = errors.New("goant: not implemented yet")
 // New creates a fresh Runtime with empty pools and an initialized global object.
 func New() *Runtime {
 	rt := &Runtime{
-		gc:       gcState{enabled: true},
+		// strNext starts at the floor rather than zero: it is compared against on
+		// every string allocated, and a zero would call stringsFull on the first
+		// one. A realm made by NewRealm keeps the zero and gets the call once,
+		// which parks the threshold — its collector is the parent's.
+		gc:       gcState{enabled: true, strNext: gcStringFloor()},
 		agent:    &agentState{},
 		objects:  newPool[object](),
 		strings:  newPool[flatString](),

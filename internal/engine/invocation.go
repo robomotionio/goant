@@ -232,15 +232,20 @@ func (inv *Invocation) Release() bool {
 	// the threshold UP whenever the last collection had set it lower, and a host
 	// that releases often then pushes it up again before the live count can ever
 	// reach it. The collector simply stops running. It cost 3.6 GB in twenty
-	// seconds on goant-soak, against 60 MB with this left alone, and it does not
-	// show up on a workload whose garbage is objects: the trigger counts object
-	// cells, so a run whose garbage is strings has nothing else to stop it.
+	// seconds on goant-soak, against 60 MB with this left alone, and it did not
+	// show up on a workload whose garbage is objects: at the time the only
+	// trigger counted object cells, so a run whose garbage was strings had
+	// nothing else to stop it. That is now stringsFull's job, and its threshold
+	// ratchets the same way and is rewound here under the same rule.
 	want := rt.objects.liveN * gcGrowthFactor
 	if want < gcFloor {
 		want = gcFloor
 	}
 	if want < rt.gc.next {
 		rt.gc.next = want
+	}
+	if strWant := max(rt.strings.liveN*gcGrowthFactor, gcStringFloor()); strWant < rt.gc.strNext {
+		rt.gc.strNext = strWant
 	}
 	rt.allocBytes = 0
 	if rt.heapLimit != 0 {

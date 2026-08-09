@@ -265,3 +265,27 @@ func TestReleaseNeverRaisesTheCollectionThreshold(t *testing.T) {
 			before, rt.gc.next)
 	}
 }
+
+// And the same for the string threshold, which ratchets for the same reason and
+// is the one that watches a run whose garbage is strings. See stringsFull.
+func TestReleaseNeverRaisesTheStringThreshold(t *testing.T) {
+	rt := New()
+	rt.gc.strNext = 2000
+
+	inv := rt.BeginInvocation()
+	if _, err := rt.RunString("strfloor_test.js", `
+		let s = "";
+		for (let i = 0; i < 20000; i++) s = ("k" + i).toUpperCase();
+		s;
+	`); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	before := rt.gc.strNext
+	if !inv.Release() {
+		t.Fatal("Release refused")
+	}
+	if rt.gc.strNext > before {
+		t.Errorf("string threshold raised from %d to %d: a host that releases often would stop collecting strings",
+			before, rt.gc.strNext)
+	}
+}

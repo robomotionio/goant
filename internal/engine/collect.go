@@ -90,6 +90,10 @@ type gcState struct {
 	next  int
 	floor int
 
+	// strNext is next for the STRING pool: the live string-cell count that is
+	// reason enough to collect on its own. See stringsFull.
+	strNext int
+
 	// enabled turns automatic collection on. It is on by default.
 	enabled bool
 	// cycles counts completed collections, for tests and diagnostics.
@@ -132,6 +136,39 @@ const gcGrowthFactor = 2
 // each other. Live heap after a sweep was never the problem and is comparable
 // either way; the peak before one was.
 var gcFloor = 1 << 14
+
+// gcStringFloor is gcFloor for the string pool: the same amount of STORAGE,
+// rather than the same number of cells. A string cell is 88 bytes against an
+// object's 224, so counting them alike would collect nearly three times as
+// often for the same resident bytes — and string-heavy code is common enough
+// that the difference is not academic.
+//
+// Approximate on purpose. It ignores the out-of-line bytes a string points at,
+// which are real but are the part chargeBytes already watches when a host has
+// set a limit; this floor exists for the host that has set none, where being
+// somewhere near right is the whole requirement. Derived rather than written
+// down so that GOANT_GC_FLOOR moves both together.
+//
+// Making it SLACKER than the object floor is the obvious lever on the cost of
+// this trigger, and it was measured and rejected. On the orders workload with
+// no limit set, the extra collections cost 5.5%, and eight times the floor
+// would have bought nearly all of that back — by reserving about 25 MB more
+// string storage than it saved. That is trading the thing this exists for
+// against the thing it costs, in the wrong direction: the whole point is
+// resident bytes. A host that wants the other trade sets a heap limit, and
+// then chargeBytes runs this schedule instead of it.
+func gcStringFloor() int {
+	n := gcFloor * int(unsafe.Sizeof(poolCell[object]{})) / int(unsafe.Sizeof(poolCell[flatString]{}))
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// gcStrParked is what stringsFull leaves in gc.strNext when the collector is
+// off: a value no live count reaches, so a Runtime running with WithGC(false)
+// pays the test on each string and never the call.
+const gcStrParked = 1 << 62
 
 // gcByteFloor is the smallest amount of out-of-line payload worth collecting
 // for. Deliberately well under any sane heap limit: the limit can only be
@@ -193,6 +230,74 @@ func (rt *Runtime) chargeBytes(n uint64) {
 			rt.jitCollectSoon()
 		}
 	}
+}
+
+// stringsFull is called when the live string-cell count has reached gc.strNext:
+// the string pool has as much in it as it is allowed before a collection.
+//
+// It exists because both collection triggers — maybeCollect on function entry
+// and backEdgeWantsGC on every loop back edge — test the live OBJECT count and
+// nothing else. A script that allocates only strings was therefore unwatched:
+// four thousand calls to ("k"+i).toUpperCase() reached 2.4 MILLION live string
+// cells with zero collections, because the object count never moved. A host that
+// had set a heap limit was covered by chargeBytes; an embedder that set none had
+// nothing watching at all, and simply grew.
+//
+// It is the no-limit HALF of chargeBytes, and defers to it whenever there is a
+// limit — see the heapLimit check below for what running both cost.
+//
+// The threshold is the live count and the schedule is twice what survived, which
+// is the rule gc.next already follows for objects. Triggering on the pool
+// RESERVING another chunk instead reads as the same thing and is not: the high
+// water mark never rewinds, so each cycle ends by taking exactly one more chunk
+// and reserved storage grows as the square root of total allocations. Measured
+// on a 200k-iteration loop that keeps one string: 147 chunks and no collection
+// before any of this, 17 and still climbing on reserved growth, 11 flat here.
+//
+// Cost is one load and a not-taken branch per string created (strings.go) —
+// liveN is the field alloc just incremented — and nothing at all at either
+// safepoint. Putting a second counter on the back edge is exactly what this
+// avoids; that measured 7-10%.
+//
+//go:noinline
+func (rt *Runtime) stringsFull() {
+	if !rt.gc.enabled {
+		// Nothing will collect, so stop asking for the rest of the run. See
+		// SetGCEnabled, which is what puts the threshold back.
+		rt.gc.strNext = gcStrParked
+		return
+	}
+	if rt.heapLimit != 0 {
+		// Already watched, and watched better. chargeBytes charges every string's
+		// bytes against a budget that is twice what SURVIVED the last sweep with
+		// an 8 MB floor, and trips the same gc.next this would. Counting cells on
+		// top of that is not a second opinion, it is a second schedule for one
+		// resource — and it showed up as one: on the deskbot orders workload with
+		// its 2 GiB limit, 13 collections became 28 and the run cost 10% more
+		// while the byte trigger was already keeping the pool bounded.
+		//
+		// So this trigger is what a host gets INSTEAD of chargeBytes, not as well
+		// as it. Strides past rather than parking, because SetHeapLimit(0) can
+		// take the budget away again and nothing would put the mark back.
+		rt.gc.strNext = rt.strings.liveN + gcStringFloor()
+		return
+	}
+	// Say it in the currency the safepoints already speak: a threshold the live
+	// object count has reached. Exactly what chargeBytes does, and for the same
+	// reason — so neither safepoint has to read anything new.
+	rt.gc.next = rt.objects.liveN
+	if rt.jitDepth > 0 {
+		rt.jitCollectSoon()
+	}
+	// Asked. Move the mark on so the next allocation does not ask again.
+	//
+	// The collection happens at the next safepoint, not here, and a native can
+	// allocate a great many strings before reaching one — JSON.stringify and
+	// Array.prototype.join build a whole result inside a single call. Without
+	// this, every string after the first would make this call. A floor's worth
+	// of headroom bounds it to one call per floor even when nothing collects at
+	// all, and collect() overwrites the mark properly as soon as one does.
+	rt.gc.strNext = rt.strings.liveN + gcStringFloor()
 }
 
 // jitCollectSoon brings every live compiled frame back to Go at its next loop
@@ -441,7 +546,16 @@ func (rt *Runtime) enforceHeapLimit() {
 // SetGCEnabled turns automatic collection on or off. It is on by default; turn
 // it off for a run short enough that nothing needs reclaiming, or one that ends
 // with Invocation.Release.
-func (rt *Runtime) SetGCEnabled(on bool) { rt.gc.enabled = on }
+func (rt *Runtime) SetGCEnabled(on bool) {
+	rt.gc.enabled = on
+	if on && rt.gc.strNext == gcStrParked {
+		// Nothing was measuring what is live while the collector was off, and
+		// liveN is now mostly garbage, so deriving a threshold from it would put
+		// the goalpost past everything the run has accumulated. Start from the
+		// floor and let the first sweep set the real one.
+		rt.gc.strNext = gcStringFloor()
+	}
+}
 
 // GCCycles reports how many collections have completed. For tests.
 func (rt *Runtime) GCCycles() int { return rt.gc.cycles }
@@ -495,6 +609,12 @@ func (rt *Runtime) collect() {
 	g.next = rt.objects.liveN * gcGrowthFactor
 	if g.next < g.floor {
 		g.next = g.floor
+	}
+
+	// The same rule for the string pool, over its own floor.
+	g.strNext = rt.strings.liveN * gcGrowthFactor
+	if f := gcStringFloor(); g.strNext < f {
+		g.strNext = f
 	}
 
 	// Total what survived is HOLDING, not just how many cells survived. Done

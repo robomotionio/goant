@@ -41,11 +41,20 @@ const (
 // is what lowers gc.next when the byte budget runs out, and that is the only
 // thing that brings a string-heavy script to a collection; incrementing the
 // counter alone leaves it growing forever with nothing ever testing the limit.
+//
+// The strNext test is how a host that set NO limit is watched. Both collection
+// triggers count object cells, so before it a script allocating nothing but
+// strings grew with nothing looking at it at all. One load — liveN is what alloc
+// just incremented — and a branch that is not taken; the policy is in
+// Runtime.stringsFull.
 func (rt *Runtime) newStringBytes(b []byte) Value {
 	if rt.heapLimit != 0 {
 		rt.chargeBytes(uint64(cap(b)))
 	}
 	h, fs := rt.strings.alloc()
+	if rt.strings.liveN >= rt.gc.strNext {
+		rt.stringsFull()
+	}
 	fs.bytes = b
 	fs.gostr = "" // the cell may be recycled; drop the previous string's cache
 	fs.isASCII = strAsciiUnknown
@@ -56,6 +65,9 @@ func (rt *Runtime) newStringBytes(b []byte) Value {
 // accounted for the bytes itself.
 func (rt *Runtime) newStringBytesRaw(b []byte) Value {
 	h, fs := rt.strings.alloc()
+	if rt.strings.liveN >= rt.gc.strNext {
+		rt.stringsFull()
+	}
 	fs.bytes = b
 	fs.gostr = ""
 	fs.isASCII = strAsciiUnknown
