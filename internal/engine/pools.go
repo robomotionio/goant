@@ -29,6 +29,26 @@ type poolCell[T any] struct {
 	elem T
 	gen  uint32 // bumped on free; even == live is NOT assumed, see alloc
 	live bool
+	// born marks a cell that was recycled from the free list DURING the running
+	// invocation, so the object in it is new however low its handle is.
+	//
+	// It exists to keep one invariant honest. Region reclamation rests on a
+	// handle comparison: below the watermark taken at Begin means older than the
+	// run, so a write to it is a write to shared state and the region cannot be
+	// freed. Recycling breaks that. The realm's own construction leaves garbage,
+	// the first collection inside a run reclaims it, and the script is then
+	// handed one of those low cells — after which its first write to the object
+	// it just made is read as a write to something older than itself.
+	//
+	// Every consequence was silent: nothing reclaimed, pools growing for the life
+	// of the process, and a host that discards a dirty Runtime throwing away its
+	// warm engine after every message big enough to collect. Which was only the
+	// large ones, because only they collect.
+	//
+	// A bool rather than an invocation number, and here rather than in a side
+	// table, because it fits in the padding the generation counter already
+	// leaves: the cell does not grow by a byte.
+	born bool
 }
 
 // gcPoison is the GOANT_GC_POISON debug mode: a swept cell is not returned to
@@ -50,35 +70,17 @@ type pool[T any] struct {
 	next     Handle   // next never-used handle (starts at 1)
 	liveN    int
 
-	// holdBelow is the handle below which a freed cell must not be handed out
-	// again yet, and held is where those cells wait.
+	// watermark is the running invocation's handle boundary, or zero when no
+	// invocation is running, and reborn lists the cells recycled from below it
+	// during this run so that End can unmark them. See poolCell.born.
 	//
-	// This exists to keep one invariant true: that a handle below the running
-	// invocation's watermark names an object older than the invocation. The
-	// whole of region reclamation rests on it — Invocation.Release frees the
-	// region without tracing anything, and it is allowed to only because a
-	// handle comparison proved the run never wrote to something that predates
-	// it (see invocation_dirty.go).
-	//
-	// A collection breaks that invariant. The realm's own construction leaves
-	// garbage behind, the first sweep inside a run reclaims it, and those low
-	// handles go on the free list — so the very next object the SCRIPT allocates
-	// is handed one, and writing to it reads as writing to shared state. The run
-	// is then reported dirty, Release refuses, and the pools keep everything.
-	// A pooled host sees that as the reclamation silently not happening, and
-	// only on the large messages, because only they collect at all.
-	//
-	// The cost is a compare in free, which runs per collected cell rather than
-	// per allocation, and a slice that is almost always empty: the only cells it
-	// can hold are pre-existing ones that died mid-run.
-	holdBelow Handle
-	held      []Handle
-
-	// Armed and disarmed by writing these fields directly from invocation.go,
-	// rather than through methods here. Adding a method to this generic type
-	// changes the code the compiler generates for the pool as a whole,
-	// including alloc and free, which are the hottest routines in the engine;
-	// see the note on liveePayload, where that measured about 7%.
+	// Written directly from invocation.go rather than through methods here.
+	// Adding a method to this generic type changes the code the compiler
+	// generates for the pool as a whole, including alloc and free, which are
+	// the hottest routines in the engine; see the note on liveePayload, where
+	// that measured about 7%.
+	watermark Handle
+	reborn    []Handle
 
 	// poisoned records cells the collector freed, under gcPoison only.
 	poisoned map[Handle]bool
@@ -120,6 +122,12 @@ func (p *pool[T]) alloc() (Handle, *T) {
 	}
 	cl := p.cell(h)
 	cl.live = true
+	if h < p.watermark {
+		// Recycled from below the running invocation's watermark: the object
+		// about to go here is the run's own, whatever its handle says.
+		cl.born = true
+		p.reborn = append(p.reborn, h)
+	}
 	p.liveN++
 	var zero T
 	cl.elem = zero
@@ -180,11 +188,7 @@ func (p *pool[T]) free(h Handle) {
 	cl.gen++
 	var zero T
 	cl.elem = zero
-	if h < p.holdBelow {
-		p.held = append(p.held, h)
-	} else {
-		p.freeList = append(p.freeList, h)
-	}
+	p.freeList = append(p.freeList, h)
 	p.liveN--
 }
 

@@ -46,7 +46,7 @@ func (rt *Runtime) noteSharedMutation(obj Value) {
 	if !obj.IsObjectType() {
 		return
 	}
-	if Handle(obj.handle()) < rt.invWatermark {
+	if h := Handle(obj.handle()); h < rt.invWatermark && !rt.bornInRun(h) {
 		rt.invDirty = true
 	}
 }
@@ -63,9 +63,21 @@ func (rt *Runtime) noteSharedMutationOf(o *object) {
 	if rt.invWatermark == 0 || rt.invDirty || o == nil {
 		return
 	}
-	if o.self < rt.invWatermark {
+	if o.self < rt.invWatermark && !rt.bornInRun(o.self) {
 		rt.invDirty = true
 	}
+}
+
+// bornInRun reports that this cell was recycled from below the watermark during
+// the running invocation, so the object in it is the run's own however low its
+// handle is.
+//
+// Off the fast path by construction: it is only reached once the handle
+// comparison has already said "older than this run", which for almost every
+// write it is not.
+func (rt *Runtime) bornInRun(h Handle) bool {
+	cl := rt.objects.cell(h)
+	return cl != nil && cl.born
 }
 
 // Dirty reports whether this invocation modified state that predates it, which

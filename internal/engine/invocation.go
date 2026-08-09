@@ -83,33 +83,19 @@ func (rt *Runtime) BeginInvocation() *Invocation {
 	rt.beginDirtyTracking()
 	rt.invInterned = nil
 
-	// Stop the object pool recycling cells from below the watermark for as long
-	// as this run lasts, so that "handle below the watermark" keeps meaning "made
-	// before this run". Without it the first collection inside a run hands the
-	// script a recycled realm cell, the script writes to it, and the run is
-	// reported as having modified shared state when it did nothing of the kind
-	// — which costs the caller the whole of region reclamation, and only on the
-	// messages big enough to collect. See the pool fields.
+	// Tell the pool where the boundary is, so that a cell recycled from below it
+	// gets marked as this run's own. Without that mark the dirty test cannot
+	// tell a new object in a recycled cell from an object older than the run,
+	// and reads every write to one as a write to shared state — which costs the
+	// caller the whole of region reclamation, and only on the messages big
+	// enough to collect. See poolCell.born.
 	//
-	// It makes the comparison sound rather than merely quieter. Before this, a
-	// low handle proved nothing; now every object the run allocates has a handle
-	// at or above the watermark, so low means old and the test can only be wrong
-	// in the direction it was always right in.
-	inv.prevHold = rt.objects.holdBelow
-	rt.objects.holdBelow = inv.marks.objects
-
-	// Cells that were already free when the run began are the same hazard, and
-	// every one of them qualifies: a free handle is always below next, and next
-	// is the watermark. So the whole list stands aside until End puts it back.
-	//
-	// It is a short list in the shape this is for — after a Release it holds
-	// only the realm's own dead scaffolding — and standing it aside costs the
-	// run nothing, because the cells it would have reused are ones Release is
-	// about to reclaim wholesale anyway. A Runtime kept in service after a run
-	// reported dirty, which the contract says to discard, can accumulate a
-	// longer one and will allocate fresh cells rather than reuse it.
-	rt.objects.held = append(rt.objects.held, rt.objects.freeList...)
-	rt.objects.freeList = rt.objects.freeList[:0]
+	// Holding those cells back instead of marking them was the other way to do
+	// it, and it is wrong: a free list that is set aside at every Begin is never
+	// drawn from again, so the pool stops reusing anything and climbs forever.
+	// Thirty gigabytes in two minutes, on a soak of short runs.
+	inv.prevHold = rt.objects.watermark
+	rt.objects.watermark = inv.marks.objects
 
 	// The fresh global inherits from the shared one, so every builtin resolves
 	// through the prototype chain while assignments land here and are dropped at
@@ -147,14 +133,17 @@ func (inv *Invocation) End() {
 	inv.rt.invWatermark = inv.prevWatermrk
 	inv.rt.invInterned = inv.prevInterned
 
-	// The cells held back during the run can be reused again: there is no longer
-	// a watermark for them to be mistaken for the far side of.
+	// The cells this run was given from below the watermark are nobody's news
+	// now: with the run over they are as old as everything else, and the next
+	// one must see them that way.
 	p := inv.rt.objects
-	p.holdBelow = inv.prevHold
-	if len(p.held) > 0 {
-		p.freeList = append(p.freeList, p.held...)
-		p.held = p.held[:0]
+	p.watermark = inv.prevHold
+	for _, h := range p.reborn {
+		if cl := p.cell(h); cl != nil {
+			cl.born = false
+		}
 	}
+	p.reborn = p.reborn[:0]
 }
 
 // Release ends the invocation and frees everything it allocated, in one step
