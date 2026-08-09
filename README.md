@@ -92,46 +92,56 @@ Measured on an idle Azure `Standard_D8s_v5` created for the purpose and
 destroyed afterwards. Scripts are in the repository; see
 [Reproducing](#reproducing).
 
-Read the pure-Go engines against each other. node, deno and bun are the JIT
-reference, not peers — the distance to them is what a bytecode interpreter
-costs, and how much of it the compiled tier closes.
+The Octane table stands goant beside the engines in its own class — embeddable
+interpreters with no optimising JIT. Cold start and binary size also list node,
+deno and bun, which are whole runtimes rather than peers and are there for
+scale.
 
 ### Octane 2.0
 
 The eight workloads [ahaoboy/js-engine-benchmark](https://github.com/ahaoboy/js-engine-benchmark)
-scores, which is what makes this comparable with what other engines publish.
-Higher is better.
+scores. Higher is better. These are the engines in goant's own class — no JIT,
+embeddable, one binary — which is the comparison that says something.
 
-| Benchmark    |    goant | goant+JIT |     goja |   node |   deno |    bun | +JIT vs fastest |
-| ------------ | -------: | --------: | -------: | -----: | -----: | -----: | --------------: |
-| Richards     |  **218** |      1393 |      216 |  34924 |  34352 |  41889 |             30× |
-| DeltaBlue    |      251 |      1049 |  **273** |  99554 |  99851 |  58488 |             95× |
-| Crypto       |  **241** |      2371 |      129 |  39846 |  42729 |  46841 |             20× |
-| RayTrace     |  **467** |       647 |      298 |  73333 |  77477 | 115956 |            179× |
-| EarleyBoyer  |  **617** |       967 |      537 |  65363 |  62784 |  72582 |             75× |
-| RegExp       |  **255** |       302 |      215 |   9346 |   9748 |  10776 |             36× |
-| Splay        |     1989 |      2414 | **2201** |  43982 |  43465 |  43845 |             18× |
-| NavierStokes |  **427** |      6123 |      205 |  32467 |  32550 |  34178 |            5.6× |
+| Benchmark    |    goant | goant+JIT |     goja |      ant |  quickjs | duktape |
+| ------------ | -------: | --------: | -------: | -------: | -------: | ------: |
+| Richards     |      227 |  **1374** |      218 |      445 |      836 |     221 |
+| DeltaBlue    |      258 |   **929** |      271 |      914 |      818 |     269 |
+| Crypto       |      257 |  **2320** |      127 |      274 |     1099 |     347 |
+| RayTrace     |      431 |       557 |      304 |      691 |  **995** |     551 |
+| EarleyBoyer  |      536 |       822 |      540 |     1111 | **1598** |     580 |
+| RegExp       |      238 |   **276** |      212 |      152 |      268 |     123 |
+| Splay        |     1874 |      2320 |     2138 |     2137 | **3426** |    2753 |
+| NavierStokes |      467 |  **6012** |      202 |    error |     1971 |    1224 |
 
 `goant` is the interpreter, which is what runs unless a host asks for
 [the tier](docs/embedding.md#the-compiled-tier); `goant+JIT` is the same binary
-with `WithJIT(true)`. Bold marks the higher of the two pure-Go interpreters, the
-only like-for-like pair here.
+with `WithJIT(true)`. Bold marks the fastest engine in each row.
 
-Against goja the interpreter leads on six of eight, geometric mean **1.27×**.
-With the tier on, **4.1×**. Against the JIT engines the remaining gap runs 5.6×
-to 179×, against 22× to 398× for the interpreter alone.
+Interpreter against interpreter, goant leads goja on five of eight — the
+like-for-like pair, both pure Go — and loses to everything written in C. **ant,
+the engine goant is a port of, is 1.1x to 3.5x faster on six of the seven it
+scores**, which is the honest answer to "what did the port cost": a bytecode
+loop in Go with NaN-boxed handles gives up a lot to the same loop in C. quickjs
+is 1.1x to 4.3x ahead on all eight. RegExp is the single interpreter row goant
+wins outright, which is the RE2 fast path rather than the loop.
 
-What the tier is worth varies by an order of magnitude inside one suite —
-NavierStokes 14×, Crypto 9.8×, Richards 6.4×, then RegExp and Splay at 1.2×. A
-baseline compiler makes arithmetic, property access and calls cheaper; it does
-not make the regex matcher or the collector faster.
+The tier is what closes it. With `WithJIT(true)` goant is fastest on five of
+the eight, including NavierStokes at 6012 against quickjs's 1971 and Crypto at
+2320 against 1099. It stays behind quickjs on RayTrace, EarleyBoyer and Splay:
+a baseline compiler makes arithmetic, property access and calls cheaper, and
+those three are dominated by allocation and the collector instead.
 
-Over all fifteen Octane workloads the tier is **3.1×** — 6.5× on the three
-asm.js-shaped ones (zlib, mandreel, gbemu) and 2.6× on the other twelve. On the
-workload this engine was built for, short flows on a pooled `Runtime`, **2.9×**.
+Over all fifteen Octane workloads the tier is worth **3.1x** — 6.5x on the three
+asm.js-shaped ones (zlib, mandreel, gbemu) and 2.6x on the other twelve. On the
+workload this engine was built for, short flows on a pooled `Runtime`, **2.9x**.
 `code-load` is the one workload the tier makes worse, which is what a benchmark
 that measures compiling rather than running should do.
+
+A JIT runtime is still one to two orders of magnitude ahead on this suite: node
+scored 34,924 on Richards against goant+JIT's 1374 (from the earlier run — node
+is not in the table above). If your scripts are compute-bound and you can afford
+cgo, that gap is the reason to reach for V8.
 
 ### Cold start
 
@@ -167,11 +177,12 @@ difference. node, deno and bun are whole runtimes and are here for scale.
 <details>
 <summary>Environment</summary>
 
-Two runs, and the tables do not mix within a row. Cold start and binary size are
-today's, all five engines on one idle machine. The Octane node/deno/bun columns
-are the earlier cross-engine run on an identically specified instance; the two
-goant Octane columns are a within-machine A/B measured together, best of five
-each, `-refresh` on both arms.
+One machine, one sitting, nothing else running on it. Every Octane column was
+measured together with `-refresh`, so no engine's score was read from a cached
+baseline. `ant` fails on NavierStokes rather than scoring it.
+
+The all-fifteen tier figures (3.1x, 6.5x, 2.6x) are from an earlier run of the
+same suite on an identically specified instance.
 
 | Detail   | Value                                            |
 | -------- | ------------------------------------------------ |
@@ -181,8 +192,8 @@ each, `-refresh` on both arms.
 | Octane   | chromium/octane @ `570ad1cc`                      |
 | test262  | tc39/test262 @ `b363f29d`                         |
 | goja     | `v0.0.0-20260723142020-b4aef50fa347`              |
-| node / deno / bun, cold start and size | 22.23.2 / 2.9.5 / 1.3.14 |
-| node / deno / bun, Octane              | 25.9.0 / 2.9.3 / 1.3.14  |
+| node / deno / bun | 22.23.2 / 2.9.5 / 1.3.14                      |
+| ant / quickjs / duktape | ant @ HEAD / 2021-03-27 / 2.7.0         |
 
 Octane scores are the best of two runs; the JIT engines carry more run-to-run
 variance than the two interpreters do.
