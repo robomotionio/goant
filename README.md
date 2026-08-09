@@ -34,8 +34,12 @@ The three ways to run JavaScript from Go, and what each one costs:
 | JIT               | amd64, arm64 (opt-in)          | none               | optimising                          |
 | Binary size       | **11.1 MB**                    | 13.3 MB            | ~90 MB linked                       |
 | Cold start        | **2.5 ms**                     | 1.9 ms             | —                                   |
-| Out of memory     | **an error you can catch**     | takes the process down | takes the process down          |
+| Out of memory     | **an error you can catch**¹    | takes the process down | takes the process down          |
 | Per-run isolation | **a fresh global, 111 ns**     | a fresh Runtime    | a fresh context                     |
+
+¹ With `SetMemoryLimit` set. It is judged on what survives a collection, so a
+script that allocates a great deal and keeps little still passes. Some array
+builtins can still exhaust memory outside it — see [Status](#status).
 
 goant is for a Go program that has to run JavaScript it did not write, on
 machines it does not control, without the process dying when that JavaScript
@@ -74,10 +78,11 @@ At 100%, whole directories: `built-ins/Temporal` (4,603), `annexB` (1,086),
 including the sixteen non-ISO calendars and CLDR-driven formatting. See
 [docs/intl402-and-temporal.md](docs/intl402-and-temporal.md).
 
-The 326 remaining failures are roughly a third proposals that have not landed
-(decorators, import-defer, import-bytes, source-phase imports), a third one root
-cause (per-function `[[Realm]]`), and a third a genuine long tail, most of it in
-`staging/`. [Status](#status) has the breakdown.
+Of the 326 remaining failures, **211 are in `staging/sm`** — SpiderMonkey's own
+suite, imported into test262's staging area. Of the other 115: 47 are proposals
+that have not landed, about 50 sit behind one root cause (per-function
+`[[Realm]]`), 12 are growable `SharedArrayBuffer`, and six are a tail of
+singletons. [Status](#status) has the breakdown.
 
 ---
 
@@ -205,7 +210,7 @@ CGO_ENABLED=0 go build -o goant-bench ./cmd/goant-bench
 
 A from-scratch port of the **"Silver" engine** from
 [`ant`](https://github.com/theMackabu/ant) — a JavaScript runtime written in C —
-rewritten in Go: lexer → AST → bytecode compiler → 213-opcode interpreter, its
+rewritten in Go: lexer → AST → bytecode compiler → 218-opcode interpreter, its
 own tracing garbage collector, WTF-8 strings, a JS→regex translation layer over
 a vendored `regexp2`, and a baseline JIT for amd64 and arm64.
 
@@ -235,19 +240,33 @@ bytes-in/bytes-out JSON path, and migrating from v8go.
 In production for Function-node scripts. What is not there yet:
 
 - **An optimising tier.** The JIT is a baseline compiler — one template per
-  bytecode, inline caches, per-site type feedback, compiled calls, no inlining
-  — and is opt-in per Runtime with `WithJIT(true)`. It is off by default
-  because "safe for a host that opts in and watches it" is a different claim
-  from "safe for everyone on upgrade". It has had differential fuzzing against
-  the interpreter on four platforms, Test262 and mjsunit with the tier on, a
-  race-detector concurrency suite, and multi-million-invocation soaks; it has
-  not had a soak on `darwin/amd64`, the one platform with no hardware behind it.
-- **Unlanded proposals**: decorators, import-defer, import-bytes, source-phase
-  imports. ~45 of the 326 test262 failures.
-- **Per-function `[[Realm]]`.** One root cause behind ~55 failures: a value must
-  report the error of the realm its function came from.
-- **`SharedArrayBuffer.prototype.slice`** on growable buffers, and threads —
-  `SharedArrayBuffer` and `Atomics` are single-agent.
+  bytecode, inline caches, per-site type feedback for element access, compiled
+  calls that reach compiled code directly, mid-body deopt, and no inlining. It
+  is opt-in per Runtime with `WithJIT(true)`, off by default because "safe for
+  a host that opts in and watches it" is a different claim from "safe for
+  everyone on upgrade". It has had differential fuzzing against the interpreter
+  on four platforms, Test262 and mjsunit with the tier on, a race-detector
+  concurrency suite, and multi-million-invocation soaks — but no soak on
+  `darwin/amd64`, the one supported platform with no hardware behind it.
+- **`staging/sm`, 211 test262 failures.** SpiderMonkey's own suite, and the
+  largest single bucket left by some way. Mostly real semantic gaps rather than
+  harness noise, but a long tail rather than a lever.
+- **Unlanded proposals**, 47 failures: decorators, import-defer, import-bytes,
+  source-phase imports.
+- **Per-function `[[Realm]]`**, about 50 failures behind one root cause: a value
+  must report the error of the realm its function came from, and goant reaches
+  for the realm on the stack.
+- **Growable `SharedArrayBuffer`**, 12 failures, and threads — `SharedArrayBuffer`
+  and `Atomics` are single-agent.
+- **Some array builtins escape the memory limit.** The limit is charged on
+  engine cells and out-of-line payload, so a builtin that grows a plain Go
+  slice — `fill`, `copyWithin`, `includes`, `String.raw` against a
+  `{length: 2**53-1}` array-like — grows without the budget being consulted,
+  and `toReversed`/`with`/`toSorted`/`toSpliced` size their result from a
+  claimed length before reading an element. A few long native loops also do not
+  check the interrupt flag, so they cannot be cancelled. The claimed-length
+  paths that used to crash the process outright are fixed; making these charge
+  the limit is not.
 - **Host modules.** No `fs`, no `http`, no Node compatibility layer — the engine
   plus a minimal runtime (event loop, timers, microtasks, `console`) is the
   whole scope. Give a script what it needs with `Set`.
