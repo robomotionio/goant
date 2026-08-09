@@ -291,12 +291,26 @@ func (rt *Runtime) initErrorBuiltin() {
 // makeErrorCtor builds an error constructor wired to the given prototype.
 func (rt *Runtime) makeErrorCtor(name string, proto, parentCtor Value) Value {
 	ctor := rt.newNativeFunc(name, 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		// Works as both `Error(msg)` and `new Error(msg)`: this is the new
-		// object under construct(); otherwise allocate one.
+		// Works as both `Error(msg)` and `new Error(msg)`.
+		//
+		// Under construct() this does its own OrdinaryCreateFromConstructor
+		// rather than keeping the object [[Construct]] pre-made. The two differ
+		// only when new.target.prototype is not an object, and then the spec
+		// falls back to %NativeError.prototype% -- as new.target's REALM knows
+		// it. The pre-made object carries %Object.prototype% from that realm
+		// instead, which is a different answer and the one the
+		// proto-from-ctor-realm tests ask about.
 		var errObj Value
-		if this.IsObjectType() {
+		switch {
+		case rt.constructing():
+			p, e := rt.newTargetProtoE(proto)
+			if e != nil {
+				return mkundef(), e
+			}
+			errObj = rt.newObject(p)
+		case this.IsObjectType():
 			errObj = this
-		} else {
+		default:
 			errObj = rt.newObject(proto)
 		}
 		rt.objPtr(errObj).setSlot(slotBrand, mknum(brandError)) // [[ErrorData]]
