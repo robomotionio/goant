@@ -2,7 +2,10 @@
 
 package engine
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // Reading a local the emitter cannot prove was written.
 //
@@ -25,9 +28,11 @@ func jitBothWays(t *testing.T, name, src string) {
 	defer func() { jitEnabled = saved }()
 
 	jitEnabled = false
-	want, errOff := New().RunString(name, src)
+	rtOff := New()
+	want, errOff := rtOff.RunString(name, src)
 	jitEnabled = true
-	got, errOn := New().RunString(name, src)
+	rtOn := New()
+	got, errOn := rtOn.RunString(name, src)
 
 	if (errOff == nil) != (errOn == nil) {
 		t.Errorf("%s: interpreted err=%v, compiled err=%v", name, errOff, errOn)
@@ -39,10 +44,32 @@ func jitBothWays(t *testing.T, name, src string) {
 		}
 		return
 	}
-	if uint64(got) != uint64(want) {
-		t.Errorf("%s: compiled %#016x (%v), interpreted %#016x (%v)",
-			name, uint64(got), got.Type(), uint64(want), want.Type())
+	if w, g := jitValueKey(rtOff, want), jitValueKey(rtOn, got); w != g {
+		t.Errorf("%s: compiled %s, interpreted %s", name, g, w)
 	}
+}
+
+// jitValueKey renders a completion value so that two Runtimes can be compared.
+//
+// Deliberately not the raw bits. A heap value is a HANDLE, and a handle is a
+// position in that Runtime's pools — so two runs that agree completely about
+// the answer still disagree about the bits as soon as anything upstream
+// allocates or recycles differently. Lowering gcFloor did exactly that, and
+// three of these tests reported the tier as wrong while printing the same
+// value on both sides.
+//
+// Numbers keep the bit comparison, because for a number the bits ARE the
+// value: nothing else tells +0 from -0, or one NaN from another, and those are
+// precisely the cases a compiled arithmetic path gets wrong.
+func jitValueKey(rt *Runtime, v Value) string {
+	if v.IsNumber() {
+		return fmt.Sprintf("num %#016x", uint64(v))
+	}
+	s, e := rt.toStringValue(v)
+	if e != nil {
+		return fmt.Sprintf("type %v <threw on ToString>", v.Type())
+	}
+	return fmt.Sprintf("type %v %q", v.Type(), rt.strGo(s))
 }
 
 func TestJITUnprovenLocalAgreesWithTheInterpreter(t *testing.T) {
@@ -585,5 +612,34 @@ func TestASeedUnassignsAcrossBlocks(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatalf("nothing checked: the fixture no longer produces a block after a seed")
+	}
+}
+
+// The agreement harness is only worth having if it still says no. These are the
+// distinctions it must not lose.
+func TestJitValueKeyDiscriminates(t *testing.T) {
+	rt := New()
+	k := func(src string) string {
+		v, err := rt.RunString("k.js", src)
+		if err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		return jitValueKey(rt, v)
+	}
+	for _, p := range [][2]string{
+		{`"a"`, `"b"`},     // different strings
+		{`1`, `"1"`},       // number vs its text
+		{`0`, `-0`},        // the sign of zero
+		{`1`, `2`},         // different numbers
+		{`true`, `"true"`}, // boolean vs its text
+		{`null`, `undefined`},
+	} {
+		if a, b := k(p[0]), k(p[1]); a == b {
+			t.Errorf("%s and %s both key as %s", p[0], p[1], a)
+		}
+	}
+	// And equal values must still agree, or every test fails for no reason.
+	if a, b := k(`"same"`), k(`"sa" + "me"`); a != b {
+		t.Errorf("equal strings keyed differently: %s vs %s", a, b)
 	}
 }

@@ -99,10 +99,37 @@ type gcState struct {
 // cycle starts, and the work per cycle stays proportional to what survives.
 const gcGrowthFactor = 2
 
-// gcFloor is the smallest live-object count worth collecting at. A realm's own
-// intrinsics are several thousand objects, so a lower threshold would collect
-// repeatedly before a script had allocated anything of its own.
-var gcFloor = 1 << 16
+// gcFloor is the smallest live-object count worth collecting at. It has to sit
+// above a realm's own intrinsics, or a script collects repeatedly before it has
+// allocated anything of its own. A realm is 1045 cells, so this leaves about
+// fifteen times the headroom that needs.
+//
+// It was 1<<16, and that was too high, for a reason particular to this engine:
+// THE CELL POOLS NEVER SHRINK. A chunk allocated at the high-water mark is held
+// for the life of the Runtime — truncate only rewinds the watermark — so one
+// unlucky peak becomes the process's permanent footprint. Collecting earlier is
+// therefore worth more here than in a program whose allocator gives memory
+// back, and the usual reasoning about sweep frequency understates it.
+//
+// Measured on a robot's own workload, a million-record message through a
+// Function node, thirteen times in one process:
+//
+//	floor    tier on            interpreter
+//	1<<16    2199 MB, 2478 ms   1562 MB
+//	1<<14    1494 MB, 2401 ms   1446 MB
+//	1<<12    1486 MB, 2395 ms   1498 MB
+//
+// The tier gives back 705 MB — 32% — and gets 3% FASTER doing it, because a
+// sweep that runs sooner is a smaller sweep over a live set that still fits in
+// cache. 1<<12 buys nothing further, so 1<<14 is the knee and not merely a
+// smaller number.
+//
+// The tier was the arm that needed this. It allocates faster, so more garbage
+// is in flight whenever a collection triggers, and Go then computes its own
+// next heap goal from that inflated figure — the two collectors compounding
+// each other. Live heap after a sweep was never the problem and is comparable
+// either way; the peak before one was.
+var gcFloor = 1 << 14
 
 // gcByteFloor is the smallest amount of out-of-line payload worth collecting
 // for. Deliberately well under any sane heap limit: the limit can only be
