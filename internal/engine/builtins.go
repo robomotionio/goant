@@ -301,10 +301,40 @@ func (rt *Runtime) createListFromArrayLike(a Value) ([]Value, *ThrowError) {
 	return list, nil
 }
 
+// hasFastElem reports whether index i is a live element of obj's fast array
+// storage — which is the case the generic array algorithms spend nearly all of
+// their time in, and the one they were paying a string for.
+//
+// Every one of those algorithms asks HasProperty(O, i) per element to skip
+// holes, and the only way to ask was to render the index as a String and look
+// up a named property. On `records.forEach(...)` over a million elements that is
+// a million strconv.FormatInt calls and a million allocations, for a question a
+// bounds test already answers: 28% of every allocation the call made.
+//
+// The condition is getElement's, deliberately, so the two cannot disagree about
+// what "present" means. It is also one-directional: true is conclusive, false
+// says only that the index is not in fast storage — it may still be a named
+// property with non-default attributes, an accessor, or inherited — so a false
+// falls through to the full lookup and nothing here can change an answer.
+func (rt *Runtime) hasFastElem(obj Value, i int) bool {
+	if obj.Type() != TArr || i < 0 {
+		return false
+	}
+	o := rt.objPtr(obj)
+	// int(o.arrLen) rather than a uint32 conversion of i: an index above
+	// MaxInt32 on a 32-bit host makes this compare false and takes the slow
+	// path, where a wrapped conversion would have answered the wrong question.
+	return o != nil && o.proxy == nil && i < int(o.arrLen) &&
+		i < len(o.arr) && !o.arr[i].IsEmpty()
+}
+
 // hasElem implements the spec HasProperty(O, i) for an integer index, used by
 // the generic array algorithms to skip holes (and to route through a Proxy's
 // [[HasProperty]] trap).
 func (rt *Runtime) hasElem(obj Value, i int) bool {
+	if rt.hasFastElem(obj, i) {
+		return true
+	}
 	return rt.hasProp(obj, numberToString(float64(i)))
 }
 
@@ -314,6 +344,9 @@ func (rt *Runtime) hasElem(obj Value, i int) bool {
 func (rt *Runtime) hasElemE(obj Value, i int) (bool, *ThrowError) {
 	if o := rt.objPtr(obj); o != nil && o.proxy != nil {
 		return rt.proxyHas(o.proxy, rt.internString(numberToString(float64(i))))
+	}
+	if rt.hasFastElem(obj, i) {
+		return true, nil
 	}
 	return rt.hasProp(obj, numberToString(float64(i))), nil
 }
