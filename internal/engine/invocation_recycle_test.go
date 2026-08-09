@@ -206,3 +206,25 @@ func TestReleaseResizesTheCollectionThreshold(t *testing.T) {
 		t.Errorf("threshold %d, want the floor %d or twice what survived (%d)", rt.gc.next, gcFloor, want)
 	}
 }
+
+// The list of recycled cells is per cell, not per allocation. A long run that
+// takes and drops the same cell over and over would otherwise append to it
+// every time, and a run does not have to end for that to matter.
+func TestRecycledCellsAreRecordedOncePerCell(t *testing.T) {
+	rt := New()
+	rt.collect()
+	if len(rt.objects.freeList) == 0 {
+		t.Skip("no free cells to recycle, so there is nothing to bound")
+	}
+
+	inv := rt.BeginInvocation()
+	free := len(rt.objects.freeList)
+	for i := 0; i < 20000; i++ {
+		v := rt.newObject(rt.objectProto)
+		rt.freeObject(Handle(v.handle()))
+	}
+	if n := len(rt.objects.reborn); n > free {
+		t.Errorf("recorded %d recycled cells from %d distinct free ones", n, free)
+	}
+	inv.End()
+}

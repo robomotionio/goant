@@ -122,9 +122,15 @@ func (p *pool[T]) alloc() (Handle, *T) {
 	}
 	cl := p.cell(h)
 	cl.live = true
-	if h < p.watermark {
+	if h < p.watermark && !cl.born {
 		// Recycled from below the running invocation's watermark: the object
 		// about to go here is the run's own, whatever its handle says.
+		//
+		// Recorded once per cell, not once per allocation. free leaves the mark
+		// standing — a cell that was the run's own before it was freed is still
+		// the run's own if the run takes it again — so the list is bounded by
+		// how many distinct cells the run recycled, and a loop that churns one
+		// cell a million times appends to it once.
 		cl.born = true
 		p.reborn = append(p.reborn, h)
 	}
