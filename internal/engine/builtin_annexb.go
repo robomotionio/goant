@@ -222,13 +222,17 @@ func (rt *Runtime) initAnnexBString() {
 
 func (rt *Runtime) initAnnexBRegExp() {
 	proto := rt.objPtr(rt.regexpProto)
+	// The realm this compile belongs to. `%RegExp.prototype%` below means THIS
+	// realm's, not the caller's — `other.RegExp.prototype.compile.call(ours)` has
+	// to reject, and reject with the other realm's TypeError.
+	realm := rt
 	rt.defMethod(proto, "compile", 2, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		o := rt.objPtr(this)
 		// RequireInternalSlot(O, [[RegExpMatcher]]); and legacy features are enabled
 		// only for a direct %RegExp% instance, not a subclass instance (approximated
 		// by its [[Prototype]] being %RegExp.prototype%). Both cases are a TypeError.
-		if o == nil || o.regex == nil || o.proto != rt.regexpProto {
-			return mkundef(), rt.typeError("RegExp.prototype.compile called on an incompatible receiver")
+		if o == nil || o.regex == nil || o.proto != realm.regexpProto {
+			return mkundef(), realm.typeError("RegExp.prototype.compile called on an incompatible receiver")
 		}
 		var pattern, flags string
 		p := arg(args, 0)

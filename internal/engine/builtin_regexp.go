@@ -520,17 +520,27 @@ func (rt *Runtime) newRegExp(pattern, flags string) (Value, *ThrowError) {
 // (reads the individual flag getters via [[Get]]).
 func (rt *Runtime) initRegExpAccessors() {
 	po := rt.objPtr(rt.regexpProto)
+	// A built-in belongs to the realm that DEFINED it, and two things here follow
+	// from that: the receiver check in step 3.a is against this realm's
+	// %RegExp.prototype%, and a TypeError it throws is this realm's TypeError.
+	//
+	// The `rt` parameter every native receives is the CALLING realm, which is a
+	// different thing, and both were reading it. `otherRealm.RegExp.prototype`
+	// then compared equal to nothing and the error came from the wrong realm --
+	// the same mistake already fixed once for eval, which captures its defining
+	// realm for exactly this reason.
+	realm := rt
 	flagGetter := func(name string, ch byte, read func(*regexpjs.Regexp) bool) {
-		g := rt.newNativeFunc("get "+name, 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-			o := rt.objPtr(this)
+		g := rt.newNativeFunc("get "+name, 0, func(_ *Runtime, this Value, args []Value) (Value, *ThrowError) {
+			o := realm.objPtr(this)
 			if o == nil {
-				return mkundef(), rt.typeError("RegExp.prototype." + name + " getter called on non-object")
+				return mkundef(), realm.typeError("RegExp.prototype." + name + " getter called on non-object")
 			}
 			if o.regex == nil {
-				if this == rt.regexpProto {
+				if this == realm.regexpProto {
 					return mkundef(), nil
 				}
-				return mkundef(), rt.typeError("RegExp.prototype." + name + " getter called on incompatible receiver")
+				return mkundef(), realm.typeError("RegExp.prototype." + name + " getter called on incompatible receiver")
 			}
 			if read != nil {
 				return mkbool(read(o.regex)), nil
@@ -550,18 +560,18 @@ func (rt *Runtime) initRegExpAccessors() {
 	flagGetter("hasIndices", 'd', nil)
 	flagGetter("unicodeSets", 'v', nil)
 
-	srcGetter := rt.newNativeFunc("get source", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		o := rt.objPtr(this)
+	srcGetter := rt.newNativeFunc("get source", 0, func(_ *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		o := realm.objPtr(this)
 		if o == nil {
-			return mkundef(), rt.typeError("RegExp.prototype.source getter called on non-object")
+			return mkundef(), realm.typeError("RegExp.prototype.source getter called on non-object")
 		}
 		if o.regex == nil {
-			if this == rt.regexpProto {
-				return rt.internString("(?:)"), nil
+			if this == realm.regexpProto {
+				return realm.internString("(?:)"), nil
 			}
-			return mkundef(), rt.typeError("RegExp.prototype.source getter called on incompatible receiver")
+			return mkundef(), realm.typeError("RegExp.prototype.source getter called on incompatible receiver")
 		}
-		return rt.internString(nonEmptySource(o.regex.Source)), nil
+		return realm.internString(nonEmptySource(o.regex.Source)), nil
 	})
 	po.defineAccessor("source", srcGetter, mkundef(), true, false, attrConfigurable)
 
@@ -573,7 +583,7 @@ func (rt *Runtime) initRegExpAccessors() {
 	}{{"hasIndices", 'd'}, {"global", 'g'}, {"ignoreCase", 'i'}, {"multiline", 'm'}, {"dotAll", 's'}, {"unicode", 'u'}, {"unicodeSets", 'v'}, {"sticky", 'y'}}
 	flagsGetter := rt.newNativeFunc("get flags", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if !this.IsObjectType() {
-			return mkundef(), rt.typeError("RegExp.prototype.flags getter called on non-object")
+			return mkundef(), realm.typeError("RegExp.prototype.flags getter called on non-object")
 		}
 		var b []byte
 		for _, f := range order {
