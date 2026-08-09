@@ -977,8 +977,9 @@ func (rt *Runtime) markRoots() {
 // valueType is what the reflective walk is looking for; objectPtrType and the
 // weak-table key type are the two it has to treat specially.
 var (
-	valueType     = reflect.TypeOf(Value(0))
-	objectPtrType = reflect.TypeOf((*object)(nil))
+	valueType       = reflect.TypeOf(Value(0))
+	objectPtrType   = reflect.TypeOf((*object)(nil))
+	jitCallSiteType = reflect.TypeOf(jitCallSite{})
 )
 
 // traceAny walks an arbitrary Go value and marks every engine Value in it.
@@ -1081,6 +1082,24 @@ func computeHoldsValue(t reflect.Type) bool {
 	switch t.Kind() {
 	case reflect.Struct:
 		if isPoolType(t) {
+			return false
+		}
+		if t == jitCallSiteType {
+			// A compiled call site's cached callee is NOT a root, and tracing it
+			// was wrong in both directions.
+			//
+			// It cannot be used after a collection: the emitted guard compares
+			// the site's epoch against the global counter and collect() bumps
+			// that counter, so every site is retired and refills on its next
+			// call. See jitCallSite.
+			//
+			// And the walk only ever reached it by accident — through
+			// Runtime.frames, so a site was traced when its function happened to
+			// be on the stack and not otherwise. That made it an intermittent
+			// root: a callee dropped while its caller was idle got swept, and the
+			// next collection with the caller running marked a dead cell. Under
+			// GOANT_GC_POISON that is a panic in the collector itself; without it,
+			// a recycled handle silently kept an unrelated object alive.
 			return false
 		}
 		for i := 0; i < t.NumField(); i++ {
