@@ -25,483 +25,162 @@ go get github.com/robomotionio/goant
 
 The three ways to run JavaScript from Go, and what each one costs:
 
-|                        | goant                      | goja                    | V8 via cgo                          |
-| ---------------------- | -------------------------- | ----------------------- | ----------------------------------- |
-| cgo                    | **none**                   | none                    | required                            |
-| Cross-compile          | **anywhere Go does**       | anywhere Go does        | a toolchain and a 100–210 MB prebuilt archive per platform |
-| Language level         | **99.998% of Test262 core** ([what that excludes](#conformance)) | 77.9%                   | current                             |
-| Out of memory          | **an error you can catch** | takes the process down  | takes the process down              |
-| Per-run isolation      | **a fresh global, 111 ns** | a fresh Runtime         | a fresh context                     |
-| JIT                    | baseline (amd64, arm64)    | none                    | optimising                          |
-| Binary cost            | **6.4 MB**                 | 13.3 MB                 | ~90 MB linked                       |
+|                   | goant                          | goja               | V8 via cgo                          |
+| ----------------- | ------------------------------ | ------------------ | ----------------------------------- |
+| cgo               | **none**                       | none               | required                            |
+| Cross-compile     | **anywhere Go does**           | anywhere Go does   | a toolchain and a 100–210 MB prebuilt archive per platform |
+| Test262 (`-all`)  | **99.4%** — 53,247 / 53,573    | 64.2%              | current                             |
+| Engine            | bytecode interpreter + baseline JIT | bytecode interpreter | optimising JIT                 |
+| JIT               | amd64, arm64 (opt-in)          | none               | optimising                          |
+| Binary size       | **11.1 MB**                    | 13.3 MB            | ~90 MB linked                       |
+| Cold start        | **2.5 ms**                     | 1.9 ms             | —                                   |
+| Out of memory     | **an error you can catch**     | takes the process down | takes the process down          |
+| Per-run isolation | **a fresh global, 111 ns**     | a fresh Runtime    | a fresh context                     |
 
 goant is for a Go program that has to run JavaScript it did not write, on
 machines it does not control, without the process dying when that JavaScript
 misbehaves. If your scripts are compute-bound and you can afford cgo, V8 is
 still faster at running them — see [Benchmarks](#benchmarks).
 
----
-
-## Why this exists
-
-goant was written for [Robomotion](https://www.robomotion.io), whose robot
-runtime (`robomotion-deskbot`) evaluates customer JavaScript in **Function
-nodes** — a script per message, millions of messages, on machines we do not
-control: Windows laptops under memory pressure, Raspberry Pis, Apple Silicon
-Macs, Ubuntu servers.
-
-That ran on V8 through cgo, first
-[`rogchap.com/v8go`](https://github.com/rogchap/v8go) and then
-[`robomotionio/v8go`](https://github.com/robomotionio/v8go) — a fork we had to
-maintain because upstream is unmaintained, pins a V8 from April 2023, and
-dropped Windows in 2021. Our fork pinned V8 14.7.173.21 and restored Windows.
-
-It worked. It also cost more than the JavaScript was worth, in four separate
-ways, and goant exists to remove all four.
-
-### 1. The build was a cross-platform research project
-
-V8 is a 100–210 MB static archive per platform, too big to vendor, so every
-build downloads one; rebuilding it takes hours under the Chromium toolchain.
-That was the easy part. It also has to be linked with V8's own clang and its own
-libc++, and on three of our five platforms that went wrong in a different way:
-Windows needed a shim to strip cgo's MinGW flags out of Go's link line, macOS
-linked clean and then died at the first script with `Check failed: (platform)
-!= nullptr`, and the published linux/arm64 archive was missing its libc++
-runtime — which nobody noticed until a Raspberry Pi build months later.
-
-Nobody did anything wrong. That is just what linking a 100 MB C++ artifact into
-a Go program across five platforms costs. A pure-Go engine cannot have any of
-it: `CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build` and you are done.
-
-### 2. A JavaScript out-of-memory killed the whole process
-
-V8's fatal OOM is `abort()`. Not an exception, not a Go panic — no `recover`, no
-deferred anything, no error to route to a Catch node:
-
-```
-# Fatal JavaScript out of memory: CALL_AND_RETRY_LAST
-```
-
-A customer hit it with a **13.4 MB message** from an SAP table extraction. The
-crash was not in their script. It was in `Global().Set("__inMsg__", …)`, before
-any user JavaScript ran, because handing a message to V8 through cgo cost
-several copies at once:
-
-| live at the same moment | where |
-|---|---|
-| the message | Go heap |
-| `string(inMsg)` | Go heap |
-| `C.CString(…)` | C heap |
-| `SeqOneByteString` / `SeqTwoByteString` | V8 old space |
-
-That is ~50–67 MB resident for a 13 MB message, and ~200–270 MB for a 50 MB one.
-Non-ASCII input — Turkish field values, in that customer's case — makes V8 choose
-UTF-16 and doubles its share.
-
-Around that sat four more sharp edges. V8 14.x sizes an isolate's heap ceiling
-from the RAM available when the isolate is created, which on a pressured Windows
-host can land at **~20 MB**. The binding did not expose
-`CreateParams::constraints`, so no initial heap could be committed and every
-isolate had to grow on demand at exactly the worst moment. It did not expose
-`AddNearHeapLimitCallback`, so there was no embedder hook before the abort. And
-V8's idle memory reducer hands pages back to the OS between calls, so every
-message re-commits and gets a fresh chance to be denied.
-
-Under goant there is one heap, Go's, and a **memory limit is an ordinary error**:
-the script is stopped, the host is told which limit it hit, the flow's error
-handler runs, and the process — with every other robot on it — carries on.
-
-#### What the memory limit counts
-
-The limit is off unless [`WithMemoryLimit`](#deadlines) sets one, and it bounds
-what a script **retains** rather than what it allocates: it is tested after a
-collection, so a loop that builds and discards a million objects passes and one
-that builds and keeps them does not.
-
-What counts toward it is the whole live heap — cell headers plus the bytes those
-cells point at: string payloads, array element storage, ArrayBuffer stores. An
-allocation large enough to exceed the budget on its own is tested before it is
-taken, since a budget checked only afterwards cannot prevent the allocation that
-exhausts the host. Each row below retains everything it allocates, run with a
-64 MB limit inside a 768 MB cgroup:
-
-| script | result |
-|---|---|
-| `k.push({})` | `ErrMemoryLimit`, process alive |
-| `k.push(new Array(256).fill(7))` | `ErrMemoryLimit`, process alive |
-| `k.push("x".repeat(100000))` | `ErrMemoryLimit`, process alive |
-| `k.push(new ArrayBuffer(1<<20))` | `ErrMemoryLimit`, process alive |
-| `s += s` | `ErrMemoryLimit`, process alive |
-| 200k × 5 KB strings, none kept | no error — allocation is not retention |
-
-One case is not covered: a single very large `ArrayBuffer` that is allocated and
-never written to. Go serves it as untouched zero pages, so it occupies no
-resident memory, and it is counted at the next collection as soon as anything
-uses it.
-
-Setting no limit costs nothing. The accounting is placed so that it is absent
-from the collector and the interpreter's dispatch loop rather than merely
-skipped by them, which is measurable: see `memlimit_bench_test.go`.
-
-### 3. Everything had to cross a boundary that no longer exists
-
-A cgo binding's API shape is dictated by its boundary: values are marshalled
-across it, so what it can offer is one big string in each direction.
-
-```
-inbound   []byte -> Go string -> V8 string -> JSON.parse -> objects
-outbound  objects -> JSON.stringify -> V8 string -> Go string -> []byte
-```
-
-Worse, a node with several outputs has to bring them back in one crossing, so
-the wrapper stringified each result and then stringified the *array of those
-strings* — escaping every quote in every payload a second time, and unescaping
-it all again on the far side.
-
-With no boundary, none of that is necessary: goant parses the host's bytes in
-place and appends output into the host's buffer. On the production message path
-that is where these came from:
-
-| Function-node call (pooled) | V8 | goant |
-|---|---:|---:|
-| passthrough | 316 µs | **109 µs** |
-| transform | 329 µs | **111 µs** |
-| async | 327 µs | **106 µs** |
-
-and on a 27.3 MB `return msg`, peak RSS went from **483 MB** under V8 to
-**272 MB**.
-
-### 4. Isolating a run cost 60× the run
-
-V8 builds a context from a heap snapshot, so a fresh realm per run is cheap and
-every embedder learns that habit. goant has no snapshot: building a realm means
-constructing every prototype and every built-in, measured at **366 µs and 885
-allocations** — against roughly 6 µs for what a short script actually does.
-
-But almost none of a realm needs isolating. The built-ins are identical every
-time; what differs per run is what the script installs. So goant gives each run
-a fresh global object whose prototype is the shared one: built-ins resolve up
-the chain, and everything the script assigns lands on the fresh object and is
-dropped at the end. **111 ns** — about three thousand times cheaper — and the
-whole run's memory is then reclaimed in one step by rewinding the allocator,
-with nothing to trace.
-
-That is [`Scope`](#scopes-and-pools), and it is the shape a message pump wants.
+Written for [Robomotion](https://www.robomotion.io), whose robot runtime
+evaluates customer JavaScript in Function nodes — a script per message, millions
+of messages, on Windows laptops, Raspberry Pis, Apple Silicon and Linux servers.
+That ran on V8 through cgo. [Why we left, in
+detail](docs/why-goant-exists.md).
 
 ---
 
-## Why not goja?
+## Conformance
 
-[goja](https://github.com/dop251/goja) is the obvious answer to "we want off
-cgo", it is good, and we tried it. The problem is the language it speaks.
-
-goja implements ECMAScript 5.1 plus a growing set of later features. Our users
-do not write ES5.1. Increasingly they do not write the JavaScript at all — they
-describe what they want to an AI, paste the result into a Function node, and run
-it. What comes back is modern by default, and a lot of it does not parse:
-
-```js
-async function* pages() { yield 1; yield 2 }
-for await (const p of pages()) console.log(p)
-```
-
-```
-goja   SyntaxError: Line 2:20 Unexpected token await
-goant  1
-       2
-```
-
-On the same Test262 core profile, from the same checkout and through the same
-harness, **goant passes 42,739 of 42,740 and goja passes 33,303** — a gap of
-over nine thousand tests. It is not spread thin, either. It is `for await…of`
-(1,142), async generators (1,608), classes containing them (2,016), `import()`
-(475), top-level `await` (250), iterator helpers (495), `\p{…}` property
-escapes (596), the `v` regex flag, `Array.fromAsync`, `Object.groupBy`, the new
-`Set` methods, `using`. That is a list of the things an AI reaches for when you
-ask it to page through an API or group some rows.
-
-What made this untenable was not the size of the gap but its shape. A runtime
-that plainly does not support something is a documented limit; one that supports
-most of a language is a guessing game, and the person guessing is a customer who
-wanted to filter some rows. The gap is invisible until it fires, it moves as
-models change what they emit, and it cannot be explained in a tooltip.
-
-So the requirement was never "pure Go" on its own. It was **pure Go and current**
-— which in practice means chasing the specification itself rather than a feature
-list. That is why the target is 100% of Test262's core profile.
-
-There is a second reason, and for a robot runtime it matters as much as the
-first: **goja has no heap limit.** Its `Runtime` exposes `SetMaxCallStackSize`,
-which bounds recursion depth, and nothing that bounds memory. A script that
-retains more than the host can give it allocates until the Go runtime cannot
-satisfy an allocation, and Go's out-of-memory is a runtime throw rather than a
-panic — no `recover`, no deferred anything, and every other goroutine in the
-process goes with it. That is the same failure that took V8 down for us, arrived
-at by a different road. goant's answer is
-[`WithMemoryLimit`](#what-the-memory-limit-counts): a budget, and an error the
-host can route to a Catch node.
-
-None of this is a knock on goja: it is a good engine, it is faster than goant on
-tight loops, and it starts faster. It is aimed at a different problem.
-
-## Where it came from
-
-The `ant` announcement went past on Hacker News: a JavaScript runtime written
-from scratch in C, with its own engine and a MIR-based JIT. Around the same time
-Bun was rewriting parts of itself from Zig to Rust, which made the general idea
-of a wholesale language port feel less exotic than it sounds.
-
-C is close enough to Go that a faithful port is mechanical more often than it is
-clever — no ownership model to reconcile, no borrow checker to satisfy, and the
-data structures transfer almost as they are. So the question was just whether
-someone would do it. That gave us a starting point rather than a blank page:
-ant's architecture, its opcode set, and its conformance corpus.
-
-What happened after was not a port any more:
-
-1. **Get the corpus green.** ant's own 1511-case compat-table suite, ES1 through
-   ESNext, as the first bar. → 1511/1511.
-2. **Then chase the specification.** Test262's ECMA-262 core profile, because
-   that is the only bar that answers "will this run what my users write". →
-   42,739 of 42,740, against goja's 33,303.
-3. **Then find the bugs conformance does not.** V8's own `mjsunit` corpus — a
-   decade and a half of real bug reports — run as a crash hunt rather than for
-   a score. → 2,653/3,149, and nothing in it crashes the engine any more.
-4. **Then make it fast.** Octane 2.0, scored against goja the way
-   [ahaoboy/js-engine-benchmark](https://github.com/ahaoboy/js-engine-benchmark)
-   does, plus the message-pump path that Robomotion actually runs.
-
-Steps 2 to 4 are where nearly all of the work went, and they are why goant is no
-longer describable as "ant in Go".
-
----
-
-## What it is
-
-goant is a from-scratch port of the **"Silver" engine** from
-[`ant`](https://github.com/theMackabu/ant) — a JavaScript runtime written in C —
-rewritten in Go: lexer → AST → bytecode compiler → 213-opcode interpreter, its
-own tracing garbage collector, WTF-8 strings, and a JS→regex translation layer
-over a vendored `regexp2`. A MIR-based JIT is ported but is not yet the default
-execution tier (see `PLAN.md`).
-
-The engine lives in `internal/engine`, deliberately: everything the interpreter
-does is free to change shape as long as the observable behaviour holds. The
-stable surfaces are this package and `v8go/`.
-
-### Conformance
+**99.4% of test262, with nothing excluded.** Not a profile, not a subset —
+`./goant-t262 -all` runs every file in the suite.
 
 | suite | goant | goja |
 |---|---|---|
-| Test262, ECMA-262 core profile (`-core`) | **42,739 / 42,740** (99.998%) | 33,303 / 42,740 (77.9%) |
-| Test262, every file, nothing excluded (`-all`) | 44,691 / 53,411 (83.7%) | — |
-| ant's compat-table corpus (ES1–ESNext) | **1511 / 1511** | — |
-| V8's `mjsunit` | 2,653 / 3,149 | — |
+| **Test262** (`-all`, every file) | **53,247 / 53,573 — 99.4%** | 34,377 / 53,573 — 64.2% |
+| ant's compat-table corpus (ES1–ESNext) | **1514 / 1514** | — |
+| V8's `mjsunit` | 2,711 / 3,149 | — |
 
-Both engines were scored on the same test262 checkout (`b363f29d`) through the
-same harness — `./goant-t262 -core -runner goja-run` — so the two numbers mean
-the same thing. goja has no ES module goal, so the runner declines module tests
-rather than emulating them.
+Both engines were scored on the same test262 checkout through the same harness,
+so the two numbers mean the same thing. goja has no ES module goal, so the
+runner declines module tests rather than emulating them.
 
-**What "core profile" means, and what it hides.** There is no official test262
-profile; `-core` is goant's own name for its own exclusion list, so the only
-honest way to quote it is next to the list. Of the 53,575 test files, `-core`
-runs 42,740 and excludes 10,835:
+At 100%, whole directories: `built-ins/Temporal` (4,603), `annexB` (1,086),
+`built-ins/Promise` (729), `built-ins/Date` (594), `built-ins/Array/prototype`,
+`built-ins/JSON`, `built-ins/Proxy`. `intl402` is 3,356 / 3,357 and
+`built-ins/RegExp` 1,877 / 1,879.
 
-| excluded | files | why |
-|---|---|---|
-| `intl402/` | 3,357 | ECMA-402 is a separate specification. goant's Intl is partial — see [docs/intl402-and-temporal.md](docs/intl402-and-temporal.md). |
-| `Temporal` | 4,611 | **In the specification. Simply not implemented.** |
-| `staging/` | 1,483 | test262's own staging area — its CONTRIBUTING.md says these "do not count towards the test262 coverage requirement for a TC39 proposal to reach Stage 4". |
-| Atomics, SharedArrayBuffer | 602 | Need the agent/worker host model. |
-| `cross-realm`, `IsHTMLDDA` | 226 | Need `$262.createRealm` and web-legacy `document.all`. |
-| unlanded proposals | 556 | decorators, import-defer, import-text/bytes, source-phase-imports, `Iterator.prototype.join`. |
+**Temporal and Intl are implemented**, both to essentially the whole suite,
+including the sixteen non-ISO calendars and CLDR-driven formatting. See
+[docs/intl402-and-temporal.md](docs/intl402-and-temporal.md).
 
-Only the first two lines should give you pause, and only the Temporal one is a
-real deduction: it is a shipped part of the language that goant does not have.
-Folding Temporal back in would take the figure from 99.998% to 90.3% — so treat
-the core number as "the language minus Temporal and Intl", never as "JavaScript".
-That is what the `-all` row is for: `./goant-t262 -all` skips nothing.
-
-The two numbers reconcile. Under `-all` there are 8,720 failures, and 8,718 of
-them sit in the buckets above (4,611 Temporal — every single excluded Temporal
-file fails, 3,141 `intl402/`, 582 host-model, 195 `staging/`, 189 unlanded
-proposals). Of the two that do not, one is a harness artefact — a test that
-times out only under full-suite load and passes on its own — and **one** is a
-genuine engine gap: `built-ins/Proxy/revocable/tco-fn-realm.js`, which wants a
-revoked Proxy to throw the TypeError of its own function's realm. That is also
-the single failure under `-core`.
-
-Whole directories are at 100%, including `built-ins/RegExp` (1867/1867),
-`built-ins/Array`, `built-ins/Promise`, `built-ins/Proxy`, `built-ins/Date`,
-`built-ins/JSON`, `built-ins/Iterator` and `language/module-code` (595/595).
-
-Not implemented: **Temporal**. **Intl** is partial and being worked on — the
-tag grammar, canonicalisation and negotiation are real (`Intl.Locale`,
-`getCanonicalLocales`, `supportedLocalesOf`), `Collator` runs the Unicode
-Collation Algorithm, `PluralRules` runs CLDR's rules, `NumberFormat` reads its
-options, and `DateTimeFormat` honours `timeZone`. Date and number *patterns*
-still come from a fixed table of locales rather than from CLDR. See
-[docs/intl402-and-temporal.md](docs/intl402-and-temporal.md) for what is done
-and what is not.
-
-[Benchmarks](#benchmarks) has the same profile scored against goja, on the same
-checkout and the same harness.
+The 326 remaining failures are roughly a third proposals that have not landed
+(decorators, import-defer, import-bytes, source-phase imports), a third one root
+cause (per-function `[[Realm]]`), and a third a genuine long tail, most of it in
+`staging/`. [Status](#status) has the breakdown.
 
 ---
 
 ## Benchmarks
 
-Everything below was measured on an idle machine created for the purpose and
-destroyed afterwards, with nothing else running on it. The scripts are in the
-repository; see [Reproducing](#reproducing).
+Measured on an idle Azure `Standard_D8s_v5` created for the purpose and
+destroyed afterwards. Scripts are in the repository; see
+[Reproducing](#reproducing).
 
-Read the pure-Go engines against each other. node, deno and bun are here as the
-JIT reference, not as peers — the distance to them is what a bytecode
-interpreter costs, and how much of it the compiled tier closes.
+Read the pure-Go engines against each other. node, deno and bun are the JIT
+reference, not peers — the distance to them is what a bytecode interpreter
+costs, and how much of it the compiled tier closes.
 
 ### Octane 2.0
 
-The suite the cross-engine comparisons standardise on, and what
-[ahaoboy/js-engine-benchmark](https://github.com/ahaoboy/js-engine-benchmark)
-scores. Higher is better.
+The eight workloads [ahaoboy/js-engine-benchmark](https://github.com/ahaoboy/js-engine-benchmark)
+scores, which is what makes this comparable with what other engines publish.
+Higher is better.
 
-| Benchmark    |    goant | goant+JIT |     goja |   node |   deno |    bun | goant+JIT vs fastest |
-| ------------ | -------: | --------: | -------: | -----: | -----: | -----: | -------------------: |
-| Richards     |  **218** |      1393 |      216 |  34924 |  34352 |  41889 |                  30× |
-| DeltaBlue    |      251 |      1049 |  **273** |  99554 |  99851 |  58488 |                  95× |
-| Crypto       |  **241** |      2371 |      129 |  39846 |  42729 |  46841 |                  20× |
-| RayTrace     |  **467** |       647 |      298 |  73333 |  77477 | 115956 |                 179× |
-| EarleyBoyer  |  **617** |       967 |      537 |  65363 |  62784 |  72582 |                  75× |
-| RegExp       |  **255** |       302 |      215 |   9346 |   9748 |  10776 |                  36× |
-| Splay        |     1989 |      2414 | **2201** |  43982 |  43465 |  43845 |                  18× |
-| NavierStokes |  **427** |      6123 |      205 |  32467 |  32550 |  34178 |                 5.6× |
+| Benchmark    |    goant | goant+JIT |     goja |   node |   deno |    bun | +JIT vs fastest |
+| ------------ | -------: | --------: | -------: | -----: | -----: | -----: | --------------: |
+| Richards     |  **218** |      1393 |      216 |  34924 |  34352 |  41889 |             30× |
+| DeltaBlue    |      251 |      1049 |  **273** |  99554 |  99851 |  58488 |             95× |
+| Crypto       |  **241** |      2371 |      129 |  39846 |  42729 |  46841 |             20× |
+| RayTrace     |  **467** |       647 |      298 |  73333 |  77477 | 115956 |            179× |
+| EarleyBoyer  |  **617** |       967 |      537 |  65363 |  62784 |  72582 |             75× |
+| RegExp       |  **255** |       302 |      215 |   9346 |   9748 |  10776 |             36× |
+| Splay        |     1989 |      2414 | **2201** |  43982 |  43465 |  43845 |             18× |
+| NavierStokes |  **427** |      6123 |      205 |  32467 |  32550 |  34178 |            5.6× |
 
 `goant` is the interpreter, which is what runs unless a host asks for
-[the tier](#the-compiled-tier); `goant+JIT` is the same binary with
-`WithJIT(true)`. Bold marks the higher of the two pure-Go interpreters, the only
-like-for-like pair here. The two goant columns are a within-machine A/B measured
-together; the other four are the earlier run on an identically specified
-instance, and the environment note below says exactly what differs.
+[the tier](docs/embedding.md#the-compiled-tier); `goant+JIT` is the same binary
+with `WithJIT(true)`. Bold marks the higher of the two pure-Go interpreters, the
+only like-for-like pair here.
 
-Against goja the interpreter is now ahead on six of the eight, by a geometric
-mean of **1.27×**, with Richards a tie inside run-to-run noise. The lead is
-largest on NavierStokes (2.1×) and Crypto (1.9×). goja keeps DeltaBlue and
-Splay, the two most allocation-dominated workloads in the set. With the tier on,
-goant is **4.1×** ahead of goja across the eight.
+Against goja the interpreter leads on six of eight, geometric mean **1.27×**.
+With the tier on, **4.1×**. Against the JIT engines the remaining gap runs 5.6×
+to 179×, against 22× to 398× for the interpreter alone.
 
-What the tier is worth varies by an order of magnitude inside one suite:
-NavierStokes 14×, Crypto 9.8×, Richards 6.4×, DeltaBlue 4.2× — then EarleyBoyer
-1.6×, RayTrace 1.4×, Splay 1.2×, RegExp 1.2×. The pattern is not subtle. A
+What the tier is worth varies by an order of magnitude inside one suite —
+NavierStokes 14×, Crypto 9.8×, Richards 6.4×, then RegExp and Splay at 1.2×. A
 baseline compiler makes arithmetic, property access and calls cheaper; it does
-not make the regex matcher faster and it does not make the collector faster, so
-a matcher benchmark and a GC benchmark barely move.
+not make the regex matcher or the collector faster.
 
-Against the JIT engines the remaining gap runs from **5.6×** on NavierStokes to
-**179×** on RayTrace, against 22× to 398× for the interpreter alone. Still an
-order of magnitude, and still the reason to reach for one of them when the work
-is genuinely compute-bound — but no longer the two orders it was.
-
-#### The other seven workloads
-
-Octane has fifteen. The table above is the eight that
-[ahaoboy/js-engine-benchmark](https://github.com/ahaoboy/js-engine-benchmark)
-scores, which is what makes it comparable with what other engines publish. The
-remaining seven, from the same two runs, goant only:
-
-| Benchmark  |  goant | goant+JIT |  tier |
-| ---------- | -----: | --------: | ----: |
-| zlib       |    315 |      2820 |  9.0× |
-| mandreel   |    417 |      3205 |  7.7× |
-| gbemu      |   1252 |      4946 |  4.0× |
-| box2d      |    945 |      2715 |  2.9× |
-| pdfjs      |   1129 |      1974 |  1.7× |
-| typescript |   3026 |      4887 |  1.6× |
-| code-load  |  12760 |     11876 | 0.93× |
-
-zlib, mandreel and gbemu are emscripten output over typed arrays — the shape a
-template JIT does best on, and not what most hand-written JavaScript looks like.
-Worth reporting apart from the rest for that reason:
-
-| | tier on vs off |
-| --- | ---: |
-| the three asm.js-shaped workloads | **6.5×** |
-| the other twelve | **2.6×** |
-| all fifteen | **3.1×** |
-
+Over all fifteen Octane workloads the tier is **3.1×** — 6.5× on the three
+asm.js-shaped ones (zlib, mandreel, gbemu) and 2.6× on the other twelve. On the
+workload this engine was built for, short flows on a pooled `Runtime`, **2.9×**.
 `code-load` is the one workload the tier makes worse, which is what a benchmark
-that measures parsing and compiling rather than running should do.
-
-On the workload this engine was actually built for — short flows on a pooled
-`Runtime`, with an `Invocation` per run — the tier measured **2.9×**, and the
-default threshold needed no tuning.
-
-On tight-loop microbenchmarks (`./goant-bench`, our own workloads rather than a
-neutral suite) goja is ahead of goant on most, by roughly 1.3–1.8×. Octane is
-the fairer of the two comparisons — it is neutral, it is what everyone else
-publishes, and it exercises whole programs rather than single operations — but
-both numbers are in the repository and neither is hidden.
+that measures compiling rather than running should do.
 
 ### Cold start
 
-Time to start, evaluate one line, and exit — the part every one of these can do.
-The hono-style cold start other runtimes publish has no counterpart here: goant
-is an engine, not a runtime with a module resolver and an npm ecosystem.
+Time to start, evaluate one line, and exit. hyperfine `--shell=none`, 20 warmup
+and 200 timed runs, all five on the same idle machine — below 5 ms hyperfine
+cannot calibrate shell startup, so timing through a shell would be measuring
+bash as much as the engine.
 
-Measured with hyperfine, 20 warmup runs and 200 timed runs:
-
-| Runtime   | Mean        | Relative       |
-| --------- | ----------: | -------------- |
-| **goja**  | **1.9 ms**  | 1.00           |
-| **goant** | **2.4 ms**  | 1.24× slower   |
-| bun       |    10.0 ms  | 5.15× slower   |
-| deno      |    13.1 ms  | 6.75× slower   |
-| node      |    20.7 ms  | 10.67× slower  |
+| Runtime   | Mean        | Relative      |
+| --------- | ----------: | ------------- |
+| **goja**  | **1.9 ms**  | 1.00          |
+| **goant** | **2.5 ms**  | 1.32× slower  |
+| bun       |    10.9 ms  | 5.81× slower  |
+| deno      |    12.7 ms  | 6.79× slower  |
+| node      |    23.5 ms  | 12.56× slower |
 
 ### Binary size
 
-| Binary                        |     Size |
-| ----------------------------- | -------: |
-| **goant** (`cmd/goant`, `-s -w`) | **6.4 MB** |
-| goja (`bench/gojarun`, minimal)  |  13.3 MB |
-| bun                              |  88.5 MB |
-| deno                             | 101.4 MB |
-| node                             | 123.0 MB |
+| Binary                              |     Size |
+| ----------------------------------- | -------: |
+| **goant** (`cmd/goant`, `-s -w`)    | **11.1 MB** |
+| goja (`bench/gojarun`, minimal)     |  13.3 MB |
+| bun                                 |  88.5 MB |
+| deno                                |  91.2 MB |
+| node                                | 119.1 MB |
 
-goant's is a whole JavaScript engine — parser, compiler, interpreter, garbage
-collector, every built-in, the Unicode tables and a regex engine — statically
-linked, with no shared library to ship beside it. node, deno and bun are whole
-runtimes and are not really being compared like for like; they are here for
-scale.
+goant's is a whole engine — parser, compiler, interpreter, garbage collector,
+every built-in, Temporal, Intl, the Unicode 17 tables and a regex engine —
+statically linked, with no shared library beside it. It was 6.4 MB before
+Temporal and Intl landed; those two and their CLDR data are most of the
+difference. node, deno and bun are whole runtimes and are here for scale.
 
 <details>
 <summary>Environment</summary>
+
+Two runs, and the tables do not mix within a row. Cold start and binary size are
+today's, all five engines on one idle machine. The Octane node/deno/bun columns
+are the earlier cross-engine run on an identically specified instance; the two
+goant Octane columns are a within-machine A/B measured together, best of five
+each, `-refresh` on both arms.
 
 | Detail   | Value                                            |
 | -------- | ------------------------------------------------ |
 | Hardware | Azure `Standard_D8s_v5` — Xeon Platinum 8370C @ 2.80 GHz, 8 vCPU, 31 GB |
 | OS       | Ubuntu 24.04.4 LTS (x86_64), kernel 6.17          |
-| Go       | 1.26.5, `CGO_ENABLED=0`                           |
+| Go       | 1.26.3, `CGO_ENABLED=0`                           |
 | Octane   | chromium/octane @ `570ad1cc`                      |
 | test262  | tc39/test262 @ `b363f29d`                         |
 | goja     | `v0.0.0-20260723142020-b4aef50fa347`              |
-| node     | 25.9.0                                            |
-| deno     | 2.9.3                                             |
-| bun      | 1.3.14                                            |
+| node / deno / bun, cold start and size | 22.23.2 / 2.9.5 / 1.3.14 |
+| node / deno / bun, Octane              | 25.9.0 / 2.9.3 / 1.3.14  |
 
-Octane scores are the best of two runs (the suite already repeats internally to
-a stable score); the JIT engines carry more run-to-run variance than the two
-interpreters do.
-
-The `goant` and `goant+JIT` columns were measured later and separately, on a
-second `Standard_D8s_v5` of the same image with Go 1.26.3: one build, run with
-the tier off and on, best of five each, `-refresh` on both arms so neither could
-read a cached score. Two independent runs of the tier-on arm eighty minutes
-apart agreed to within 2.5% on fourteen of the fifteen workloads and 6.5% on
-Splay. They are commit `98a82b4`; the only commit after it that touches amd64
-code at all is the per-Runtime JIT flag, which turns one global read into one
-field read at three sites.
+Octane scores are the best of two runs; the JIT engines carry more run-to-run
+variance than the two interpreters do.
 
 </details>
 
@@ -518,402 +197,60 @@ CGO_ENABLED=0 go build -o goant-bench ./cmd/goant-bench
 ./goant-bench                                  # the microbenchmarks
 ```
 
-`goant-bench` scores whichever engines are on PATH and skips the rest, so a
-partial install still produces a table. See [bench/README.md](bench/README.md).
+`goant-bench` scores whichever engines are on PATH and skips the rest.
 
 ---
+
+## What it is
+
+A from-scratch port of the **"Silver" engine** from
+[`ant`](https://github.com/theMackabu/ant) — a JavaScript runtime written in C —
+rewritten in Go: lexer → AST → bytecode compiler → 213-opcode interpreter, its
+own tracing garbage collector, WTF-8 strings, a JS→regex translation layer over
+a vendored `regexp2`, and a baseline JIT for amd64 and arm64.
+
+The engine lives in `internal/engine`, deliberately: everything the interpreter
+does is free to change shape as long as the observable behaviour holds. The
+stable surfaces are the root package and `v8go/`.
 
 ## Using it
 
-### Runtime
-
 ```go
-rt := goant.New(
-    goant.WithMemoryLimit(512 << 20),  // a budget, not a crash
-    goant.WithModuleDir("./js"),       // where import specifiers resolve
-)
+rt := goant.New(goant.WithJIT(true))   // the compiled tier, off by default
 defer rt.Close()
 
-v, err := rt.RunString(`2 + 2`)
-v, err  = rt.RunScript("main.js", src)
-v, err  = rt.RunFile("main.js")
-v, err  = rt.RunModule("mod.js", src)   // ES module: strict, own scope, TLA
+rt.Set("fetchRow", func(id int) map[string]any { ... })   // Go in
+v, err := rt.RunString(`JSON.stringify(fetchRow(7))`)     // JS out
+
+rt.SetDeadline(50 * time.Millisecond)   // interruptible
+rt.SetMemoryLimit(64 << 20)             // an error, not an abort
 ```
 
-A `Runtime` runs one script at a time and is not safe for concurrent use — the
-same constraint every engine places on an isolate. `Interrupt` is the exception,
-and is safe from any goroutine.
-
-Compile once, run many:
-
-```go
-prog, err := rt.Compile("transform.js", src)
-v, err := rt.RunProgram(prog)
-```
-
-### The compiled tier
-
-Off by default. A function entered often enough is compiled to machine code and
-run natively from then on; everything the compiler declines keeps interpreting,
-so this changes how fast a program runs and not what it computes.
-
-```go
-rt := goant.New(goant.WithJIT(true))
-
-rt.SetJIT(false)   // stops compiling AND stops entering compiled code
-rt.SetJIT(true)    // and back
-rt.JITEnabled()
-```
-
-It is per `Runtime`, not per process. A host does not have one workload — the
-tier is worth having for a long numeric flow and worth nothing for a script that
-runs once — and both usually run in the same binary. `GOANT_JIT=1` sets the
-default for Runtimes created afterwards, which is a convenience for benchmarking
-rather than the way a program should decide.
-
-`SetJIT(false)` is a kill switch rather than a preference: it stops this Runtime
-entering code it has **already** compiled, so a host that sees trouble can turn
-the tier off on a live Runtime and have the next call interpret. No restart, and
-no effect on any other Runtime.
-
-Executable memory is reported apart from the heap, because the memory limit does
-not cover it:
-
-```go
-s := rt.Stats()
-s.Bytes                    // the JavaScript heap — what WithMemoryLimit bounds
-s.CodeBytes, s.CodeBlocks  // executable memory, process-wide, bounded by nothing
-```
-
-Compiled code is released when the function that owns it is collected, so this
-tracks how much distinct code is live rather than how long the process has been
-up. It is still worth watching: a limit set on the heap says nothing about it.
-
-### Values
-
-`Value` is a small struct — a handle plus its Runtime — so passing one around
-costs nothing and reading one allocates nothing. The zero `Value` is `undefined`,
-and every method on it is safe.
-
-```go
-v.Kind()          // KindString, KindNumber, KindObject, …
-v.IsArray()       // and IsFunction, IsDate, IsPromise, IsError, IsTypedArray…
-v.String()        // ToString; also makes Value an fmt.Stringer
-v.Int()           // ToNumber, truncated
-v.Float()
-v.Bool()          // ToBoolean — JavaScript truthiness
-v.Bytes()         // an ArrayBuffer or typed array, without copying
-v.Time()          // a Date
-v.Export()        // -> any
-v.ExportTo(&dst)  // -> the Go type you already have
-```
-
-Objects, arrays and functions come through views:
-
-```go
-obj := v.Object()
-name, err := obj.Get("name")
-err  = obj.Set("count", 3)
-keys, err := obj.Keys()
-n, err := obj.Len()
-item, err := obj.At(0)
-res, err := obj.Call("method", 1, "two")   // `this` is bound to obj
-
-fn := v.Function()
-res, err := fn.Call(1, 2)
-inst, err := fn.Construct("arg")           // new fn("arg")
-```
-
-Reads return `(Value, error)` rather than swallowing failures: a property read
-can run a getter or a Proxy trap, and a host bridging one should not silently
-receive `undefined` when it actually threw. A key that simply is not there is
-`undefined` with no error, which is what JavaScript does.
-
-### Go values in
-
-`Set` and every `any` parameter accept ordinary Go values:
-
-| Go | JavaScript |
-|---|---|
-| `nil` | `null` |
-| `bool`, all `int`/`uint`/`float` | `boolean`, `number` |
-| `string` | `string` |
-| `[]byte` | `Uint8Array` — **no copy**, the script writes into your slice |
-| `*big.Int` | `bigint` |
-| `time.Time` | `Date` |
-| `error` | `Error` |
-| slice, array | `Array` |
-| map | object |
-| struct, `*struct` | object — fields by `json` tags, methods as functions |
-| `func(…)` | function |
-
-Cycles are preserved: the same Go pointer converts to the same JavaScript
-object. Types with no JavaScript form — channels, complex numbers — are an
-error rather than a guess.
-
-### Go functions in
-
-Pass an ordinary Go function and it is bound by its signature: arguments
-converted into its parameter types, its result converted back, a returned
-`error` thrown into the script.
-
-```go
-rt.Set("upper", strings.ToUpper)
-rt.Set("hypot", math.Hypot)
-rt.Set("lookup", func(key string) (string, error) {
-    v, ok := table[key]
-    if !ok {
-        return "", fmt.Errorf("no such key %q", key)
-    }
-    return v, nil
-})
-rt.Set("join", func(sep string, parts ...string) string { … })  // variadic
-rt.Set("describe", func(o Order) string { … })                  // struct argument
-```
-
-A missing argument is the parameter's zero value and extra ones are ignored,
-which is what a JavaScript function does with them.
-
-When the argument list is variable, or you want the values unconverted, use the
-raw form:
-
-```go
-rt.Set("log", goant.Func(func(c *goant.Call) (any, error) {
-    parts := make([]string, c.Len())
-    for i := range parts {
-        parts[i] = c.String(i)
-    }
-    logger.Println(strings.Join(parts, " "))
-    return nil, nil
-}))
-```
-
-`c.This` is the receiver, so a raw function installed as a method works.
-
-### JavaScript values out
-
-```go
-var cfg struct {
-    Host string   `json:"host"`
-    Port int      `json:"port"`
-    Tags []string `json:"tags"`
-}
-err := v.ExportTo(&cfg)
-```
-
-Structs, maps, slices, arrays, pointers, `time.Time`, `[]byte`, `*big.Int` and
-anything implementing `json.Unmarshaler` are all supported. A property the
-script did not set leaves its field alone, so `ExportTo` fills in over defaults.
-
-A `*func` target binds a JavaScript function to a Go signature:
-
-```go
-v, _ := rt.Get("format")
-
-var format func(string, int) (string, error)
-v.ExportTo(&format)
-
-s, err := format("row", 3)
-```
-
-`Export()` is the untyped direction, and follows `encoding/json`'s conventions:
-numbers are always `float64`, objects are `map[string]any`, arrays are `[]any`.
-A cycle exports as the same Go map twice, not forever.
-
-### Errors
-
-```go
-_, err := rt.RunString(src)
-
-var jsErr *goant.Error
-if errors.As(err, &jsErr) {
-    jsErr.Name        // "TypeError"
-    jsErr.Message
-    jsErr.Stack
-    jsErr.Value()     // the thrown value itself — a script may throw anything
-}
-
-var se *goant.SyntaxError   // would not parse; nothing ran
-errors.As(err, &se)
-
-errors.Is(err, goant.ErrInterrupted)   // stopped from outside
-errors.Is(err, goant.ErrMemoryLimit)   // outgrew its budget
-```
-
-Being stopped is not something the script did, so it is not reported as an
-exception — and a memory limit is a different problem from a timeout, with a
-different fix, so it is not reported as one either.
-
-### Deadlines
-
-```go
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
-
-stop := rt.WithContext(ctx)
-defer stop()
-
-v, err := rt.RunProgram(prog)   // errors.Is(err, goant.ErrInterrupted)
-```
-
-The interruption is left set afterwards, so an abandoned script cannot quietly
-resume; call `ClearInterrupt` before reusing the Runtime, or let a `Pool` retire
-it.
-
-### Promises
-
-Nothing settles until the job queue runs, and the checkpoint is explicit so a
-host stays in control of when its callbacks fire.
-
-```go
-v, err := rt.RunString(`(async () => { … })()`)
-res, err := rt.Await(v)   // drains the queue, unwraps; a rejection becomes *Error
-```
-
-`Await` passes a non-promise straight through, so it is safe to wrap around any
-result. `RunJobs` is the bare drain.
-
-### Scopes and pools
-
-A `Scope` is one unit of work with its own globals, reclaimed in one step when it
-closes:
-
-```go
-prog, _ := rt.Compile("transform.js", src)
-
-s, err := rt.NewScope()
-defer s.Close()
-
-s.Set("input", msg)
-v, err := s.RunProgram(prog)
-out, _, err := v.AppendJSON(buf[:0])   // read what you need BEFORE Close
-```
-
-Everything the run allocated is freed at `Close`, so **every Value from the scope
-becomes invalid** — read out what you need first. The one thing a Scope does not
-isolate is modification of the shared built-ins; that is detected rather than
-prevented, and `s.Polluted()` reports it.
-
-A `Pool` does the bookkeeping a server would otherwise write itself — leasing,
-deadlines, and retiring a Runtime that was polluted, abandoned, or has grown too
-large:
-
-```go
-pool := goant.NewPool(goant.PoolConfig{
-    New: func() (*goant.Runtime, error) {
-        rt := goant.New(goant.WithMemoryLimit(1 << 30))
-        return rt, rt.Set("log", logger.Println)
-    },
-    MaxUses:   50_000,
-    MaxMemory: 256 << 20,
-    MaxIdle:   runtime.NumCPU(),
-})
-defer pool.Close()
-
-var out []byte
-err := pool.Do(ctx, func(s *goant.Scope) error {
-    s.Set("msg", input)
-    v, err := s.RunProgram(prog)
-    if err != nil {
-        return err
-    }
-    out, _, err = v.AppendJSON(nil)
-    return err
-})
-```
-
-A `Pool` is safe for concurrent use; each job gets a Runtime to itself for its
-duration.
-
-### JSON, as bytes
-
-```go
-v, err := rt.ParseJSON(data)          // no intermediate JavaScript string
-v, err  = rt.ParseJSONLazy(data)      // build each value on first read
-
-out, ok, err := v.AppendJSON(dst)     // append into the host's buffer
-```
-
-`ParseJSONLazy` validates the whole document up front, then builds properties
-and elements as something reads them. A value nobody reads is never built, and a
-document the host serializes without touching goes back out as the bytes it came
-in as — so a pass-through costs a scan, a full traversal costs what the eager
-parse would have, and anything in between lands in between. Nothing to configure
-and nothing to predict.
-
-For a host with several outputs per run, `AppendJSONEach` serializes an array's
-elements into one buffer and hands back the offsets, so the payloads are spans of
-a single allocation and each value is serialized exactly once.
-
----
-
-## Migrating from v8go
-
-The `v8go/` package is a drop-in replacement for the `rogchap` /
-`robomotionio` v8go binding, implemented on goant. Changing the import path takes
-a program off cgo and off V8 without touching call sites:
-
-```go
-import v8go "github.com/robomotionio/goant/v8go"
-```
-
-`NewIsolate`, `NewContext`, `RunScript`, `FunctionTemplate`, `ObjectTemplate`,
-`JSError` and the rest keep their signatures. The differences are deliberate,
-and each one says so in its own doc comment:
-
-- `IsolateOptions.MaxOldSpaceBytes` becomes a real budget on the live heap,
-  enforced after a collection and reported through `HeapLimitExceeded()` — which
-  is what the option was always meant to do.
-- The V8-tuning no-ops (`SetFlags`, `AddNearHeapLimitCallback`,
-  `WarmupOldGenerationHeap`) are kept so call sites compile, and each one
-  documents that it does nothing.
-- `CreateCodeCache` returns nil: there is no serialised bytecode format. Callers
-  already handle that, because V8 can refuse to produce one too.
-- A `Context` is an invocation on a shared isolate rather than a fresh realm, so
-  there is one at a time per isolate. `ContextDirty` reports a script that
-  modified shared state; such an isolate must be disposed rather than pooled.
-- Anything not needed by a caller is absent rather than stubbed, so a missing
-  feature is a compile error and not a wrong answer at runtime.
-
-New code should use the `goant` package. The shim exists so an existing program
-can move in one commit and modernise afterwards.
-
----
+[**docs/embedding.md**](docs/embedding.md) is the full API: values, converting
+Go in and JavaScript out, errors, deadlines, promises, scopes and pools, the
+bytes-in/bytes-out JSON path, and migrating from v8go.
 
 ## Status
 
-Working, and in production for Function-node scripts. What is not there yet:
+In production for Function-node scripts. What is not there yet:
 
-- **JIT.** There is a [compiled tier](#the-compiled-tier), on amd64 and arm64,
-  and it is not on by default — `goant.WithJIT(true)` turns it on per Runtime.
-  It is a baseline compiler: one template per bytecode, inline caches, per-site
-  type feedback for element access, compiled calls, and no inlining. Measured at
-  3.1× on Octane and 2.9× on pooled short flows. What it does not have is the
-  optimising tier the JIT engines in the [Octane table](#octane-20) are, which is
-  most of the remaining distance to them.
-
-  It is off by default because "safe for a host that opts in and watches it" is
-  a different claim from "safe for everyone on upgrade". What it has been put
-  through: differential fuzzing against the interpreter on four platforms, with
-  every generated program run interpreted, compiled, and compiled-with-a-deopt
-  and the three answers compared; Test262 and mjsunit with the tier on, which
-  produce no failure the interpreter does not also produce; a concurrency suite
-  under the race detector; and a multi-million-invocation soak on a pooled
-  Runtime. What it has not had is a soak on `darwin/amd64`, the one supported
-  platform with no hardware behind it.
-- **Per-function `[[Realm]]`.** The one remaining Test262 core failure: a
-  revoked Proxy must report the TypeError of the realm its function came from,
-  and goant has a single realm's worth of intrinsics to reach for.
-- **Temporal.** Not implemented.
-- **Intl.** Partial: see [docs/intl402-and-temporal.md](docs/intl402-and-temporal.md).
-  Locale identifiers, collation, plural rules, number options and time zones
-  are implemented; per-locale date and number *patterns* come from a fixed
-  table rather than from CLDR, and DisplayNames, ListFormat,
-  RelativeTimeFormat, Segmenter and DurationFormat do not exist.
+- **An optimising tier.** The JIT is a baseline compiler — one template per
+  bytecode, inline caches, per-site type feedback, compiled calls, no inlining
+  — and is opt-in per Runtime with `WithJIT(true)`. It is off by default
+  because "safe for a host that opts in and watches it" is a different claim
+  from "safe for everyone on upgrade". It has had differential fuzzing against
+  the interpreter on four platforms, Test262 and mjsunit with the tier on, a
+  race-detector concurrency suite, and multi-million-invocation soaks; it has
+  not had a soak on `darwin/amd64`, the one platform with no hardware behind it.
+- **Unlanded proposals**: decorators, import-defer, import-bytes, source-phase
+  imports. ~45 of the 326 test262 failures.
+- **Per-function `[[Realm]]`.** One root cause behind ~55 failures: a value must
+  report the error of the realm its function came from.
+- **`SharedArrayBuffer.prototype.slice`** on growable buffers, and threads —
+  `SharedArrayBuffer` and `Atomics` are single-agent.
 - **Host modules.** No `fs`, no `http`, no Node compatibility layer — the engine
   plus a minimal runtime (event loop, timers, microtasks, `console`) is the
   whole scope. Give a script what it needs with `Set`.
-- **Threads.** `SharedArrayBuffer` and `Atomics` are single-agent.
 
 ---
 
@@ -939,17 +276,10 @@ CGO_ENABLED=0 go build -o goant ./cmd/goant
 CGO_ENABLED=0 go build -o goant-conf ./cmd/goant-conf
 CGO_ENABLED=0 go build -o goant-t262 ./cmd/goant-t262
 
-./goant-conf --runner ./goant --profile interp     # ant's corpus: 1511/1511
-./goant-t262 -core -t262 ../test262                # ECMA-262 core profile
-./goant-t262 -all  -t262 ../test262                # every file, nothing skipped
-./goant-t262 -core -t262 ../test262 -runner goja-run   # the core profile, for goja
+./goant-conf --runner ./goant --profile interp         # ant's corpus: 1514/1514
+./goant-t262 -all -t262 ../test262                     # every file, nothing skipped
+./goant-t262 -all -t262 ../test262 -runner goja-run    # the same, for goja
 ```
-
-`-core` and `-all` are the two numbers in [Conformance](#conformance); `-core`
-prints what it skipped and why with `-show-skip`, so its exclusion list is
-checkable rather than something you have to take on trust.
-
----
 
 ## Layout
 
