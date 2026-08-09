@@ -196,6 +196,20 @@ func (inv *Invocation) Release() bool {
 		delete(rt.interned, k)
 	}
 
+	// The cells this run was handed from BELOW the watermark are its own — that
+	// is what the mark on them says — and the rewind below cannot reach them,
+	// because it frees upward from the mark and they are under it. Freed here
+	// instead, by name: the list is exactly the region's lower half.
+	//
+	// Without this they are stranded live, one small pile per released run, and
+	// a host alternating Release with End accumulates them faster than the
+	// collector's threshold rises to notice. Freeing them is sound for the same
+	// reason the rewind is: the dirty check has already established that
+	// nothing outside the region points into it.
+	for _, h := range rt.objects.reborn {
+		rt.objects.free(h) // a no-op on one the run already freed
+	}
+
 	inv.End()
 
 	rt.objMemo = [objMemoSize]objMemoEntry{}
@@ -209,17 +223,24 @@ func (inv *Invocation) Release() bool {
 	// has just gone. Left alone it stays sized for the heap this run built, so
 	// the NEXT run allocates that whole peak again before it collects once —
 	// and a run that collects late finds more still reachable, which raises the
-	// threshold again. Over thirteen messages that ratchet took the threshold
-	// from sixteen thousand cells to a hundred and eighty-four thousand, and
-	// since the pools never shrink, every step of it was paid resident for good.
+	// threshold again. Over thirteen messages that ratchet took it from sixteen
+	// thousand cells to a hundred and eighty-four thousand, and since the pools
+	// never shrink, every step of it was paid resident for good.
 	//
-	// So re-derive it from what survived the rewind, which is the same thing a
-	// collection would have set it to. A pooled runtime then starts each message
-	// where a fresh one would, instead of inheriting the worst message it has
-	// ever run.
-	rt.gc.next = rt.objects.liveN * gcGrowthFactor
-	if rt.gc.next < gcFloor {
-		rt.gc.next = gcFloor
+	// LOWER ONLY, and that is not a detail. Re-deriving it outright — the floor
+	// when what survived is small, which after a rewind it always is — pushes
+	// the threshold UP whenever the last collection had set it lower, and a host
+	// that releases often then pushes it up again before the live count can ever
+	// reach it. The collector simply stops running. It cost 3.6 GB in twenty
+	// seconds on goant-soak, against 60 MB with this left alone, and it does not
+	// show up on a workload whose garbage is objects: the trigger counts object
+	// cells, so a run whose garbage is strings has nothing else to stop it.
+	want := rt.objects.liveN * gcGrowthFactor
+	if want < gcFloor {
+		want = gcFloor
+	}
+	if want < rt.gc.next {
+		rt.gc.next = want
 	}
 	rt.allocBytes = 0
 	if rt.heapLimit != 0 {

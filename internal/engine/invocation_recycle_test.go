@@ -228,3 +228,40 @@ func TestRecycledCellsAreRecordedOncePerCell(t *testing.T) {
 	}
 	inv.End()
 }
+
+// Release lowers the collection threshold and must never raise it.
+//
+// Re-deriving it outright looks equivalent and is not. After a rewind what
+// survived is small, so the derived figure is the floor — and a host that
+// releases often pushes the threshold back up to the floor before the live
+// count can ever reach it, so the collector never runs again. On goant-soak
+// that was 3.6 GB in twenty seconds against 60 MB.
+//
+// It does not show up on a workload whose garbage is objects. The trigger
+// counts object cells, so a run whose garbage is strings has nothing else to
+// stop it, which is why this is asserted directly rather than left to a
+// benchmark to notice.
+func TestReleaseNeverRaisesTheCollectionThreshold(t *testing.T) {
+	rt := New()
+
+	// A threshold below the floor, which is what a small realm's own collection
+	// leaves behind and exactly the case the re-derivation got wrong.
+	rt.gc.next = 2000
+
+	inv := rt.BeginInvocation()
+	if _, err := rt.RunString("floor_test.js", `
+		let s = "";
+		for (let i = 0; i < 2000; i++) s = ("k" + i).toUpperCase();
+		s;
+	`); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	before := rt.gc.next
+	if !inv.Release() {
+		t.Fatal("Release refused")
+	}
+	if rt.gc.next > before {
+		t.Errorf("threshold raised from %d to %d: a host that releases often would never collect again",
+			before, rt.gc.next)
+	}
+}

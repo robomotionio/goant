@@ -132,35 +132,44 @@ func jitEmitICPut(a *jitasm.Asm, recv, val, obj, way jitasm.Reg, wayBase, epoch 
 // getting its memory back, and only on the messages large enough to collect,
 // because only they recycle anything.
 //
+// Reading the mark means resolving the handle, and the handle is resolved here
+// rather than taken from a register the caller happens to have it in. It was
+// taken from one, briefly, and two of the three call sites do not keep the
+// object pointer live that far — the register is documented as dead by then and
+// they use it. That is a segfault in generated code, which is the worst kind
+// there is, and the resolve costs six instructions on a path that has already
+// decided it is about to end this Runtime's reuse.
+//
 // recv is the receiver, whose handle is the low half of its Value — it has
-// passed the tag check, so the low 32 bits are a handle the engine issued. obj
-// is the receiver's object pointer, which is also its cell pointer, and it must
-// still hold it. t is scratch and jitRegScratch is clobbered; nothing else is
-// touched, and the flags are not live across it.
+// passed the tag check, so the low 32 bits are a handle the engine issued. t0
+// and t1 are scratch and jitRegScratch is clobbered; nothing else is touched,
+// and the flags are not live across it. The three must be distinct.
 //
 // Four instructions when no invocation is running, which is the case for every
 // embedding that does not pool: load the runtime, load the watermark, test,
-// branch. Everything after that is on the path a store to an older object takes,
-// which is the path that ends the reuse of the Runtime anyway.
-func jitEmitNoteSharedMutation(a *jitasm.Asm, recv, obj, t jitasm.Reg) {
+// branch.
+func jitEmitNoteSharedMutation(a *jitasm.Asm, recv, t0, t1 jitasm.Reg) {
 	scratch := jitRegScratch
 	clean := a.NewLabel()
 
 	a.MovRegMem(scratch, jitasm.RegCtx, jitmem.CtxOffHost)
-	a.Mov32RegMem(t, scratch, int32(jitOffRTWatermark))
-	a.TestRegReg(t, t)
+	a.Mov32RegMem(t1, scratch, int32(jitOffRTWatermark))
+	a.TestRegReg(t1, t1)
 	a.Jcc(jitasm.CondE, clean) // no invocation is watching
 
 	// The handle, zero-extended out of the Value, against the watermark. A
 	// 32-bit move is the whole payload extraction: the tag is in the high half.
-	// This takes the scratch register, so the runtime pointer is loaded again
-	// below rather than kept — one load on a path already committed to a store.
-	a.Mov32RegReg(scratch, recv)
-	a.CmpRegReg(scratch, t)
+	a.Mov32RegReg(t0, recv)
+	a.CmpRegReg(t0, t1)
 	a.Jcc(jitasm.CondAE, clean) // this run's own object
 
-	a.MovzxRegMem8(t, obj, int32(jitOffObjBorn)) // TestARunThatCollectsIsNotDirty/tier covers this
-	a.TestRegReg(t, t)
+	// Below the watermark: old, unless the cell says it was recycled into this
+	// run. t1 carries the pool in and is clobbered; t0 comes back holding the
+	// object, which is also its cell.
+	a.MovRegMem(t1, jitasm.RegCtx, jitmem.CtxOffPool)
+	jitEmitResolve(a, t0, recv, t1)
+	a.MovzxRegMem8(t1, t0, int32(jitOffObjBorn))
+	a.TestRegReg(t1, t1)
 	a.Jcc(jitasm.CondNE, clean) // recycled into this run: new, not shared
 
 	a.MovRegMem(scratch, jitasm.RegCtx, jitmem.CtxOffHost)
