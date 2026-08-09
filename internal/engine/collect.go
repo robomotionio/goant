@@ -137,28 +137,45 @@ const gcGrowthFactor = 2
 // either way; the peak before one was.
 var gcFloor = 1 << 14
 
-// gcStringFloor is gcFloor for the string pool: the same amount of STORAGE,
-// rather than the same number of cells. A string cell is 88 bytes against an
-// object's 224, so counting them alike would collect nearly three times as
-// often for the same resident bytes — and string-heavy code is common enough
-// that the difference is not academic.
+// gcStringBackstop is how much slacker the string floor is than the object one.
+// It is the difference between a backstop and a second collection schedule, and
+// the number is what an extra collection costs.
+//
+// pool.sweep walks every chunk and every slot below p.next, so a collection
+// costs the RESERVED POOL — not the live set, and not the pool that tripped it.
+// On the orders workload that is 897,024 object cells swept per cycle whatever
+// the string pool is doing. Matching gcFloor's storage exactly made this trigger
+// fire about as often as the object trigger, and paying that fixed cost twice as
+// often is what the measurements said: Octane's Splay -16.2%, RegExp -4.1%, the
+// orders workload -5.9%, and the other thirteen Octane workloads flat. The two
+// that moved are the two that are allocation-bound, which is the tell.
+//
+// Eight times the floor gives nearly all of that back and keeps what this is
+// for. The case it exists for is a program allocating nothing but strings with
+// no heap limit, which reached 2.4 MILLION live cells — 211 MB — and never
+// collected; the backstop bounds it at about 29 MB. Giving up 25 MB on the
+// pathological workload to stop charging every ordinary one is the right way
+// round, and the first version of this had it backwards.
+//
+// It only relaxes the SMALL-live-set case. Past the first sweep the threshold is
+// twice what survived, so a program genuinely holding strings passes this floor
+// once and never sees it again.
+const gcStringBackstop = 8
+
+// gcStringFloor is gcFloor for the string pool: the same amount of STORAGE
+// rather than the same number of cells, times the backstop above. A string cell
+// is 88 bytes against an object's 224, so counting them alike would collect
+// nearly three times as often for the same resident bytes — and string-heavy
+// code is common enough that the difference is not academic.
 //
 // Approximate on purpose. It ignores the out-of-line bytes a string points at,
 // which are real but are the part chargeBytes already watches when a host has
 // set a limit; this floor exists for the host that has set none, where being
 // somewhere near right is the whole requirement. Derived rather than written
 // down so that GOANT_GC_FLOOR moves both together.
-//
-// Making it SLACKER than the object floor is the obvious lever on the cost of
-// this trigger, and it was measured and rejected. On the orders workload with
-// no limit set, the extra collections cost 5.5%, and eight times the floor
-// would have bought nearly all of that back — by reserving about 25 MB more
-// string storage than it saved. That is trading the thing this exists for
-// against the thing it costs, in the wrong direction: the whole point is
-// resident bytes. A host that wants the other trade sets a heap limit, and
-// then chargeBytes runs this schedule instead of it.
 func gcStringFloor() int {
-	n := gcFloor * int(unsafe.Sizeof(poolCell[object]{})) / int(unsafe.Sizeof(poolCell[flatString]{}))
+	n := gcStringBackstop * gcFloor *
+		int(unsafe.Sizeof(poolCell[object]{})) / int(unsafe.Sizeof(poolCell[flatString]{}))
 	if n < 1 {
 		n = 1
 	}

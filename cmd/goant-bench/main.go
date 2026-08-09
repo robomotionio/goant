@@ -40,13 +40,15 @@ type engine struct {
 // this module's dependencies — see bench/README.md for how to build it.
 var candidates = []engine{
 	{name: "goant", bin: "./goant"},
-	// The three interpreters worth standing beside. goja is the other pure-Go
+	// The four interpreters worth standing beside. goja is the other pure-Go
 	// engine; ant is the C engine goant is a port of, so it is the answer to
-	// "what did the port cost"; duktape is the reference embeddable interpreter.
-	// None of the three has a JIT, which is what makes them the honest
-	// comparison — node is in the table to show the distance to one.
+	// "what did the port cost"; quickjs is the one most embedders actually
+	// reach for; duktape is the reference embeddable interpreter. None of the
+	// four has a JIT, which is what makes them the honest comparison — node,
+	// deno and bun are in the table to show the distance to one.
 	{name: "goja", bin: "goja-run"},
 	{name: "ant", bin: "ant"},
+	{name: "quickjs", bin: "qjs"},
 	{name: "duktape", bin: "duk"},
 	{name: "node", bin: "node"},
 	{name: "deno", bin: "deno", args: []string{"run", "--quiet", "--allow-read"}},

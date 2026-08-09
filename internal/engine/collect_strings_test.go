@@ -35,8 +35,9 @@ func TestStringGarbageIsCollectedWithNoHeapLimit(t *testing.T) {
 		t.Fatal("600k string allocations and not one collection")
 	}
 	// Reserved chunks, not live cells: the pools never shrink, so what a host
-	// pays for is the high-water mark.
-	if chunks := len(rt.strings.chunks); chunks > 24 {
+	// pays for is the high-water mark. The bound is the backstop floor plus
+	// room, not a tight fit — see gcStringBackstop for why the floor is slack.
+	if chunks := len(rt.strings.chunks); chunks > 110 {
 		t.Fatalf("string pool reserved %d chunks (%d cells) for a loop that keeps one string",
 			chunks, chunks*poolChunkSize)
 	}
@@ -47,6 +48,11 @@ func TestStringGarbageIsCollectedWithNoHeapLimit(t *testing.T) {
 // and it must not mean a square root of it either, which is what triggering on
 // the pool RESERVING a chunk gives, since the high-water mark never rewinds.
 func TestStringReserveIsFlatInTheNumberOfAllocations(t *testing.T) {
+	// At a reduced floor, so both arms are well past it and the test measures
+	// the SCHEDULE rather than the constant — and finishes quickly. Both floors
+	// move together, which is what gcStringFloor deriving from gcFloor buys.
+	withGCFloor(t, 1<<10)
+
 	reserved := func(iters int) int {
 		rt := New()
 		if _, err := rt.RunString("churn.js", `
@@ -129,7 +135,7 @@ func TestStringFloorIsStorageNotCells(t *testing.T) {
 	}
 }
 
-// TestAHeapLimitKeepsTheOneScheduleItAlreadyHad. The string trigger is the
+// TestAHeapLimitMakesTheStringTriggerStandDown. The string trigger is the
 // no-limit half of chargeBytes, not a second opinion beside it: with a limit
 // set, every string's bytes are already charged against a budget derived from
 // what survived, and that budget already trips gc.next.
@@ -138,28 +144,38 @@ func TestStringFloorIsStorageNotCells(t *testing.T) {
 // this did, and on the deskbot orders workload — a large live object graph, a
 // small live string set, a 2 GiB limit — it turned 13 collections into 28 and
 // cost 10%, while the byte trigger was keeping the pool bounded on its own.
-func TestAHeapLimitKeepsTheOneScheduleItAlreadyHad(t *testing.T) {
-	withLimit := New()
-	withLimit.SetHeapLimit(2 << 30)
-	if _, err := withLimit.RunString("churn.js", stringChurn); err != nil {
-		t.Fatalf("run: %v", err)
+//
+// Tested against the mechanism rather than against a collection count: with the
+// backstop floor in place the two arms no longer collect a comparable number of
+// times, so counting cycles would be measuring the floor, not the deferral.
+func TestAHeapLimitMakesTheStringTriggerStandDown(t *testing.T) {
+	// nextBytes out of reach so chargeBytes cannot lower gc.next itself; this
+	// has to observe the string path alone.
+	arm := func(limit uint64) (before, after int, strNext int) {
+		rt := New()
+		rt.SetHeapLimit(limit)
+		rt.nextBytes = 1 << 60
+		rt.gc.next = 1 << 30 // only stringsFull would bring this down
+		rt.gc.strNext = 1    // and it fires on the very next string
+		before = rt.gc.next
+		rt.newStringBytes([]byte("x"))
+		return before, rt.gc.next, rt.gc.strNext
 	}
 
-	noLimit := New()
-	if _, err := noLimit.RunString("churn.js", stringChurn); err != nil {
-		t.Fatalf("run: %v", err)
+	before, after, strNext := arm(2 << 30)
+	if after != before {
+		t.Errorf("with a heap limit, the string trigger pulled gc.next from %d to %d; "+
+			"chargeBytes is the watcher there and this is the second schedule that cost 10%%",
+			before, after)
+	}
+	if strNext <= 1 {
+		t.Errorf("strNext left at %d: it must stride past, or every string re-enters stringsFull", strNext)
 	}
 
-	// The point is not a particular count — the byte trigger collects on this
-	// workload too. It is that adding the cell trigger on top does not multiply
-	// them, which is what a second schedule for one resource does.
-	if withLimit.gc.cycles > noLimit.gc.cycles {
-		t.Errorf("with a heap limit: %d collections; without one: %d. "+
-			"The limited Runtime is paying for both schedules.",
-			withLimit.gc.cycles, noLimit.gc.cycles)
-	}
-	if withLimit.gc.cycles == 0 {
-		t.Error("a limited Runtime collected nothing at all; chargeBytes is supposed to be the watcher here")
+	before, after, _ = arm(0)
+	if after >= before {
+		t.Errorf("with NO heap limit, the string trigger left gc.next at %d: "+
+			"nothing else is watching strings there", after)
 	}
 }
 
