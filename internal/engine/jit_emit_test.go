@@ -227,7 +227,8 @@ func TestJITLoopOutlivesItsFuel(t *testing.T) {
 	}
 	defer c.free()
 
-	for _, n := range []float64{0, 1, 10, jitFuel - 1, jitFuel, jitFuel + 1, 3*jitFuel + 7} {
+	fuel := float64(jitFuel)
+	for _, n := range []float64{0, 1, 10, fuel - 1, fuel, fuel + 1, 3*fuel + 7} {
 		locals := make([]Value, fn.maxLocals)
 		locals[0], locals[1] = tov(n), tov(0)
 		got, ok := jitRunT(t, rt, c, fn, locals)

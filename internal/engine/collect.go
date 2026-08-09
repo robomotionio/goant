@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync"
 	"unsafe"
+
+	"github.com/robomotionio/goant/internal/jitmem"
 )
 
 // Tracing collection over the handle pools.
@@ -187,7 +189,123 @@ func (rt *Runtime) chargeBytes(n uint64) {
 		// Due a collection on bytes. Say so in the currency the safepoints
 		// already speak: a threshold the live count has reached.
 		rt.gc.next = rt.objects.liveN
+		if rt.jitDepth > 0 {
+			rt.jitCollectSoon()
+		}
 	}
+}
+
+// jitCollectSoon brings every live compiled frame back to Go at its next loop
+// back edge, by spending the fuel it has left.
+//
+// The interpreter answers "a collection is due" on the very next back edge,
+// because that is where it tests. Compiled code has no such test: its only
+// safepoint is the fuel counter running out, so it kept allocating for up to
+// jitFuel more iterations — twenty thousand — past the moment the budget said
+// stop. That is not a small overshoot on a loop that allocates two strings a
+// row, and it is why the tier's resident peak sat above the interpreter's on
+// exactly the workload this engine ships for.
+//
+// Setting the fuel to one rather than adding a check is what makes this free.
+// The decrement and the not-taken branch are already in every loop; nothing new
+// is emitted, nothing extra is read, and the steady-state cost is unchanged.
+// Sweeping GOANT_JIT_FUEL down to 1 gives the same memory profile by making
+// every iteration a safepoint, and pays a round trip per iteration for it.
+//
+// ONE, not zero: the back edge decrements and branches on the result, so a zero
+// here wraps to 2^64-1 and the loop would run for the rest of the process.
+//
+// Every frame in the chain, not just the innermost: an outer frame resumes with
+// whatever fuel it had, and a caller that loops around a callee would otherwise
+// carry on to its own expiry. Costing one store each on a chain that is a
+// handful deep.
+//
+// Safe to write from here because a compiled frame only reaches Go through a
+// helper, so nothing is executing when this runs, and the back edge re-reads
+// the counter from memory every iteration rather than holding it in a register.
+//
+//go:noinline
+func (rt *Runtime) jitCollectSoon() {
+	for _, ctx := range rt.jitFrames[:rt.jitDepth] {
+		if ctx.Args[1] > 1 {
+			ctx.Args[1] = 1
+		}
+	}
+}
+
+// jitGrant is how much fuel a compiled frame gets: enough to reach the next
+// collection, and never more than jitFuel.
+//
+// The byte budget above can say "collect now" and be obeyed, because it is a
+// decision the runtime makes while compiled code is stopped in a helper. The
+// count trigger cannot: it is not a decision at all, it is a threshold the live
+// count drifts past, and the only code watching is the interpreter's back edge.
+// A compiled loop crosses it and keeps going until its fuel runs out, which on
+// a fifty-thousand-row message is two and a half more windows of allocation.
+// Measured on that message: the interpreter collected twenty-two times and the
+// tier seven, and held 28% more cell storage for it.
+//
+// So the grant is sized to the headroom instead of fixed. The rate comes from
+// the window that just ended — cells allocated divided by iterations run — and
+// the next window is however many iterations that rate says will consume what
+// is left. A loop that allocates nothing measures a rate of zero and keeps the
+// full twenty thousand, which is the case that must not regress: those loops
+// are what the tier is for, and the round trip is the cost it exists to avoid.
+//
+// Self-correcting rather than exact. Overshooting means one collection happens
+// a little late; undershooting means one extra round trip in twenty thousand
+// iterations. Both are cheap, and neither can be wrong about anything but
+// timing.
+func (rt *Runtime) jitGrant(ctx *jitmem.ExecContext) uint64 {
+	live := rt.objects.liveN
+	f := jitFuel
+	if !rt.gc.enabled {
+		ctx.FuelBase, ctx.LiveBase = f, int64(live)
+		return f
+	}
+	next := rt.gc.next
+	if next == 0 {
+		next = gcFloor
+	}
+	if head := next - live; head <= 0 {
+		// Already past it. One iteration, then the back edge takes the exit and
+		// the collection happens there.
+		f = 1
+	} else {
+		// A window with a rate behind it runs until the rate says the headroom
+		// is gone. One without runs jitProbe iterations to acquire one.
+		//
+		// The unmeasured window is the one that matters most, and that is not
+		// obvious. An overshoot there is not a one-off: the next threshold is
+		// twice what SURVIVED the late collection, so a window that ran long
+		// raises every threshold after it by the same proportion, and the
+		// sequence compounds from there. One unmeasured window at twenty
+		// thousand iterations cost 311,296 cells of held storage by the end of a
+		// fifty-thousand-row message — forty-five megabytes, out of six thousand
+		// cells of overshoot. Guessing a rate instead does not fix it either:
+		// this loop allocates four or five cells an iteration, so a guess of one
+		// is wrong by that factor and overshoots by it.
+		//
+		// So do not guess. Measure, on a window short enough that being wrong
+		// about it costs nothing.
+		est := uint64(jitProbe)
+		// used is negative when a collection landed inside the window, and zero
+		// for a loop that allocates nothing: no rate either way, so probe again.
+		// The second case is the one that must stay cheap — a loop that
+		// allocates nothing is what the tier is for — and it does: its next
+		// window measures zero, and a rate of zero takes the full grant.
+		if used := int64(live) - ctx.LiveBase; used > 0 && ctx.FuelBase > 0 {
+			est = uint64(head) * ctx.FuelBase / uint64(used)
+		}
+		if est < f {
+			f = est
+			if f == 0 {
+				f = 1
+			}
+		}
+	}
+	ctx.FuelBase, ctx.LiveBase = f, int64(live)
+	return f
 }
 
 func osGetenvGCPoison() bool { return envOn("GOANT_GC_POISON") }

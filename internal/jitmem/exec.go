@@ -233,6 +233,24 @@ type ExecContext struct {
 	// for a field nothing reads unless a guard has already failed. Appending
 	// instead leaves every offset generated code compiles against where it was.
 	BailIP uint64
+	// FuelBase and LiveBase are what this frame's current fuel grant was sized
+	// from: how many iterations it bought, and the live cell count at the moment
+	// it was made. Divide the cells allocated since by the iterations run and
+	// you have the loop's allocation rate, which is what lets the next grant end
+	// where the next collection is due rather than twenty thousand iterations
+	// past it. See jitGrant in the engine.
+	//
+	// Per frame rather than per runtime, and that is the whole reason they are
+	// here. A runtime-wide window is reset by every nested entry — the callback
+	// inside a map, the comparator inside a sort — so the loop that is actually
+	// burning the fuel never gets to measure itself, and the rate reads as one
+	// cell per twenty thousand iterations. It did, and the grant stayed at the
+	// maximum for it.
+	//
+	// Appended, like BailIP above and for the same reason: every offset
+	// generated code compiles against stays where it was.
+	FuelBase uint64
+	LiveBase int64
 	// stack is the array Stack points into. Held here so that Go's collector
 	// keeps it alive for as long as the context can be entered, and unexported
 	// so that it sits past every offset generated code compiles against.

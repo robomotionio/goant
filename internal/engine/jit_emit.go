@@ -173,7 +173,18 @@ func jitRefillSlots(a *jitasm.Asm, sp, after, push int, deep bool) {
 // The exit is a resumption, not a bailout: at a back edge the operand stack is
 // empty and every live value is already in the locals array, so re-entering
 // needs nothing but the address to re-enter at.
-const jitFuel = 20000
+//
+// A variable rather than a constant so GOANT_JIT_FUEL can sweep it, which is
+// how the number below was chosen and how the claim that it no longer decides
+// when a collection happens is checked. Read once when a function is compiled
+// and once per refuel, so nothing hot pays for the indirection.
+var jitFuel = uint64(envInt("GOANT_JIT_FUEL", 20000))
+
+// jitProbe is how long a fuel window runs when nothing is known yet about how
+// fast the loop allocates. Long enough to measure a rate over, short enough
+// that a loop which allocates hard cannot pass the collection threshold inside
+// it, and paid once per loop rather than once per iteration.
+const jitProbe = 1024
 
 // refuse records why a function was declined and returns the nil that says so.
 func refuse(why *string, reason string) *jitCode {
@@ -2823,7 +2834,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		// the root stack never holds an entry with a previous call's values in it.
 		ctx.Exit, ctx.Helper = 0, 0
 		ctx.Args[0] = uint64(uintptr(unsafe.Pointer(&locals[0])))
-		ctx.Args[1] = jitFuel
+		ctx.Args[1] = rt.jitGrant(ctx)
 		ctx.Args[2], ctx.Args[3] = 0, 0
 		ctx.Ret, ctx.Resume = 0, 0
 		// The frame's operand stack, sized to what this function needs. Reused
@@ -2937,7 +2948,10 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 					rt.dropOpenUpvals(rt.frameDepth)
 					return mkundef(), rt.terminated(), true
 				}
-				cur.Args[1] = jitFuel
+				// Refuelled after the collection above, not before: the grant is
+				// sized to the headroom, and the headroom is what the sweep that
+				// just ran decided.
+				cur.Args[1] = rt.jitGrant(cur)
 				run, runPC = cur, cur.Resume
 			case jitmem.ExitHelper:
 				// Whose frame this is. A frame compiled code built is identified
