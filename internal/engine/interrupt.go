@@ -38,6 +38,12 @@ const (
 	interruptHost   = 1 // Interrupt() — a timeout, a cancellation, a shutdown
 	interruptMemory = 2 // the heap budget was exceeded; see SetHeapLimit
 	interruptBlob   = 3 // a referenced blob could not be fetched; see SetBlobResolver
+	// interruptYield is the odd one out: it does not stop the script. Another
+	// agent wants its turn, and this is how it is asked for — by borrowing the
+	// check the hot path already makes rather than adding one beside it. See
+	// agent.go. It is raised only from interruptNone, so a real interrupt is
+	// never displaced by a turn.
+	interruptYield = 4
 )
 
 // interruptState is the cross-goroutine half of the Runtime. It is a separate
@@ -109,13 +115,43 @@ func (rt *Runtime) ClearInterrupt() {
 }
 
 // Interrupted reports whether an interrupt is pending or has been delivered.
+// A pending turn hand-over is not one: the script is not stopping.
 func (rt *Runtime) Interrupted() bool {
+	if rt.interrupt == nil {
+		return false
+	}
+	f := rt.interrupt.flag.Load()
+	return f != interruptNone && f != interruptYield
+}
+
+// interruptPending is the interpreter-side check, and it is byte for byte what
+// it was: nil test, one atomic load, compare against zero. It runs on every
+// function entry and every 1024th back edge, in the interpreter and in compiled
+// code alike, and it has to stay inlinable — adding the agent case to it cost
+// 87 against the inliner's budget of 80, and every safepoint in the engine
+// became a call.
+//
+// So it answers "is the flag raised", and interruptStops answers what a raised
+// flag MEANS. The second question is only asked when the answer to the first is
+// yes, which for a Runtime with no second agent is never.
+func (rt *Runtime) interruptPending() bool {
 	return rt.interrupt != nil && rt.interrupt.flag.Load() != 0
 }
 
-// interruptPending is the interpreter-side check. Inlined into the hot paths.
-func (rt *Runtime) interruptPending() bool {
-	return rt.interrupt != nil && rt.interrupt.flag.Load() != 0
+// interruptStops reports whether a raised flag means the script must stop. All
+// of them do except a turn hand-over, which is dealt with here and then is no
+// longer pending.
+//
+// Deliberately out of line: it is reached once per raised flag, and inlining it
+// would put its cost back on the path that tests for one.
+//
+//go:noinline
+func (rt *Runtime) interruptStops() bool {
+	if rt.interrupt.flag.Load() == interruptYield {
+		rt.yieldTurn()
+		return false
+	}
+	return true
 }
 
 // checkBackEdge is called on every backward jump. It counts locally and only

@@ -601,7 +601,9 @@ func execRunnerArgs(runner string, args []string, timeout time.Duration) execRes
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, runner, args...)
-	cmd.Env = append(os.Environ(), "TZ=UTC")
+	// $262.agent is off unless a host asks. An engine that does not know the
+	// variable ignores it, so pointing -runner at another engine still works.
+	cmd.Env = append(os.Environ(), "TZ=UTC", "GOANT_AGENTS=1")
 	var so, se strings.Builder
 	cmd.Stdout = &so
 	cmd.Stderr = &se

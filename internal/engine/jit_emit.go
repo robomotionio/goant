@@ -2932,7 +2932,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 				if rt.backEdgeWantsGC() {
 					rt.collect()
 				}
-				if rt.interruptPending() {
+				if rt.interruptPending() && rt.interruptStops() {
 					rt.jitDepth = base
 					rt.dropOpenUpvals(rt.frameDepth)
 					return mkundef(), rt.terminated(), true
@@ -3146,7 +3146,7 @@ func (c *jitCode) jitRunAt(rt *Runtime, fn *svFunc, cl *closure, fnVal Value, ar
 		// Entering a function is a check point for the host interrupt, and a tail
 		// call is the one entry that never reaches the depth check — so unbounded
 		// tail recursion has nothing else to stop it.
-		if rt.interruptPending() {
+		if rt.interruptPending() && rt.interruptStops() {
 			return mkundef(), rt.terminated(), true
 		}
 

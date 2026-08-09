@@ -199,6 +199,23 @@ type Runtime struct {
 	// and its brand check are program-observable.
 	finRegistries map[*object][]finCell
 
+	// sabProto is %SharedArrayBuffer.prototype%, needed to wrap bytes broadcast
+	// from another agent. See agent.go.
+	sabProto Value
+
+	// asyncWaits are the outstanding Atomics.waitAsync promises. The event loop
+	// settles them when it has nothing else left to run. See agent.go.
+	asyncWaits []*asyncWaiter
+
+	// agentInbox delivers this agent's one broadcast SharedArrayBuffer from the
+	// agent that started it. Nil in an agent nobody started.
+	agentInbox chan []byte
+
+	// cluster is the agent cluster this Runtime belongs to, nil unless the host
+	// started a second agent. Agents share the cluster and nothing else. See
+	// agent.go.
+	cluster *agentCluster
+
 	// objMemo is a direct-mapped handle-to-object translation cache; see objPtr.
 	// Cleared wherever a handle can stop naming its cell.
 	objMemo [objMemoSize]objMemoEntry

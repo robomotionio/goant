@@ -68,6 +68,12 @@ func main() {
 	}
 
 	rt := engine.New()
+	// $262.agent is a capability, not a language feature: it starts goroutines
+	// that run scripts. A host asks for it explicitly, and the conformance
+	// runner is the only thing here that does. See Runtime.EnableAgents.
+	if os.Getenv("GOANT_AGENTS") == "1" {
+		rt.EnableAgents()
+	}
 	if *modBase != "" {
 		rt.SetModuleBase(*modBase)
 	}

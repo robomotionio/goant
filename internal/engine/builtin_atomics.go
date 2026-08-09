@@ -101,6 +101,9 @@ func (rt *Runtime) initSharedArrayBuffer() {
 		return nb, nil
 	})
 	rt.setStringTag(proto, "SharedArrayBuffer")
+	// Kept because an agent that receives a broadcast has to build a
+	// SharedArrayBuffer over bytes it did not allocate, in its own realm.
+	rt.sabProto = proto
 
 	ctor := rt.newNativeFunc("SharedArrayBuffer", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		if !rt.constructing() {
@@ -280,21 +283,46 @@ func (rt *Runtime) initAtomics() {
 	// while this one is stopped looking at it: a wait that would block has
 	// already waited as long as it ever will, and a notify wakes nobody.
 	rt.defMethod(ao, "wait", 4, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		res, e := rt.atomicsWaitResult(args)
+		p, e := rt.atomicsWaitCheck(args)
 		if e != nil {
 			return mkundef(), e
 		}
-		return rt.newString(res), nil
+		if !p.matched {
+			return rt.newString("not-equal"), nil
+		}
+		return rt.newString(rt.atomicsPark(p.view, p.index, p.timeout)), nil
 	})
+	// waitAsync never blocks its agent. If it would have to, it answers a promise
+	// and puts the waiter on a list the event loop services once it has nothing
+	// else to run -- which is the point at which a host would go to sleep anyway.
 	rt.defMethod(ao, "waitAsync", 4, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
-		res, e := rt.atomicsWaitResult(args)
+		p, e := rt.atomicsWaitCheck(args)
 		if e != nil {
 			return mkundef(), e
 		}
 		out := rt.newPlainObject()
 		oo := rt.objPtr(out)
-		oo.defineOwn("async", mkbool(false), attrDefault)
-		oo.defineOwn("value", rt.newString(res), attrDefault)
+		settled := func(res string) (Value, *ThrowError) {
+			oo.defineOwn("async", mkbool(false), attrDefault)
+			oo.defineOwn("value", rt.newString(res), attrDefault)
+			return out, nil
+		}
+		if !p.matched {
+			return settled("not-equal")
+		}
+		if p.timeout <= 0 {
+			return settled("timed-out")
+		}
+		prom, resolve, _, pe := rt.newPromiseCapability(rt.promiseCtor)
+		if pe != nil {
+			return mkundef(), pe
+		}
+		if !rt.parkAsync(p, resolve) {
+			// Nobody else can see these bytes, so the answer is already known.
+			return settled("timed-out")
+		}
+		oo.defineOwn("async", mkbool(true), attrDefault)
+		oo.defineOwn("value", prom, attrDefault)
 		return out, nil
 	})
 	rt.defMethod(ao, "notify", 3, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
@@ -306,11 +334,26 @@ func (rt *Runtime) initAtomics() {
 		if e != nil {
 			return mkundef(), e
 		}
-		if _, e := rt.toIntegerOrInfinity(arg(args, 2)); e != nil {
+		// A missing or undefined count is +∞, which is why this is not ToIndex.
+		cf, e := rt.toIntegerOrInfinity(arg(args, 2))
+		if e != nil {
 			return mkundef(), e
 		}
-		_ = i
-		return mknum(0), nil
+		count := maxWaiters
+		if !arg(args, 2).IsUndefined() && !math.IsInf(cf, 1) {
+			if cf < 0 {
+				cf = 0
+			}
+			if cf < float64(maxWaiters) {
+				count = int(cf)
+			}
+		}
+		// Notifying a non-shared buffer is not an error; there is simply nobody
+		// on the list, because only a shared one can be waited on.
+		if b := o.ta.bufPtr; b == nil || !b.abShared {
+			return mknum(0), nil
+		}
+		return mknum(float64(rt.atomicsWake(o, i, count))), nil
 	})
 	// Atomics.pause([iterationNumber]): a spin-loop hint. iterationNumber, if
 	// present, must be an integral Number; the operation itself is a no-op here

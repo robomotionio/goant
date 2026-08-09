@@ -13,7 +13,10 @@ package engine
 // through valueOf -- which may detach the buffer under us. So the array is
 // checked again afterwards.
 
-import "math/big"
+import (
+	"math"
+	"math/big"
+)
 
 // atomicsAccess is ValidateTypedArray's accessMode. It exists for one case: an
 // immutable buffer refuses a write, and it refuses it here -- before the index
@@ -176,42 +179,58 @@ func atomicsNarrow(k taKind, n int64) int64 {
 	return n
 }
 
-// atomicsWaitResult is the shared front half of wait and waitAsync: everything
-// they must validate, and the answer that follows when there is nobody else to
-// change the cell. A wait on a buffer no one else can see is not a wait at all,
-// which is why it is a TypeError rather than a very long pause.
-func (rt *Runtime) atomicsWaitResult(args []Value) (string, *ThrowError) {
+// atomicsWaitPlan is what wait and waitAsync agree on before they diverge: the
+// validated location, how long to wait, and whether the value was still the one
+// the caller expected. Only a match ever parks.
+type atomicsWaitPlan struct {
+	view    *object
+	index   int
+	timeout float64 // milliseconds; +Inf for no deadline
+	matched bool
+}
+
+// atomicsWaitCheck is the shared front half of wait and waitAsync: DoWait steps
+// 1-14, in the order that makes each observable coercion happen exactly once
+// and in the right place. The timeout is coerced whatever the comparison said,
+// because a valueOf on it is observable either way.
+func (rt *Runtime) atomicsWaitCheck(args []Value) (atomicsWaitPlan, *ThrowError) {
+	var p atomicsWaitPlan
 	o, e := rt.atomicsView(arg(args, 0), true, atomicsRead)
 	if e != nil {
-		return "", e
+		return p, e
 	}
 	if b := o.ta.bufPtr; b == nil || !b.abShared {
-		return "", rt.typeError("Atomics.wait requires a SharedArrayBuffer")
+		return p, rt.typeError("Atomics.wait requires a SharedArrayBuffer")
 	}
 	i, e := rt.atomicsIndex(o, arg(args, 1))
 	if e != nil {
-		return "", e
+		return p, e
 	}
 	var matches bool
 	if isBigIntKind(o.ta.kind) {
 		want, e := rt.toBigInt(arg(args, 2))
 		if e != nil {
-			return "", e
+			return p, e
 		}
 		matches = atomicsReadBig(rt, o, i).Cmp(atomicsWrapBig(o.ta.kind, want)) == 0
 	} else {
 		f, e := rt.toIntegerOrInfinity(arg(args, 2))
 		if e != nil {
-			return "", e
+			return p, e
 		}
 		matches = atomicsReadInt(rt, o, i) == atomicsNarrow(o.ta.kind, int64(toUint32(f)))
 	}
-	// The timeout is coerced whatever the comparison said: it is observable.
-	if _, e := rt.toNumber(arg(args, 3)); e != nil {
-		return "", e
+	tv, e := rt.toNumber(arg(args, 3))
+	if e != nil {
+		return p, e
 	}
-	if !matches {
-		return "not-equal", nil
+	// NaN is +∞, not zero: an undefined timeout means wait until notified.
+	t := tv
+	switch {
+	case math.IsNaN(t):
+		t = math.Inf(1)
+	case t < 0:
+		t = 0
 	}
-	return "timed-out", nil
+	return atomicsWaitPlan{view: o, index: i, timeout: t, matched: matches}, nil
 }

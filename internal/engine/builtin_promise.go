@@ -65,6 +65,12 @@ const maxMacrotasks = 1 << 20
 func (rt *Runtime) runEventLoop() {
 	rt.drainMicrotasks()
 	for fired := 0; fired < maxMacrotasks; fired++ {
+		// A waitAsync whose answer is already known settles before the next
+		// timer, because a poll loop of zero-delay timers never lets the queue
+		// empty and would otherwise starve it forever.
+		if rt.settleReadyAsyncWaits() {
+			rt.drainMicrotasks()
+		}
 		// Pick the earliest live task by (delay, seq).
 		best := -1
 		for i := range rt.macrotasks {
@@ -82,6 +88,13 @@ func (rt *Runtime) runEventLoop() {
 			}
 		}
 		if best < 0 {
+			// Out of timers is not out of work: a waitAsync promise settles when
+			// another agent notifies it or its deadline passes, and neither is a
+			// job on any queue here.
+			if rt.serviceAsyncWaits() {
+				rt.drainMicrotasks()
+				continue
+			}
 			break
 		}
 		t := rt.macrotasks[best]

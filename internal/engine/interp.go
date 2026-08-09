@@ -130,7 +130,7 @@ func (rt *Runtime) runFrame(fn *svFunc, cl *closure, fnVal, thisVal Value, args 
 	// Function entry is a check point for the host interrupt, so unbounded
 	// recursion is caught without waiting on a loop back-edge. Once terminated,
 	// every subsequent frame refuses to start, which is what unwinds the stack.
-	if rt.interruptPending() {
+	if rt.interruptPending() && rt.interruptStops() {
 		return mkundef(), rt.terminated()
 	}
 	rt.frameStrict = fn.isStrict
@@ -244,7 +244,7 @@ func (rt *Runtime) jitCallCompiled(fnVal, thisVal Value, args []Value) (Value, *
 	savedStrict, savedActiveNT := rt.frameStrict, rt.activeNewTarget
 	// Function entry is a check point for the host interrupt, so unbounded
 	// recursion is caught without waiting on a loop back edge.
-	if rt.interruptPending() {
+	if rt.interruptPending() && rt.interruptStops() {
 		rt.frameDepth--
 		return mkundef(), rt.terminated(), true
 	}
@@ -1834,7 +1834,7 @@ running:
 			// spin without entering a frame, and so the other interrupt check
 			// point. Forward jumps pay nothing.
 			if t <= ip {
-				if rt.checkBackEdge() {
+				if rt.checkBackEdge() && rt.interruptStops() {
 					thrown = rt.terminated()
 					goto unwind
 				}
@@ -1859,7 +1859,7 @@ running:
 			if !rt.toBoolean(pop()) {
 				t := int(readU32(code, ip+1))
 				if t <= ip {
-					if rt.checkBackEdge() {
+					if rt.checkBackEdge() && rt.interruptStops() {
 						thrown = rt.terminated()
 						goto unwind
 					}
@@ -1876,7 +1876,7 @@ running:
 			if rt.toBoolean(pop()) {
 				t := int(readU32(code, ip+1))
 				if t <= ip {
-					if rt.checkBackEdge() {
+					if rt.checkBackEdge() && rt.interruptStops() {
 						thrown = rt.terminated()
 						goto unwind
 					}
