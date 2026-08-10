@@ -68,42 +68,75 @@ of it either, because a module pins one version of a dependency for the whole
 build: `//go:build windows` selects a different file, not a different v8go. What
 we did was keep two branches of our own code, one for each v8go version.
 
-**[Our own v8go fork](https://github.com/robomotionio/v8go)** (2026). Windows
-restored on amd64 and arm64 with clang-cl, and V8 moved up to 14.7. It works. It
-also means an LLVM toolchain per platform, ours to keep building: clang on
-Linux, Homebrew clang on macOS, and clang-cl on Windows, where Go's own cgo
-compiler cannot be used at all.
+**[Our own v8go fork](https://github.com/robomotionio/v8go)** landed in 2026. We
+restored Windows support on both amd64 and arm64 with clang-cl, and upgraded V8
+to 14.7.
 
-Two other things wore V8 out.
+It works, but it also means maintaining an LLVM toolchain for every platform.
 
-The first is memory it never gives back. V8 keeps per-isolate state that GC
-cannot reclaim, so a pooled isolate climbs to its 1.4 GB ceiling and the process
-dies there instead of throwing.
+V8 14 forced us to standardize on Clang across platforms. Linux uses Clang,
+macOS needs a newer Homebrew Clang with a small libc++ patch, and Windows uses
+clang-cl because Go's default MinGW toolchain is not ABI-compatible with V8.
 
-The second was our own doing. Messages used to be capped, so nothing large ever
-reached V8. Then we added Large Message Objects, which keep anything over a
-threshold outside the message itself, and flows started carrying tens of
-megabytes. Handing one to V8 copied it four times on the way in: Go bytes, Go
-string, C string, V8 string. A 13 MB message was around 50 MB live at once, and
-on Windows that killed the process with 4 GB of RAM still free. Windows commits
-memory up front instead of overcommitting, so near the system commit limit a
-50 MB transient allocation is refused however much RAM is free. Linux
-overcommits and never showed it. The fix is on the host, not in the code: a
-larger page file, memory compression off, a reboot, all of which an enterprise
-IT department has to agree to first.
+Toolchains were only part of the problem. Two other issues made V8 difficult to
+live with.
 
-Both fixes were partial. External strings let V8 point at the Go bytes instead
-of copying them, but only for ASCII: one Turkish character puts it back on the
-copies, at two bytes per character. LazyMessage put a `Proxy` in front of the
-message so nothing crossed until the script asked for it. That removed the
-copies and made a loop over 10,000 records take 19.7 s instead of 7.9 ms. The
-crossing into Go was cheap; each read rescanning the whole message to find one
-field was not.
+The first was memory.
 
-So the crashes stopped and the speed went. Neither answer suited every flow, so
-it shipped as a switch the customer sets, `--enable-features=LazyMessage`: large
-messages or fast ones, pick one. With a boundary in the middle, every fix moved
-the cost somewhere else rather than removing it.
+V8 keeps some per-isolate state that garbage collection cannot reclaim. Over
+time, a pooled isolate keeps growing until it reaches its roughly 1.4 GB limit.
+At that point, the process dies instead of returning an error we can handle.
+
+The second problem came from our own architecture.
+
+Messages used to have a size limit, so very large payloads never reached V8.
+Then we added Large Message Objects, which store large values outside the
+message itself. Suddenly, flows could carry tens of megabytes.
+
+Passing one of those messages into V8 caused several copies along the way: Go
+bytes, Go string, C string, then V8 string. A 13 MB message could temporarily
+use around 50 MB of memory.
+
+On Windows, that was enough to kill the process even with several gigabytes of
+RAM still free.
+
+The reason is that Windows commits memory up front. If the system is close to
+its commit limit, even a temporary 50 MB allocation can fail. Linux overcommits
+memory, so we never saw the same problem there.
+
+The practical fix was outside our code: increase the Windows page file, disable
+memory compression, and reboot. In an enterprise environment, even that can
+require IT approval.
+
+We also tried fixing it in software.
+
+External strings let V8 point directly at the Go memory instead of copying it.
+That worked well for ASCII, but non-ASCII text could put us back on the copying
+path.
+
+Then we built `LazyMessage`.
+
+Instead of passing the whole message into V8, `LazyMessage` puts a Proxy in
+front of it. Data only crosses into Go when the script actually reads a field.
+
+That solved the memory problem, but created a performance problem.
+
+A loop over 10,000 records went from 7.9 ms to 19.7 seconds.
+
+Crossing into Go was not the expensive part. The real cost was that every
+property read had to rescan the message to find the requested field.
+
+So neither approach worked well for every flow.
+
+We shipped `LazyMessage` behind a feature flag:
+
+`--enable-features=LazyMessage`
+
+Customers can choose based on the workload: lower memory usage for large
+messages, or better performance for normal ones.
+
+That became the pattern with V8. With a language and ABI boundary in the middle,
+many fixes do not remove the cost. They just move it somewhere else.
 
 **[goant](https://github.com/robomotionio/goant)** (2026). Ant came up on
 [Hacker News](https://news.ycombinator.com/item?id=48875377) as *"Show HN: Ant,
