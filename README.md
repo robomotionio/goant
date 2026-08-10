@@ -49,8 +49,9 @@ Still ES5, and now a C toolchain in every build on every platform we ship. The
 binding was archived four months after we moved off it.
 
 **[rogchap.com/v8go](https://github.com/rogchap/v8go)** (2021 to 2026). Current
-JavaScript at last, and five years of paying for it. v8go vendors prebuilt V8 as
-static archives, one per platform, and the set changed under us.
+JavaScript at last. We used it for five years, and shipping on every platform we
+support was the hard part. v8go vendors prebuilt V8 as static archives, one per
+platform, and the set is not the same from one release to the next.
 [v0.6.0](https://github.com/rogchap/v8go/releases), in May 2021, was the first
 release with a Windows binary. v0.7.0, that December, took it back out:
 *"Removed Windows support until its build issues are addressed."* The same
