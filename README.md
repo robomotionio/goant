@@ -67,14 +67,26 @@ also means a C++ toolchain per platform that is now ours to keep building.
 
 Two other things wore V8 out. It keeps per-isolate state that GC cannot reclaim,
 so a pooled isolate eventually reaches its 1.4 GB ceiling and the process dies
-instead of throwing. And a large message cost three copies to cross cgo: one Go
-string, one C string, one V8 string. On Windows that was fatal by itself. We
-routed around it with a `Proxy` over the message, which removed the copies and
-then made a loop over 10,000 records take 19.7 s instead of 7.9 ms. That is not
-a fix, it is a choice of which failure to have.
+instead of throwing. And a message reached the script through four copies: Go
+bytes, Go string, C string, V8 string. On Windows, 13 MB of it was fatal.
 
-**goant** (2026). No cgo boundary, so there is nothing to marshal and no
-`abort()` to catch. [The long version](docs/why-goant-exists.md).
+We fixed that twice, and both fixes were partial. External strings let V8 point
+into the Go bytes instead of copying them, but only while the message is ASCII;
+one Turkish character falls back to the copies, and V8 then stores the whole
+string at two bytes per character. LazyMessage replaced the message with a
+`Proxy` backed by Go callbacks, so nothing crossed the boundary until the script
+asked for it. It removed the copies, and it made a loop over 10,000 records take
+19.7 s instead of 7.9 ms, because every property read rescanned the whole
+document. It shipped behind a per-robot flag, which is not a fix. It is a choice
+of which failure to have.
+
+**goant** (2026). ant came up on
+[Hacker News](https://news.ycombinator.com/item?id=48875377) as *"Show HN: Ant,
+a JavaScript runtime and ecosystem"*. Its engine, Silver, is written in C, which
+is near enough to Go to port from rather than reimplement, so we tried it. Once
+it ran we started on test262, then on a baseline JIT, and that is where we are.
+No cgo boundary, so nothing to marshal and no `abort()` to catch.
+[The long version](docs/why-goant-exists.md).
 
 ## Why goant?
 
