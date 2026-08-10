@@ -60,11 +60,16 @@ binding was archived four months after we moved off it.
 
 **[rogchap.com/v8go](https://github.com/rogchap/v8go)** (2021 to 2026). Current
 JavaScript at last, and five years of paying for it. v8go vendors prebuilt V8 as
-static archives, one per platform, and the set changes between releases. Its
-last release with a Windows archive is also its only release with no arm64
-archive. So the versions that bring Apple Silicon and the Pi are the versions
-that drop Windows. Windows is our largest install base, so we stayed on a V8
-from April 2021.
+static archives, one per platform, and the set changed under us.
+[v0.6.0](https://github.com/rogchap/v8go/releases), in May 2021, was the first
+release with a Windows binary. v0.7.0, that December, took it back out:
+*"Removed Windows support until its build issues are addressed."* The same
+release is the one that added Apple Silicon and linux/arm64. So the version with
+Windows and the version with arm64 were never the same version.
+
+Windows is our largest install base, so we stayed on v0.6.0, and with it a V8
+from April 2021. Building for the platforms we ship then became ours to do, one
+at a time: Apple Silicon, Intel Mac and Windows.
 
 **[Our own v8go fork](https://github.com/robomotionio/v8go)** (2026). Windows
 restored on amd64 and arm64 with clang-cl, and V8 moved up to 14.7. It works. It

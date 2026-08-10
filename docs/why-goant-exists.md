@@ -33,14 +33,19 @@ to the next:
 | v0.9.0 | `darwin_arm64`, `darwin_x86_64`, `linux_arm64`, `linux_x86_64` |
 | our fork | all four, plus `windows_arm64` and `windows_x86_64` |
 
-v0.6.0 is the last release with a Windows archive, and Windows is our largest
-install base — so v0.6.0, and the V8 9.0 it carries from April 2021, is where we
-stayed. It is also the release with no arm64 archive at all: the versions that
-would have brought Apple Silicon and Raspberry Pi are exactly the versions that
-drop Windows. Two attempts to move up were reverted within a day. Upstream's own
-README says only *"There used to be Windows binary support"*. In 2026 we forked
-it, restored Windows amd64 and arm64 with clang-cl, and moved to V8 14.7 — which
-means a C++ toolchain per platform that is now ours to keep working.
+v0.6.0 (May 2021) was the first release to ship a Windows binary. v0.7.0
+(December 2021) took it back out — its notes say *"Removed Windows support until
+its build issues are addressed"* — and the very same release added Apple Silicon
+and linux/arm64. So the version with Windows and the version with arm64 have
+never been the same version.
+
+Windows is our largest install base, so v0.6.0, and the V8 9.0 it carries from
+April 2021, is where we stayed for five years. Two attempts to move up were
+reverted within a day. Building for the platforms we ship became ours to do, one
+at a time. Upstream's README still says only *"There used to be Windows binary
+support"*. In 2026 we forked it, restored Windows amd64 and arm64 with clang-cl,
+and moved to V8 14.7 — which means a C++ toolchain per platform that is now ours
+to keep working.
 
 **Half two: memory.** V8's per-isolate state — hidden classes, inline caches,
 JIT code, type-feedback maps — is not reclaimable by GC; only disposing the
