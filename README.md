@@ -83,7 +83,16 @@ reached V8. Then we added Large Message Objects, which keep anything over a
 threshold outside the message itself, and flows started carrying tens of
 megabytes. Handing one to V8 copied it four times on the way in: Go bytes, Go
 string, C string, V8 string. A 13 MB message was around 50 MB live at once, and
-on Windows that was enough to kill the process.
+on Windows that was enough to kill the process while the machine still reported
+4 GB of RAM free.
+
+That figure was misleading. Windows can run out of commit before it runs out of
+physical memory, and once the system commit charge is near its limit a 50 MB
+transient allocation is refused however much RAM appears to be free. Linux
+overcommits, so it never showed this at all. The fix is on the host rather than
+in the code: a larger page file, memory compression off, a reboot. That is a
+change an enterprise IT department has to approve, which is a poor place for a
+customer's automation to be stuck.
 
 Both fixes for it were partial. External strings let V8 point at the Go bytes
 instead of copying them, but only for ASCII: one Turkish character puts it back
