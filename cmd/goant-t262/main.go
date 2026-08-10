@@ -814,8 +814,10 @@ func report(res []result, verbose, showSkip bool, failFile string) {
 		rate = 100 * float64(pass) / float64(run)
 	}
 	fmt.Printf("%-46s %8d %8d %8d %6.1f%%\n", "TOTAL", pass, fail, skip, rate)
-	fmt.Printf("\n%d/%d passing (of %d run; %d skipped)\n", pass, run, run, skip)
 	reportPeaks()
+	// The score last, so `| tail -3` still shows it. The peak table is a
+	// diagnostic and belongs above the headline, not in front of it.
+	fmt.Printf("\n%d/%d passing (of %d run; %d skipped)\n", pass, run, run, skip)
 
 	if failFile != "" {
 		var b strings.Builder
