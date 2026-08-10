@@ -410,6 +410,52 @@ type result struct {
 	reason  string
 }
 
+// peakTop is how many of the hungriest tests to name. A run that dies for
+// memory should say which test did it, in the run itself: chasing a 30 GB peak
+// by bisecting the suite with address-space caps cost hours and produced three
+// wrong answers before this existed.
+const peakTop = 10
+
+var (
+	peakMu     sync.Mutex
+	peakByTest = map[string]int64{}
+)
+
+func notePeak(path string, rss int64) {
+	if rss == 0 {
+		return
+	}
+	peakMu.Lock()
+	if rss > peakByTest[path] {
+		peakByTest[path] = rss
+	}
+	peakMu.Unlock()
+}
+
+// reportPeaks names the hungriest tests. Printed always, not only on failure:
+// the number that matters is the LARGEST SINGLE CHILD, because that is what has
+// to fit the machine, and a suite total hides it.
+func reportPeaks() {
+	peakMu.Lock()
+	defer peakMu.Unlock()
+	if len(peakByTest) == 0 {
+		return
+	}
+	type kv struct {
+		path string
+		rss  int64
+	}
+	all := make([]kv, 0, len(peakByTest))
+	for p, r := range peakByTest {
+		all = append(all, kv{p, r})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].rss > all[j].rss })
+	fmt.Printf("\npeak memory, hungriest %d of %d tests:\n", min(peakTop, len(all)), len(all))
+	for _, e := range all[:min(peakTop, len(all))] {
+		fmt.Printf("  %8.2f GB  %s\n", float64(e.rss)/(1<<30), e.path)
+	}
+}
+
 func runAll(runner, root string, tests []string, harness map[string]string, timeout time.Duration, jobs int) []result {
 	tmpDir, err := os.MkdirTemp("", "goant-t262-")
 	if err != nil {
@@ -506,6 +552,7 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 		// Flags must precede the positional file (flag parsing stops at the first
 		// non-flag argument).
 		ex := execRunnerArgs(runner, []string{"-module", "-prelude", preFile, modFile}, timeout)
+		notePeak(rel, ex.maxRSS)
 		if ok, reason := classify(m, ex); !ok {
 			return result{rel, outFail, "module: " + reason}
 		}
@@ -522,6 +569,7 @@ func runOne(runner, root, path string, harness map[string]string, timeout time.D
 			return result{rel, outFail, "write: " + err.Error()}
 		}
 		ex := execRunnerArgs(runner, []string{"-module-base", baseDir, scratch}, timeout)
+		notePeak(rel, ex.maxRSS)
 		if ok, reason := classify(m, ex); !ok {
 			return result{rel, outFail, variant + ": " + reason}
 		}
@@ -591,6 +639,11 @@ type execResult struct {
 	stdout   string
 	stderr   string
 	timedOut bool
+	// maxRSS is the child's peak resident size, straight from the kernel via
+	// wait4. Free -- the kernel has already counted it -- and it is the only way
+	// to answer "which test used the memory" without bisecting the suite with
+	// caps, which is what -peak reports.
+	maxRSS int64
 }
 
 func execRunner(runner, file string, timeout time.Duration) execResult {
@@ -610,7 +663,7 @@ func execRunnerArgs(runner string, args []string, timeout time.Duration) execRes
 	cmd.Stdout = &so
 	cmd.Stderr = &se
 	err := cmd.Run()
-	r := execResult{stdout: so.String(), stderr: se.String()}
+	r := execResult{stdout: so.String(), stderr: se.String(), maxRSS: childMaxRSS(cmd)}
 	if ctx.Err() == context.DeadlineExceeded {
 		r.timedOut = true
 		r.exit = -1
@@ -762,6 +815,7 @@ func report(res []result, verbose, showSkip bool, failFile string) {
 	}
 	fmt.Printf("%-46s %8d %8d %8d %6.1f%%\n", "TOTAL", pass, fail, skip, rate)
 	fmt.Printf("\n%d/%d passing (of %d run; %d skipped)\n", pass, run, run, skip)
+	reportPeaks()
 
 	if failFile != "" {
 		var b strings.Builder

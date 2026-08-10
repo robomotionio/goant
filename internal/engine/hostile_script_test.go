@@ -334,3 +334,48 @@ func TestConsoleLogDoesNotAskTheScriptWhatASymbolIsCalled(t *testing.T) {
 		t.Error("printing a symbol called back into the script")
 	}
 }
+
+// TestReplaceTemplateCannotExpandWithoutBound. A replacement template expands
+// MULTIPLICATIVELY: every $& or $1 inserts a copy of something as large as the
+// subject, so a small template against a moderate string is not a moderate
+// result. 32,768 backreferences over a 1 MB subject is 32 GB from one call, and
+// it was reached without the engine ever consulting its own maximum string
+// length -- which repeat and padStart have checked all along.
+//
+// The subject here is small enough to keep the test quick; what it pins is that
+// the refusal happens at all, and that it is the ordinary catchable RangeError
+// rather than a dead process.
+func TestReplaceTemplateCannotExpandWithoutBound(t *testing.T) {
+	rt := New()
+	v, err := rt.RunString("expand.js", `
+		let s = "x".repeat(1 << 16);
+		let tmpl = "$1".repeat(1 << 14);
+		let out;
+		try { out = "len:" + s.replace(/(.+)/g, tmpl).length; }
+		catch (e) { out = e.constructor.name; }
+		out;
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := rt.strGo(v); got != "RangeError" {
+		t.Errorf("a 1 GB expansion produced %q; it must refuse with a RangeError "+
+			"before allocating, not after", got)
+	}
+}
+
+// And an ordinary replacement is untouched by the bound.
+func TestOrdinaryReplacementsStillExpand(t *testing.T) {
+	rt := New()
+	// The prefix/suffix forms use a backtick, which a Go raw string cannot hold,
+	// so this one is an interpreted literal.
+	v, err := rt.RunString("ok.js", "\"a-b-c\".replace(/(\\w)-(\\w)/, \"$2$1\") + \"|\" +\n"+
+		"\"xyz\".replace(/y/, \"[$&]\") + \"|\" +\n"+
+		"\"abc\".replace(/b/, \"$`\" + \"$'\")")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got, want := rt.strGo(v), "ba-c|x[y]z|aacc"; got != want {
+		t.Errorf("replacement expansion = %q, want %q", got, want)
+	}
+}

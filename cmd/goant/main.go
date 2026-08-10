@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/pprof"
+	"strconv"
 	"strings"
 
 	"github.com/robomotionio/goant/internal/engine"
@@ -80,6 +81,37 @@ func main() {
 	// that run scripts. See Runtime.EnableAgents.
 	if os.Getenv("GOANT_AGENTS") == "1" {
 		rt.EnableAgents()
+	}
+	// GOANT_HEAP_LIMIT bounds the live heap, in megabytes, for a host that runs
+	// this binary rather than links the package -- which for us means the
+	// conformance harness, one process per test.
+	//
+	// It exists because a single test262 file can ask for an unbounded amount:
+	// measured, `-all` peaked at 30.6 GB in ONE child, which fits our 31 GB
+	// bench box by 400 MB and cannot fit a 16 GB CI runner at all. The runner
+	// there does not fail the test, it dies, and the job reports "the runner has
+	// received a shutdown signal" with no indication that memory was the reason.
+	if mb := os.Getenv("GOANT_HEAP_LIMIT"); mb != "" {
+		n, err := strconv.ParseUint(mb, 10, 64)
+		if err != nil || n == 0 {
+			fmt.Fprintf(os.Stderr, "goant: GOANT_HEAP_LIMIT must be a positive number of megabytes, got %q\n", mb)
+			os.Exit(2)
+		}
+		rt.SetHeapLimit(n << 20)
+	}
+	// GOANT_ADDR_LIMIT is the hard counterpart, in megabytes: a kernel cap on
+	// the address space rather than a budget the engine charges itself. The two
+	// are not interchangeable — see setAddressSpaceLimit.
+	if mb := os.Getenv("GOANT_ADDR_LIMIT"); mb != "" {
+		n, err := strconv.ParseUint(mb, 10, 64)
+		if err != nil || n == 0 {
+			fmt.Fprintf(os.Stderr, "goant: GOANT_ADDR_LIMIT must be a positive number of megabytes, got %q\n", mb)
+			os.Exit(2)
+		}
+		if err := setAddressSpaceLimit(n << 20); err != nil {
+			fmt.Fprintf(os.Stderr, "goant: could not cap the address space: %v\n", err)
+			os.Exit(2)
+		}
 	}
 	if *modBase != "" {
 		rt.SetModuleBase(*modBase)

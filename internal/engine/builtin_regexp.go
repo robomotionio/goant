@@ -1913,6 +1913,20 @@ func (rt *Runtime) expandReplacement(tmpl, match string, position int, input []r
 	matchLen := utf16Len([]byte(match))
 	var out strings.Builder
 	for i := 0; i < len(tmpl); i++ {
+		// A template expands multiplicatively: every $&, $1 or $` inserts a copy
+		// of something as large as the subject, so a modest template against a
+		// modest string is not a modest result. test262's
+		// staging/sm/String/replace-math.js replaces a 1 MB string with a
+		// template holding 32,768 $1 references, which is 32 GB from one call --
+		// and the test asserts a length of 2^36 while saying in its own comment
+		// that running out of memory is an acceptable outcome.
+		//
+		// Checked per iteration rather than at the end, because the point is to
+		// refuse BEFORE the allocation rather than to notice afterwards. The
+		// overshoot is bounded by one insertion, which is at most the subject.
+		if out.Len() > maxStringLength {
+			return "", rt.rangeError("Invalid string length")
+		}
 		if tmpl[i] != '$' || i+1 >= len(tmpl) {
 			out.WriteByte(tmpl[i])
 			continue

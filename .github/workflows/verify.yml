@@ -30,6 +30,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      only:
+        description: "Which job group to run"
+        type: choice
+        default: all
+        options: [all, unit, test262, fuzz]
+      platforms:
+        description: "Comma-separated runs-on, blank for all (e.g. ubuntu-24.04)"
+        type: string
+        default: ""
   schedule:
     # Nightly, because the fuzzer finds more the longer it is left alone and a
     # nightly run is the only one whose corpus is not competing with a push.
@@ -54,24 +64,53 @@ permissions:
   contents: read
 
 jobs:
+  # Debugging one platform should cost one runner, not fifteen. A dispatch can
+  # name a job group and a platform list; a push or the nightly schedule leaves
+  # both blank and gets everything. Chasing a single Linux failure through the
+  # full matrix -- two macOS runners included -- three times over is what this
+  # exists to stop.
+  plan:
+    name: plan
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.p.outputs.matrix }}
+      unit: ${{ steps.p.outputs.unit }}
+      test262: ${{ steps.p.outputs.test262 }}
+      fuzz: ${{ steps.p.outputs.fuzz }}
+    steps:
+      - id: p
+        shell: bash
+        env:
+          WANT: ${{ github.event.inputs.only || 'all' }}
+          PLATFORMS: ${{ github.event.inputs.platforms || '' }}
+        run: |
+          all='[{"name":"ubuntu-22.04 amd64","runs-on":"ubuntu-22.04"},
+                {"name":"ubuntu-24.04 amd64","runs-on":"ubuntu-24.04"},
+                {"name":"windows amd64","runs-on":"windows-latest"},
+                {"name":"macos arm64","runs-on":"macos-15"},
+                {"name":"macos intel","runs-on":"macos-15-intel"}]'
+          if [ -n "$PLATFORMS" ]; then
+            sel=$(printf '%s' "$PLATFORMS" | tr ',' '\n' | sed 's/ //g' | jq -R . | jq -sc .)
+            m=$(printf '%s' "$all" | jq -c --argjson sel "$sel" '[.[] | select(.["runs-on"] as $r | $sel | index($r))]')
+            [ "$m" = "[]" ] && { echo "::error::no platform matched \"$PLATFORMS\""; exit 1; }
+          else
+            m=$(printf '%s' "$all" | jq -c .)
+          fi
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
+          for g in unit test262 fuzz; do
+            if [ "$WANT" = all ] || [ "$WANT" = "$g" ]; then echo "$g=true"; else echo "$g=false"; fi
+          done >> "$GITHUB_OUTPUT"
+          echo "running $WANT on $m"
   unit:
+    needs: plan
+    if: needs.plan.outputs.unit == 'true'
     name: unit / ${{ matrix.name }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: ubuntu-22.04 amd64
-            runs-on: ubuntu-22.04
-          - name: ubuntu-24.04 amd64
-            runs-on: ubuntu-24.04
-          - name: windows amd64
-            runs-on: windows-latest
-          - name: macos arm64
-            runs-on: macos-15
-          - name: macos intel
-            runs-on: macos-15-intel
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -139,23 +178,15 @@ jobs:
         run: go test -count=1 -race ./internal/engine/
 
   test262:
+    needs: plan
+    if: needs.plan.outputs.test262 == 'true'
     name: test262 / ${{ matrix.name }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: ubuntu-22.04 amd64
-            runs-on: ubuntu-22.04
-          - name: ubuntu-24.04 amd64
-            runs-on: ubuntu-24.04
-          - name: windows amd64
-            runs-on: windows-latest
-          - name: macos arm64
-            runs-on: macos-15
-          - name: macos intel
-            runs-on: macos-15-intel
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -332,23 +363,15 @@ jobs:
           retention-days: 14
 
   fuzz:
+    needs: plan
+    if: needs.plan.outputs.fuzz == 'true'
     name: fuzz / ${{ matrix.name }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: ubuntu-22.04 amd64
-            runs-on: ubuntu-22.04
-          - name: ubuntu-24.04 amd64
-            runs-on: ubuntu-24.04
-          - name: windows amd64
-            runs-on: windows-latest
-          - name: macos arm64
-            runs-on: macos-15
-          - name: macos intel
-            runs-on: macos-15-intel
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
