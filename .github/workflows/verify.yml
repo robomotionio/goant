@@ -187,9 +187,17 @@ jobs:
       - name: Build the runner
         shell: bash
         working-directory: goant
+        # .exe on Windows, and the runner named explicitly rather than left to
+        # the -runner default of "./goant". Without the suffix the harness's
+        # exec of "./goant" fails LookPath on every single test, which is not a
+        # hypothetical: it is what this job did for its whole existence.
         run: |
-          go build -o goant ./cmd/goant
-          go build -o goant-t262 ./cmd/goant-t262
+          EXE=""
+          [ "$RUNNER_OS" = "Windows" ] && EXE=".exe"
+          go build -o "goant$EXE" ./cmd/goant
+          go build -o "goant-t262$EXE" ./cmd/goant-t262
+          echo "T262=./goant-t262$EXE" >> "$GITHUB_ENV"
+          echo "RUNNER=./goant$EXE" >> "$GITHUB_ENV"
 
       - name: test262, tier off
         shell: bash
@@ -198,7 +206,7 @@ jobs:
         # are enormous and the hosted runners are shared; at 10s they landed on
         # either side of the limit from run to run, which is noise this job then
         # had to reason about.
-        run: ./goant-t262 -core -t262 ../test262 -timeout 30s -failures ../off.txt | tail -3
+        run: $T262 -core -t262 ../test262 -runner "$RUNNER" -timeout 30s -failures ../off.txt | tee ../off.summary | tail -3
 
       - name: test262, tier on
         shell: bash
@@ -206,7 +214,7 @@ jobs:
         env:
           GOANT_JIT: "1"
           GOANT_JIT_THRESHOLD: "2"
-        run: ./goant-t262 -core -t262 ../test262 -timeout 30s -failures ../on.txt | tail -3
+        run: $T262 -core -t262 ../test262 -runner "$RUNNER" -timeout 30s -failures ../on.txt | tee ../on.summary | tail -3
 
       # The gate. Not the score: a score has to be kept up to date by hand and
       # goes stale the first time someone fixes a test. What must be zero is the
@@ -230,6 +238,35 @@ jobs:
       - name: No test may fail only with the tier on
         shell: bash
         run: |
+          # A DIFFERENTIAL gate passes trivially when both arms are equally
+          # broken, and it did: on Windows the harness could not exec the runner,
+          # so all 47,351 tests failed identically with the tier off and on, the
+          # two lists were byte-for-byte the same, and this step reported "0
+          # tests answered differently" and went green. It was green for as long
+          # as the job has existed, while testing nothing at all.
+          #
+          # So the difference is checked only after each arm is shown to have
+          # RUN. Any exec failure is fatal, and so is a pass rate on the floor —
+          # a proportion rather than a pinned score, so it never goes stale and
+          # still catches a run that collapsed.
+          for arm in off on; do
+            if grep -q "executable file not found\|\[exec\]" "$arm.txt"; then
+              echo "::error::the $arm arm could not run the engine — this is a broken harness, not a test result"
+              grep -m 3 "executable file not found\|\[exec\]" "$arm.txt" | sed 's/^/  /'
+              exit 1
+            fi
+            read -r pass total <<<"$(sed -n 's#^\([0-9][0-9]*\)/\([0-9][0-9]*\) passing.*#\1 \2#p' "$arm.summary" | head -1)"
+            if [ -z "${pass:-}" ] || [ -z "${total:-}" ] || [ "$total" -eq 0 ]; then
+              echo "::error::could not read a score out of the $arm arm; it did not finish"
+              cat "$arm.summary"; exit 1
+            fi
+            if [ "$((pass * 100 / total))" -lt 50 ]; then
+              echo "::error::the $arm arm passed $pass of $total — that is a broken run, not a regression"
+              exit 1
+            fi
+            echo "$arm arm: $pass/$total"
+          done
+
           answers() { awk -F'\t' '$2 !~ /timeout/ {print $1}' "$1" | sort -u; }
           timeouts() { awk -F'\t' '$2 ~ /timeout/ {print $1}' "$1" | sort -u; }
 
@@ -308,6 +345,18 @@ jobs:
         run: |
           go test ./internal/engine/ -run xxx -fuzz FuzzJITAgreesWithTheInterpreter -fuzztime=5m -parallel=4 > fuzz.log 2>&1 || true
           tail -5 fuzz.log
+
+          # The verdict below is "no crasher was written", and NOTHING is also no
+          # crasher: a build error, a bad flag or a harness that dies on start-up
+          # all produce a clean-looking run. The test262 job shipped exactly that
+          # bug -- green for its whole existence while the runner could not exec
+          # -- so prove the fuzzer actually fuzzed before believing its silence.
+          if ! grep -q "elapsed:" fuzz.log; then
+            echo "::error::the fuzzer never started; this is not a clean run"
+            cat fuzz.log
+            exit 1
+          fi
+
           if git status --porcelain internal/engine/testdata/fuzz/ | grep -q . \
              || grep -qi "Failing input written\|failure while testing seed" fuzz.log; then
             echo "::error::the fuzzer found a disagreement"
