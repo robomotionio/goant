@@ -46,36 +46,38 @@ still faster at running them — see [Benchmarks](#benchmarks).
 ## The road here
 
 [Robomotion](https://www.robomotion.io)'s robot runtime evaluates customer
-JavaScript in Function nodes — a script per message, millions of messages, on
-Windows laptops, Raspberry Pis, Apple Silicon and Linux servers. Four engines in
-seven years:
+JavaScript in Function nodes: a script per message, millions of messages, on
+Windows laptops, Raspberry Pis, Apple Silicon and Linux servers. It has run four
+JavaScript engines in seven years.
 
-**otto** (2019), pure Go. Dropped for the dialect: ES5 only, and Go's `regexp`
-for regular expressions, so no lookahead and no backreferences. It passes 20.9%
-of test262.
+**otto** (2019), pure Go. Dropped for the dialect. It is ES5 only, and it uses
+Go's `regexp` package, so there is no lookahead and there are no backreferences.
+It passes 20.9% of test262.
 
 **duktape** (2021), C through cgo. Still ES5, and now a C toolchain in every
 build on every platform we ship.
 
-**V8 through v8go** (2021–2026) — current JavaScript at last, and five years of
-paying for it. v8go vendors prebuilt V8 as static archives, and its last release
-carrying a Windows archive is also its only one carrying no arm64 archive: the
-versions that bring Apple Silicon and the Pi are the versions that drop Windows.
-Windows is our largest install base, so we sat on a V8 from April 2021 until we
-forked v8go in 2026 to restore Windows and get to V8 14.7 — which buys a C++
-toolchain per platform to maintain.
+**rogchap.com/v8go** (2021 to 2026). Current JavaScript at last, and five years
+of paying for it. v8go vendors prebuilt V8 as static archives, one per platform,
+and the set changes between releases. Its last release with a Windows archive is
+also its only release with no arm64 archive. So the versions that bring Apple
+Silicon and the Pi are the versions that drop Windows. Windows is our largest
+install base, so we stayed on a V8 from April 2021.
 
-Two things wore it out. V8's per-isolate state — hidden classes, inline caches,
-JIT code, type feedback — is not reclaimable by GC, so a pooled isolate
-eventually walks into its ~1.4 GB ceiling and the process dies rather than
-throws. And a large message cost three copies crossing cgo — Go string, C
-string, V8 string — which on Windows was fatal by itself. Routing around that
-with a `Proxy` over the message removed the copies, and made a loop over 10,000
-records take 19.7 s instead of 7.9 ms: not a fix so much as a choice of which
-failure to have.
+**Our own v8go fork** (2026). Windows restored on amd64 and arm64 with clang-cl,
+and V8 moved up to 14.7. It works. It also means a C++ toolchain per platform
+that is now ours to keep building.
 
-**goant** (2026). No cgo boundary, so nothing to marshal and no `abort()` to
-catch. [The long version](docs/why-goant-exists.md).
+Two other things wore V8 out. It keeps per-isolate state that GC cannot reclaim,
+so a pooled isolate eventually reaches its 1.4 GB ceiling and the process dies
+instead of throwing. And a large message cost three copies to cross cgo: one Go
+string, one C string, one V8 string. On Windows that was fatal by itself. We
+routed around it with a `Proxy` over the message, which removed the copies and
+then made a loop over 10,000 records take 19.7 s instead of 7.9 ms. That is not
+a fix, it is a choice of which failure to have.
+
+**goant** (2026). No cgo boundary, so there is nothing to marshal and no
+`abort()` to catch. [The long version](docs/why-goant-exists.md).
 
 ## Why not goja?
 
