@@ -858,6 +858,54 @@ func (rt *Runtime) markSlice(vs []Value) {
 type parkedFrames struct {
 	frames []vmFrame
 	slabs  []frameSlab
+	// And the driver's compiled contexts, for the same reason as frames: while
+	// a coroutine has the engine they are reachable from nothing the collector
+	// walks. jitDepth comes with them because it is what bounds the live part,
+	// and it lives on the Runtime rather than beside the slice.
+	jitFrames []*jitmem.ExecContext
+	jitDepth  int
+}
+
+// markJITFrames marks the live part of a compiled-frame context chain: the
+// receiver, the callee, the return slot, the operand stack and the locals of
+// every frame up to depth.
+//
+// depth is clamped to what the slice actually holds. The two are separate
+// fields — the chain is swapped per coroutine in genDrive while the depth lives
+// on the Runtime — and when they disagree this is a `slice bounds out of range`
+// inside the collector, which is what it was before genDrive learned to swap
+// both. The clamp is a belt on top of that fix: getting a root wrong is a
+// silent wrong answer later, and crashing the process here is worse than
+// tracing one frame too few in a state that should not arise.
+func (rt *Runtime) markJITFrames(frames []*jitmem.ExecContext, depth int) {
+	if depth > len(frames) {
+		depth = len(frames)
+	}
+	for _, ctx := range frames[:depth] {
+		rt.markValue(Value(ctx.Args[2]))
+		rt.markValue(Value(ctx.Ret))
+		// The receiver, which reaches compiled code as an integer and is
+		// otherwise reachable only from the interpreter frame that entered it —
+		// a frame this walk does not descend into.
+		rt.markValue(Value(ctx.This))
+		// The running function itself, for the self-reference a named function
+		// expression binds.
+		rt.markValue(Value(ctx.FnVal))
+		// The operand stack the frame left behind when it called out. StackN is
+		// compiled code's own statement of how much of it is live; past that the
+		// slots hold whatever an earlier frame at this depth wrote, which is
+		// exactly what must not be traced.
+		for _, v := range jitFrameStack(ctx) {
+			rt.markValue(v)
+		}
+		// And its variables, for a frame a compiled call site opened. Those have
+		// no vmFrame and no entry in the locals slab — the context is the whole
+		// of what they published — so this is the only place they are reachable
+		// from. NLocals is zero for every other frame.
+		for _, v := range jitCtxLocals(ctx) {
+			rt.markValue(v)
+		}
+	}
 }
 
 func (rt *Runtime) markSlabs(slabs []frameSlab) {
@@ -930,6 +978,7 @@ func (rt *Runtime) markRoots() {
 		for i := range r.parked {
 			rt.markFrames(r.parked[i].frames)
 			rt.markSlabs(r.parked[i].slabs)
+			rt.markJITFrames(r.parked[i].jitFrames, r.parked[i].jitDepth)
 		}
 
 		// The intern table maps text to a string cell by Handle, not by Value, so
@@ -952,31 +1001,7 @@ func (rt *Runtime) markRoots() {
 		// The live part of the chain, and only that: contexts are built ahead of
 		// where anything has run and are never freed, so past this depth they
 		// hold whatever the last frame there left behind — see jitCtxAt.
-		for _, ctx := range r.jitFrames[:r.jitDepth] {
-			rt.markValue(Value(ctx.Args[2]))
-			rt.markValue(Value(ctx.Ret))
-			// The receiver, which reaches compiled code as an integer and is
-			// otherwise reachable only from the interpreter frame that entered
-			// it — a frame this walk does not descend into.
-			rt.markValue(Value(ctx.This))
-			// The running function itself, for the self-reference a named
-			// function expression binds.
-			rt.markValue(Value(ctx.FnVal))
-			// The operand stack the frame left behind when it called out.
-			// StackN is compiled code's own statement of how much of it is
-			// live; past that the slots hold whatever an earlier frame at this
-			// depth wrote, which is exactly what must not be traced.
-			for _, v := range jitFrameStack(ctx) {
-				rt.markValue(v)
-			}
-			// And its variables, for a frame a compiled call site opened. Those
-			// have no vmFrame and no entry in the locals slab — the context is
-			// the whole of what they published — so this is the only place they
-			// are reachable from. NLocals is zero for every other frame.
-			for _, v := range jitCtxLocals(ctx) {
-				rt.markValue(v)
-			}
-		}
+		rt.markJITFrames(r.jitFrames, r.jitDepth)
 
 		// A suspended async function has no object to hang its coroutine off, so
 		// asyncFrames is what keeps it alive; the reflective walk below finds it

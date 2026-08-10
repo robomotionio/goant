@@ -77,6 +77,12 @@ type genState struct {
 	// context is addressed by depth, so sharing the driver's chain would let
 	// the driver hand a live frame's context to something else at that depth.
 	jitFrames []*jitmem.ExecContext
+	// jitDepth is how far into jitFrames this coroutine was when it suspended,
+	// the counterpart of genDepth for the compiled chain. It has to travel with
+	// jitFrames: the depth lives on the Runtime, so swapping the slice without
+	// it leaves the driver's depth indexing the coroutine's (initially empty)
+	// slice, and the collector reads jitFrames[:jitDepth].
+	jitDepth int
 
 	// asyncReqs is the async-generator request queue (AsyncGeneratorRequest
 	// records): next/return/throw calls are serviced one at a time, since an
@@ -161,6 +167,9 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 	// the driver reuses, and the collector reads both sets.
 	mainFrames := rt.frames
 	rt.frames = g.frames
+	// The compiled chain and the depth that bounds it, captured here so the park
+	// below can hold them and the collector can reach them.
+	mainJIT, mainJITDepth := rt.jitFrames, rt.jitDepth
 	// Both of those are now reachable only from the Go locals above, and the
 	// collector walks the Runtime, not this stack frame. Park them where it can
 	// see them for as long as the coroutine has the engine.
@@ -173,11 +182,13 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 	// the sibling function declaration sitting in the driver's own locals, and
 	// the failure surfaced as ordinary JavaScript calling a value that was no
 	// longer a function, with nothing on the stack to say why.
-	rt.parked = append(rt.parked, parkedFrames{frames: mainFrames, slabs: mainSlabs})
+	rt.parked = append(rt.parked, parkedFrames{
+		frames: mainFrames, slabs: mainSlabs,
+		jitFrames: mainJIT, jitDepth: mainJITDepth,
+	})
 	// And the same for the compiled frames' contexts, which are addressed by
 	// depth like the two above and stay live for the same reason.
-	mainJIT := rt.jitFrames
-	rt.jitFrames = g.jitFrames
+	rt.jitFrames, rt.jitDepth = g.jitFrames, g.jitDepth
 	if !g.started {
 		g.started = true
 		go rt.genRun(g)
@@ -191,6 +202,7 @@ func (rt *Runtime) genDrive(g *genState, kind genResumeKind, val Value) genMsg {
 	g.slabs = rt.swapSlabs(mainSlabs)
 	g.frames, rt.frames = rt.frames, mainFrames
 	g.jitFrames, rt.jitFrames = rt.jitFrames, mainJIT
+	g.jitDepth, rt.jitDepth = rt.jitDepth, mainJITDepth
 	rt.curGen = prevGen
 	rt.frameDepth = mainDepth
 	if m.done || m.err != nil {
