@@ -315,7 +315,7 @@ imported suite; [Status](#status) accounts for the rest.
 ## Benchmarks
 
 Measured on an idle Azure `Standard_D8s_v5` created for the purpose. Scripts are
-in the repository; see [Reproducing](#reproducing).
+in the repository, and the Environment note below has the commands.
 
 ### Octane 2.0
 
