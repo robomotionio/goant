@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/robomotionio/goant/internal/harness"
 )
 
 // engine is one JavaScript implementation to measure. args are whatever has to
@@ -243,6 +245,12 @@ func runEngine(e engine, script string) ([]byte, error) {
 	defer cancel()
 	args := append(append([]string{}, e.args...), script)
 	cmd := exec.CommandContext(ctx, e.bin, args...)
+	// Explicit, because engineKey reads GOANT_JIT from THIS process to decide
+	// whether the column is +jit. If the child chose its own tier the key would
+	// describe a run that did not happen, which is the failure documented at
+	// length in baseline.go and paid for twice already. Harmless for the other
+	// engines: node and goja do not read it.
+	cmd.Env = harness.PinJIT(os.Environ())
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if ctx.Err() != nil {

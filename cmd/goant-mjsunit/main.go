@@ -34,6 +34,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/robomotionio/goant/internal/harness"
 )
 
 func main() {
@@ -419,7 +421,7 @@ func execRunner(runner string, args []string, timeout time.Duration) execResult 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, runner, args...)
-	cmd.Env = append(os.Environ(), "TZ=UTC")
+	cmd.Env = harness.PinJIT(append(os.Environ(), "TZ=UTC"))
 	var so, se strings.Builder
 	cmd.Stdout = &so
 	cmd.Stderr = &se

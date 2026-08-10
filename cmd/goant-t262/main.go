@@ -33,6 +33,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/robomotionio/goant/internal/harness"
 )
 
 func main() {
@@ -658,7 +660,7 @@ func execRunnerArgs(runner string, args []string, timeout time.Duration) execRes
 	// production embedder must not hand a script, and the suite is the one thing
 	// that needs them. An engine that does not know these variables ignores
 	// them, so pointing -runner at another engine still works.
-	cmd.Env = append(os.Environ(), "TZ=UTC", "GOANT_262=1", "GOANT_AGENTS=1")
+	cmd.Env = harness.PinJIT(append(os.Environ(), "TZ=UTC", "GOANT_262=1", "GOANT_AGENTS=1"))
 	var so, se strings.Builder
 	cmd.Stdout = &so
 	cmd.Stderr = &se

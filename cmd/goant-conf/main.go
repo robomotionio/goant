@@ -21,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/robomotionio/goant/internal/harness"
 )
 
 type result struct {
@@ -203,6 +205,11 @@ func runOne(runner, profile, corpus, name string, timeout time.Duration) result 
 	cmd.Env = append(os.Environ(), "TZ=UTC")
 	if profile == "jit" && runner != "node" {
 		cmd.Env = append(cmd.Env, "GOANT_JIT=always")
+	} else {
+		// Every other profile is the interpreter, and now has to say so: the
+		// goant CLI runs the tier by default, so silence here would make the
+		// non-jit profiles measure the jit one.
+		cmd.Env = harness.PinJIT(cmd.Env)
 	}
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {

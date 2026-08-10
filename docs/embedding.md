@@ -48,9 +48,16 @@ collection at a moment of the host's choosing rather than the collector's.
 
 ## The JIT
 
-Off by default. A function entered often enough is compiled to machine code and
-run natively from then on; everything the compiler declines keeps interpreting,
-so this changes how fast a program runs and not what it computes.
+Off by default for a `Runtime` you create. A function entered often enough is
+compiled to machine code and run natively from then on; everything the compiler
+declines keeps interpreting, so this changes how fast a program runs and not
+what it computes.
+
+(The `goant` command-line binary is the opposite and runs it by default —
+`goant -jit=false` turns it off there. The two defaults answer different
+questions: an embedder inherits whatever the process is doing and should get the
+conservative path until it asks, while someone typing `goant script.js` has
+asked for this engine to run their script.)
 
 ```go
 rt := goant.New(goant.WithJIT(true))
