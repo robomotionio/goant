@@ -202,11 +202,19 @@ jobs:
       - name: test262, tier off
         shell: bash
         working-directory: goant
+        # -all, not -core. -core is this repository's own exclusion list, and it
+        # skips 6,224 files -- among them every one of the 4,603 Temporal tests
+        # and the 3,357 in intl402. Both of those are implemented now and both
+        # pass, so gating the tier on -core left a hole the size of Temporal: a
+        # miscompilation anywhere in that code could not fail this job. The list
+        # made sense when the features did not exist. It costs about 13% more
+        # wall time to close.
+        #
         # 30s rather than the 10s default. The generated property-escape tests
         # are enormous and the hosted runners are shared; at 10s they landed on
         # either side of the limit from run to run, which is noise this job then
         # had to reason about.
-        run: $T262 -core -t262 ../test262 -runner "$RUNNER" -timeout 30s -failures ../off.txt | tee ../off.summary | tail -3
+        run: $T262 -all -t262 ../test262 -runner "$RUNNER" -timeout 30s -failures ../off.txt | tee ../off.summary | tail -3
 
       - name: test262, tier on
         shell: bash
@@ -214,7 +222,7 @@ jobs:
         env:
           GOANT_JIT: "1"
           GOANT_JIT_THRESHOLD: "2"
-        run: $T262 -core -t262 ../test262 -runner "$RUNNER" -timeout 30s -failures ../on.txt | tee ../on.summary | tail -3
+        run: $T262 -all -t262 ../test262 -runner "$RUNNER" -timeout 30s -failures ../on.txt | tee ../on.summary | tail -3
 
       # The gate. Not the score: a score has to be kept up to date by hand and
       # goes stale the first time someone fixes a test. What must be zero is the
