@@ -17,25 +17,30 @@ enough that goant, which is currently far slower, still finishes quickly.
 
 ## The other engines
 
-`goant-bench` scores whichever of `goja-run`, `node`, `deno` and `bun` is on
-PATH, skipping the rest. node, deno and bun are the JIT reference; **goja is the
-comparison that matters**, being the other pure-Go engine and so the only one
-measured under the same constraints.
+`goant-bench` scores whichever of `goja-run`, `otto-run`, `ant`, `qjs`, `duk`,
+`node`, `deno` and `bun` is on PATH, skipping the rest. node, deno and bun are
+the JIT reference; **goja is the comparison that matters**, being the other
+pure-Go engine still in use and so the only one measured under the same
+constraints. otto is the other end of that range — the first pure-Go engine, ES5
+and RE2 regular expressions — and is there to show where a pure-Go engine used
+to stop rather than to make another close race.
 
-goja is reached through a `goja-run` binary rather than linked in, which keeps
-it out of this module's dependency graph. `gojarun/` is its own module for the
-same reason:
+Both are reached through a runner binary rather than linked in, which keeps them
+out of this module's dependency graph. `gojarun/` and `ottorun/` are their own
+modules for the same reason:
 
 ```sh
 go build -C bench/gojarun -o "$(go env GOPATH)/bin/goja-run" .
+go build -C bench/ottorun -o "$(go env GOPATH)/bin/otto-run" .
 ```
 
-It presents the same command-line contract as `./goant`, so `goant-t262` can
-drive it too — which is what makes the conformance comparison in the README an
-apples-to-apples one rather than two numbers from two harnesses:
+Each presents the same command-line contract as `./goant`, so `goant-t262` can
+drive them too — which is what makes the conformance comparison in the README an
+apples-to-apples one rather than numbers from three harnesses:
 
 ```sh
 ./goant-t262 -core -runner goja-run
+./goant-t262 -core -runner otto-run
 ```
 
 ## Octane 2.0
