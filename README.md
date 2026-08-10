@@ -442,11 +442,13 @@ CGO_ENABLED=0 go build -o goant-bench ./cmd/goant-bench
 rt := goant.New(goant.WithJIT(true))   // the baseline JIT, off by default
 defer rt.Close()
 
+rt.SetMemoryLimit(64 << 20)   // an error, not an abort
+
+stop := rt.WithContext(ctx)   // ctx's deadline interrupts the script
+defer stop()
+
 rt.Set("fetchRow", func(id int) map[string]any { ... })   // Go in
 v, err := rt.RunString(`JSON.stringify(fetchRow(7))`)     // JS out
-
-rt.SetDeadline(50 * time.Millisecond)   // interruptible
-rt.SetMemoryLimit(64 << 20)             // an error, not an abort
 ```
 
 [**docs/embedding.md**](docs/embedding.md) is the full API: values, converting
