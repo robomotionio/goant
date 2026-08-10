@@ -67,6 +67,8 @@ jobs:
       - name: Work out the version
         id: v
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
@@ -82,15 +84,39 @@ jobs:
             tag="nightly"
             rolling=true
           fi
+
+          # The schedule fires whether or not main moved, and republishing an
+          # identical binary is not free: the rolling tag is deleted and
+          # recreated, so every watcher gets a release notification and every
+          # cache of that URL is invalidated, for a byte-identical download.
+          #
+          # Skip only on the SCHEDULE. A tag push is someone cutting a release,
+          # and a manual dispatch is someone asking for this build on purpose --
+          # neither should be second-guessed because the commit looks familiar.
+          skip=false
+          if [ "$rolling" = true ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            prev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq .object.sha 2>/dev/null || true)"
+            if [ -n "$prev" ] && [ "$prev" = "$GITHUB_SHA" ]; then
+              skip=true
+              echo "::notice::nightly already points at ${GITHUB_SHA:0:7}; nothing to publish"
+            fi
+          fi
+
           {
             echo "version=$version"
             echo "tag=$tag"
             echo "rolling=$rolling"
+            echo "skip=$skip"
             echo "sha=${GITHUB_SHA:0:7}"
           } >> "$GITHUB_OUTPUT"
-          echo "building $version as $tag (${GITHUB_SHA:0:7})"
+          if [ "$skip" = true ]; then
+            echo "skipping: main is unchanged since the last nightly"
+          else
+            echo "building $version as $tag (${GITHUB_SHA:0:7})"
+          fi
 
       - name: Build the six targets
+        if: steps.v.outputs.skip != 'true'
         shell: bash
         env:
           VERSION: ${{ steps.v.outputs.version }}
@@ -136,6 +162,7 @@ jobs:
           ls -la dist
 
       - name: Check the binary it will publish
+        if: steps.v.outputs.skip != 'true'
         shell: bash
         env:
           VERSION: ${{ steps.v.outputs.version }}
@@ -169,6 +196,7 @@ jobs:
           esac
 
       - uses: actions/upload-artifact@v4
+        if: steps.v.outputs.skip != 'true'
         with:
           name: dist
           path: dist/*
@@ -178,11 +206,13 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       version: ${{ steps.v.outputs.version }}
       rolling: ${{ steps.v.outputs.rolling }}
+      skip: ${{ steps.v.outputs.skip }}
       sha: ${{ steps.v.outputs.sha }}
 
   publish:
     name: publish
     needs: build
+    if: needs.build.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -214,8 +244,22 @@ jobs:
               --title "nightly ($SHA)" \
               --notes "Automated build of $GITHUB_SHA. Version reports as v${VERSION}-${SHA}."
           else
-            gh release create "$TAG" dist/* \
-              --title "$TAG" \
-              --generate-notes
+            # A hand-written note when there is one, because --generate-notes
+            # bases itself on the PREVIOUS release and there isn't one for the
+            # first tag: it would walk 1300 commits and land a wall of text on
+            # the page someone arrives at from a link. Later tags have a
+            # predecessor and can generate a real changelog.
+            #
+            # NOT a prerelease, deliberately. GitHub's /releases/latest endpoint
+            # skips prereleases, and that endpoint is what the installers these
+            # harnesses use resolve first -- a repository whose only release is
+            # a prerelease reads as having none, and its sidebar says "1 tag"
+            # rather than a version.
+            notes=".github/release-notes/${TAG}.md"
+            if [ -f "$notes" ]; then
+              gh release create "$TAG" dist/* --title "$TAG" --notes-file "$notes"
+            else
+              gh release create "$TAG" dist/* --title "$TAG" --generate-notes
+            fi
           fi
           gh release view "$TAG" --json assets --jq '.assets[].name'
