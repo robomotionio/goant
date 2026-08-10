@@ -149,63 +149,128 @@ baseline JIT, and that is where we are.
 
 ## Why not goja?
 
-**[goja](https://github.com/dop251/goja)** is the obvious answer if you want off cgo. It is good, and it is the
-yardstick in every benchmark below. The problem is which JavaScript it speaks.
+[**goja**](https://github.com/dop251/goja) is the obvious choice if you want a
+pure-Go JavaScript engine. It is fast, mature, and the baseline used in the
+benchmarks below.
 
-Our users often do not write the JavaScript themselves. They ask an AI for it,
-paste the result into an automation, and run it. What comes back is written
-against today's language, not the one an engine stopped at. That code does not
-fail in strange ways. It fails on ordinary things.
+The problem for us is JavaScript compatibility.
 
-Regex is where it hurts most. Automations lean on regex heavily, and what an AI
-writes is rarely a simple pattern. goja passes 53% of test262's RegExp suite.
+Our users often do not write the JavaScript themselves. They ask an AI to
+generate it, paste it into an automation, and run it. AI-generated code tends to
+use current JavaScript features, so missing language and runtime features
+quickly become production problems.
+
+### Regular expressions
+
+Regex is especially important for automation workloads. goja currently passes
+53% of test262's RegExp suite.
 
 ```js
 // "strip anything that isn't a letter or a digit"
 "Ankara-2026!".replace(/[^\p{L}\p{N}]+/gu, "_")
-goja   "_"
-goant  "Ankara_2026_"
 
-// "format this as euros"
-new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(1234.5)
-goja   ReferenceError: Intl is not defined
-goant  1.234,50 €
-
-// "show it with thousands separators"
-(1234567.891).toLocaleString("en-US", { maximumFractionDigits: 2 })
-goja   RangeError: toString() radix argument must be between 2 and 36
-goant  1,234,567.89
-
-// "group these records by region"
-Object.groupBy(orders, o => o.region)
-goja   TypeError: Object has no member 'groupBy'
-goant  { EU: [...], US: [...] }
-
-// "take the first four multiples of three"
-[...naturals().filter(n => n % 3 === 0).take(4)]
-goja   TypeError: Object has no member 'filter'
-goant  0,3,6,9
+goja  "_"
+goant "Ankara_2026_"
 ```
 
-The first is the sharpest, and on its own it settles the question for us. goja
-has no Unicode property escapes, and does not reject them either. `\p{L}`
-matches nothing, so the negated class matches everything and the string is
-erased; `"Grüße, Ankara".match(/\p{L}+/gu)` returns `null` for the same reason.
-No error, no warning, just the wrong answer, in a flow that was working. And
-`\p{L}` is what an AI reaches for the moment the text is not ASCII.
+goja does not support Unicode property escapes such as `\p{L}` and `\p{N}`. More
+importantly, it does not reject them.
 
-The `toLocaleString` case has the same shape: with no `Intl` at all, the options
-object falls through to `Number.prototype.toString`, which reads it as a
-*radix*. Neither is a missing feature declining politely.
+```js
+"Grüße, Ankara".match(/\p{L}+/gu)
+```
 
-Be fair about the size of the gap: goja **does** have `at`, `toSorted`, `with`,
-`findLast`, `Object.hasOwn`, `replaceAll` and `??=`, and its regex engine does
-lookbehind, named groups, named backreferences, `s` and `y`. Of fifteen regex
-features tried it passed eleven, missing property escapes and the `d` and `v`
-flags. Every example above was run against both engines before it was written
-down. What is missing is the last few years: `Intl`, property escapes, iterator
-helpers, `Object.groupBy`, `Promise.withResolvers`, `Array.fromAsync` and
-modules. That is exactly the vintage an AI writes in.
+Instead of throwing an error, goja returns `null`.
+
+That makes this more than a missing feature. The script runs successfully but
+produces the wrong result.
+
+Unicode property escapes are also common in AI-generated regex whenever text may
+contain non-ASCII characters.
+
+### Intl
+
+goja does not implement `Intl`.
+
+For automation code this affects much more than currency formatting.
+
+```js
+new Intl.NumberFormat("de-DE", {
+  style: "currency",
+  currency: "EUR"
+}).format(1234.5)
+
+goja  ReferenceError: Intl is not defined
+goant "1.234,50 €"
+```
+
+`Intl` is also the standard JavaScript API for locale-aware numbers, dates,
+sorting, relative time, lists, pluralization, and other common formatting tasks:
+
+```js
+new Intl.DateTimeFormat("tr-TR").format(date)
+
+new Intl.Collator("de").compare(a, b)
+
+new Intl.RelativeTimeFormat("en").format(-1, "day")
+
+new Intl.ListFormat("en").format(["Alice", "Bob", "Carol"])
+
+new Intl.PluralRules("en").select(2)
+```
+
+These APIs appear frequently in generated JavaScript because they are the normal
+browser and Node.js solution to localization problems.
+
+The absence of `Intl` also affects APIs that use locale formatting indirectly:
+
+```js
+(1234567.891).toLocaleString("en-US", {
+  maximumFractionDigits: 2
+})
+
+goja  RangeError: toString() radix argument must be between 2 and 36
+goant "1,234,567.89"
+```
+
+Here the options object ends up reaching `Number.prototype.toString`, where it
+is interpreted as the radix argument. Code that should format a number therefore
+fails for a reason unrelated to the code the user wrote.
+
+### Newer JavaScript APIs
+
+The same issue appears with newer built-ins:
+
+```js
+// group records by region
+Object.groupBy(orders, o => o.region)
+
+goja  TypeError: Object has no member 'groupBy'
+goant { EU: [...], US: [...] }
+```
+
+```js
+// take the first four multiples of three
+[...naturals().filter(n => n % 3 === 0).take(4)]
+
+goja  TypeError: Object has no member 'filter'
+goant [0, 3, 6, 9]
+```
+
+goja supports many modern features, including `at`, `toSorted`, `with`,
+`findLast`, `Object.hasOwn`, `replaceAll`, and `??=`. Its RegExp implementation
+also supports lookbehind, named groups, named backreferences, and the `s` and
+`y` flags.
+
+The remaining gaps are features that increasingly appear in generated
+JavaScript: Unicode property escapes, the RegExp `d` and `v` flags, `Intl`,
+iterator helpers, `Object.groupBy`, `Promise.withResolvers`, `Array.fromAsync`,
+and modules.
+
+For our workload, compatibility with the JavaScript that users and AI tools
+write today matters more than supporting a smaller language surface.
+
+Every example above was run against both engines before being included here.
 
 ---
 
