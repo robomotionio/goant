@@ -37,6 +37,8 @@ The runtime executes customer JavaScript inside Function nodes, typically one sc
 across millions of messages. It runs on Linux servers, Windows servers, Intel and Apple Silicon Macs, 
 and Raspberry Pi devices. Over the past seven years, we have used four different JavaScript engines.
 
+Join our 5000+ [Robomotion Discord](https://community.robomotion.io) community.
+
 <img width="1894" height="938" alt="image" src="https://github.com/user-attachments/assets/95844799-8169-43bf-8c37-f96e74a6a650" />
 <img width="1614" height="862" alt="image" src="https://github.com/user-attachments/assets/1f43a034-e811-4ee9-9147-a37bbf2dc79f" />
 
