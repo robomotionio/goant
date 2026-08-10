@@ -1,6 +1,6 @@
 # Embedding goant
 
-The full embedding API: runtimes, the compiled tier, values, converting Go
+The full embedding API: runtimes, the JIT, values, converting Go
 values in and JavaScript values out, errors, deadlines, promises, scopes and
 pools, the bytes-in/bytes-out JSON path, and migrating from v8go.
 
@@ -34,7 +34,7 @@ prog, err := rt.Compile("transform.js", src)
 v, err := rt.RunProgram(prog)
 ```
 
-## The compiled tier
+## The JIT
 
 Off by default. A function entered often enough is compiled to machine code and
 run natively from then on; everything the compiler declines keeps interpreting,
@@ -49,14 +49,14 @@ rt.JITEnabled()
 ```
 
 It is per `Runtime`, not per process. A host does not have one workload — the
-tier is worth having for a long numeric flow and worth nothing for a script that
+JIT is worth having for a long numeric flow and worth nothing for a script that
 runs once — and both usually run in the same binary. `GOANT_JIT=1` sets the
 default for Runtimes created afterwards, which is a convenience for benchmarking
 rather than the way a program should decide.
 
 `SetJIT(false)` is a kill switch rather than a preference: it stops this Runtime
 entering code it has **already** compiled, so a host that sees trouble can turn
-the tier off on a live Runtime and have the next call interpret. No restart, and
+the JIT off on a live Runtime and have the next call interpret. No restart, and
 no effect on any other Runtime.
 
 Executable memory is reported apart from the heap, because the memory limit does

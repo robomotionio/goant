@@ -115,7 +115,7 @@ embeddable, one binary — which is the comparison that says something.
 | NavierStokes |      467 |  **6012** |      202 |    error |     1971 |    1224 |
 
 `goant` is the interpreter, which is what runs unless a host asks for
-[the tier](docs/embedding.md#the-compiled-tier); `goant+JIT` is the same binary
+[the JIT](docs/embedding.md#the-jit); `goant+JIT` is the same binary
 with `WithJIT(true)`. Bold marks the fastest engine in each row.
 
 Interpreter against interpreter, goant leads goja on five of eight — the
@@ -126,16 +126,16 @@ loop in Go with NaN-boxed handles gives up a lot to the same loop in C. quickjs
 is 1.1x to 4.3x ahead on all eight. RegExp is the single interpreter row goant
 wins outright, which is the RE2 fast path rather than the loop.
 
-The tier is what closes it. With `WithJIT(true)` goant is fastest on five of
+The JIT is what closes it. With `WithJIT(true)` goant is fastest on five of
 the eight, including NavierStokes at 6012 against quickjs's 1971 and Crypto at
 2320 against 1099. It stays behind quickjs on RayTrace, EarleyBoyer and Splay:
 a baseline compiler makes arithmetic, property access and calls cheaper, and
 those three are dominated by allocation and the collector instead.
 
-Over all fifteen Octane workloads the tier is worth **3.1x** — 6.5x on the three
+Over all fifteen Octane workloads the JIT is worth **3.1x** — 6.5x on the three
 asm.js-shaped ones (zlib, mandreel, gbemu) and 2.6x on the other twelve. On the
 workload this engine was built for, short flows on a pooled `Runtime`, **2.9x**.
-`code-load` is the one workload the tier makes worse, which is what a benchmark
+`code-load` is the one workload the JIT makes worse, which is what a benchmark
 that measures compiling rather than running should do.
 
 A JIT runtime is still one to two orders of magnitude ahead on this suite: node
@@ -181,7 +181,7 @@ One machine, one sitting, nothing else running on it. Every Octane column was
 measured together with `-refresh`, so no engine's score was read from a cached
 baseline. `ant` fails on NavierStokes rather than scoring it.
 
-The all-fifteen tier figures (3.1x, 6.5x, 2.6x) are from an earlier run of the
+The all-fifteen JIT figures (3.1x, 6.5x, 2.6x) are from an earlier run of the
 same suite on an identically specified instance.
 
 | Detail   | Value                                            |
@@ -232,7 +232,7 @@ stable surfaces are the root package and `v8go/`.
 ## Using it
 
 ```go
-rt := goant.New(goant.WithJIT(true))   // the compiled tier, off by default
+rt := goant.New(goant.WithJIT(true))   // the baseline JIT, off by default
 defer rt.Close()
 
 rt.Set("fetchRow", func(id int) map[string]any { ... })   // Go in
@@ -250,13 +250,13 @@ bytes-in/bytes-out JSON path, and migrating from v8go.
 
 In production for Function-node scripts. What is not there yet:
 
-- **An optimising tier.** The JIT is a baseline compiler — one template per
+- **An optimising JIT.** What exists is a *baseline* compiler — one template per
   bytecode, inline caches, per-site type feedback for element access, compiled
   calls that reach compiled code directly, mid-body deopt, and no inlining. It
   is opt-in per Runtime with `WithJIT(true)`, off by default because "safe for
   a host that opts in and watches it" is a different claim from "safe for
   everyone on upgrade". It has had differential fuzzing against the interpreter
-  on four platforms, Test262 and mjsunit with the tier on, a race-detector
+  on four platforms, Test262 and mjsunit with it on, a race-detector
   concurrency suite, and multi-million-invocation soaks — but no soak on
   `darwin/amd64`, the one supported platform with no hardware behind it.
 - **`staging/sm`, 211 test262 failures.** SpiderMonkey's own suite, and the
