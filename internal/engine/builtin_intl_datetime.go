@@ -10,7 +10,7 @@ package engine
 //
 // The patterns assembled here are English's, as in ListFormat and
 // DurationFormat: CLDR carries a skeleton-to-pattern table per locale, and
-// generating it is what A4 in docs/intl402-and-temporal.md is about. What is
+// generating it per locale is the remaining work. What is
 // locale-independent -- which options exist, which combinations are legal,
 // which components a bare `new Intl.DateTimeFormat()` implies, and the shape of
 // formatToParts -- is here and is most of what the suite checks.

@@ -175,10 +175,8 @@ At 100%, whole directories: `built-ins/Temporal` (4,603), `annexB` (1,086),
 `built-ins/JSON`, `built-ins/Proxy`. `intl402` is 3,356 / 3,357 and
 `built-ins/RegExp` 1,877 / 1,879. **Temporal and Intl are implemented**, both to
 essentially the whole suite, including the sixteen non-ISO calendars and
-CLDR-driven formatting. See
-[docs/intl402-and-temporal.md](docs/intl402-and-temporal.md). Of the 326
-failures left, two thirds are SpiderMonkey's imported suite; [Status](#status)
-accounts for the rest.
+CLDR-driven formatting. Of the 326 failures left, two thirds are SpiderMonkey's
+imported suite; [Status](#status) accounts for the rest.
 
 ---
 
