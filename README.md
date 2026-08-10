@@ -45,10 +45,13 @@ still faster at running them; see [Benchmarks](#benchmarks).
 
 ## The road here
 
-[Robomotion](https://www.robomotion.io)'s robot runtime evaluates customer
+[Robomotion](https://www.robomotion.io) is an Agentic RPA platform. Robot runtime evaluates customer
 JavaScript in Function nodes: a script per message, millions of messages, on
 Windows laptops, Raspberry Pis, Apple Silicon and Linux servers. It has run four
 JavaScript engines in seven years.
+
+<img width="1894" height="938" alt="image" src="https://github.com/user-attachments/assets/95844799-8169-43bf-8c37-f96e74a6a650" />
+<img width="1614" height="862" alt="image" src="https://github.com/user-attachments/assets/1f43a034-e811-4ee9-9147-a37bbf2dc79f" />
 
 **[otto](https://github.com/robertkrimen/otto)** (2019), pure Go. Dropped for
 the dialect. It is ES5 only, and it uses Go's `regexp` package, so there is no
