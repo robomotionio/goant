@@ -270,6 +270,12 @@ AI-generated JavaScript commonly assume are available.
 For our workload, supporting the JavaScript users actually paste into Function
 nodes matters more than broad compatibility with an older JavaScript surface.
 
+There is also the installed base. Our customers have tens of thousands of
+Function nodes written and working in production today. Moving from V8 to goja
+would put all of that on a smaller language surface at once, and not every
+failure would announce itself: the `\p{L}` case above returns the wrong answer
+rather than an error.
+
 Every example above was run against both engines before being included here.
 
 ---
