@@ -119,12 +119,14 @@ this run was whatever its default is.
 with `WithJIT(true)`. Bold marks the fastest engine in each row.
 
 Interpreter against interpreter, goant leads goja on five of eight — the
-like-for-like pair, both pure Go — and loses to everything written in C. **ant,
-the engine goant is a port of, is 1.1x to 3.5x faster on six of the seven it
-scores**, which is the honest answer to "what did the port cost": a bytecode
+like-for-like pair, both pure Go — and trails the C engines almost everywhere.
+**ant, the engine goant is a port of, is 1.1x to 3.5x faster on six of the seven
+it scores**, which is the honest answer to "what did the port cost": a bytecode
 loop in Go with NaN-boxed handles gives up a lot to the same loop in C. quickjs
-is 1.1x to 4.3x ahead on all eight. RegExp is the single interpreter row goant
-wins outright, which is the RE2 fast path rather than the loop.
+is 1.1x to 4.3x ahead on all eight, so **the goant interpreter wins no row
+outright**. It comes closest on RegExp — ahead of goja, ant and duktape, and
+within 1.1x of quickjs — which is the RE2 fast path rather than the loop. It
+also edges duktape on Richards, and that is the whole of the good news.
 
 The JIT is what closes it. With `WithJIT(true)` goant is fastest on five of
 the eight, including NavierStokes at 6012 against quickjs's 1971 and Crypto at
