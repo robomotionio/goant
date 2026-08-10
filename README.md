@@ -338,9 +338,9 @@ None of them has an optimizing JIT.
 | Splay        |     1874 |      2320 |     2138 |      527 |     2137 | **3426** |    2753 |
 | NavierStokes |      467 |  **6012** |      202 |       41 |    error |     1971 |    1224 |
 
-`goant` is the interpreter, which is what runs unless a host asks for
-[the JIT](docs/embedding.md#the-jit); `goant+JIT` is the same binary with
-`WithJIT(true)`. Bold marks the fastest engine in each row.
+`goant` is the interpreter alone, measured with
+[the JIT](docs/embedding.md#the-jit) turned off; `goant+JIT` is the same binary
+with it on. Bold marks the fastest engine in each row.
 
 Interpreter against interpreter, goant leads goja on five of eight. That is the
 like-for-like pair, both pure Go. It trails the C engines almost everywhere.
@@ -484,9 +484,12 @@ What is still missing:
   template per bytecode, inline caches, type feedback for element access, direct
   compiled-to-compiled calls, mid-function deoptimization, and no inlining.
 
-  JIT is enabled per Runtime with `WithJIT(true)` and is off by default. The
-  reason is simple: "safe when a host explicitly enables and monitors it" is not
-  the same as "safe for everyone after an upgrade."
+  JIT is enabled per Runtime with `WithJIT(true)` and is off by default when you
+  embed the package. The reason is simple: "safe when a host explicitly enables
+  and monitors it" is not the same as "safe for everyone after an upgrade." The
+  `goant` command-line binary is the other case and runs it by default, since
+  someone typing `goant script.js` has asked for the engine rather than
+  inherited it.
 
   It has been tested with differential fuzzing against the interpreter on four
   platforms, Test262, mjsunit, race-detector concurrency tests, and
@@ -555,6 +558,8 @@ CGO_ENABLED=0 go test ./...
 CGO_ENABLED=0 go build -o goant ./cmd/goant        # the CLI
 ./goant script.js
 ./goant -e 'console.log(1 + 1)'
+./goant --version
+./goant -jit=false script.js                       # the CLI runs the JIT by default
 ```
 
 Verified to cross-compile with `CGO_ENABLED=0` for linux/amd64, linux/arm64,
@@ -580,7 +585,7 @@ CGO_ENABLED=0 go build -o goant-t262 ./cmd/goant-t262
 | `internal/engine` | the engine: values, object model, compiler, interpreter, GC, built-ins |
 | `internal/regexpjs`, `internal/regexp2` | JS regex translation over a vendored regexp2 |
 | `internal/jitasm`, `internal/jitmem` | the JIT: instruction encoders and executable memory |
-| `cmd/goant` | CLI (`goant file.js`, `-e`, `--parse`, `--disasm`) |
+| `cmd/goant` | CLI (`goant file.js`, `-e`, `--parse`, `--disasm`, `--version`) |
 | `cmd/goant-conf`, `cmd/goant-t262`, `cmd/goant-mjsunit` | conformance harnesses |
 | `tools/` | generators (opcodes, Unicode tables, Intl data, corpus) |
 | `bench/`, `conformance/` | benchmarks and the test corpus |

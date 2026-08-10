@@ -4,6 +4,8 @@
 //	goant -e '<code>'    evaluate a string
 //	goant --parse f.js   parse only, report syntax errors (Phase 1)
 //	goant --disasm f.js   disassemble compiled bytecode (Phase 3)
+//	goant --version      print the version and exit
+//	goant -jit=false f.js run with the compiled tier off
 package main
 
 import (
@@ -11,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"runtime/pprof"
 	"strconv"
 	"strings"
@@ -27,8 +30,15 @@ func main() {
 		prelude = flag.String("prelude", "", "comma-separated script files to run (as scripts) before the module")
 		modBase = flag.String("module-base", "", "directory that import specifiers resolve against (for scripts using import())")
 		cpuProf = flag.String("cpuprofile", "", "write a CPU profile to this file")
+		jit     = flag.Bool("jit", true, "run the compiled tier (GOANT_JIT overrides; an explicit -jit wins over both)")
+		showVer = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
+
+	if *showVer {
+		fmt.Println(versionString())
+		return
+	}
 
 	// Where the compiled tier actually ran, for GOANT_JIT_STATS=1. Deferred
 	// rather than printed at the end of main because the interesting exits —
@@ -66,6 +76,31 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: goant [flags] file.js")
 		flag.PrintDefaults()
 		os.Exit(2)
+	}
+
+	// The compiled tier is ON in this binary and OFF for a host that links the
+	// package. The two defaults answer different questions. An embedder inherits
+	// whatever the process is doing and should get the conservative path until it
+	// asks; someone running `goant script.js` has asked for this engine to run a
+	// script, and handing them a third of the speed it has is not conservative,
+	// it is just wrong. External benchmark harnesses invoke the bare binary with
+	// no flags and no environment, so this is also the number the world measures.
+	//
+	// Precedence: an explicit -jit wins, then GOANT_JIT, then on. GOANT_JIT still
+	// decides in BOTH directions when it is set, because every A/B of the tier in
+	// this repo is spelled that way -- see jit_tier.go on what reading presence
+	// rather than value once cost.
+	//
+	// Anything that shells out to this binary must now say which tier it wants
+	// rather than let the child pick. goant-t262, goant-mjsunit, goant-bench and
+	// goant-conf all route their child environment through harness.PinJIT.
+	switch {
+	case flagWasSet("jit"):
+		engine.JITSetEnabled(*jit)
+	case os.Getenv("GOANT_JIT") != "":
+		// jit_tier.go already parsed it at init, in both directions.
+	default:
+		engine.JITSetEnabled(true)
 	}
 
 	rt := engine.New()
@@ -157,6 +192,74 @@ func main() {
 // profiling records whether a CPU profile is running, so the exit paths know
 // they have to flush it before os.Exit discards the deferred stop.
 var profiling bool
+
+// flagWasSet reports whether a flag was given on the command line, as opposed
+// to holding its default. flag.Visit walks only the flags that were set, which
+// is the only way to tell `-jit=true` from an unmentioned -jit -- and telling
+// them apart is what lets the environment decide in the middle case.
+func flagWasSet(name string) bool {
+	set := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
+}
+
+// version is the release this binary was cut from, stamped at link time:
+//
+//	go build -ldflags "-X main.version=0.1.0" ./cmd/goant
+//
+// Empty means an unstamped build, which says 0.0.0 rather than inventing a
+// number it cannot back up.
+var version = ""
+
+// versionString is one line, and deliberately one line only.
+//
+// It is read by machines as well as people: the js-engine-benchmark harness
+// picks the version out of `--version` with a regex over the whole output, so a
+// second line beginning with a v and a digit would be a coin toss. The shape is
+// `goant vX.Y.Z-<sha>` because that is what their generic pattern extracts
+// intact, commit included -- an engine that printed the commit on its own line
+// got a blank version column and an issue asking for it back.
+func versionString() string {
+	v := version
+	if v == "" {
+		v = "0.0.0"
+	}
+	rev, dirty := vcsRevision()
+	if rev == "" {
+		return "goant v" + v
+	}
+	if dirty {
+		rev += ".dirty"
+	}
+	return "goant v" + v + "-" + rev
+}
+
+// vcsRevision returns the short commit this binary was built from, and whether
+// the tree was dirty, from the stamps the Go toolchain records for a build made
+// inside a repository. Absent for a build from an exported tree or under
+// -buildvcs=false, which is why a release stamps -X main.version as well.
+func vcsRevision() (rev string, dirty bool) {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", false
+	}
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+			if len(rev) > 7 {
+				rev = rev[:7]
+			}
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	return rev, dirty
+}
 
 func dumpJITStats() {
 	c, d, in := engine.JITStats()
