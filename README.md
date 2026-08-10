@@ -328,17 +328,6 @@ CGO_ENABLED=0 go build -o goant-bench ./cmd/goant-bench
 
 ---
 
-## What it is
-
-A from-scratch port of the **"Silver" engine** from
-[`ant`](https://github.com/theMackabu/ant), a JavaScript runtime written in C,
-rewritten in Go: lexer → AST → bytecode compiler → 218-opcode interpreter, its
-own tracing garbage collector, WTF-8 strings, a JS→regex translation layer over
-a vendored `regexp2`, and a baseline JIT for amd64 and arm64. The engine lives
-in `internal/engine` deliberately: everything the interpreter does is free to
-change shape as long as the observable behaviour holds. The stable surfaces are
-the root package and `v8go/`.
-
 ## Using it
 
 ```go
