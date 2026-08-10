@@ -89,28 +89,6 @@ eleven days with AI agents, so C to Go looked like a smaller version of a bet
 someone had already won. Once the port ran we started on test262, then on a
 baseline JIT, and that is where we are.
 
-## Why goant?
-
-|                   | goant                          | goja               | V8 via cgo                          |
-| ----------------- | ------------------------------ | ------------------ | ----------------------------------- |
-| cgo               | **none**                       | none               | required                            |
-| Cross-compile     | **anywhere Go does**           | anywhere Go does   | a C toolchain, plus a prebuilt V8 archive per platform |
-| Test262 (`-all`)  | **99.4%**, 53,247 / 53,573     | 64.2%              | current                             |
-| Engine            | bytecode interpreter + **baseline JIT** (amd64, arm64, opt-in) | bytecode interpreter, no JIT | optimising JIT |
-| Binary size       | **11.1 MB**                    | 13.3 MB            | ~90 MB linked                       |
-| Cold start        | **2.5 ms**                     | 2.0 ms             | n/a                                 |
-| Out of memory     | **an error you can catch**¹    | takes the process down | takes the process down          |
-| Per-run isolation | **a fresh global, 111 ns**     | a fresh Runtime    | a fresh context                     |
-
-¹ With `SetMemoryLimit` set. It is judged on what survives a collection, so a
-script that allocates a great deal and keeps little still passes. Some array
-builtins can still exhaust memory outside it; see [Status](#status).
-
-goant is for a Go program that has to run JavaScript it did not write, on
-machines it does not control, without the process dying when that JavaScript
-misbehaves. If your scripts are compute-bound and you can afford cgo, V8 is
-still faster at running them; see [Benchmarks](#benchmarks).
-
 ## Why not goja?
 
 goja is the obvious answer if you want off cgo. It is good, and it is the
