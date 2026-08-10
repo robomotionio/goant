@@ -293,6 +293,11 @@ jobs:
           restore-keys: fuzz-${{ matrix.runs-on }}-
 
       - name: Differential fuzz, 5 minutes
+        # bash, because windows-latest defaults to pwsh and this body is a shell
+        # script: without it PowerShell parses `if git status ...` and stops at
+        # "Missing '(' after 'if'", so the job goes red in under a second having
+        # never run the fuzzer at all. Every other multi-line run: here says so.
+        shell: bash
         # The VERDICT is whether a crasher was written, not the exit code.
         # `go test -fuzz` exits NON-ZERO with "context deadline exceeded" when
         # -fuzztime expires while a worker is mid-execution, so a clean run comes
