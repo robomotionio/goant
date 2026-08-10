@@ -87,6 +87,11 @@ written against the current language, not the one an engine happened to stop at.
 That code does not fail exotically. It fails on the ordinary things:
 
 ```js
+// "strip anything that isn't a letter or a digit"
+"Ankara-2026!".replace(/[^\p{L}\p{N}]+/gu, "_")
+goja   "_"
+goant  "Ankara_2026_"
+
 // "format this as euros"
 new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(1234.5)
 goja   ReferenceError: Intl is not defined
@@ -108,17 +113,26 @@ goja   TypeError: Object has no member 'filter'
 goant  0,3,6,9
 ```
 
-The second is the sharpest: with no `Intl` at all, an options object handed to
-`toLocaleString` falls through to `Number.prototype.toString`, which reads it as
-a *radix*. That is not a missing feature declining politely, and "format this as
-money" is the most ordinary thing a business-automation script does.
+The first is the sharpest, and on its own it settles the question for us. goja
+has no Unicode property escapes — and does not reject them either. `\p{L}`
+matches nothing, so the negated class matches everything and the string is
+erased; `"Grüße, Ankara".match(/\p{L}+/gu)` returns `null` for the same reason.
+No error, no warning, just the wrong answer, in a flow that was working. RPA
+automations lean on regex heavily, and `\p{L}` is what an AI reaches for the
+moment the text is not ASCII.
+
+The `toLocaleString` case has the same shape: with no `Intl` at all, the options
+object falls through to `Number.prototype.toString`, which reads it as a
+*radix*. Neither is a missing feature declining politely.
 
 Be fair about the size of the gap: goja **does** have `at`, `toSorted`, `with`,
-`findLast`, `Object.hasOwn`, `replaceAll`, `??=` and named capture groups, and
-every example above was run against both engines before it was written down.
-What is missing is the last few years — `Intl`, iterator helpers,
-`Object.groupBy`, `Promise.withResolvers`, `Array.fromAsync`, modules — which is
-exactly the vintage an AI writes in.
+`findLast`, `Object.hasOwn`, `replaceAll` and `??=`, and its regex engine does
+lookbehind, named groups, named backreferences, `s` and `y` — of fifteen regex
+features tried it passed eleven, missing property escapes and the `d` and `v`
+flags. Every example above was run against both engines before it was written
+down. What is missing is the last few years — `Intl`, property escapes, iterator
+helpers, `Object.groupBy`, `Promise.withResolvers`, `Array.fromAsync`, modules —
+which is exactly the vintage an AI writes in.
 
 ---
 
@@ -130,12 +144,15 @@ exactly the vintage an AI writes in.
 | suite | goant | goja | otto |
 |---|---|---|---|
 | **Test262** (`-all`, every file) | **53,247 / 53,573 — 99.4%** | 34,377 — 64.2% | 11,205 — 20.9% |
+| Test262 `built-ins/RegExp` | **1,877 / 1,879 — 99.9%** | 997 — 53.1% | 538 — 28.6% |
 | ant's compat-table corpus (ES1–ESNext) | **1514 / 1514** | — | — |
 | V8's `mjsunit` | 2,711 / 3,149 | — | — |
 
 All three were scored on the same test262 checkout through the same harness, so
 the numbers mean the same thing — and they are the three pure-Go engines in the
-order we ran them. Neither goja nor otto has an ES module goal, so the runner
+order we ran them. `RegExp` is broken out because RPA flows lean on it heavily;
+the regex *literal* grammar is a second measurement, at 238 / 238 against goja's
+210 and otto's 40. Neither goja nor otto has an ES module goal, so the runner
 declines module tests rather than emulating them.
 
 At 100%, whole directories: `built-ins/Temporal` (4,603), `annexB` (1,086),
