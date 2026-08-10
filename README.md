@@ -89,9 +89,10 @@ Both fixes for it were partial. External strings let V8 point at the Go bytes
 instead of copying them, but only for ASCII: one Turkish character puts it back
 on the copies, and V8 then stores the whole string at two bytes per character.
 LazyMessage put a `Proxy` in front of the message so nothing crossed until the
-script asked for it, which removed the copies and made a loop over 10,000
-records take 19.7 s instead of 7.9 ms, because every read rescanned the whole
-document.
+script asked for it. That removed the copies, and made a loop over 10,000
+records take 19.7 s instead of 7.9 ms. Crossing into Go per read was not the
+expensive part. Each read rescanned the whole message to find one field, so a
+read cost the size of the message.
 
 **[goant](https://github.com/robomotionio/goant)** (2026). Ant came up on
 [Hacker News](https://news.ycombinator.com/item?id=48875377) as *"Show HN: Ant,
