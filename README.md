@@ -23,16 +23,14 @@ go get github.com/robomotionio/goant
 
 ## Why goant?
 
-The three ways to run JavaScript from Go, and what each one costs:
-
 |                   | goant                          | goja               | V8 via cgo                          |
 | ----------------- | ------------------------------ | ------------------ | ----------------------------------- |
 | cgo               | **none**                       | none               | required                            |
-| Cross-compile     | **anywhere Go does**           | anywhere Go does   | a toolchain and a 100–210 MB prebuilt archive per platform |
+| Cross-compile     | **anywhere Go does**           | anywhere Go does   | a C toolchain, plus a prebuilt V8 archive per platform |
 | Test262 (`-all`)  | **99.4%** — 53,247 / 53,573    | 64.2%              | current                             |
 | Engine            | bytecode interpreter + **baseline JIT** (amd64, arm64, opt-in) | bytecode interpreter, no JIT | optimising JIT |
 | Binary size       | **11.1 MB**                    | 13.3 MB            | ~90 MB linked                       |
-| Cold start        | **2.5 ms**                     | 1.9 ms             | —                                   |
+| Cold start        | **2.5 ms**                     | 2.0 ms             | —                                   |
 | Out of memory     | **an error you can catch**¹    | takes the process down | takes the process down          |
 | Per-run isolation | **a fresh global, 111 ns**     | a fresh Runtime    | a fresh context                     |
 
@@ -45,16 +43,60 @@ machines it does not control, without the process dying when that JavaScript
 misbehaves. If your scripts are compute-bound and you can afford cgo, V8 is
 still faster at running them — see [Benchmarks](#benchmarks).
 
+## The road here
+
+Four engines in seven years, all in the git log of one file — the Function node
+in [Robomotion](https://www.robomotion.io)'s robot runtime, which evaluates
+customer JavaScript a script per message, millions of messages, on Windows
+laptops, Raspberry Pis, Apple Silicon and Linux servers.
+
+**otto** (2019) — pure Go, ES5. Constructing a VM cost 500 ms, so it was built
+once per node and shared behind a mutex; the comment saying so is still in the
+commit. That number was about 2019's otto — today's starts in 1.9 ms, quicker
+than goant. What has not moved is the dialect: still ES5, still Go's RE2 for
+regular expressions with no lookahead and no backreferences, and still **20.9%
+of test262** against goja's 64.2% and goant's 99.4%.
+
+**duktape** (2021) — C, through cgo. Still ES5, and now a C toolchain in every
+build on every platform we ship.
+
+**V8, through `rogchap.com/v8go`** (2021–2026) — the five years that produced
+this engine, and for most of them the problem was not V8 at all. v8go ships
+prebuilt V8 as static archives inside the module, and **v0.6.0 is the last
+release that contains a Windows one**. Windows is our largest install base, so
+we stayed on v0.6.0 — V8 9.0.257.18, April 2021 — for five years. Twice, once in
+2021 and again in 2024, someone bumped to 0.7.0; both times it was reverted the
+next day. The bind is that v0.6.0 has no arm64 archive at all, for either macOS
+or Linux, so the releases that would have brought Apple Silicon and Raspberry Pi
+are exactly the releases that drop Windows. In April 2026 we forked it, restored
+Windows amd64 and arm64 through clang-cl, and moved to V8 14.7 — which is 169 MB
+of prebuilt archive in the module we left, and a C++ toolchain per platform in
+the one we now maintain ourselves.
+
+Then the memory. A pooled isolate accumulates hidden classes, inline caches, JIT
+code and type-feedback maps that GC cannot reclaim — only `Isolate::Dispose()`
+releases them — so a long-running node saturates V8's ~1.4 GB per-isolate heap
+and dies there: *Mark-Compact 1358.6 → 1358.6 MB … last resort; GC freed
+nothing*. Separately, handing a 13 MB message to V8 copied it three times — Go
+string, C string, V8 string — and on Windows that peak crashed the process
+outright. The fix was a JS `Proxy` over the message backed by Go callbacks,
+which avoided the copies and then made a loop over 10,000 records take 19.7 s
+instead of 7.9 ms: not a fix so much as a choice of which failure to have.
+
+**goant** (2026). The bridge was deleted three months later. With no cgo
+boundary there is nothing to marshal across: the message is parsed in place and
+serialized straight back out, and a 27.3 MB pass-through now peaks at 272 MB
+rather than 698 MB. That is what this engine is for. [The long
+version](docs/why-goant-exists.md).
+
 ## Why not goja?
 
-goja is the obvious answer to "we want off cgo", it is good, and we use it as
-the yardstick in every benchmark below. The problem is the dialect.
-
-Our users increasingly do not write the JavaScript at all. They describe what
-they want to an AI, paste the result into a Function node and run it — and what
-comes back is written against the CURRENT language, not the one an engine
-happened to stop at. That code does not fail exotically. It fails on the
-ordinary things:
+goja is the obvious answer to "we want off cgo", it is good, and it is the
+yardstick in every benchmark below. The problem is the dialect. Our users
+increasingly do not write the JavaScript at all: they describe what they want to
+an AI, paste the result into a Function node and run it — and what comes back is
+written against the current language, not the one an engine happened to stop at.
+That code does not fail exotically. It fails on the ordinary things:
 
 ```js
 // "format this as euros"
@@ -78,29 +120,17 @@ goja   TypeError: Object has no member 'filter'
 goant  0,3,6,9
 ```
 
-The second one is the sharpest. goja has no `Intl` at all, so an options object
-handed to `toLocaleString` falls through to `Number.prototype.toString`, which
-reads it as a RADIX. That is not a missing feature declining politely; it is a
-confusing error from an unrelated method, and "format this as money" is the most
-ordinary thing a business-automation script does.
+The second is the sharpest: with no `Intl` at all, an options object handed to
+`toLocaleString` falls through to `Number.prototype.toString`, which reads it as
+a *radix*. That is not a missing feature declining politely, and "format this as
+money" is the most ordinary thing a business-automation script does.
 
-Be fair about the size of the gap, because it is easy to overstate: goja **does**
-have `at`, `toSorted`, `with`, `findLast`, `Object.hasOwn`, `replaceAll`, `??=`
-and named capture groups. Every example above was run against both engines
-before it was written down. What is missing is the last few years — `Intl`,
-iterator helpers, `Object.groupBy`, `Promise.withResolvers`, `Array.fromAsync`,
-modules — and that is exactly the vintage an AI writes in.
-
-The gap is measurable rather than rhetorical, which is why the conformance
-number matters: on the same test262 checkout, through the same harness,
-**99.4% against 64.2%**. That difference is not a scoreboard. It is the set of
-programs your users can paste in and have run.
-
-Written for [Robomotion](https://www.robomotion.io), whose robot runtime
-evaluates customer JavaScript in Function nodes — a script per message, millions
-of messages, on Windows laptops, Raspberry Pis, Apple Silicon and Linux servers.
-That ran on V8 through cgo. [Why we left, in
-detail](docs/why-goant-exists.md).
+Be fair about the size of the gap: goja **does** have `at`, `toSorted`, `with`,
+`findLast`, `Object.hasOwn`, `replaceAll`, `??=` and named capture groups, and
+every example above was run against both engines before it was written down.
+What is missing is the last few years — `Intl`, iterator helpers,
+`Object.groupBy`, `Promise.withResolvers`, `Array.fromAsync`, modules — which is
+exactly the vintage an AI writes in.
 
 ---
 
@@ -109,65 +139,55 @@ detail](docs/why-goant-exists.md).
 **99.4% of test262, with nothing excluded.** Not a profile, not a subset —
 `./goant-t262 -all` runs every file in the suite.
 
-| suite | goant | goja |
-|---|---|---|
-| **Test262** (`-all`, every file) | **53,247 / 53,573 — 99.4%** | 34,377 / 53,573 — 64.2% |
-| ant's compat-table corpus (ES1–ESNext) | **1514 / 1514** | — |
-| V8's `mjsunit` | 2,711 / 3,149 | — |
+| suite | goant | goja | otto |
+|---|---|---|---|
+| **Test262** (`-all`, every file) | **53,247 / 53,573 — 99.4%** | 34,377 — 64.2% | 11,205 — 20.9% |
+| ant's compat-table corpus (ES1–ESNext) | **1514 / 1514** | — | — |
+| V8's `mjsunit` | 2,711 / 3,149 | — | — |
 
-Both engines were scored on the same test262 checkout through the same harness,
-so the two numbers mean the same thing. goja has no ES module goal, so the
-runner declines module tests rather than emulating them.
+All three were scored on the same test262 checkout through the same harness, so
+the numbers mean the same thing — and they are the three pure-Go engines in the
+order we ran them. Neither goja nor otto has an ES module goal, so the runner
+declines module tests rather than emulating them.
 
 At 100%, whole directories: `built-ins/Temporal` (4,603), `annexB` (1,086),
 `built-ins/Promise` (729), `built-ins/Date` (594), `built-ins/Array/prototype`,
 `built-ins/JSON`, `built-ins/Proxy`. `intl402` is 3,356 / 3,357 and
-`built-ins/RegExp` 1,877 / 1,879.
-
-**Temporal and Intl are implemented**, both to essentially the whole suite,
-including the sixteen non-ISO calendars and CLDR-driven formatting. See
-[docs/intl402-and-temporal.md](docs/intl402-and-temporal.md).
-
-Of the 326 remaining failures, **211 are in `staging/sm`** — SpiderMonkey's own
-suite, imported into test262's staging area. Of the other 115: 47 are proposals
-that have not landed, about 50 sit behind one root cause (per-function
-`[[Realm]]`), 12 are growable `SharedArrayBuffer`, and six are a tail of
-singletons. [Status](#status) has the breakdown.
+`built-ins/RegExp` 1,877 / 1,879. **Temporal and Intl are implemented**, both to
+essentially the whole suite, including the sixteen non-ISO calendars and
+CLDR-driven formatting — see
+[docs/intl402-and-temporal.md](docs/intl402-and-temporal.md). Of the 326
+failures left, two thirds are SpiderMonkey's imported suite; [Status](#status)
+accounts for the rest.
 
 ---
 
 ## Benchmarks
 
-Measured on an idle Azure `Standard_D8s_v5` created for the purpose and
-destroyed afterwards. Scripts are in the repository; see
-[Reproducing](#reproducing).
-
-The Octane table stands goant beside the engines in its own class. Cold start
-and binary size also list node, deno and bun, which are whole runtimes rather
-than peers and are there for scale.
+Measured on an idle Azure `Standard_D8s_v5` created for the purpose. Scripts are
+in the repository; see [Reproducing](#reproducing).
 
 ### Octane 2.0
 
 The eight workloads [ahaoboy/js-engine-benchmark](https://github.com/ahaoboy/js-engine-benchmark)
 scores. Higher is better. These are the engines in goant's own class — small,
 embeddable, shipped as one binary — which is the comparison that says something.
-None of them has an optimising JIT; `ant` ships a MIR-based one whose state in
-this run was whatever its default is.
+None of them has an optimising JIT.
 
-| Benchmark    |    goant | goant+JIT |     goja |      ant |  quickjs | duktape |
-| ------------ | -------: | --------: | -------: | -------: | -------: | ------: |
-| Richards     |      227 |  **1374** |      218 |      445 |      836 |     221 |
-| DeltaBlue    |      258 |   **929** |      271 |      914 |      818 |     269 |
-| Crypto       |      257 |  **2320** |      127 |      274 |     1099 |     347 |
-| RayTrace     |      431 |       557 |      304 |      691 |  **995** |     551 |
-| EarleyBoyer  |      536 |       822 |      540 |     1111 | **1598** |     580 |
-| RegExp       |      238 |   **276** |      212 |      152 |      268 |     123 |
-| Splay        |     1874 |      2320 |     2138 |     2137 | **3426** |    2753 |
-| NavierStokes |      467 |  **6012** |      202 |    error |     1971 |    1224 |
+| Benchmark    |    goant | goant+JIT |     goja |     otto |      ant |  quickjs | duktape |
+| ------------ | -------: | --------: | -------: | -------: | -------: | -------: | ------: |
+| Richards     |      227 |  **1374** |      218 |       22 |      445 |      836 |     221 |
+| DeltaBlue    |      258 |   **929** |      271 |       20 |      914 |      818 |     269 |
+| Crypto       |      257 |  **2320** |      127 |       26 |      274 |     1099 |     347 |
+| RayTrace     |      431 |       557 |      304 |       82 |      691 |  **995** |     551 |
+| EarleyBoyer  |      536 |       822 |      540 |       84 |     1111 | **1598** |     580 |
+| RegExp       |      238 |   **276** |      212 |    error |      152 |      268 |     123 |
+| Splay        |     1874 |      2320 |     2138 |      527 |     2137 | **3426** |    2753 |
+| NavierStokes |      467 |  **6012** |      202 |       41 |    error |     1971 |    1224 |
 
 `goant` is the interpreter, which is what runs unless a host asks for
-[the JIT](docs/embedding.md#the-jit); `goant+JIT` is the same binary
-with `WithJIT(true)`. Bold marks the fastest engine in each row.
+[the JIT](docs/embedding.md#the-jit); `goant+JIT` is the same binary with
+`WithJIT(true)`. Bold marks the fastest engine in each row.
 
 Interpreter against interpreter, goant leads goja on five of eight — the
 like-for-like pair, both pure Go — and trails the C engines almost everywhere.
@@ -175,67 +195,64 @@ like-for-like pair, both pure Go — and trails the C engines almost everywhere.
 it scores**, which is the honest answer to "what did the port cost": a bytecode
 loop in Go with NaN-boxed handles gives up a lot to the same loop in C. quickjs
 is 1.1x to 4.3x ahead on all eight, so **the goant interpreter wins no row
-outright**. It comes closest on RegExp — ahead of goja, ant and duktape, and
-within 1.1x of quickjs — which is the RE2 fast path rather than the loop. It
-also edges duktape on Richards, and that is the whole of the good news.
+outright**. It comes closest on RegExp, which is the RE2 fast path rather than
+the loop. otto is the other end of the range: 3.6x to 12.9x behind goant on the
+seven it scores, and it cannot run the eighth at all — Octane's RegExp benchmark
+uses lookahead, and Go's `regexp` has no syntax for it.
 
-The JIT is what closes it. With `WithJIT(true)` goant is fastest on five of
-the eight, including NavierStokes at 6012 against quickjs's 1971 and Crypto at
-2320 against 1099. It stays behind quickjs on RayTrace, EarleyBoyer and Splay:
-a baseline compiler makes arithmetic, property access and calls cheaper, and
-those three are dominated by allocation and the collector instead.
+The JIT is what closes it: with `WithJIT(true)` goant is fastest on five of the
+eight. It stays behind quickjs on RayTrace, EarleyBoyer and Splay, which are
+dominated by allocation and the collector rather than by the arithmetic,
+property access and calls a baseline compiler makes cheaper. Over all fifteen
+Octane workloads the JIT is worth **3.1x** — 6.5x on the three asm.js-shaped
+ones (zlib, mandreel, gbemu), 2.6x on the other twelve, and **2.9x** on the
+workload this engine was built for, short flows on a pooled `Runtime`.
+`code-load` is the one it makes worse, which is what a benchmark that measures
+compiling rather than running should do.
 
-Over all fifteen Octane workloads the JIT is worth **3.1x** — 6.5x on the three
-asm.js-shaped ones (zlib, mandreel, gbemu) and 2.6x on the other twelve. On the
-workload this engine was built for, short flows on a pooled `Runtime`, **2.9x**.
-`code-load` is the one workload the JIT makes worse, which is what a benchmark
-that measures compiling rather than running should do.
+An *optimising* JIT is still one to two orders of magnitude ahead: node, on the
+same machine, scores 33,300 on Richards against goant+JIT's 1374. If your
+scripts are compute-bound and you can afford cgo, that gap is the reason to
+reach for V8.
 
-An *optimising* JIT is still one to two orders of magnitude ahead on this suite:
-node scored 34,924 on Richards against goant+JIT's 1374 (from the earlier run — node
-is not in the table above). If your scripts are compute-bound and you can afford
-cgo, that gap is the reason to reach for V8.
+### Cold start and size
 
-### Cold start
+Time to start, evaluate one line, and exit — hyperfine `--shell=none`, 20 warmup
+and 200 timed runs, all nine in one sitting on the same idle machine. node, deno
+and bun are whole runtimes rather than peers and are listed for scale.
 
-Time to start, evaluate one line, and exit. hyperfine `--shell=none`, 20 warmup
-and 200 timed runs, all five on the same idle machine — below 5 ms hyperfine
-cannot calibrate shell startup, so timing through a shell would be measuring
-bash as much as the engine.
+| Runtime   |    Cold start | Binary      | Links against |
+| --------- | ------------: | ----------: | ------------- |
+| quickjs   |        0.8 ms |      1.0 MB | system libs   |
+| duktape   |        1.1 ms |      0.3 MB | system libs   |
+| otto      |        1.9 ms |      7.1 MB | nothing       |
+| goja      |        2.0 ms |     13.3 MB | nothing       |
+| **goant** |    **2.5 ms** | **11.1 MB** | **nothing**   |
+| ant       |        3.6 ms |     11.8 MB | system libs   |
+| bun       |       11.5 ms |     88.5 MB | system libs   |
+| deno      |       13.3 ms |     91.2 MB | system libs   |
+| node      |       24.0 ms |    119.1 MB | system libs   |
 
-| Runtime   | Mean        | Relative      |
-| --------- | ----------: | ------------- |
-| **goja**  | **1.9 ms**  | 1.00          |
-| **goant** | **2.5 ms**  | 1.32× slower  |
-| bun       |    10.9 ms  | 5.81× slower  |
-| deno      |    12.7 ms  | 6.79× slower  |
-| node      |    23.5 ms  | 12.56× slower |
-
-### Binary size
-
-| Binary                              |     Size |
-| ----------------------------------- | -------: |
-| **goant** (`cmd/goant`, `-s -w`)    | **11.1 MB** |
-| goja (`bench/gojarun`, minimal)     |  13.3 MB |
-| bun                                 |  88.5 MB |
-| deno                                |  91.2 MB |
-| node                                | 119.1 MB |
-
-goant's is a whole engine — parser, compiler, interpreter, garbage collector,
-every built-in, Temporal, Intl, the Unicode 17 tables and a regex engine —
-statically linked, with no shared library beside it. It was 6.4 MB before
-Temporal and Intl landed; those two and their CLDR data are most of the
-difference. node, deno and bun are whole runtimes and are here for scale.
+goant is neither the smallest nor the quickest to start — quickjs, duktape and
+otto beat it on both. What its 11.1 MB contains is a whole engine: parser,
+compiler, interpreter, garbage collector, every built-in, Temporal, Intl, the
+Unicode 17 tables and a regex engine, statically linked, with nothing to install
+beside it. It was 6.4 MB before Temporal and Intl landed. The dynamically linked
+rows are one file plus whatever the system already has, which is not the same
+measurement.
 
 <details>
 <summary>Environment</summary>
 
-One machine, one sitting, nothing else running on it. Every Octane column was
-measured together with `-refresh`, so no engine's score was read from a cached
-baseline. `ant` fails on NavierStokes rather than scoring it.
-
-The all-fifteen JIT figures (3.1x, 6.5x, 2.6x) are from an earlier run of the
-same suite on an identically specified instance.
+One machine, nothing else running on it, and it is still there — `goant-bench`
+caches every comparison engine's score against the host and the hash of the
+exact script, so a later run adds a column without re-measuring the others or
+mixing in a second machine. The goant, goja, ant, quickjs and duktape columns
+were measured together in one sitting with `-refresh`; the otto column was added
+later on that same machine, best of two runs like the rest. `ant` fails on
+NavierStokes rather than scoring it. The all-fifteen JIT figures (3.1x, 6.5x,
+2.6x) are from an earlier run of the same suite on an identically specified
+instance.
 
 | Detail   | Value                                            |
 | -------- | ------------------------------------------------ |
@@ -244,20 +261,22 @@ same suite on an identically specified instance.
 | Go       | 1.26.3, `CGO_ENABLED=0`                           |
 | Octane   | chromium/octane @ `570ad1cc`                      |
 | test262  | tc39/test262 @ `b363f29d`                         |
-| goja     | `v0.0.0-20260723142020-b4aef50fa347`              |
+| goja / otto | `v0.0.0-20260723142020-b4aef50fa347` / `v0.5.1` |
 | node / deno / bun | 22.23.2 / 2.9.5 / 1.3.14                      |
 | ant / quickjs / duktape | ant @ HEAD / 2021-03-27 / 2.7.0         |
 
 Octane scores are the best of two runs. Splay carries the most run-to-run
-variance of the eight, being the one dominated by the collector.
+variance of the eight, being the one dominated by the collector. The cold-start
+and binary-size table is a separate single sitting, all nine measured together
+against the same one-line script, on a machine the script refuses to measure on
+until it is idle.
 
-</details>
-
-### Reproducing
+**Reproducing:**
 
 ```sh
 sh bench/suites/fetch.sh                                  # Octane, pinned commit
 go build -C bench/gojarun -o "$(go env GOPATH)/bin/goja-run" .
+go build -C bench/ottorun -o "$(go env GOPATH)/bin/otto-run" .
 
 CGO_ENABLED=0 go build -o goant ./cmd/goant
 CGO_ENABLED=0 go build -o goant-bench ./cmd/goant-bench
@@ -268,6 +287,8 @@ CGO_ENABLED=0 go build -o goant-bench ./cmd/goant-bench
 
 `goant-bench` scores whichever engines are on PATH and skips the rest.
 
+</details>
+
 ---
 
 ## What it is
@@ -276,11 +297,10 @@ A from-scratch port of the **"Silver" engine** from
 [`ant`](https://github.com/theMackabu/ant) — a JavaScript runtime written in C —
 rewritten in Go: lexer → AST → bytecode compiler → 218-opcode interpreter, its
 own tracing garbage collector, WTF-8 strings, a JS→regex translation layer over
-a vendored `regexp2`, and a baseline JIT for amd64 and arm64.
-
-The engine lives in `internal/engine`, deliberately: everything the interpreter
-does is free to change shape as long as the observable behaviour holds. The
-stable surfaces are the root package and `v8go/`.
+a vendored `regexp2`, and a baseline JIT for amd64 and arm64. The engine lives
+in `internal/engine` deliberately: everything the interpreter does is free to
+change shape as long as the observable behaviour holds. The stable surfaces are
+the root package and `v8go/`.
 
 ## Using it
 
@@ -306,31 +326,27 @@ In production for Function-node scripts. What is not there yet:
 - **An optimising JIT.** What exists is a *baseline* compiler — one template per
   bytecode, inline caches, per-site type feedback for element access, compiled
   calls that reach compiled code directly, mid-body deopt, and no inlining. It
-  is opt-in per Runtime with `WithJIT(true)`, off by default because "safe for
-  a host that opts in and watches it" is a different claim from "safe for
-  everyone on upgrade". It has had differential fuzzing against the interpreter
-  on four platforms, Test262 and mjsunit with it on, a race-detector
-  concurrency suite, and multi-million-invocation soaks — but no soak on
-  `darwin/amd64`, the one supported platform with no hardware behind it.
-- **`staging/sm`, 211 test262 failures.** SpiderMonkey's own suite, and the
-  largest single bucket left by some way. Mostly real semantic gaps rather than
-  harness noise, but a long tail rather than a lever.
-- **Unlanded proposals**, 47 failures: decorators, import-defer, import-bytes,
-  source-phase imports.
-- **Per-function `[[Realm]]`**, about 50 failures behind one root cause: a value
-  must report the error of the realm its function came from, and goant reaches
-  for the realm on the stack.
-- **Growable `SharedArrayBuffer`**, 12 failures, and threads — `SharedArrayBuffer`
-  and `Atomics` are single-agent.
+  is opt-in per Runtime with `WithJIT(true)`, off by default because "safe for a
+  host that opts in and watches it" is a different claim from "safe for everyone
+  on upgrade". It has had differential fuzzing against the interpreter on four
+  platforms, Test262 and mjsunit with it on, a race-detector concurrency suite,
+  and multi-million-invocation soaks — but no soak on `darwin/amd64`, the one
+  supported platform with no hardware behind it.
+- **The 326 test262 failures**: 211 in `staging/sm` (SpiderMonkey's own suite —
+  real semantic gaps, but a long tail rather than a lever), 47 unlanded
+  proposals (decorators, import-defer, import-bytes, source-phase imports),
+  about 50 behind per-function `[[Realm]]` — a value must report the error of
+  the realm its function came from, and goant reaches for the realm on the stack
+  — and 12 growable `SharedArrayBuffer`. `SharedArrayBuffer` and `Atomics` are
+  single-agent; there are no threads.
 - **Some array builtins escape the memory limit.** The limit is charged on
   engine cells and out-of-line payload, so a builtin that grows a plain Go
   slice — `fill`, `copyWithin`, `includes`, `String.raw` against a
-  `{length: 2**53-1}` array-like — grows without the budget being consulted,
-  and `toReversed`/`with`/`toSorted`/`toSpliced` size their result from a
-  claimed length before reading an element. A few long native loops also do not
-  check the interrupt flag, so they cannot be cancelled. The claimed-length
-  paths that used to crash the process outright are fixed; making these charge
-  the limit is not.
+  `{length: 2**53-1}` array-like — grows without the budget being consulted, and
+  `toReversed`/`with`/`toSorted`/`toSpliced` size their result from a claimed
+  length before reading an element. A few long native loops also do not check
+  the interrupt flag, so they cannot be cancelled. The paths that used to crash
+  the process outright are fixed; making these charge the limit is not.
 - **Host modules.** No `fs`, no `http`, no Node compatibility layer — the engine
   plus a minimal runtime (event loop, timers, microtasks, `console`) is the
   whole scope. Give a script what it needs with `Set`.
@@ -352,10 +368,10 @@ Verified to cross-compile with `CGO_ENABLED=0` for linux/amd64, linux/arm64,
 darwin/amd64, darwin/arm64, windows/amd64 and windows/arm64 — from any of them,
 with no toolchain beyond Go.
 
-### Conformance harnesses
+<details>
+<summary>Conformance harnesses and layout</summary>
 
 ```sh
-CGO_ENABLED=0 go build -o goant ./cmd/goant
 CGO_ENABLED=0 go build -o goant-conf ./cmd/goant-conf
 CGO_ENABLED=0 go build -o goant-t262 ./cmd/goant-t262
 
@@ -363,8 +379,6 @@ CGO_ENABLED=0 go build -o goant-t262 ./cmd/goant-t262
 ./goant-t262 -all -t262 ../test262                     # every file, nothing skipped
 ./goant-t262 -all -t262 ../test262 -runner goja-run    # the same, for goja
 ```
-
-## Layout
 
 | path | purpose |
 |---|---|
@@ -380,6 +394,8 @@ CGO_ENABLED=0 go build -o goant-t262 ./cmd/goant-t262
 
 [PLAN.md](PLAN.md) has the architecture and [TODO.md](TODO.md) the
 phase-by-phase checklist.
+
+</details>
 
 ## Credits
 
