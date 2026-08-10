@@ -45,49 +45,37 @@ still faster at running them — see [Benchmarks](#benchmarks).
 
 ## The road here
 
-Four engines in seven years, all in the git log of one file — the Function node
-in [Robomotion](https://www.robomotion.io)'s robot runtime, which evaluates
-customer JavaScript a script per message, millions of messages, on Windows
-laptops, Raspberry Pis, Apple Silicon and Linux servers.
+[Robomotion](https://www.robomotion.io)'s robot runtime evaluates customer
+JavaScript in Function nodes — a script per message, millions of messages, on
+Windows laptops, Raspberry Pis, Apple Silicon and Linux servers. Four engines in
+seven years:
 
-**otto** (2019) — pure Go, ES5. Constructing a VM cost 500 ms, so it was built
-once per node and shared behind a mutex; the comment saying so is still in the
-commit. That number was about 2019's otto — today's starts in 1.9 ms, quicker
-than goant. What has not moved is the dialect: still ES5, still Go's RE2 for
-regular expressions with no lookahead and no backreferences, and still **20.9%
-of test262** against goja's 64.2% and goant's 99.4%.
+**otto** (2019), pure Go. Dropped for the dialect: ES5 only, and Go's `regexp`
+for regular expressions, so no lookahead and no backreferences. It passes 20.9%
+of test262.
 
-**duktape** (2021) — C, through cgo. Still ES5, and now a C toolchain in every
+**duktape** (2021), C through cgo. Still ES5, and now a C toolchain in every
 build on every platform we ship.
 
-**V8, through `rogchap.com/v8go`** (2021–2026) — the five years that produced
-this engine, and for most of them the problem was not V8 at all. v8go ships
-prebuilt V8 as static archives inside the module, and **v0.6.0 is the last
-release that contains a Windows one**. Windows is our largest install base, so
-we stayed on v0.6.0 — V8 9.0.257.18, April 2021 — for five years. Twice, once in
-2021 and again in 2024, someone bumped to 0.7.0; both times it was reverted the
-next day. The bind is that v0.6.0 has no arm64 archive at all, for either macOS
-or Linux, so the releases that would have brought Apple Silicon and Raspberry Pi
-are exactly the releases that drop Windows. In April 2026 we forked it, restored
-Windows amd64 and arm64 through clang-cl, and moved to V8 14.7 — which is 169 MB
-of prebuilt archive in the module we left, and a C++ toolchain per platform in
-the one we now maintain ourselves.
+**V8 through v8go** (2021–2026) — current JavaScript at last, and five years of
+paying for it. v8go vendors prebuilt V8 as static archives, and its last release
+carrying a Windows archive is also its only one carrying no arm64 archive: the
+versions that bring Apple Silicon and the Pi are the versions that drop Windows.
+Windows is our largest install base, so we sat on a V8 from April 2021 until we
+forked v8go in 2026 to restore Windows and get to V8 14.7 — which buys a C++
+toolchain per platform to maintain.
 
-Then the memory. A pooled isolate accumulates hidden classes, inline caches, JIT
-code and type-feedback maps that GC cannot reclaim — only `Isolate::Dispose()`
-releases them — so a long-running node saturates V8's ~1.4 GB per-isolate heap
-and dies there: *Mark-Compact 1358.6 → 1358.6 MB … last resort; GC freed
-nothing*. Separately, handing a 13 MB message to V8 copied it three times — Go
-string, C string, V8 string — and on Windows that peak crashed the process
-outright. The fix was a JS `Proxy` over the message backed by Go callbacks,
-which avoided the copies and then made a loop over 10,000 records take 19.7 s
-instead of 7.9 ms: not a fix so much as a choice of which failure to have.
+Two things wore it out. V8's per-isolate state — hidden classes, inline caches,
+JIT code, type feedback — is not reclaimable by GC, so a pooled isolate
+eventually walks into its ~1.4 GB ceiling and the process dies rather than
+throws. And a large message cost three copies crossing cgo — Go string, C
+string, V8 string — which on Windows was fatal by itself. Routing around that
+with a `Proxy` over the message removed the copies, and made a loop over 10,000
+records take 19.7 s instead of 7.9 ms: not a fix so much as a choice of which
+failure to have.
 
-**goant** (2026). The bridge was deleted three months later. With no cgo
-boundary there is nothing to marshal across: the message is parsed in place and
-serialized straight back out, and a 27.3 MB pass-through now peaks at 272 MB
-rather than 698 MB. That is what this engine is for. [The long
-version](docs/why-goant-exists.md).
+**goant** (2026). No cgo boundary, so nothing to marshal and no `abort()` to
+catch. [The long version](docs/why-goant-exists.md).
 
 ## Why not goja?
 

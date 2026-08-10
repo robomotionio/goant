@@ -10,64 +10,53 @@ the short one.
 
 ## Four engines in seven years
 
-One file — the Function node — has had its JavaScript engine replaced three
-times before goant. The git log is the shortest honest account of why an engine
-like this got written:
+The Function node has had its JavaScript engine replaced three times before
+goant.
 
-| date | change |
-| --- | --- |
-| 2019-11 | **otto**, vendored. Pure Go, ES5. The code comment: *"25.10.2019 otto.New takes 500 ms!! so we take it from onmessage to oncreate but now we have to use mutex"* — a per-node VM behind a lock, because construction was too expensive to do per message. |
-| 2021-04 | **duktape**, via `gopkg.in/olebedev/go-duktape.v3`. Still ES5, and now cgo. |
-| 2021-06 | *"Switch to v8"* — `rogchap.com/v8go` v0.6.0, bundling V8 9.0.257.18 from April 2021. |
-| 2021-12 | v8go 0.7.0. Reverted two days later. |
-| 2024-01 | *"Mac Signing Fixes - Arm Support"*, then *"arm fixes"*. |
-| 2024-01 | v8go 0.7.0 again. Reverted the next day. |
-| 2026-04 | Fork to `github.com/robomotionio/v8go` at V8 14.7, Windows restored — five years on a 2021 V8 ends. |
+**otto** (2019) — pure Go, ES5. Dropped for the dialect. It is ES5 only, and it
+uses Go's `regexp` package, so lookahead and backreferences are parse errors
+rather than features; it passes 20.9% of test262 today.
 
-**Why five years on one release.** v8go vendors prebuilt V8 as static archives
-in the module, and the platforms it ships are not the same set from one release
+**duktape** (2021) — C, through cgo. Bought nothing on the language and cost a C
+toolchain in every build on every platform we ship.
+
+**V8, through v8go** (2021–2026) — current JavaScript at last, and five years of
+paying for it. The bill had two halves.
+
+**Half one: which platforms exist in which release.** v8go vendors prebuilt V8
+as static archives in the module, and the set is not the same from one release
 to the next:
 
 | release | archives |
 | --- | --- |
 | v0.6.0 | `darwin_x86_64`, `linux_x86_64`, **`windows_x86_64`** |
 | v0.9.0 | `darwin_arm64`, `darwin_x86_64`, `linux_arm64`, `linux_x86_64` |
-| robomotionio fork | all four, plus `windows_arm64` and `windows_x86_64` |
+| our fork | all four, plus `windows_arm64` and `windows_x86_64` |
 
 v0.6.0 is the last release with a Windows archive, and Windows is our largest
-install base — so v0.6.0 is where we stayed. It is also the release with no
-arm64 archive at all: the versions that would have brought Apple Silicon and
-Raspberry Pi are exactly the versions that drop Windows. That is what both
-one-day reverts were, in 2021 and again in 2024. Upstream's own README says only
-*"There used to be Windows binary support"*; the fork's says it exists *"to
-restore Windows support that was dropped"*, which it does with clang-cl.
-| 2026-04 | *"retire pooled V8 isolates to prevent heap exhaustion"*. |
-| 2026-05 | *"survive 25-50 MB inMsg in Function under Windows commit pressure"*. |
-| 2026-05 | *"lazy msg bridge to fix Windows V8 OOM on large inMsg"*. |
-| 2026-07 | *"Run the FunctionNode on goant instead of V8"*. |
-| 2026-07 | *"Withdraw LazyMessage and the message bridge"* — the workaround deleted, three months after it shipped. |
+install base — so v0.6.0, and the V8 9.0 it carries from April 2021, is where we
+stayed. It is also the release with no arm64 archive at all: the versions that
+would have brought Apple Silicon and Raspberry Pi are exactly the versions that
+drop Windows. Two attempts to move up were reverted within a day. Upstream's own
+README says only *"There used to be Windows binary support"*. In 2026 we forked
+it, restored Windows amd64 and arm64 with clang-cl, and moved to V8 14.7 — which
+means a C++ toolchain per platform that is now ours to keep working.
 
-Two of those entries are worth reading together. The isolate retirement was
-forced by V8 accumulating per-isolate state that GC cannot reclaim — hidden
-classes, inline caches, JIT code, type-feedback maps — so a pooled isolate walks
-into the ~1.4 GB per-isolate cap and dies there. The Windows crash log:
+**Half two: memory.** V8's per-isolate state — hidden classes, inline caches,
+JIT code, type-feedback maps — is not reclaimable by GC; only disposing the
+isolate frees it. A pooled isolate therefore climbs to V8's ~1.4 GB per-isolate
+ceiling and the process dies there rather than throwing, in under ten minutes
+under load. The fix was to dispose an isolate on a use-count or heap-size cap
+rather than return it to the pool: paying for a fresh isolate often enough to
+stay under a ceiling GC could not.
 
-```
-Mark-Compact 1358.6 → 1358.6 MB … last resort; GC freed nothing
-```
-
-It reproduced in about nine minutes. The fix was a use-count and heap-size cap
-that disposes an isolate rather than returning it to the pool — that is, paying
-for a fresh isolate often enough to stay under a ceiling that GC could not.
-
-And the bridge. Handing a 13 MB message to V8 copied it three times (Go string,
-C string, V8 string) and peaked at roughly four times its size in transient
-commit; on Windows that was fatal. The replacement was a JS `Proxy` over the
-message backed by Go callbacks, reading through `gjson` and writing through
-`sjson`. It removed the copies and then cost a loop over 10,000 records **19.7 s
-against 7.9 ms**, because every property read re-scanned the whole document. Per
-robot, it was a flag — which meant it did not offer a way out, only a choice of
-which failure to have.
+Separately, handing a large message to V8 copied it three times — Go string, C
+string, V8 string — peaking at roughly four times its size in transient commit,
+which on Windows was fatal on its own. The replacement was a JS `Proxy` over the
+message backed by Go callbacks. It removed the copies and then cost a loop over
+10,000 records **19.7 s against 7.9 ms**, because every property read re-scanned
+the whole document. It shipped behind a per-robot flag, which meant it did not
+offer a way out — only a choice of which failure to have.
 
 Both problems are gone rather than solved. There is no boundary to marshal
 across, so the message is parsed in place and serialized straight back out; a
@@ -84,9 +73,10 @@ Pis, Apple Silicon Macs, Ubuntu servers.
 
 That ran on V8 through cgo, first
 [`rogchap.com/v8go`](https://github.com/rogchap/v8go) and then
-[`robomotionio/v8go`](https://github.com/robomotionio/v8go) — a fork we had to
-maintain because upstream is unmaintained, pins a V8 from April 2023, and
-dropped Windows in 2021. Our fork pinned V8 14.7.173.21 and restored Windows.
+[`robomotionio/v8go`](https://github.com/robomotionio/v8go) — a fork we maintain
+because upstream's newest release still carries a V8 from April 2023 and has
+shipped no Windows archive since 2021. Ours pins V8 14.7.173.21 and restores
+Windows on amd64 and arm64.
 
 It worked. It also cost more than the JavaScript was worth, in four separate
 ways, and goant exists to remove all four.
