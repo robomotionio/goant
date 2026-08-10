@@ -82,7 +82,7 @@ catch. [The long version](docs/why-goant-exists.md).
 goja is the obvious answer to "we want off cgo", it is good, and it is the
 yardstick in every benchmark below. The problem is the dialect. Our users
 increasingly do not write the JavaScript at all: they describe what they want to
-an AI, paste the result into a Function node and run it — and what comes back is
+an AI, paste the result into an automation and run it — and what comes back is
 written against the current language, not the one an engine happened to stop at.
 That code does not fail exotically. It fails on the ordinary things:
 
@@ -326,7 +326,13 @@ bytes-in/bytes-out JSON path, and migrating from v8go.
 
 ## Status
 
-In production for Function-node scripts. What is not there yet:
+**Used in production**, embedded in a Go service that runs scripts it did not
+write, under a deadline and a memory limit, on Linux, macOS and Windows across
+amd64 and arm64. There is no tagged release yet, so `go get` pins a commit; the
+root package and `v8go/` are the surfaces meant to stay put, and
+`internal/engine` is explicitly not one.
+
+What is missing:
 
 - **An optimising JIT.** What exists is a *baseline* compiler — one template per
   bytecode, inline caches, per-site type feedback for element access, compiled
