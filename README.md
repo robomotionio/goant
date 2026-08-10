@@ -105,8 +105,8 @@ its commit limit, even a temporary 50 MB allocation can fail. Linux overcommits
 memory, so we never saw the same problem there.
 
 The practical fix was outside our code: increase the Windows page file, disable
-memory compression, and reboot. In an enterprise environment, even that can
-require IT approval.
+memory compression, and reboot. In an enterprise environment that is hard to
+explain and harder to get approved.
 
 We also tried fixing it in software.
 
