@@ -317,7 +317,7 @@ in the repository; see [Reproducing](#reproducing).
 The eight workloads [ahaoboy/js-engine-benchmark](https://github.com/ahaoboy/js-engine-benchmark)
 scores. Higher is better. These are the engines in goant's own class: small,
 embeddable, shipped as one binary. That is the comparison that says something.
-None of them has an optimising JIT.
+None of them has an optimizing JIT.
 
 | Benchmark    |    goant | goant+JIT |     goja |     otto |      ant |  quickjs | duktape |
 | ------------ | -------: | --------: | -------: | -------: | -------: | -------: | ------: |
@@ -355,7 +355,7 @@ workload this engine was built for, short flows on a pooled `Runtime`.
 `code-load` is the one it makes worse, which is what a benchmark that measures
 compiling rather than running should do.
 
-An *optimising* JIT is still one to two orders of magnitude ahead: node, on the
+An *optimizing* JIT is still one to two orders of magnitude ahead: node, on the
 same machine, scores 33,300 on Richards against goant+JIT's 1374. If your
 scripts are compute-bound and you can afford cgo, that gap is the reason to
 reach for V8.
@@ -455,41 +455,76 @@ bytes-in/bytes-out JSON path, and migrating from v8go.
 
 ## Status
 
-**Used in production**, embedded in a Go service that runs scripts it did not
-write, under a deadline and a memory limit, on Linux, macOS and Windows across
-amd64 and arm64. There is no tagged release yet, so `go get` pins a commit; the
-root package and `v8go/` are the surfaces meant to stay put, and
-`internal/engine` is explicitly not one.
+**Used in production.** It is embedded in Robomotion RPA
+[robots](https://robomotion.io/downloads) that run user-provided scripts with
+time and memory limits, on Linux, macOS, and Windows across amd64 and arm64.
 
-What is missing:
+There is no tagged release yet, so `go get` must pin a specific commit. The root
+package and `v8go/` are intended to remain stable. `internal/engine` is not a
+public API and may change.
 
-- **An optimising JIT.** What exists is a *baseline* compiler: one template per
-  bytecode, inline caches, per-site type feedback for element access, compiled
-  calls that reach compiled code directly, mid-body deopt, and no inlining. It
-  is opt-in per Runtime with `WithJIT(true)`, off by default because "safe for a
-  host that opts in and watches it" is a different claim from "safe for everyone
-  on upgrade". It has had differential fuzzing against the interpreter on four
-  platforms, Test262 and mjsunit with it on, a race-detector concurrency suite,
-  and multi-million-invocation soaks, but no soak on `darwin/amd64`, the one
-  supported platform with no hardware behind it.
-- **The 326 test262 failures**: 211 in `staging/sm` (SpiderMonkey's own suite,
-  real semantic gaps, but a long tail rather than a lever), 47 unlanded
-  proposals (decorators, import-defer, import-bytes, source-phase imports),
-  about 50 behind per-function `[[Realm]]`, where a value must report the error
-  of the realm its function came from and goant reaches for the realm on the
-  stack, and 12 growable `SharedArrayBuffer`. `SharedArrayBuffer` and `Atomics` are
-  single-agent; there are no threads.
-- **Some array builtins escape the memory limit.** The limit is charged on
-  engine cells and out-of-line payload, so a builtin that grows a plain Go
-  slice (`fill`, `copyWithin`, `includes`, or `String.raw` against a
-  `{length: 2**53-1}` array-like) grows without the budget being consulted, and
-  `toReversed`/`with`/`toSorted`/`toSpliced` size their result from a claimed
-  length before reading an element. A few long native loops also do not check
-  the interrupt flag, so they cannot be cancelled. The paths that used to crash
-  the process outright are fixed; making these charge the limit is not.
-- **Host modules.** No `fs`, no `http`, no Node compatibility layer. The engine
-  plus a minimal runtime (event loop, timers, microtasks, `console`) is the
-  whole scope. Give a script what it needs with `Set`.
+What is still missing:
+
+- **An optimizing JIT.**
+
+  The current JIT is a baseline compiler, not an optimizing one. It has one
+  template per bytecode, inline caches, type feedback for element access, direct
+  compiled-to-compiled calls, mid-function deoptimization, and no inlining.
+
+  JIT is enabled per Runtime with `WithJIT(true)` and is off by default. The
+  reason is simple: "safe when a host explicitly enables and monitors it" is not
+  the same as "safe for everyone after an upgrade."
+
+  It has been tested with differential fuzzing against the interpreter on four
+  platforms, Test262, mjsunit, race-detector concurrency tests, and
+  multi-million-call stress tests. The only supported platform without a stress
+  test is `darwin/amd64`, because there is currently no hardware available for
+  it.
+
+- **326 Test262 failures.**
+
+  These are mainly:
+
+  - 211 failures in `staging/sm`, SpiderMonkey's test suite. These are real
+    semantic gaps, but mostly many small issues rather than one major missing
+    feature.
+  - 47 failures for proposals not implemented yet, including decorators, import
+    defer, import bytes, and source-phase imports.
+  - About 50 failures related to per-function `[[Realm]]`. Some errors must come
+    from the realm where the function was created, but goant currently uses the
+    realm from the current stack.
+  - 12 failures related to growable `SharedArrayBuffer`.
+
+  `SharedArrayBuffer` and `Atomics` currently support only a single agent. There
+  is no thread support.
+
+- **Some array built-ins can bypass the memory limit.**
+
+  The memory limit tracks engine objects and external payloads. However, some
+  built-ins grow normal Go slices without checking the memory budget.
+
+  This affects operations such as `fill`, `copyWithin`, `includes`, and
+  `String.raw` when used with array-like objects that claim extremely large
+  lengths, such as `{length: 2**53-1}`.
+
+  Methods such as `toReversed`, `with`, `toSorted`, and `toSpliced` may also
+  allocate their result based on the claimed length before reading any elements.
+
+  Some long-running native loops also do not check the interrupt flag, so they
+  cannot currently be cancelled.
+
+  The cases that previously crashed the whole process have been fixed. Proper
+  memory accounting for these remaining cases has not.
+
+- **No host modules.**
+
+  There is no `fs`, `http`, or Node.js compatibility layer.
+
+  The scope is the JavaScript engine plus a small runtime with an event loop,
+  timers, microtasks, and `console`.
+
+  If a script needs access to host functionality, provide it explicitly with
+  `Set`.
 
 ---
 
