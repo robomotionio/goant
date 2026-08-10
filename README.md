@@ -4,8 +4,10 @@
 
 # goant
 
-A JavaScript engine in pure Go. No cgo, nothing to fetch at build time, one
-static binary, and it cross-compiles wherever Go does.
+A JavaScript engine in pure Go, built to embed in Go applications. It passes
+**99.4% of test262** with nothing excluded, and ships an opt-in baseline JIT for
+amd64 and arm64. No cgo, nothing to fetch at build time, one static binary, and
+it cross-compiles wherever Go does.
 
 ```go
 rt := goant.New()
