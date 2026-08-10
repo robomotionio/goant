@@ -14,6 +14,20 @@ const stringChurn = `
 	last
 `
 
+// Both of the tests below assert that RESERVED storage stays flat, and under
+// GOANT_GC_POISON it cannot: poison exists to catch a use-after-free, so a swept
+// cell is never handed out again. The pool has no free list to draw on, every
+// allocation takes a fresh cell, and reserved storage tracks total allocations
+// by construction — which is the very shape these tests exist to reject. What
+// they check is the collection SCHEDULE; poison changes the allocator, not the
+// schedule, and the tests that watch gc.cycles run under it unchanged.
+func skipUnderGCPoison(t *testing.T) {
+	t.Helper()
+	if gcPoison {
+		t.Skip("GOANT_GC_POISON never recycles a cell, so reserved storage cannot be flat")
+	}
+}
+
 // TestStringGarbageIsCollectedWithNoHeapLimit is the regression for the gap.
 // deskbot sets a limit, so this was invisible from the product; any other
 // embedder had nothing watching it at all.
@@ -24,6 +38,7 @@ const stringChurn = `
 // to hold is that reserved storage stays FLAT — a longer loop must not reserve
 // more — not that it lands on a particular chunk count.
 func TestStringGarbageIsCollectedWithNoHeapLimit(t *testing.T) {
+	skipUnderGCPoison(t)
 	rt := New()
 	if rt.heapLimit != 0 {
 		t.Fatal("a fresh Runtime already has a heap limit; this test needs none")
@@ -48,6 +63,7 @@ func TestStringGarbageIsCollectedWithNoHeapLimit(t *testing.T) {
 // and it must not mean a square root of it either, which is what triggering on
 // the pool RESERVING a chunk gives, since the high-water mark never rewinds.
 func TestStringReserveIsFlatInTheNumberOfAllocations(t *testing.T) {
+	skipUnderGCPoison(t)
 	// At a reduced floor, so both arms are well past it and the test measures
 	// the SCHEDULE rather than the constant — and finishes quickly. Both floors
 	// move together, which is what gcStringFloor deriving from gcFloor buys.
