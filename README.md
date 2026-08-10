@@ -94,8 +94,10 @@ records take 19.7 s instead of 7.9 ms. Crossing into Go per read was not the
 expensive part. Each read rescanned the whole message to find one field, so a
 read cost the size of the message.
 
-So the crashes stopped and the speed went. With a boundary in the middle, every
-fix moved the cost somewhere else rather than removing it.
+So the crashes stopped and the speed went. Neither answer suited every flow, so
+it shipped as a switch the customer sets, `--enable-features=LazyMessage`: large
+messages or fast ones, pick one. With a boundary in the middle, every fix moved
+the cost somewhere else rather than removing it.
 
 **[goant](https://github.com/robomotionio/goant)** (2026). Ant came up on
 [Hacker News](https://news.ycombinator.com/item?id=48875377) as *"Show HN: Ant,
