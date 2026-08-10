@@ -50,12 +50,13 @@ JavaScript in Function nodes: a script per message, millions of messages, on
 Windows laptops, Raspberry Pis, Apple Silicon and Linux servers. It has run four
 JavaScript engines in seven years.
 
-**otto** (2019), pure Go. Dropped for the dialect. It is ES5 only, and it uses
-Go's `regexp` package, so there is no lookahead and there are no backreferences.
-It passes 20.9% of test262.
+**[otto](https://github.com/robertkrimen/otto)** (2019), pure Go. Dropped for
+the dialect. It is ES5 only, and it uses Go's `regexp` package, so there is no
+lookahead and there are no backreferences. It passes 20.9% of test262.
 
-**duktape** (2021), C through cgo. Still ES5, and now a C toolchain in every
-build on every platform we ship.
+**[duktape](https://github.com/olebedev/go-duktape)** (2021), C through cgo.
+Still ES5, and now a C toolchain in every build on every platform we ship. The
+binding was archived four months after we moved off it.
 
 **[rogchap.com/v8go](https://github.com/rogchap/v8go)** (2021 to 2026). Current
 JavaScript at last, and five years of paying for it. v8go vendors prebuilt V8 as
