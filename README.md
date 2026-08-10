@@ -45,6 +45,57 @@ machines it does not control, without the process dying when that JavaScript
 misbehaves. If your scripts are compute-bound and you can afford cgo, V8 is
 still faster at running them — see [Benchmarks](#benchmarks).
 
+## Why not goja?
+
+goja is the obvious answer to "we want off cgo", it is good, and we use it as
+the yardstick in every benchmark below. The problem is the dialect.
+
+Our users increasingly do not write the JavaScript at all. They describe what
+they want to an AI, paste the result into a Function node and run it — and what
+comes back is written against the CURRENT language, not the one an engine
+happened to stop at. That code does not fail exotically. It fails on the
+ordinary things:
+
+```js
+// "format this as euros"
+new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(1234.5)
+goja   ReferenceError: Intl is not defined
+goant  1.234,50 €
+
+// "show it with thousands separators"
+(1234567.891).toLocaleString("en-US", { maximumFractionDigits: 2 })
+goja   RangeError: toString() radix argument must be between 2 and 36
+goant  1,234,567.89
+
+// "group these records by region"
+Object.groupBy(orders, o => o.region)
+goja   TypeError: Object has no member 'groupBy'
+goant  { EU: [...], US: [...] }
+
+// "take the first four multiples of three"
+[...naturals().filter(n => n % 3 === 0).take(4)]
+goja   TypeError: Object has no member 'filter'
+goant  0,3,6,9
+```
+
+The second one is the sharpest. goja has no `Intl` at all, so an options object
+handed to `toLocaleString` falls through to `Number.prototype.toString`, which
+reads it as a RADIX. That is not a missing feature declining politely; it is a
+confusing error from an unrelated method, and "format this as money" is the most
+ordinary thing a business-automation script does.
+
+Be fair about the size of the gap, because it is easy to overstate: goja **does**
+have `at`, `toSorted`, `with`, `findLast`, `Object.hasOwn`, `replaceAll`, `??=`
+and named capture groups. Every example above was run against both engines
+before it was written down. What is missing is the last few years — `Intl`,
+iterator helpers, `Object.groupBy`, `Promise.withResolvers`, `Array.fromAsync`,
+modules — and that is exactly the vintage an AI writes in.
+
+The gap is measurable rather than rhetorical, which is why the conformance
+number matters: on the same test262 checkout, through the same harness,
+**99.4% against 64.2%**. That difference is not a scoreboard. It is the set of
+programs your users can paste in and have run.
+
 Written for [Robomotion](https://www.robomotion.io), whose robot runtime
 evaluates customer JavaScript in Function nodes — a script per message, millions
 of messages, on Windows laptops, Raspberry Pis, Apple Silicon and Linux servers.
