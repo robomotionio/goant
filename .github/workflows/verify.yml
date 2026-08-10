@@ -227,6 +227,23 @@ jobs:
         # had to reason about.
         run: $T262 -all -t262 ../test262 -runner "$RUNNER" -timeout 30s -failures ../off.txt | tee ../off.summary | tail -3
 
+      # Uploaded the moment it exists, not at the end of the job. Each arm is
+      # about eight minutes and the upload at the bottom of this job only runs
+      # if the job survives to reach it -- so when a hosted runner was reclaimed
+      # part-way through the second arm, the FIRST arm's completed result was
+      # discarded with it. Keeping it costs nothing and makes an evicted job
+      # half a job rather than none.
+      - name: Keep the tier-off list
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: t262-off-${{ matrix.runs-on }}
+          path: |
+            off.txt
+            off.summary
+          retention-days: 14
+          if-no-files-found: ignore
+
       - name: test262, tier on
         shell: bash
         working-directory: goant
