@@ -16,6 +16,9 @@ defer rt.Close()
 rt.Set("greet", func(name string) string { return "hello " + name })
 
 v, err := rt.RunString(`greet("ada").toUpperCase()`)
+if err != nil {
+	log.Fatal(err)
+}
 fmt.Println(v.String()) // HELLO ADA
 ```
 
@@ -27,17 +30,17 @@ go get github.com/robomotionio/goant
 
 [Robomotion](https://www.robomotion.io) is an RPA platform whose robot runtime is written in Go. 
 Even in a low-code platform, users still need a scripting language for cases where visual building 
-blocks are not enough, so we chose JavaScript from the beginning.
+blocks are not enough, so we chose JavaScript from the beginning. Robots execute that user-provided 
+JavaScript across millions of messages, which puts the engine on one of the hottest paths in the 
+product.
 
 Robomotion is built around a Node-RED-inspired messaging architecture. This allows automation flows to 
 process messages concurrently and execute multiple branches in parallel, a capability that is uncommon
 in traditional RPA products.
 
-The runtime executes customer JavaScript inside Function nodes, typically one script per message, 
-across millions of messages. It runs on Linux servers, Windows servers, Intel and Apple Silicon Macs, 
-and Raspberry Pi devices. Over the past seven years, we have used four different JavaScript engines.
-
-Join our 5000+ [Robomotion Discord](https://community.robomotion.io) community.
+The runtime executes customer JavaScript inside Function nodes, typically one script per message. 
+It runs on Linux servers, Windows servers, Intel and Apple Silicon Macs, and Raspberry Pi devices. 
+Over the past seven years, we have used four different JavaScript engines.
 
 <img width="1894" height="938" alt="image" src="https://github.com/user-attachments/assets/95844799-8169-43bf-8c37-f96e74a6a650" />
 <img width="1614" height="862" alt="image" src="https://github.com/user-attachments/assets/1f43a034-e811-4ee9-9147-a37bbf2dc79f" />
@@ -441,12 +444,15 @@ CGO_ENABLED=0 go build -o goant-bench ./cmd/goant-bench
 ## Using it
 
 ```go
+ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+defer cancel()
+
 rt := goant.New(goant.WithJIT(true))   // the baseline JIT, off by default
 defer rt.Close()
 
 rt.SetMemoryLimit(64 << 20)   // an error, not an abort
 
-stop := rt.WithContext(ctx)   // ctx's deadline interrupts the script
+stop := rt.WithContext(ctx)   // the deadline interrupts the script
 defer stop()
 
 rt.Set("fetchRow", func(id int) map[string]any { ... })   // Go in
@@ -497,10 +503,14 @@ What is still missing:
   - About 50 failures related to per-function `[[Realm]]`. Some errors must come
     from the realm where the function was created, but goant currently uses the
     realm from the current stack.
-  - 12 failures related to growable `SharedArrayBuffer`.
+  - 10 failures in `SharedArrayBuffer.prototype.slice`, which does not
+    implement the species protocol and mis-clamps an out-of-range start or end.
 
-  `SharedArrayBuffer` and `Atomics` currently support only a single agent. There
-  is no thread support.
+  `SharedArrayBuffer` and `Atomics` do work across more than one agent, and
+  `Atomics.wait`, `waitAsync` and `notify` are implemented with a FIFO waiter
+  list. But a second agent is reachable only through the Test262 host API
+  (`WithHostAPI`), and agents in a cluster take turns under a lock rather than
+  running at the same time. There is no worker or thread API for a host.
 
 - **Some array built-ins can bypass the memory limit.**
 
@@ -575,6 +585,13 @@ CGO_ENABLED=0 go build -o goant-t262 ./cmd/goant-t262
 phase-by-phase checklist.
 
 </details>
+
+## Community
+
+goant was built for [Robomotion](https://www.robomotion.io), where it runs
+customer JavaScript inside production RPA robots. Join 5,000+ automation
+enthusiasts in our Robomotion [Discord](https://community.robomotion.io)
+community.
 
 ## Credits
 
