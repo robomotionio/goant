@@ -91,7 +91,7 @@ baseline JIT, and that is where we are.
 
 ## Why not goja?
 
-goja is the obvious answer if you want off cgo. It is good, and it is the
+**[goja](https://github.com/dop251/goja)** is the obvious answer if you want off cgo. It is good, and it is the
 yardstick in every benchmark below. The problem is which JavaScript it speaks.
 
 Our users often do not write the JavaScript themselves. They ask an AI for it,
