@@ -30,8 +30,7 @@ The three ways to run JavaScript from Go, and what each one costs:
 | cgo               | **none**                       | none               | required                            |
 | Cross-compile     | **anywhere Go does**           | anywhere Go does   | a toolchain and a 100–210 MB prebuilt archive per platform |
 | Test262 (`-all`)  | **99.4%** — 53,247 / 53,573    | 64.2%              | current                             |
-| Engine            | bytecode interpreter + baseline JIT | bytecode interpreter | optimising JIT                 |
-| JIT               | amd64, arm64 (opt-in)          | none               | optimising                          |
+| Engine            | bytecode interpreter + **baseline JIT** (amd64, arm64, opt-in) | bytecode interpreter, no JIT | optimising JIT |
 | Binary size       | **11.1 MB**                    | 13.3 MB            | ~90 MB linked                       |
 | Cold start        | **2.5 ms**                     | 1.9 ms             | —                                   |
 | Out of memory     | **an error you can catch**¹    | takes the process down | takes the process down          |
@@ -92,16 +91,17 @@ Measured on an idle Azure `Standard_D8s_v5` created for the purpose and
 destroyed afterwards. Scripts are in the repository; see
 [Reproducing](#reproducing).
 
-The Octane table stands goant beside the engines in its own class — embeddable
-interpreters with no optimising JIT. Cold start and binary size also list node,
-deno and bun, which are whole runtimes rather than peers and are there for
-scale.
+The Octane table stands goant beside the engines in its own class. Cold start
+and binary size also list node, deno and bun, which are whole runtimes rather
+than peers and are there for scale.
 
 ### Octane 2.0
 
 The eight workloads [ahaoboy/js-engine-benchmark](https://github.com/ahaoboy/js-engine-benchmark)
-scores. Higher is better. These are the engines in goant's own class — no JIT,
-embeddable, one binary — which is the comparison that says something.
+scores. Higher is better. These are the engines in goant's own class — small,
+embeddable, shipped as one binary — which is the comparison that says something.
+None of them has an optimising JIT; `ant` ships a MIR-based one whose state in
+this run was whatever its default is.
 
 | Benchmark    |    goant | goant+JIT |     goja |      ant |  quickjs | duktape |
 | ------------ | -------: | --------: | -------: | -------: | -------: | ------: |
@@ -138,8 +138,8 @@ workload this engine was built for, short flows on a pooled `Runtime`, **2.9x**.
 `code-load` is the one workload the JIT makes worse, which is what a benchmark
 that measures compiling rather than running should do.
 
-A JIT runtime is still one to two orders of magnitude ahead on this suite: node
-scored 34,924 on Richards against goant+JIT's 1374 (from the earlier run — node
+An *optimising* JIT is still one to two orders of magnitude ahead on this suite:
+node scored 34,924 on Richards against goant+JIT's 1374 (from the earlier run — node
 is not in the table above). If your scripts are compute-bound and you can afford
 cgo, that gap is the reason to reach for V8.
 
@@ -195,8 +195,8 @@ same suite on an identically specified instance.
 | node / deno / bun | 22.23.2 / 2.9.5 / 1.3.14                      |
 | ant / quickjs / duktape | ant @ HEAD / 2021-03-27 / 2.7.0         |
 
-Octane scores are the best of two runs; the JIT engines carry more run-to-run
-variance than the two interpreters do.
+Octane scores are the best of two runs. Splay carries the most run-to-run
+variance of the eight, being the one dominated by the collector.
 
 </details>
 
