@@ -63,27 +63,35 @@ carries from April 2021, while Apple Silicon, Intel Mac and Linux moved on to
 later releases. Worse, the interface changed underneath: code written against
 v0.6.0 does not compile against v0.9.0, because `NewIsolate`, `NewContext`,
 `NewObjectTemplate`, `NewFunctionTemplate` and `Context.Isolate` all return an
-error in the first and a bare value in the second. So we carried two versions of
-v8go in the build, and two branches of our own code to call them with.
+error in the first and a bare value in the second. Build tags do not get you out
+of it either, because a module pins one version of a dependency for the whole
+build: `//go:build windows` selects a different file, not a different v8go. What
+we did was keep two branches of our own code, one for each v8go version.
 
 **[Our own v8go fork](https://github.com/robomotionio/v8go)** (2026). Windows
 restored on amd64 and arm64 with clang-cl, and V8 moved up to 14.7. It works. It
 also means a C++ toolchain per platform that is now ours to keep building.
 
-Two other things wore V8 out. It keeps per-isolate state that GC cannot reclaim,
-so a pooled isolate eventually reaches its 1.4 GB ceiling and the process dies
-instead of throwing. And a message reached the script through four copies: Go
-bytes, Go string, C string, V8 string. On Windows, 13 MB of it was fatal.
+Two other things wore V8 out.
 
-We fixed that twice, and both fixes were partial. External strings let V8 point
-into the Go bytes instead of copying them, but only while the message is ASCII;
-one Turkish character falls back to the copies, and V8 then stores the whole
-string at two bytes per character. LazyMessage replaced the message with a
-`Proxy` backed by Go callbacks, so nothing crossed the boundary until the script
-asked for it. It removed the copies, and it made a loop over 10,000 records take
-19.7 s instead of 7.9 ms, because every property read rescanned the whole
-document. It shipped behind a per-robot flag, which is not a fix. It is a choice
-of which failure to have.
+The first is memory it never gives back. V8 keeps per-isolate state that GC
+cannot reclaim, so a pooled isolate climbs to its 1.4 GB ceiling and the process
+dies there instead of throwing.
+
+The second was our own doing. Messages used to be capped, so nothing large ever
+reached V8. Then we added Large Message Objects, which keep anything over a
+threshold outside the message itself, and flows started carrying tens of
+megabytes. Handing one to V8 copied it four times on the way in: Go bytes, Go
+string, C string, V8 string. A 13 MB message was around 50 MB live at once, and
+on Windows that was enough to kill the process.
+
+Both fixes for it were partial. External strings let V8 point at the Go bytes
+instead of copying them, but only for ASCII: one Turkish character puts it back
+on the copies, and V8 then stores the whole string at two bytes per character.
+LazyMessage put a `Proxy` in front of the message so nothing crossed until the
+script asked for it, which removed the copies and made a loop over 10,000
+records take 19.7 s instead of 7.9 ms, because every read rescanned the whole
+document.
 
 **[goant](https://github.com/robomotionio/goant)** (2026). Ant came up on
 [Hacker News](https://news.ycombinator.com/item?id=48875377) as *"Show HN: Ant,
