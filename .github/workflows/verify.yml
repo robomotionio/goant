@@ -172,7 +172,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: test262
-          key: test262-${{ env.T262_SHA }}
+          # Keyed by runner as well as by SHA. Actions caches are shared across
+          # operating systems when the key matches, and the checkout below is
+          # not byte-identical between them, so one OS could restore another's
+          # copy and quietly undo the autocrlf setting.
+          key: test262-${{ matrix.runs-on }}-${{ env.T262_SHA }}
 
       - name: Fetch test262
         if: steps.t262-cache.outputs.cache-hit != 'true'
@@ -180,6 +184,13 @@ jobs:
         run: |
           git init test262
           cd test262
+          # autocrlf off. It defaults to true on the Windows runners, which
+          # rewrites every line ending in the corpus on checkout -- and this
+          # corpus tests line endings. line-terminator-normalisation-LF.js was
+          # being handed CRLF and failing for it. The failure was invisible until
+          # this job started running on Windows at all.
+          git config core.autocrlf false
+          git config core.eol lf
           git remote add origin https://github.com/tc39/test262.git
           git fetch --depth 1 origin "$T262_SHA"
           git checkout FETCH_HEAD
