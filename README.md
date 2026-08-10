@@ -80,7 +80,7 @@ asked for it. It removed the copies, and it made a loop over 10,000 records take
 document. It shipped behind a per-robot flag, which is not a fix. It is a choice
 of which failure to have.
 
-**[goant](https://github.com/robomotionio/goant)** (2026). ant came up on
+**[goant](https://github.com/robomotionio/goant)** (2026). Ant came up on
 [Hacker News](https://news.ycombinator.com/item?id=48875377) as *"Show HN: Ant,
 a JavaScript runtime and ecosystem"*. Its engine, Silver, is written in C, which
 is near enough to Go to port from rather than reimplement. Bun had just
