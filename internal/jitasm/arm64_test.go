@@ -586,7 +586,21 @@ func TestEveryRelationalConditionIsFalseForANaN(t *testing.T) {
 
 // uintptrOfSlice is the address of a slice's first element, for the tests that
 // hand generated code a real buffer to work on.
+// escapeSink forces every buffer whose ADDRESS is handed to machine code onto
+// the heap. Assigning the parameter to a package-level variable is what does it:
+// escape analysis is interprocedural, so the caller's make() heap-allocates.
+//
+// That is not tidiness. A uintptr does not make a slice escape, so a small
+// `make([]uint64, 3)` stays on the goroutine STACK — and Go grows a stack by
+// COPYING it to a new address. The very next call can do exactly that, after
+// which the emitted store writes to where the buffer used to be. It surfaced as
+// a flaky "store at +0 landed elsewhere" on macOS arm64, and only ever at +0,
+// because +0 is the one buffer small enough to be stack-allocated; every larger
+// displacement makes a slice too big for the stack and so was never affected.
+var escapeSink []uint64
+
 func uintptrOfSlice(s []uint64) uintptr {
+	escapeSink = s
 	return uintptr(unsafe.Pointer(&s[0]))
 }
 

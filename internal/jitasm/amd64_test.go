@@ -87,7 +87,7 @@ func TestMemoryEveryBase(t *testing.T) {
 	for i := range scratch {
 		scratch[i] = uint64(i)*0x1010101 + 1
 	}
-	addr := uint64(uintptr(unsafe.Pointer(&scratch[0])))
+	addr := addrOfU64(scratch)
 
 	for _, base := range []Reg{RAX, RCX, RBX, RSI, RDI, R8, R11, R12, R15} {
 		for _, disp := range []int32{0, 8, 200} {
@@ -298,7 +298,7 @@ func TestScaledIndexEveryRegister(t *testing.T) {
 	for i := range scratch {
 		scratch[i] = uint64(i)*0x1010101 + 1
 	}
-	addr := uint64(uintptr(unsafe.Pointer(&scratch[0])))
+	addr := addrOfU64(scratch)
 
 	for _, base := range allocatable {
 		for _, index := range allocatable {
@@ -334,7 +334,7 @@ func TestScaledIndexScales(t *testing.T) {
 	for i := range scratch {
 		scratch[i] = byte(i)
 	}
-	addr := uint64(uintptr(unsafe.Pointer(&scratch[0])))
+	addr := addrOfByte(scratch)
 
 	for _, scale := range []uint8{1, 2, 4, 8} {
 		a := NewAsm()
@@ -382,7 +382,7 @@ func TestLeaScaledIndexKeepsFlags(t *testing.T) {
 // field that follows.
 func TestMemoryOperandForms(t *testing.T) {
 	scratch := []uint64{7, 0xFFFFFFFF00000007, 0}
-	addr := uint64(uintptr(unsafe.Pointer(&scratch[0])))
+	addr := addrOfU64(scratch)
 
 	cases := []struct {
 		name string
@@ -444,7 +444,7 @@ func TestMemoryOperandForms(t *testing.T) {
 // into what the register already held.
 func TestByteAndWordLoads(t *testing.T) {
 	scratch := []uint64{0xAABBCCDDEEFF0102}
-	addr := uint64(uintptr(unsafe.Pointer(&scratch[0])))
+	addr := addrOfU64(scratch)
 
 	for _, tc := range []struct {
 		name string
@@ -485,7 +485,7 @@ var target [64]uint64
 // place, and a store that lands somewhere else is harder to trace back than a
 // load that comes from somewhere else.
 func TestScaledIndexStore(t *testing.T) {
-	addr := uint64(uintptr(unsafe.Pointer(&target[0])))
+	addr := addrOfU64(target[:])
 	for _, base := range allocatable {
 		for _, index := range allocatable {
 			// RAX carries the value being stored, so it cannot also carry an
@@ -527,7 +527,7 @@ func TestScaledIndexStore(t *testing.T) {
 // it is aimed at has other fields packed against it, and the failure mode of a
 // wider store is not a wrong value in the target but a changed value beside it.
 func TestByteStoreTouchesOneByte(t *testing.T) {
-	addr := uint64(uintptr(unsafe.Pointer(&target[0])))
+	addr := addrOfU64(target[:])
 	for _, disp := range []int32{0, 1, 7} {
 		target = [64]uint64{}
 
@@ -761,4 +761,29 @@ func TestSubsLeavesTheValueAlone(t *testing.T) {
 			t.Errorf("SubsRegImm32(%d, 1) = %d, want %d", start, got, start-1)
 		}
 	}
+}
+
+// escapeU64 and escapeByte force a buffer whose ADDRESS is handed to machine
+// code onto the heap, by assigning it to a package-level variable: escape
+// analysis is interprocedural, so the caller's make() heap-allocates.
+//
+// A uintptr does not make a slice escape, so `make([]uint64, 64)` stays on the
+// goroutine STACK -- and Go grows a stack by COPYING it to a new address, after
+// which emitted code writes to where the buffer used to be. The arm64 half of
+// this file was failing that way on macOS, flakily and only for its smallest
+// buffer. Nothing here has been seen to fail yet; the hazard is the same one and
+// "does not escape" is what `go build -gcflags=-m` says about every one of them.
+var (
+	escapeU64Sink  []uint64
+	escapeByteSink []byte
+)
+
+func addrOfU64(s []uint64) uint64 {
+	escapeU64Sink = s
+	return uint64(uintptr(unsafe.Pointer(&s[0])))
+}
+
+func addrOfByte(s []byte) uint64 {
+	escapeByteSink = s
+	return uint64(uintptr(unsafe.Pointer(&s[0])))
 }
