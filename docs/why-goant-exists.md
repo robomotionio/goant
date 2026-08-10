@@ -39,11 +39,13 @@ its build issues are addressed"* — and the very same release added Apple Silic
 and linux/arm64. So the version with Windows and the version with arm64 have
 never been the same version.
 
-Windows is our largest install base, so v0.6.0, and the V8 9.0 it carries from
-April 2021, is where we stayed for five years. Two attempts to move up were
-reverted within a day. Building for the platforms we ship became ours to do, one
-at a time. Upstream's README still says only *"There used to be Windows binary
-support"*. In 2026 we forked it, restored Windows amd64 and arm64 with clang-cl,
+Windows is our largest install base, so Windows stayed on v0.6.0, and the V8 9.0
+it carries from April 2021, for five years. Two attempts to move the whole
+product up were reverted within a day. What we did instead was take the later
+releases on the platforms that could have them, which left one product running
+two different V8 versions split by operating system: the JavaScript a customer's
+script met depended on which machine the robot was on. Upstream's README still
+says only *"There used to be Windows binary support"*. In 2026 we forked it, restored Windows amd64 and arm64 with clang-cl,
 and moved to V8 14.7 — which means a C++ toolchain per platform that is now ours
 to keep working.
 

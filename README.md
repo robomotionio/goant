@@ -67,9 +67,11 @@ release with a Windows binary. v0.7.0, that December, took it back out:
 release is the one that added Apple Silicon and linux/arm64. So the version with
 Windows and the version with arm64 were never the same version.
 
-Windows is our largest install base, so we stayed on v0.6.0, and with it a V8
-from April 2021. Building for the platforms we ship then became ours to do, one
-at a time: Apple Silicon, Intel Mac and Windows.
+Windows is our largest install base, so Windows stayed on v0.6.0 and the V8 it
+carries from April 2021, while Apple Silicon, Intel Mac and Linux moved on to
+later releases. One product, two V8 versions, split by operating system: which
+JavaScript a customer's script met depended on which machine the robot was
+running on.
 
 **[Our own v8go fork](https://github.com/robomotionio/v8go)** (2026). Windows
 restored on amd64 and arm64 with clang-cl, and V8 moved up to 14.7. It works. It
