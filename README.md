@@ -257,18 +257,18 @@ goja  TypeError: Object has no member 'filter'
 goant [0, 3, 6, 9]
 ```
 
-goja supports many modern features, including `at`, `toSorted`, `with`,
-`findLast`, `Object.hasOwn`, `replaceAll`, and `??=`. Its RegExp implementation
-also supports lookbehind, named groups, named backreferences, and the `s` and
-`y` flags.
+goja supports many modern JavaScript features, including `at`, `toSorted`,
+`with`, `findLast`, `Object.hasOwn`, `replaceAll`, and `??=`. Its RegExp
+implementation also supports lookbehind, named groups, named backreferences, and
+the `s` and `y` flags.
 
-The remaining gaps are features that increasingly appear in generated
-JavaScript: Unicode property escapes, the RegExp `d` and `v` flags, `Intl`,
-iterator helpers, `Object.groupBy`, `Promise.withResolvers`, `Array.fromAsync`,
-and modules.
+The gaps that matter to us are the ones that show up in ordinary automation
+code: `Intl`, Unicode property escapes, newer RegExp flags, `Object.groupBy`,
+iterator helpers, and other APIs that current browsers, Node.js, and
+AI-generated JavaScript commonly assume are available.
 
-For our workload, compatibility with the JavaScript that users and AI tools
-write today matters more than supporting a smaller language surface.
+For our workload, supporting the JavaScript users actually paste into Function
+nodes matters more than broad compatibility with an older JavaScript surface.
 
 Every example above was run against both engines before being included here.
 
