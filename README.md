@@ -60,9 +60,11 @@ Windows and the version with arm64 were never the same version.
 
 Windows is our largest install base, so Windows stayed on v0.6.0 and the V8 it
 carries from April 2021, while Apple Silicon, Intel Mac and Linux moved on to
-later releases. One product, two V8 versions, split by operating system: which
-JavaScript a customer's script met depended on which machine the robot was
-running on.
+later releases. Worse, the interface changed underneath: code written against
+v0.6.0 does not compile against v0.9.0, because `NewIsolate`, `NewContext`,
+`NewObjectTemplate`, `NewFunctionTemplate` and `Context.Isolate` all return an
+error in the first and a bare value in the second. So we carried two versions of
+v8go in the build, and two branches of our own code to call them with.
 
 **[Our own v8go fork](https://github.com/robomotionio/v8go)** (2026). Windows
 restored on amd64 and arm64 with clang-cl, and V8 moved up to 14.7. It works. It
