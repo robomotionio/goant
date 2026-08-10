@@ -70,7 +70,11 @@ we did was keep two branches of our own code, one for each v8go version.
 
 **[Our own v8go fork](https://github.com/robomotionio/v8go)** (2026). Windows
 restored on amd64 and arm64 with clang-cl, and V8 moved up to 14.7. It works. It
-also means a C++ toolchain per platform that is now ours to keep building.
+also means an LLVM toolchain per platform, ours to keep building. V8 14 passes
+libc++ types across the ABI, so Linux needs clang rather than gcc, macOS needs a
+Homebrew clang 19 or later with a patched `__config_site` because Chromium pins
+libc++ under `std::__Cr` where Apple's emits `std::__1`, and Windows needs
+clang-cl because Go's own cgo compiler is MinGW and the ABI does not match.
 
 Two other things wore V8 out.
 
