@@ -371,25 +371,25 @@ Time to start, evaluate one line, and exit. hyperfine `--shell=none`, 20 warmup
 and 200 timed runs, all nine in one sitting on the same idle machine. node, deno
 and bun are whole runtimes rather than peers and are listed for scale.
 
-| Runtime   |    Cold start | Binary      | Links against |
-| --------- | ------------: | ----------: | ------------- |
-| quickjs   |        0.8 ms |      1.0 MB | system libs   |
-| duktape   |        1.1 ms |      0.3 MB | system libs   |
-| otto      |        1.9 ms |      7.1 MB | nothing       |
-| goja      |        2.0 ms |     13.3 MB | nothing       |
-| **goant** |    **2.5 ms** | **11.1 MB** | **nothing**   |
-| ant       |        3.6 ms |     11.8 MB | system libs   |
-| bun       |       11.5 ms |     88.5 MB | system libs   |
-| deno      |       13.3 ms |     91.2 MB | system libs   |
-| node      |       24.0 ms |    119.1 MB | system libs   |
+| Runtime   |    Cold start | Binary      |
+| --------- | ------------: | ----------: |
+| quickjs   |        0.8 ms |      1.0 MB |
+| duktape   |        1.1 ms |      0.3 MB |
+| otto      |        1.9 ms |      7.1 MB |
+| goja      |        2.0 ms |     13.3 MB |
+| **goant** |    **2.5 ms** | **11.1 MB** |
+| ant       |        3.6 ms |     11.8 MB |
+| bun       |       11.5 ms |     88.5 MB |
+| deno      |       13.3 ms |     91.2 MB |
+| node      |       24.0 ms |    119.1 MB |
 
 goant is neither the smallest nor the quickest to start. quickjs, duktape and
 otto beat it on both. What its 11.1 MB contains is a whole engine: parser,
 compiler, interpreter, garbage collector, every built-in, Temporal, Intl, the
 Unicode 17 tables and a regex engine, statically linked, with nothing to install
-beside it. It was 6.4 MB before Temporal and Intl landed. The dynamically linked
-rows are one file plus whatever the system already has, which is not the same
-measurement.
+beside it. It was 6.4 MB before Temporal and Intl landed. Only otto and goja
+link against nothing the way goant does; every other row is one file plus
+whatever the system already has, which is not the same measurement.
 
 <details>
 <summary>Environment</summary>
@@ -512,23 +512,24 @@ What is still missing:
   (`WithHostAPI`), and agents in a cluster take turns under a lock rather than
   running at the same time. There is no worker or thread API for a host.
 
-- **Some array built-ins can bypass the memory limit.**
+- **A deliberately hostile script can outrun the memory limit and the deadline.**
 
-  The memory limit tracks engine objects and external payloads. However, some
-  built-ins grow normal Go slices without checking the memory budget.
+  Both hold for ordinary code, including ordinary runaway code: a `while (true)`
+  loop stops the moment its deadline fires. Reaching the gap takes an array-like
+  that claims a length it does not have, such as `{length: 2**53-1}`, handed to
+  a generic array built-in. No real array can be that long.
 
-  This affects operations such as `fill`, `copyWithin`, `includes`, and
-  `String.raw` when used with array-like objects that claim extremely large
-  lengths, such as `{length: 2**53-1}`.
+  Given that, `toReversed`, `with`, `toSorted` and `toSpliced` size their result
+  from the claimed length before reading an element, while `fill`, `copyWithin`,
+  `includes` and `String.raw` walk to it. Those allocations are plain Go slices
+  the budget does not count, and the loop runs inside a built-in, where the
+  interrupt flag is not read until it returns. So such a script can pass the
+  memory limit without raising `ErrMemoryLimit`, and outlast its deadline.
 
-  Methods such as `toReversed`, `with`, `toSorted`, and `toSpliced` may also
-  allocate their result based on the claimed length before reading any elements.
-
-  Some long-running native loops also do not check the interrupt flag, so they
-  cannot currently be cancelled.
-
-  The cases that previously crashed the whole process have been fixed. Proper
-  memory accounting for these remaining cases has not.
+  What it cannot do is end the process, which was the part that mattered. The
+  allocations that used to fail with a Go runtime error no `recover` could catch
+  are bounded now, and `internal/engine/hostile_script_test.go` keeps them that
+  way. What is left is the accounting.
 
 - **No host modules.**
 
