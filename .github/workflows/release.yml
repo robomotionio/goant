@@ -1,0 +1,221 @@
+name: release
+
+# Ships the `goant` CLI as a binary for the six platforms it runs on.
+#
+# One ubuntu runner builds all six. That is not a shortcut, it is the point of
+# the engine: no cgo anywhere, so GOOS and GOARCH are the whole cross-compile
+# story and there is nothing per-platform to get wrong. Every other engine that
+# publishes here needs a runner per target.
+#
+# Two kinds of release come out of this file:
+#
+#   - a tag push (v1.2.3) cuts a normal release at that tag.
+#   - the nightly schedule, or a dispatch, replaces a rolling `nightly`
+#     prerelease that always points at the head of main.
+#
+# The rolling tag exists because of how external benchmark harnesses consume
+# this. They install "the latest release" and re-measure on a schedule, so an
+# engine that releases twice a year is published twice a year and its score is
+# stale in between -- which is the substance of half the open issues on
+# ahaoboy/js-engine-benchmark. A tag that is recreated nightly makes the
+# published number track the engine instead of the release cadence.
+#
+# Asset names are Rust target triples. Nothing here is Rust; that is simply the
+# vocabulary the installer these harnesses use (easy-install) reads most
+# reliably, and an asset it cannot place is an engine that does not appear.
+#
+# Only the `goant` binary ships. The other commands in cmd/ are harnesses for
+# working ON the engine, and an installer handed two binaries in one release has
+# to guess which one is the engine.
+
+on:
+  push:
+    tags: ["v*"]
+  schedule:
+    # After verify.yml's 03:00 nightly, so a broken main is red before it is
+    # published rather than after.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CGO_ENABLED: "0"
+  GO_VERSION: "1.26"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Unshallow, so `git describe` can find the last tag for a nightly
+          # version string, and so the toolchain's VCS stamp is a real commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Work out the version
+        id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+            tag="${GITHUB_REF#refs/tags/}"
+            rolling=false
+          else
+            # No tag yet is 0.0.0 rather than a number nobody agreed to. The
+            # commit still reaches `goant --version` through the toolchain's VCS
+            # stamp, which is the part a benchmark table actually shows.
+            version="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+            version="${version:-0.0.0}"
+            tag="nightly"
+            rolling=true
+          fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "rolling=$rolling"
+            echo "sha=${GITHUB_SHA:0:7}"
+          } >> "$GITHUB_OUTPUT"
+          echo "building $version as $tag (${GITHUB_SHA:0:7})"
+
+      - name: Build the six targets
+        shell: bash
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist stage
+
+          # goant-<triple>, the name easy-install reads. The windows triple says
+          # -gnu rather than -msvc because Go links its own binaries and never
+          # goes near the MSVC toolchain; the other Go engine published there
+          # (goja) is named the same way.
+          targets="
+          linux   amd64 x86_64-unknown-linux-gnu
+          linux   arm64 aarch64-unknown-linux-gnu
+          darwin  amd64 x86_64-apple-darwin
+          darwin  arm64 aarch64-apple-darwin
+          windows amd64 x86_64-pc-windows-gnu
+          windows arm64 aarch64-pc-windows-gnu
+          "
+
+          while read -r goos goarch triple; do
+            if [ -z "${goos:-}" ]; then continue; fi
+            exe=goant
+            if [ "$goos" = windows ]; then exe=goant.exe; fi
+
+            # -s -w strips the symbol table and DWARF, which is how a Go binary
+            # is stripped. The external `strip` these harnesses run over every
+            # engine is not safe on a Go binary, so arriving already stripped is
+            # both smaller and a request not to try.
+            GOOS="$goos" GOARCH="$goarch" go build \
+              -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "stage/$exe" ./cmd/goant
+
+            if [ "$goos" = windows ]; then
+              (cd stage && zip -q "../dist/goant-$triple.zip" "$exe")
+            else
+              tar -C stage -czf "dist/goant-$triple.tar.gz" "$exe"
+            fi
+            rm -f "stage/$exe"
+          done <<< "$targets"
+
+          ls -la dist
+
+      - name: Check the binary it will publish
+        shell: bash
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          tar -xzf dist/goant-x86_64-unknown-linux-gnu.tar.gz -C stage
+
+          # A release that cannot say what it is has been the single most common
+          # complaint against the engines already published, so prove the flag
+          # works and carries the version we just stamped.
+          out="$(stage/goant --version)"
+          echo "version line: $out"
+          case "$out" in
+            "goant v${VERSION}"*) ;;
+            *) echo "::error::--version said '$out', expected to start with 'goant v${VERSION}'"; exit 1 ;;
+          esac
+
+          # And prove the tier is on without being asked. This binary is measured
+          # by running it with no flags and no environment; shipping it with the
+          # compiled tier asleep would publish a third of the engine. Nothing
+          # else in CI covers the DEFAULT, only the two explicit settings.
+          cat > /tmp/hot.js <<'JS'
+          function f(n){ var s=0; for (var i=0;i<n;i++) s+=i; return s }
+          var t=0; for (var k=0;k<50;k++) t+=f(1000)
+          print(t)
+          JS
+          stats="$(GOANT_JIT_STATS=1 stage/goant /tmp/hot.js 2>&1 >/dev/null | head -1)"
+          echo "tier: $stats"
+          case "$stats" in
+            "jit: 0 compiled"*) echo "::error::the shipped binary does not run the compiled tier by default"; exit 1 ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      rolling: ${{ steps.v.outputs.rolling }}
+      sha: ${{ steps.v.outputs.sha }}
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+          ROLLING: ${{ needs.build.outputs.rolling }}
+          SHA: ${{ needs.build.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$ROLLING" = true ]; then
+            # Deleted and recreated rather than edited, so the tag moves to this
+            # commit instead of leaving the release pointing at whatever it was
+            # cut from first. Tag deletion propagates asynchronously; without the
+            # pause the recreate can resurrect the old one.
+            gh release delete "$TAG" --yes --cleanup-tag || true
+            sleep 10
+            gh release create "$TAG" dist/* \
+              --prerelease \
+              --target "$GITHUB_SHA" \
+              --title "nightly ($SHA)" \
+              --notes "Automated build of $GITHUB_SHA. Version reports as v${VERSION}-${SHA}."
+          else
+            gh release create "$TAG" dist/* \
+              --title "$TAG" \
+              --generate-notes
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[].name'
