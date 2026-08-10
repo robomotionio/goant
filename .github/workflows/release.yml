@@ -244,8 +244,22 @@ jobs:
               --title "nightly ($SHA)" \
               --notes "Automated build of $GITHUB_SHA. Version reports as v${VERSION}-${SHA}."
           else
-            gh release create "$TAG" dist/* \
-              --title "$TAG" \
-              --generate-notes
+            # A hand-written note when there is one, because --generate-notes
+            # bases itself on the PREVIOUS release and there isn't one for the
+            # first tag: it would walk 1300 commits and land a wall of text on
+            # the page someone arrives at from a link. Later tags have a
+            # predecessor and can generate a real changelog.
+            #
+            # NOT a prerelease, deliberately. GitHub's /releases/latest endpoint
+            # skips prereleases, and that endpoint is what the installers these
+            # harnesses use resolve first -- a repository whose only release is
+            # a prerelease reads as having none, and its sidebar says "1 tag"
+            # rather than a version.
+            notes=".github/release-notes/${TAG}.md"
+            if [ -f "$notes" ]; then
+              gh release create "$TAG" dist/* --title "$TAG" --notes-file "$notes"
+            else
+              gh release create "$TAG" dist/* --title "$TAG" --generate-notes
+            fi
           fi
           gh release view "$TAG" --json assets --jq '.assets[].name'
