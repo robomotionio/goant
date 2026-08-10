@@ -83,25 +83,20 @@ reached V8. Then we added Large Message Objects, which keep anything over a
 threshold outside the message itself, and flows started carrying tens of
 megabytes. Handing one to V8 copied it four times on the way in: Go bytes, Go
 string, C string, V8 string. A 13 MB message was around 50 MB live at once, and
-on Windows that was enough to kill the process while the machine still reported
-4 GB of RAM free.
+on Windows that killed the process with 4 GB of RAM still free. Windows commits
+memory up front instead of overcommitting, so near the system commit limit a
+50 MB transient allocation is refused however much RAM is free. Linux
+overcommits and never showed it. The fix is on the host, not in the code: a
+larger page file, memory compression off, a reboot, all of which an enterprise
+IT department has to agree to first.
 
-That figure was misleading. Windows can run out of commit before it runs out of
-physical memory, and once the system commit charge is near its limit a 50 MB
-transient allocation is refused however much RAM appears to be free. Linux
-overcommits, so it never showed this at all. The fix is on the host rather than
-in the code: a larger page file, memory compression off, a reboot. That is a
-change an enterprise IT department has to approve, which is a poor place for a
-customer's automation to be stuck.
-
-Both fixes for it were partial. External strings let V8 point at the Go bytes
-instead of copying them, but only for ASCII: one Turkish character puts it back
-on the copies, and V8 then stores the whole string at two bytes per character.
-LazyMessage put a `Proxy` in front of the message so nothing crossed until the
-script asked for it. That removed the copies, and made a loop over 10,000
-records take 19.7 s instead of 7.9 ms. Crossing into Go per read was not the
-expensive part. Each read rescanned the whole message to find one field, so a
-read cost the size of the message.
+Both fixes were partial. External strings let V8 point at the Go bytes instead
+of copying them, but only for ASCII: one Turkish character puts it back on the
+copies, at two bytes per character. LazyMessage put a `Proxy` in front of the
+message so nothing crossed until the script asked for it. That removed the
+copies and made a loop over 10,000 records take 19.7 s instead of 7.9 ms. The
+crossing into Go was cheap; each read rescanning the whole message to find one
+field was not.
 
 So the crashes stopped and the speed went. Neither answer suited every flow, so
 it shipped as a switch the customer sets, `--enable-features=LazyMessage`: large
