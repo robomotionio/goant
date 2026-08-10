@@ -45,10 +45,17 @@ still faster at running them; see [Benchmarks](#benchmarks).
 
 ## The road here
 
-[Robomotion](https://www.robomotion.io) is an Agentic RPA platform. Robot runtime evaluates customer
-JavaScript in Function nodes: a script per message, millions of messages, on
-Windows laptops, Raspberry Pis, Apple Silicon and Linux servers. It has run four
-JavaScript engines in seven years.
+[Robomotion](https://www.robomotion.io) is an RPA platform whose robot runtime is written in Go. 
+Even in a low-code platform, users still need a scripting language for cases where visual building 
+blocks are not enough, so we chose JavaScript from the beginning.
+
+Robomotion is built around a Node-RED-inspired messaging architecture. This allows automation flows to 
+process messages concurrently and execute multiple branches in parallel, a capability that is uncommon
+in traditional RPA products.
+
+The runtime executes customer JavaScript inside Function nodes, typically one script per message, 
+across millions of messages. It runs on Linux servers, Windows servers, Intel and Apple Silicon Macs, 
+and Raspberry Pi devices. Over the past seven years, we have used four different JavaScript engines.
 
 <img width="1894" height="938" alt="image" src="https://github.com/user-attachments/assets/95844799-8169-43bf-8c37-f96e74a6a650" />
 <img width="1614" height="862" alt="image" src="https://github.com/user-attachments/assets/1f43a034-e811-4ee9-9147-a37bbf2dc79f" />
