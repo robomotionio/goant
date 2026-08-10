@@ -83,10 +83,12 @@ of which failure to have.
 **goant** (2026). ant came up on
 [Hacker News](https://news.ycombinator.com/item?id=48875377) as *"Show HN: Ant,
 a JavaScript runtime and ecosystem"*. Its engine, Silver, is written in C, which
-is near enough to Go to port from rather than reimplement, so we tried it. Once
-it ran we started on test262, then on a baseline JIT, and that is where we are.
-No cgo boundary, so nothing to marshal and no `abort()` to catch.
-[The long version](docs/why-goant-exists.md).
+is near enough to Go to port from rather than reimplement. Bun had just
+[rewritten 535,000 lines of Zig into Rust](https://bun.com/blog/bun-in-rust) in
+eleven days with AI agents, so C to Go looked like a smaller version of a bet
+someone had already won. Once the port ran we started on test262, then on a
+baseline JIT, and that is where we are. No cgo boundary, so nothing to marshal
+and no `abort()` to catch. [The long version](docs/why-goant-exists.md).
 
 ## Why goant?
 
