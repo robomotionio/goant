@@ -87,8 +87,7 @@ is near enough to Go to port from rather than reimplement. Bun had just
 [rewritten 535,000 lines of Zig into Rust](https://bun.com/blog/bun-in-rust) in
 eleven days with AI agents, so C to Go looked like a smaller version of a bet
 someone had already won. Once the port ran we started on test262, then on a
-baseline JIT, and that is where we are. No cgo boundary, so nothing to marshal
-and no `abort()` to catch. [The long version](docs/why-goant-exists.md).
+baseline JIT, and that is where we are.
 
 ## Why goant?
 
