@@ -103,6 +103,12 @@ func (rt *Runtime) Interrupt() {
 		return
 	}
 	rt.interrupt.flag.Store(interruptHost)
+	// A loop asleep on the wall clock is not running any script, so it will not
+	// reach an interrupt check on its own. Waking it is what turns "stop" into
+	// something that happens now rather than at the next timer.
+	if rt.host != nil {
+		rt.host.signal()
+	}
 }
 
 // ClearInterrupt cancels a pending or delivered interrupt, making the Runtime

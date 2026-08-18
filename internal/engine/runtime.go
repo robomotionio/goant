@@ -1,11 +1,13 @@
 package engine
 
 import (
+	"context"
 	"errors"
-	"github.com/robomotionio/goant/internal/jitmem"
 	"math"
 	"path/filepath"
+	"time"
 
+	"github.com/robomotionio/goant/internal/jitmem"
 	"github.com/robomotionio/goant/internal/regexpjs"
 )
 
@@ -194,6 +196,23 @@ type Runtime struct {
 	macrotasks []macrotask
 	timerSeq   uint64
 
+	// realTimers switches the loop to the wall clock. See SetRealTimers.
+	realTimers bool
+
+	// host is the cross-goroutine job queue and live-work count, shared by every
+	// realm of the isolate the way the interrupt flag is. See hostloop.go.
+	host *hostQueue
+
+	// hostRoots are the values the host is holding on JavaScript's behalf,
+	// counted rather than flagged because the same value may be held twice. The
+	// reflective root walk finds this map like any other field.
+	hostRoots map[Value]int
+
+	// loopCtx bounds the loop RunLoop is currently driving. Nil everywhere else,
+	// including inside a nested drain, so a callback that drains again inherits
+	// the same deadline rather than losing it.
+	loopCtx context.Context
+
 	// FinalizationRegistry [[Cells]], keyed by the registry object. Cleanup
 	// callbacks never fire (no tracing GC), but register/unregister bookkeeping
 	// and its brand check are program-observable.
@@ -307,6 +326,20 @@ type Runtime struct {
 	// is the directory specifiers resolve against at the entry point.
 	modules   map[string]*moduleRecord
 	moduleDir string
+	// moduleResolver lets the host answer "where does this specifier live",
+	// which is the only way a bare specifier can mean anything: the engine's own
+	// answer is a path join, and `@scope/pkg` joined to a directory is a file
+	// that is not there. See SetModuleResolver.
+	moduleResolver ModuleResolverFunc
+	// moduleKeys caches what the resolver said, keyed by (referrer, specifier).
+	// Resolution has to be a function — the same import in the same module must
+	// name the same record every time it is looked up, and it is looked up from
+	// half a dozen places after loading — so the resolver is asked once and the
+	// answer is kept.
+	moduleKeys map[string]string
+	// moduleSources holds source the resolver supplied itself, for a module that
+	// is not on disk at all: an embedded bundle, a generated shim, a string.
+	moduleSources map[string]string
 	// asyncEvalOrder hands out [[AsyncEvaluationOrder]] numbers: the sequence in
 	// which modules started waiting, which orders the ones a single completion
 	// makes runnable together.
@@ -533,9 +566,13 @@ type closure struct {
 // real clock, so ordering is by (delay, seq): earlier delay first, ties broken
 // by scheduling order. period > 0 marks a setInterval task (re-armed on fire).
 type macrotask struct {
-	fn        Value
-	args      []Value
-	delay     float64
+	fn    Value
+	args  []Value
+	delay float64
+	// deadline is when this task is due on the wall clock, set only when the
+	// Runtime is on real timers. Under the virtual clock delay alone orders the
+	// queue and this stays zero. See SetRealTimers.
+	deadline  time.Time
 	period    float64
 	seq       uint64
 	id        uint64
@@ -545,9 +582,18 @@ type macrotask struct {
 // ErrNotImplemented marks engine surface that is scaffolded but not yet ported.
 var ErrNotImplemented = errors.New("goant: not implemented yet")
 
+// ErrHostClosed is what Post reports once the Runtime has been closed: a
+// goroutine finishing after shutdown learns its answer went nowhere, rather
+// than queueing onto a loop that will never run again.
+var ErrHostClosed = errors.New("goant: runtime is closed")
+
 // New creates a fresh Runtime with empty pools and an initialized global object.
 func New() *Runtime {
 	rt := &Runtime{
+		// One queue per isolate, created here rather than lazily: Post is called
+		// from another goroutine, and a field that appears on first use is a data
+		// race however carefully it is written.
+		host: newHostQueue(),
 		// strNext starts at the floor rather than zero: it is compared against on
 		// every string allocated, and a zero would call stringsFull on the first
 		// one. A realm made by NewRealm keeps the zero and gets the call once,
@@ -618,6 +664,12 @@ func (rt *Runtime) NewRealm() *Runtime {
 		// that cancels does not know or care which realm is currently on the
 		// stack, and a realm that ignored the flag would keep the isolate alive.
 		interrupt: rt.interrupt,
+
+		// The same argument applies to the host queue and the clock: there is one
+		// event loop, and which realm a posted job lands in says nothing about
+		// which realm has to run it.
+		host:       rt.host,
+		realTimers: rt.realTimers,
 
 		// Realms of one agent share the pools, so they must also share the list
 		// of who has roots in them: a collection driven from either realm has to

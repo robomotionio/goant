@@ -6,6 +6,8 @@ package engine
 // then/catch/finally derive a fresh promise. The host drains the microtask queue
 // after the top-level script (Runtime.drainMicrotasks in runtime.go).
 
+import "time"
+
 // job is one queued microtask: the Go closure that runs it, plus the values
 // that closure captured.
 //
@@ -63,8 +65,20 @@ const maxMacrotasks = 1 << 20
 // seq) order — draining microtasks after each — until no timers remain. This is
 // the host event loop for setTimeout/setInterval under a virtual clock.
 func (rt *Runtime) runEventLoop() {
+	if rt.realTimers {
+		// A host that asked for a wall clock asked for a loop that can wait on it.
+		rt.runRealEventLoop()
+		return
+	}
 	rt.drainMicrotasks()
+	rt.runExternalJobs()
 	for fired := 0; fired < maxMacrotasks; fired++ {
+		// A job posted from another goroutine is work like any other, and under
+		// the virtual clock it is work that is already here: nothing waits for
+		// one, so what has arrived by now is what this loop will run.
+		if rt.runExternalJobs() {
+			continue
+		}
 		// A waitAsync whose answer is already known settles before the next
 		// timer, because a poll loop of zero-delay timers never lets the queue
 		// empty and would otherwise starve it forever.
@@ -91,6 +105,9 @@ func (rt *Runtime) runEventLoop() {
 			// Out of timers is not out of work: a waitAsync promise settles when
 			// another agent notifies it or its deadline passes, and neither is a
 			// job on any queue here.
+			if rt.runExternalJobs() {
+				continue
+			}
 			if rt.serviceAsyncWaits() {
 				rt.drainMicrotasks()
 				continue
@@ -125,9 +142,14 @@ func (rt *Runtime) scheduleTimer(fn Value, delay, period float64, args []Value) 
 	if delay < 0 || delay != delay {
 		delay = 0
 	}
-	rt.macrotasks = append(rt.macrotasks, macrotask{
-		fn: fn, args: args, delay: delay, period: period, seq: id, id: id,
-	})
+	t := macrotask{fn: fn, args: args, delay: delay, period: period, seq: id, id: id}
+	if rt.realTimers {
+		// Stamped once, at scheduling time, so a callback that runs long does not
+		// drag every timer behind it: what a script asked for is "this many
+		// milliseconds from now", and now is here.
+		t.deadline = time.Now().Add(time.Duration(delay) * time.Millisecond)
+	}
+	rt.macrotasks = append(rt.macrotasks, t)
 	return mknum(float64(id))
 }
 

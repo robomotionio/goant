@@ -124,10 +124,22 @@ var anyType = reflect.TypeOf((*any)(nil)).Elem()
 var timeType = reflect.TypeOf(time.Time{})
 var bigIntPtrType = reflect.TypeOf((*big.Int)(nil))
 var valueType = reflect.TypeOf(Value{})
+
 var objectPtrType = reflect.TypeOf((*Object)(nil))
 var functionPtrType = reflect.TypeOf((*Function)(nil))
 var promisePtrType = reflect.TypeOf((*Promise)(nil))
 var byteSliceType = reflect.TypeOf([]byte(nil))
+
+// isWrapperType reports whether t carries a Value rather than describing one.
+// convert knows all four by name; this is how the reflective path finds its way
+// back there instead of walking one as ordinary Go data.
+func isWrapperType(t reflect.Type) bool {
+	switch t {
+	case valueType, objectPtrType, functionPtrType, promisePtrType:
+		return true
+	}
+	return false
+}
 var jsonUnmarshalerType = reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
 
 // --- Go to JavaScript -------------------------------------------------------
@@ -344,6 +356,13 @@ func (c *toJS) recall(rv reflect.Value) (engine.Value, bool) {
 func (c *toJS) reflected(rv reflect.Value) (engine.Value, error) {
 	if !rv.IsValid() {
 		return c.e.Null(), nil
+	}
+	// A wrapper type is a value that is ALREADY in this Runtime, not Go data to
+	// be copied into it. Walking one as a struct produces an empty object, since
+	// its fields are unexported — which is what a host function returning a
+	// promise came back as: `{}`, with no `then` on it and no error anywhere.
+	if isWrapperType(rv.Type()) {
+		return c.convert(rv.Interface())
 	}
 
 	switch rv.Kind() {
@@ -986,7 +1005,16 @@ func exportInto(v Value, dst reflect.Value) error {
 		dst.Set(reflect.ValueOf(x))
 		return nil
 	case anyType:
-		dst.Set(reflect.ValueOf(v.Export()))
+		// Export renders null and undefined as a nil interface, and
+		// reflect.ValueOf(nil) is the zero reflect.Value — which Set panics on
+		// rather than reporting. A host function taking an `any` was therefore
+		// one `f(null)` away from taking the process down.
+		x := v.Export()
+		if x == nil {
+			dst.Set(reflect.Zero(dt))
+			return nil
+		}
+		dst.Set(reflect.ValueOf(x))
 		return nil
 	}
 

@@ -223,10 +223,78 @@ func splitModuleKey(key string) (spec, typ string) {
 	return key, ""
 }
 
+// ModuleResolverFunc is how a host answers "where does this specifier live".
+//
+// It is given the specifier exactly as written and the path of the module doing
+// the importing (empty at an entry point), and returns the source and a path.
+// The path is the registry key: two importers that resolve to the same path get
+// the same module instance, which is what makes a shared dependency shared.
+// Returning empty source means "read that path from disk", so a resolver can map
+// bare specifiers onto real files without also taking over reading them.
+type ModuleResolverFunc func(specifier, referrer string) (source, path string, err error)
+
+// SetModuleResolver installs the host's module resolution. Without one the
+// engine resolves a specifier as a path relative to the importing module, which
+// covers relative imports and nothing else — a bare `import "@scope/pkg"` has no
+// meaning the engine can supply, because the meaning is the host's package
+// layout, an embedded bundle, or an import map.
+func (rt *Runtime) SetModuleResolver(fn ModuleResolverFunc) { rt.moduleResolver = fn }
+
+// hostResolve asks the resolver where a specifier lives and records the answer.
+//
+// The import type rides along untouched: `with { type: "json" }` names a
+// different module from the same file imported as source, and that distinction
+// belongs to the engine rather than to the host.
+func (rt *Runtime) hostResolve(spec, referrer string) *ThrowError {
+	if rt.moduleResolver == nil {
+		return nil
+	}
+	cacheKey := referrer + moduleKeySep + moduleKeySep + spec
+	if rt.moduleKeys != nil {
+		if _, ok := rt.moduleKeys[cacheKey]; ok {
+			return nil
+		}
+	}
+	bare, typ := splitModuleKey(spec)
+	ref, _ := splitModuleKey(referrer)
+	src, path, err := rt.moduleResolver(bare, ref)
+	if err != nil {
+		return rt.typeError("cannot resolve module '" + bare + "': " + err.Error())
+	}
+	if path == "" {
+		return rt.typeError("cannot resolve module '" + bare + "': resolver returned no path")
+	}
+	key := joinModuleKey(path, typ)
+	if rt.moduleKeys == nil {
+		rt.moduleKeys = map[string]string{}
+	}
+	rt.moduleKeys[cacheKey] = key
+	if src != "" {
+		if rt.moduleSources == nil {
+			rt.moduleSources = map[string]string{}
+		}
+		// Only for a module not yet loaded: a resolver returning source for a path
+		// already in the registry is describing a module that is already running,
+		// and replacing its text now would change nothing but the next reload.
+		if _, loaded := rt.modules[key]; !loaded {
+			rt.moduleSources[key] = src
+		}
+	}
+	return nil
+}
+
 // resolveSpecifier turns an import specifier into an absolute path, relative to
 // the importing module's directory (or the process cwd at the entry point). The
 // import type rides along, so the result is the registry key.
 func (rt *Runtime) resolveSpecifier(key, referrer string) string {
+	// What the host resolver said, if it was asked. Every later lookup of the
+	// same import — linking, evaluation, the deferred-namespace walk — has to
+	// land on the same record, so the answer is remembered rather than recomputed.
+	if rt.moduleKeys != nil {
+		if p, ok := rt.moduleKeys[referrer+moduleKeySep+moduleKeySep+key]; ok {
+			return p
+		}
+	}
 	spec, typ := splitModuleKey(key)
 	referrer, _ = splitModuleKey(referrer)
 	if filepath.IsAbs(spec) {
@@ -243,6 +311,31 @@ func (rt *Runtime) resolveSpecifier(key, referrer string) string {
 		}
 	}
 	return joinModuleKey(filepath.Clean(filepath.Join(base, spec)), typ)
+}
+
+// moduleURL renders a module's registry key as the URL import.meta.url reports.
+//
+// A key is normally an absolute path, which becomes a file: URL. It is not
+// always: a host resolver may key a module on something that is not a file at
+// all — an entry in an embedded bundle, a generated shim — and such a key
+// usually carries its own scheme. One that already looks like a URL is passed
+// through, because inventing a file: path for a module that has no file would
+// only mislead the code reading it.
+func moduleURL(path string) string {
+	path, _ = splitModuleKey(path)
+	if path == "" {
+		return ""
+	}
+	if i := strings.Index(path, ":"); i > 1 && !strings.ContainsAny(path[:i], `/\`) {
+		// A scheme, unless it is a Windows drive letter — those are one character,
+		// which is why the index has to be past the first.
+		return path
+	}
+	u := filepath.ToSlash(path)
+	if !strings.HasPrefix(u, "/") {
+		u = "/" + u
+	}
+	return "file://" + u
 }
 
 // loadModule runs the three module phases in order: instantiate (parse and
@@ -279,6 +372,9 @@ func (rt *Runtime) loadModule(spec, referrer string) (*moduleRecord, *ThrowError
 // is different — that is a load failure, and its TypeError is what a dynamic
 // import must reject with.
 func (rt *Runtime) instantiateModule(spec, referrer string) (*moduleRecord, *SyntaxError, *ThrowError) {
+	if e := rt.hostResolve(spec, referrer); e != nil {
+		return nil, nil, e
+	}
 	path := rt.resolveSpecifier(spec, referrer)
 	if rt.modules == nil {
 		rt.modules = map[string]*moduleRecord{}
@@ -290,10 +386,18 @@ func (rt *Runtime) instantiateModule(spec, referrer string) (*moduleRecord, *Syn
 		return m, nil, nil
 	}
 	file, typ := splitModuleKey(path)
-	src, err := os.ReadFile(file)
-	if err != nil {
-		bare, _ := splitModuleKey(spec)
-		return nil, nil, rt.typeError("cannot resolve module '" + bare + "'")
+	var src []byte
+	if text, ok := rt.moduleSources[path]; ok {
+		// Source the host supplied for this specifier — a module that is not on
+		// disk at all.
+		src = []byte(text)
+	} else {
+		var err error
+		src, err = os.ReadFile(file)
+		if err != nil {
+			bare, _ := splitModuleKey(spec)
+			return nil, nil, rt.typeError("cannot resolve module '" + bare + "'")
+		}
 	}
 	if typ != "" {
 		m, se, e := rt.syntheticModule(path, typ, string(src))
