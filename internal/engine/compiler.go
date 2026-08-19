@@ -1215,7 +1215,17 @@ func (c *compiler) compileExpr(n *Node) {
 		c.emit(OpSpecialObj)
 		c.emitByte(3)
 	case NGlobalThis:
-		c.emit(OpGlobal)
+		// Like `undefined` above: not reserved, so a binding named globalThis
+		// shadows the intrinsic and a reference has to resolve to it. Without
+		// this the parameter in `function f(globalThis)` parsed and then read as
+		// the global object, which is worse than the syntax error it replaced.
+		if slot := c.resolveLocal("globalThis"); slot >= 0 {
+			c.emitOpU16(OpGetLocal, uint16(slot))
+		} else if uv := c.resolveUpvalue("globalThis"); uv >= 0 {
+			c.emitOpU16(OpGetUpval, uint16(uv))
+		} else {
+			c.emit(OpGlobal)
+		}
 	case NNewTarget:
 		// Inside an instance field initializer new.target is always undefined,
 		// even though the code runs inline in the constructor.

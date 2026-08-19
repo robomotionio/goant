@@ -90,6 +90,12 @@ func (rt *Runtime) initBuiltins() {
 	g.defineOwn("setImmediate", rt.newNativeFunc("setImmediate", 1, timer(false)), attrWritable|attrConfigurable)
 	g.defineOwn("clearImmediate", rt.newNativeFunc("clearImmediate", 1, clear), attrWritable|attrConfigurable)
 
+	// structuredClone(value): a deep copy that keeps Map/Set/Date/RegExp/typed
+	// arrays and preserves cycles. See builtin_structuredclone.go.
+	g.defineOwn("structuredClone", rt.newNativeFunc("structuredClone", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
+		return rt.structuredClone(arg(args, 0), map[Value]Value{})
+	}), attrWritable|attrConfigurable)
+
 	// queueMicrotask(fn): schedule fn on the promise-reaction (microtask) queue.
 	g.defineOwn("queueMicrotask", rt.newNativeFunc("queueMicrotask", 1, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		fn := arg(args, 0)

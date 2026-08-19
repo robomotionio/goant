@@ -688,23 +688,92 @@ func joinSurrogateEscapes(src string) string {
 	return b.String()
 }
 
-// splitAstralLiterals rewrites every literal astral code point in a pattern as
-// the two \uXXXX escapes for its surrogate pair.
-func splitAstralLiterals(src string) string {
-	if !strings.ContainsFunc(src, func(c rune) bool { return c > 0xFFFF }) {
+// escapeLoneSurrogates rewrites every unpaired surrogate in a pattern as its
+// \uXXXX escape, leaving everything else alone. See the note in Compile.
+func escapeLoneSurrogates(src string) string {
+	if !hasLoneSurrogate(src) {
 		return src
 	}
 	var b strings.Builder
-	b.Grow(len(src))
-	for _, c := range src {
-		if c > 0xFFFF {
-			v := c - 0x10000
-			fmt.Fprintf(&b, `\u%04X\u%04X`, 0xD800+(v>>10), 0xDC00+(v&0x3FF))
+	b.Grow(len(src) + 8)
+	for i := 0; i < len(src); {
+		c, size := decodeWTF8(src[i:])
+		i += size
+		if c >= 0xD800 && c <= 0xDFFF {
+			fmt.Fprintf(&b, `\u%04X`, c)
 			continue
 		}
 		b.WriteRune(c)
 	}
 	return b.String()
+}
+
+func hasLoneSurrogate(src string) bool {
+	for i := 0; i < len(src); {
+		c, size := decodeWTF8(src[i:])
+		if c >= 0xD800 && c <= 0xDFFF {
+			return true
+		}
+		i += size
+	}
+	return false
+}
+
+// splitAstralLiterals rewrites every literal astral code point in a pattern as
+// the two \uXXXX escapes for its surrogate pair, and every LONE surrogate as the
+// one escape for itself.
+//
+// The lone half is not decoration. A pattern built at run time — `new
+// RegExp("[" + s + "]")` — carries whatever code units the string had, and a
+// JavaScript string may hold an unpaired surrogate. Those reach here as WTF-8,
+// which Go's range decodes as U+FFFD: a class written `[\uD800-\uDB7F]` became
+// `[\uFFFD-\uDB7F]`, a range in reverse order, and the regex failed to compile
+// with an error naming characters that were never in it. Spelling them as
+// escapes puts the string path and the literal path — which already worked —
+// onto the same text.
+func splitAstralLiterals(src string) string {
+	if !needsSurrogateEscaping(src) {
+		return src
+	}
+	var b strings.Builder
+	b.Grow(len(src))
+	for i := 0; i < len(src); {
+		c, size := decodeWTF8(src[i:])
+		i += size
+		switch {
+		case c > 0xFFFF:
+			v := c - 0x10000
+			fmt.Fprintf(&b, `\u%04X\u%04X`, 0xD800+(v>>10), 0xDC00+(v&0x3FF))
+		case c >= 0xD800 && c <= 0xDFFF:
+			fmt.Fprintf(&b, `\u%04X`, c)
+		default:
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
+}
+
+// needsSurrogateEscaping reports whether a pattern holds anything the rewrite
+// above would change: an astral code point, or a WTF-8 lone surrogate.
+func needsSurrogateEscaping(src string) bool {
+	for i := 0; i < len(src); {
+		c, size := decodeWTF8(src[i:])
+		if c > 0xFFFF || (c >= 0xD800 && c <= 0xDFFF) {
+			return true
+		}
+		i += size
+	}
+	return false
+}
+
+// decodeWTF8 reads one code point, keeping a lone surrogate as itself where the
+// standard decoder would report U+FFFD. Surrogates are how JavaScript strings
+// carry unpaired code units, and a pattern is a JavaScript string.
+func decodeWTF8(s string) (rune, int) {
+	if len(s) >= 3 && s[0] == 0xED && s[1] >= 0xA0 && s[1] <= 0xBF && s[2] >= 0x80 && s[2] <= 0xBF {
+		return rune(0xD000|int(s[0]&0x0F)<<12) | rune(int(s[1]&0x3F)<<6) | rune(int(s[2]&0x3F)), 3
+	}
+	return utf8.DecodeRuneInString(s)
 }
 
 func isASCIILetter(c rune) bool {
@@ -713,6 +782,20 @@ func isASCIILetter(c rune) bool {
 
 func Compile(pattern, flags string) (*Regexp, error) {
 	r := &Regexp{Source: pattern, Flags: flags}
+	// Before anything else reads the text: a pattern built at run time carries
+	// whatever code units its string had, and a JavaScript string may hold an
+	// unpaired surrogate. Those arrive as WTF-8, which is not valid UTF-8 — and
+	// nearly every pass below starts with []rune(src), which turns each of the
+	// three bytes into U+FFFD. A class written [\uD800-\uDB7F] reached the
+	// matcher as [\uFFFD\uFFFD\uFFFD-\uDB7F]: a range in reverse order, failing
+	// to compile with an error naming characters that were never in it.
+	//
+	// Spelling them as escapes first makes the text ASCII, so no later pass can
+	// mangle it, and puts the run-time-built pattern on exactly the same footing
+	// as the literal one — which always worked, because its source was already
+	// escapes. r.Source keeps the original: `re.source` must report what the
+	// author wrote.
+	pattern = escapeLoneSurrogates(pattern)
 	seen := map[rune]bool{}
 	opts := regexp2.RegexOptions(regexp2.ECMAScript)
 	for _, f := range flags {

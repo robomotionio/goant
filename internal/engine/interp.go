@@ -928,6 +928,14 @@ running:
 				}
 				if *cell == 0 {
 					*cell = rt.newObject(rt.objectProto)
+					// url is the one property the spec's host hook is expected to
+					// populate, and a great deal of published code reads it —
+					// `new URL('./x', import.meta.url)` is how a module finds a file
+					// beside itself. An empty object here read as undefined, and the
+					// failure showed up as a URL parse error somewhere else entirely.
+					if o := rt.objPtr(*cell); o != nil {
+						o.defineOwn("url", rt.newString(moduleURL(fn.filename)), attrDefault)
+					}
 				}
 				push(*cell)
 			case 4:

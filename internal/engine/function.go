@@ -1,6 +1,9 @@
 package engine
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // Function objects & the call machinery (ant src/ant.c function sections +
 // engine.c call handling). A JS function is an object (T_FUNC) whose closure
@@ -512,12 +515,61 @@ func (rt *Runtime) isCallable(v Value) bool {
 	return false
 }
 
+// notCallable reports a call on something that is not a function, saying what
+// the something was.
+//
+// The call opcodes do not carry the callee's name — a method call has already
+// popped the property off the stack by the time it fails — so the value itself
+// is what there is to describe. It is worth describing: "undefined is not a
+// function" is a missing import or a typo'd property, "an object is not a
+// function" is a namespace where a function was expected, and the bare "value is
+// not a function" this used to say distinguished neither.
+func (rt *Runtime) notCallable(v Value) *ThrowError {
+	return rt.typeError(rt.describeValue(v) + " is not a function")
+}
+
+// describeValue renders a value briefly enough for an error message: what it is
+// rather than what it contains.
+func (rt *Runtime) describeValue(v Value) string {
+	switch v.Type() {
+	case TUndef:
+		return "undefined"
+	case TNull:
+		return "null"
+	case TBool, TNum:
+		s, err := rt.toStringValue(v)
+		if err != nil {
+			return "a " + rt.typeofString(v)
+		}
+		return rt.strGo(s)
+	case TStr:
+		s := rt.strGo(v)
+		if len(s) > 24 {
+			s = s[:24] + "…"
+		}
+		return "the string " + strconv.Quote(s)
+	case TSymbol:
+		return "a symbol"
+	case TBigInt:
+		return "a bigint"
+	}
+	if o := rt.objPtr(v); o != nil {
+		if rt.isArrayValue(v) {
+			return "an array"
+		}
+		if o.brandID() == brandError {
+			return "an error"
+		}
+	}
+	return "an object"
+}
+
 // callValue invokes a callable with the given this-binding and arguments
 // (ant sv_call_native / the interpreter call path).
 func (rt *Runtime) callValue(fnVal, thisVal Value, args []Value) (Value, *ThrowError) {
 	o := rt.objPtr(fnVal)
 	if o == nil || !o.flags.isCallable {
-		return mkundef(), rt.typeError("value is not a function")
+		return mkundef(), rt.notCallable(fnVal)
 	}
 	if o.proxy != nil {
 		return rt.proxyApply(o.proxy, thisVal, args)
@@ -545,7 +597,7 @@ func (rt *Runtime) callValue(fnVal, thisVal Value, args []Value) (Value, *ThrowE
 	}
 	cl := o.clPtr
 	if cl == nil {
-		return mkundef(), rt.typeError("value is not a function")
+		return mkundef(), rt.notCallable(fnVal)
 	}
 	if cl.fn.isGenerator {
 		return rt.newGenerator(cl.fn, cl, fnVal, thisVal, args)

@@ -297,7 +297,13 @@ func (p *parser) hasErr() bool { return p.err != nil }
 // ---- token classification helpers (ant is_*_tok) ----
 
 func isContextualIdentTok(t Token) bool {
-	return t == TokAs || t == TokFrom || t == TokOf || t == TokAsync || t == TokUsing
+	// window and globalThis have their own tokens for the sake of the expression
+	// path, and neither is a reserved word: `function f(window)` is ordinary
+	// JavaScript, and the DOM libraries in the wild are full of it. Leaving them
+	// out here made every binding position reject them — a parse error on code
+	// that Node runs.
+	return t == TokAs || t == TokFrom || t == TokOf || t == TokAsync ||
+		t == TokUsing || t == TokWindow || t == TokGlobalThis
 }
 
 func isIdentLikeTok(t Token) bool {

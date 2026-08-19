@@ -172,8 +172,15 @@ func (rt *Runtime) Close() {
 		return
 	}
 	rt.mu.Lock()
+	e := rt.e
 	rt.e = nil
 	rt.mu.Unlock()
+	if e != nil {
+		// A goroutine still on its way back with an answer has to learn that
+		// nothing is listening. Without this its Post blocks nobody and settles
+		// nothing, and the only symptom is a promise that never resolves.
+		e.CloseHost()
+	}
 }
 
 // ErrClosed is returned by a Runtime used after Close.
