@@ -453,3 +453,143 @@ func TestNullIntoAnyParameter(t *testing.T) {
 		}
 	}
 }
+
+// `window` and `globalThis` are ordinary identifiers, not reserved words, and a
+// browser-shaped library binds both. goant gave each its own token for the
+// expression path and then rejected them everywhere a binding is expected — so
+// `function Location(window, href)`, which is in the DOM implementation half the
+// ecosystem depends on, would not parse.
+func TestGlobalNamesAreBindable(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`(function (window) { return typeof window })(1)`, "number"},
+		{`(function (globalThis) { return typeof globalThis })(1)`, "number"},
+		{`(function () { var window = 3; return window })()`, "3"},
+		{`(function () { let globalThis = 5; return globalThis })()`, "5"},
+		{`(function () { const { window } = { window: 7 }; return window })()`, "7"},
+		{`(function () { try { null.x } catch (window) { return typeof window } })()`, "object"},
+		{`(function () { function window() { return 'fn' } return window() })()`, "fn"},
+		// Unshadowed, globalThis is still the global object and window is still
+		// undefined — which is what Node reports too.
+		{`typeof globalThis`, "object"},
+		{`typeof window`, "undefined"},
+		{`globalThis === globalThis.globalThis`, "true"},
+	}
+	rt := goant.New()
+	defer rt.Close()
+	for _, c := range cases {
+		v, err := rt.RunString(c.src)
+		if err != nil {
+			t.Errorf("%s: %v", c.src, err)
+			continue
+		}
+		if v.String() != c.want {
+			t.Errorf("%s = %q, want %q", c.src, v.String(), c.want)
+		}
+	}
+}
+
+// A let or const declared INSIDE a loop body gets a fresh binding per iteration,
+// like the loop head's. It did not: every closure made in the body shared one
+// slot and saw the last value.
+//
+// The symptom in the wild was not a subtle one. zod builds each schema by
+// binding its prototype methods in a loop; with one shared binding, every schema
+// got the same method under every name, and `z.string().min(1)` called something
+// else entirely.
+func TestPerIterationBodyBindings(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"for", `
+			const out = []
+			for (let i = 0; i < 3; i++) { const x = 'v' + i; out.push(() => x) }
+			out.map(f => f()).join(',')`, "v0,v1,v2"},
+		{"for with var head", `
+			const out = []
+			for (var i = 0; i < 3; i++) { const x = 'w' + i; out.push(() => x) }
+			out.map(f => f()).join(',')`, "w0,w1,w2"},
+		{"continue skips nothing", `
+			const out = []
+			for (let i = 0; i < 3; i++) { const x = i; if (i === 1) { out.push(() => x); continue } out.push(() => x) }
+			out.map(f => f()).join(',')`, "0,1,2"},
+		{"while", `
+			const out = []
+			let n = 0
+			while (n < 3) { const y = n; n++; out.push(() => y) }
+			out.map(f => f()).join(',')`, "0,1,2"},
+		{"while with continue", `
+			const out = []
+			let n = 0
+			while (n < 3) { const y = n; n++; if (y === 1) { out.push(() => y); continue } out.push(() => y) }
+			out.map(f => f()).join(',')`, "0,1,2"},
+		{"do while", `
+			const out = []
+			let m = 0
+			do { const z = m; out.push(() => z); m++ } while (m < 3)
+			out.map(f => f()).join(',')`, "0,1,2"},
+		{"for of", `
+			const out = []
+			for (const item of ['p', 'q']) { const v = item.toUpperCase(); out.push(() => v) }
+			out.map(f => f()).join(',')`, "P,Q"},
+		{"for in", `
+			const out = []
+			for (const key in { k1: 1, k2: 2 }) { const v = key + '!'; out.push(() => v) }
+			out.map(f => f()).join(',')`, "k1!,k2!"},
+		{"nested loops", `
+			const out = []
+			for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) { const p = ` + "`${i}${j}`" + `; out.push(() => p) }
+			out.map(f => f()).join(',')`, "00,01,10,11"},
+		{"inner block", `
+			const out = []
+			for (let i = 0; i < 3; i++) { { const deep = 'd' + i; out.push(() => deep) } }
+			out.map(f => f()).join(',')`, "d0,d1,d2"},
+		{"async closure in loop", `
+			const out = []
+			for (let i = 0; i < 3; i++) { const x = i; out.push(async () => x) }
+			out.length + ':' + out.every(f => typeof f === 'function')`, "3:true"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rt := goant.New()
+			defer rt.Close()
+			v := mustRun(t, rt, c.src)
+			if v.String() != c.want {
+				t.Fatalf("got %q, want %q", v.String(), c.want)
+			}
+		})
+	}
+}
+
+// A pattern built at run time carries whatever code units its string had, and a
+// JavaScript string may hold an unpaired surrogate. Those are WTF-8 in Go, which
+// every pass in the translator turned into three U+FFFD — so a class of
+// surrogates became a range in reverse order and failed to compile, naming
+// characters that were never in the pattern.
+//
+// domino, the DOM implementation turndown parses HTML with, builds exactly such
+// a class to detect surrogates in XML names.
+func TestRuntimeBuiltSurrogatePatterns(t *testing.T) {
+	rt := goant.New()
+	defer rt.Close()
+	cases := []struct{ src, want string }{
+		{`String(new RegExp("^[a\uD800-\uDB7F\uDC00-\uDFFF]$").test("a"))`, "true"},
+		{`String(new RegExp("[\uD800-\uDB7F\uDC00-\uDFFF]").test("abc"))`, "false"},
+		{`String(new RegExp("[\uD800-\uDB7F]").test("\uD800"))`, "true"},
+		// Built and literal agree, which is the property that was broken.
+		{`String(new RegExp("[\uD800-\uDFFF]").test("\uD900") === /[\uD800-\uDFFF]/.test("\uD900"))`, "true"},
+		// Non-unicode mode still reads an astral character as two code units.
+		{`String(new RegExp("^[\u{1D306}]$").test("\u{1D306}"))`, "false"},
+		{`String(new RegExp("^[\u{1D306}]$", "u").test("\u{1D306}"))`, "true"},
+		{`String(new RegExp("[\uD800]", "u").test("\uD800"))`, "true"},
+		// The reported source is what was passed in, not the escaped rewrite.
+		{`new RegExp("[\uD800]").source.length`, "3"},
+	}
+	for _, c := range cases {
+		v, err := rt.RunString(c.src)
+		if err != nil {
+			t.Errorf("%s: %v", c.src, err)
+			continue
+		}
+		if v.String() != c.want {
+			t.Errorf("%s = %q, want %q", c.src, v.String(), c.want)
+		}
+	}
+}

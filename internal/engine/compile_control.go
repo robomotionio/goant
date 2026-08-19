@@ -83,7 +83,15 @@ func (c *compiler) compileWhile(n *Node) {
 	c.compileExpr(n.Cond)
 	exit := c.emitJump(OpJmpFalse)
 	l.breaks = append(l.breaks, exit)
+	bodyDepth := c.scopeDepth
 	c.compileStmt(n.Body)
+	// `continue` jumps straight back to the condition, so the per-iteration
+	// detach cannot sit only on the fall-through path: the target moves here, in
+	// front of it, and only when there is something to detach.
+	if c.mayCapture(n) {
+		l.continueTarget = len(c.fn.code)
+	}
+	c.closeBodyBindings(bodyDepth, c.mayCapture(n))
 	c.emit(OpJmp)
 	c.emitU32(uint32(loopStart))
 	c.patchContinues(l)
@@ -94,8 +102,10 @@ func (c *compiler) compileDoWhile(n *Node) {
 	c.resetCompletion()
 	l := c.pushLoop(c.consumeLabel(), false)
 	loopStart := len(c.fn.code)
+	bodyDepth := c.scopeDepth
 	c.compileStmt(n.Body)
 	l.continueTarget = len(c.fn.code)
+	c.closeBodyBindings(bodyDepth, c.mayCapture(n))
 	c.compileExpr(n.Cond)
 	c.emit(OpJmpTrue)
 	c.emitU32(uint32(loopStart))
@@ -160,14 +170,17 @@ func (c *compiler) compileFor(n *Node) {
 		l.breaks = append(l.breaks, exit)
 	}
 
+	bodyDepth := c.scopeDepth
 	c.compileStmt(n.Body)
 
 	// Continue jumps target the update clause.
 	l.continueTarget = len(c.fn.code)
 	c.patchContinues(l)
 	// Per-iteration lexical binding: close the loop var's captures before the
-	// update mutates it for the next iteration.
+	// update mutates it for the next iteration, and the body's own bindings
+	// before the next iteration reuses their slots.
 	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
+	c.closeBodyBindings(bodyDepth, c.mayCapture(n))
 	if n.Update != nil {
 		c.compileExpr(n.Update)
 		c.emit(OpPop)
@@ -295,11 +308,13 @@ func (c *compiler) compileForOf(n *Node) {
 	c.emitOpU16(OpPutLocal, uint16(closeSlot)) // [value] (net-neutral)
 	store()
 
+	bodyDepth := c.scopeDepth
 	c.compileStmt(n.Body)
 
 	l.continueTarget = len(c.fn.code)
 	c.patchContinues(l)
 	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
+	c.closeBodyBindings(bodyDepth, c.mayCapture(n))
 	c.emit(OpJmp)
 	c.emitU32(uint32(condStart))
 
@@ -390,11 +405,13 @@ func (c *compiler) compileForAwaitOf(n *Node) {
 	c.emitOpU16(OpPutLocal, uint16(closeSlot))
 	store()
 
+	bodyDepth := c.scopeDepth
 	c.compileStmt(n.Body)
 
 	l.continueTarget = len(c.fn.code)
 	c.patchContinues(l)
 	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
+	c.closeBodyBindings(bodyDepth, c.mayCapture(n))
 	c.emit(OpJmp)
 	c.emitU32(uint32(condStart))
 
@@ -502,6 +519,7 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 	}
 	store()
 
+	bodyDepth := c.scopeDepth
 	c.compileStmt(n.Body)
 
 	// continue target: i++
@@ -511,8 +529,9 @@ func (c *compiler) compileForArray(n *Node, produceOp Opcode) {
 		c.patchJump(deleted)
 	}
 	// Per-iteration lexical binding: close any closure capture of the loop var
-	// before the next iteration reuses its slot.
+	// before the next iteration reuses its slot, and the body's bindings with it.
 	c.closeForHeadBindings(lexSlots, c.mayCapture(n))
+	c.closeBodyBindings(bodyDepth, c.mayCapture(n))
 	c.emitOpU16(OpGetLocal, uint16(iSlot))
 	c.emit(OpInc)
 	c.emitOpU16(OpPutLocal, uint16(iSlot))
@@ -601,6 +620,37 @@ func (c *compiler) closeForHeadBindings(slots []int, mayCapture bool) {
 	}
 	for _, s := range slots {
 		c.emitOpU16(OpCloseUpval, uint16(s))
+	}
+}
+
+// closeBodyBindings detaches captures of the lexical bindings declared INSIDE a
+// loop body, once per iteration.
+//
+// The head's bindings were already handled (closeForHeadBindings); these are the
+// other half of per-iteration semantics, and they were missing:
+//
+//	for (let i = 0; i < 3; i++) { const x = 'v' + i; fns.push(() => x) }
+//
+// Every closure shared one `x` and saw the last value, because the body's block
+// is entered afresh on each iteration at RUNTIME while the compiler assigns its
+// bindings one slot for the whole loop. Detaching at the end of the iteration is
+// what makes the slot the iteration's own.
+//
+// This is not an obscure corner: it is how a loop that builds callbacks is
+// written, and it made zod hand every schema the same bound method.
+//
+// depth is the loop's own scope depth, so everything declared deeper belongs to
+// the body. Slots are never reused (locals are append-only), so closing by index
+// cannot touch a binding this loop does not own.
+func (c *compiler) closeBodyBindings(depth int, mayCapture bool) {
+	if !mayCapture {
+		return
+	}
+	for i := range c.locals {
+		lv := &c.locals[i]
+		if lv.blockScoped && lv.captured && lv.depth > depth {
+			c.emitOpU16(OpCloseUpval, uint16(i))
+		}
 	}
 }
 

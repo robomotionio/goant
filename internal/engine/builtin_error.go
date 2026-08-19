@@ -362,6 +362,13 @@ func (rt *Runtime) makeError(proto Value, name, msg string) Value {
 	e := rt.newObject(proto)
 	rt.objPtr(e).setSlot(slotBrand, mknum(brandError)) // [[ErrorData]]
 	rt.objPtr(e).defineOwn("message", rt.internString(msg), attrWritable|attrConfigurable)
+	// The same capture `new Error` performs. Without it every error the ENGINE
+	// throws — every TypeError from calling a non-function, every ReferenceError
+	// — arrived with a stack that was just its own message. That is survivable
+	// while the program is a page of script and useless the moment it is two
+	// hundred thousand lines of somebody else's: "value is not a function", and
+	// nothing whatsoever about where.
+	rt.objPtr(e).setSlot(slotErrorFrames, rt.captureCallSites(mkundef()))
 	return e
 }
 
