@@ -572,10 +572,14 @@ type macrotask struct {
 	// deadline is when this task is due on the wall clock, set only when the
 	// Runtime is on real timers. Under the virtual clock delay alone orders the
 	// queue and this stays zero. See SetRealTimers.
-	deadline  time.Time
-	period    float64
-	seq       uint64
-	id        uint64
+	deadline time.Time
+	period   float64
+	seq      uint64
+	id       uint64
+	// unref'd timers fire like any other, but do not by themselves keep the
+	// loop alive: a watchdog that bounds someone else's work must not outlive
+	// the work. See UnrefTimer.
+	unref     bool
 	cancelled bool
 }
 

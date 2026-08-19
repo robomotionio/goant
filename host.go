@@ -216,6 +216,27 @@ func (rt *Runtime) HostUnref() {
 	}
 }
 
+// UnrefTimer marks a timer as not keeping the loop alive, and RefTimer undoes
+// it. This is Node's timer.unref(), and it exists for one shape: a watchdog
+// armed alongside some work, which must fire if the loop is running and must not
+// be the reason it keeps running.
+//
+// id is what setTimeout or setInterval returned. An id that no longer names a
+// live timer is ignored — a timer that has fired or been cleared has nothing
+// left to unref.
+func (rt *Runtime) UnrefTimer(id float64) {
+	if e, err := rt.engineOf(); err == nil {
+		e.UnrefTimer(id, true)
+	}
+}
+
+// RefTimer restores a timer's hold on the loop. See UnrefTimer.
+func (rt *Runtime) RefTimer(id float64) {
+	if e, err := rt.engineOf(); err == nil {
+		e.UnrefTimer(id, false)
+	}
+}
+
 // RunLoop drives the event loop until nothing more can happen, or ctx is done.
 //
 // "Nothing more" means more than an empty queue once a host is involved: no

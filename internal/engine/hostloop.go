@@ -331,8 +331,8 @@ func (rt *Runtime) runRealEventLoop() {
 			continue
 		}
 
-		next, hasTimer := rt.nextTimerDeadline()
-		if !hasTimer && !rt.HostPending() {
+		next, hasTimer, keepAlive := rt.nextTimerDeadline()
+		if !keepAlive && !rt.HostPending() {
 			// Genuinely out of work — except for the one kind of work that lives
 			// on neither queue.
 			if rt.serviceAsyncWaits() {
@@ -412,20 +412,44 @@ func (rt *Runtime) dropCancelledTimers() {
 	rt.macrotasks = live
 }
 
-// nextTimerDeadline returns when the earliest live timer is due.
-func (rt *Runtime) nextTimerDeadline() (time.Time, bool) {
-	var best time.Time
-	found := false
+// nextTimerDeadline returns when the earliest live timer is due, and whether any
+// of them is reason enough to keep waiting.
+//
+// The two answers differ, which is the whole point of unref: a watchdog timer
+// still has to FIRE at its deadline if the loop is running, and must not by
+// itself be what keeps the loop running. So the deadline covers every timer and
+// the "is there work" answer covers only the ref'd ones.
+func (rt *Runtime) nextTimerDeadline() (next time.Time, hasTimer, keepAlive bool) {
 	for i := range rt.macrotasks {
 		t := &rt.macrotasks[i]
 		if t.cancelled {
 			continue
 		}
-		if !found || t.deadline.Before(best) {
-			best, found = t.deadline, true
+		if !hasTimer || t.deadline.Before(next) {
+			next, hasTimer = t.deadline, true
+		}
+		if !t.unref {
+			keepAlive = true
 		}
 	}
-	return best, found
+	return next, hasTimer, keepAlive
+}
+
+// UnrefTimer marks a scheduled timer as not keeping the loop alive. It is
+// Node's timer.unref(), and library code leans on it: an idle watchdog armed
+// alongside a request is unref'd so that finishing the request finishes the
+// program, rather than waiting out a timeout nobody is interested in any more.
+//
+// Without it, a five-minute stream watchdog held the loop open for five minutes
+// after the stream had finished.
+func (rt *Runtime) UnrefTimer(id float64, unref bool) {
+	n := uint64(id)
+	for i := range rt.macrotasks {
+		if rt.macrotasks[i].id == n {
+			rt.macrotasks[i].unref = unref
+			return
+		}
+	}
 }
 
 // waitForWork blocks until a posted job arrives, the next timer is due, or the

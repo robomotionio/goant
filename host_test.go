@@ -593,3 +593,44 @@ func TestRuntimeBuiltSurrogatePatterns(t *testing.T) {
 		}
 	}
 }
+
+// An unref'd timer must not hold the loop open, and must still fire when the
+// loop is running for another reason.
+func TestUnrefTimer(t *testing.T) {
+	rt := goant.New(goant.WithRealTimers(true))
+	defer rt.Close()
+	rt.Set("unref", func(id float64) { rt.UnrefTimer(id) })
+	mustRun(t, rt, `
+		globalThis.fired = false;
+		const id = setTimeout(() => { globalThis.fired = true }, 3000);
+		unref(id.id === undefined ? id : id.id);
+	`)
+	start := time.Now()
+	if err := rt.RunLoop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("the loop waited %v for an unref'd timer", d)
+	}
+	if v, _ := rt.Get("fired"); v.Bool() {
+		t.Fatal("the unref'd timer fired even though nothing kept the loop alive")
+	}
+
+	// Now with work that outlives it: the watchdog fires because the loop is
+	// running anyway.
+	rt2 := goant.New(goant.WithRealTimers(true))
+	defer rt2.Close()
+	rt2.Set("unref", func(id float64) { rt2.UnrefTimer(id) })
+	mustRun(t, rt2, `
+		globalThis.watchdog = false;
+		const id = setTimeout(() => { globalThis.watchdog = true }, 20);
+		unref(id.id === undefined ? id : id.id);
+		setTimeout(() => {}, 120);
+	`)
+	if err := rt2.RunLoop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := rt2.Get("watchdog"); !v.Bool() {
+		t.Fatal("the unref'd timer did not fire while the loop was running")
+	}
+}
