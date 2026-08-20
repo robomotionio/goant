@@ -510,7 +510,11 @@ What is still missing:
   There is no `fs`, `http`, or Node.js compatibility layer.
 
   The scope is the JavaScript engine plus a small runtime with an event loop,
-  timers, microtasks, and `console`.
+  timers, microtasks, `console`, and the part of `crypto` that needs the
+  operating system to answer: `getRandomValues` and `randomUUID`. There is no
+  `crypto.subtle` — it is an API over key material, and a stub that answered
+  anything would be worse than the property being absent, since a script tests
+  for it and takes another path when it is missing.
 
   If a script needs access to host functionality, provide it explicitly with
   `Set`.
