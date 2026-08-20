@@ -756,6 +756,7 @@ func (rt *Runtime) initRealm() {
 	rt.initProxyBuiltin()
 	rt.initShadowRealmBuiltin()
 	rt.initTypedArrays()
+	rt.initCrypto()
 	rt.initIteratorHelpers()
 	rt.initAsyncIterator()
 	rt.initDisposableStack()
