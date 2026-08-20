@@ -5,8 +5,14 @@ package engine
 // clz32, imul, fround, hypot) are implemented to spec.
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"math"
 	"math/big"
+	"os"
+	"strconv"
+	"sync/atomic"
+	"time"
 )
 
 func (rt *Runtime) initMath() {
@@ -167,7 +173,7 @@ func (rt *Runtime) initMath() {
 		return mknum(out), nil
 	}), attrWritable|attrConfigurable)
 
-	// Math.random — deterministic-free PRNG (xorshift; not for crypto).
+	// Math.random — xorshift PRNG, seeded per Runtime; not for crypto.
 	mo.defineOwn("random", rt.newNativeFunc("random", 0, func(rt *Runtime, this Value, args []Value) (Value, *ThrowError) {
 		return mknum(rt.nextRandom()), nil
 	}), attrWritable|attrConfigurable)
@@ -279,11 +285,65 @@ func jsClz32(x float64) float64 {
 	return float64(n)
 }
 
+// randBase is the process's entropy for Math.random, read once. Every Runtime
+// derives its own stream from it, so two isolates in one process — and two
+// robots on one machine — do not hand out the same numbers.
+//
+// GOANT_RANDOM_SEED replaces the entropy with a fixed base, which makes the
+// whole process reproducible: same seed, same sequence, in every Runtime it
+// creates, in that order. That is what a benchmark comparing two builds or a
+// fuzzer replaying a failure wants, and it is the only thing the old fixed
+// constant was ever good for.
+var randBase = func() uint64 {
+	if s := os.Getenv("GOANT_RANDOM_SEED"); s != "" {
+		if n, err := strconv.ParseUint(s, 0, 64); err == nil {
+			return n
+		}
+	}
+	var b [8]byte
+	if _, err := cryptorand.Read(b[:]); err == nil {
+		return binary.LittleEndian.Uint64(b[:])
+	}
+	// crypto/rand does not fail on any platform goant builds for, but a
+	// generator that silently repeats is exactly the bug this function exists
+	// to fix, so there is a fallback rather than a panic.
+	return uint64(time.Now().UnixNano())
+}()
+
+// randSeq numbers the streams handed out from randBase, so realms and isolates
+// created in one process each get their own.
+var randSeq atomic.Uint64
+
+// randSeed returns this Runtime's starting state.
+//
+// Consecutive stream numbers must not produce correlated first outputs — a
+// script that reads one Math.random() and stops is the common case, and under a
+// plain counter those reads would march in lockstep across isolates. The
+// splitmix64 finalizer decorrelates them.
+func randSeed() uint64 {
+	x := randBase + randSeq.Add(1)*0x9E3779B97F4A7C15
+	x ^= x >> 30
+	x *= 0xBF58476D1CE4E5B9
+	x ^= x >> 27
+	x *= 0x94D049BB133111EB
+	x ^= x >> 31
+	if x == 0 {
+		return 0x9E3779B97F4A7C15 // xorshift is dead at zero
+	}
+	return x
+}
+
 // nextRandom returns a pseudo-random float in [0,1) via a per-Runtime xorshift
-// generator seeded lazily.
+// generator, seeded on first use.
+//
+// Seeded here rather than in New so a Runtime that never calls Math.random
+// never pays for the seed, and — more importantly — so the stream numbering
+// follows the order scripts actually ask for randomness rather than the order
+// realms happen to be built in, which is what makes GOANT_RANDOM_SEED
+// reproducible across runs.
 func (rt *Runtime) nextRandom() float64 {
 	if rt.randState == 0 {
-		rt.randState = 0x9E3779B97F4A7C15 // fixed nonzero seed (deterministic)
+		rt.randState = randSeed()
 	}
 	x := rt.randState
 	x ^= x << 13
