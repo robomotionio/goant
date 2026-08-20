@@ -475,7 +475,8 @@ type Runtime struct {
 	// exitCode is set by process.exit() to request termination.
 	exitCode *int
 
-	// randState is the Math.random xorshift generator state.
+	// randState is the Math.random xorshift generator state, seeded per Runtime
+	// on first use. Zero means unseeded — see nextRandom.
 	randState uint64
 
 	filename string
