@@ -216,6 +216,29 @@ func (rt *Runtime) HostUnref() {
 	}
 }
 
+// Hold keeps v alive until the returned release function is called.
+//
+// A Value is a handle, not a reference the collector can see: the Runtime's
+// garbage collector finds what JavaScript can reach, and a Value held only by
+// Go is not something JavaScript can reach. Kept across any call that runs
+// JavaScript — RunLoop, a function call, a property read that hits a getter —
+// such a Value can be swept, its slot reused, and the handle go on naming
+// whatever was allocated there next. Nothing fails; the host just starts
+// reading a different object.
+//
+// Hold is for that case: an object a host keeps between calls, a callback it
+// will invoke later, a promise it awaits by hand. Await and AwaitContext hold
+// what they await themselves. Holds are counted, so holding the same Value
+// twice needs two releases; release is idempotent, and safe to defer. Call
+// both on the Runtime's goroutine.
+func (rt *Runtime) Hold(v Value) (release func()) {
+	e, err := rt.engineOf()
+	if err != nil {
+		return func() {}
+	}
+	return e.HoldValue(v.v)
+}
+
 // UnrefTimer marks a timer as not keeping the loop alive, and RefTimer undoes
 // it. This is Node's timer.unref(), and it exists for one shape: a watchdog
 // armed alongside some work, which must fire if the loop is running and must not
@@ -277,6 +300,13 @@ func (rt *Runtime) AwaitContext(ctx context.Context, v Value) (Value, error) {
 		}
 		return v, nil
 	}
+	// Held for as long as the loop runs. A promise the script returned and kept
+	// no reference to — an async function that has finished, say — is
+	// reachable from nothing JavaScript can see once it settles, and the loop
+	// may go on running other work after that. A collection there swept it,
+	// the slot was reused, and the state read below was some other object's.
+	// See Hold.
+	defer e.HoldValue(v.v)()
 	if err := rt.RunLoop(ctx); err != nil {
 		return Value{}, err
 	}

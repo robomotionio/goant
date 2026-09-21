@@ -144,6 +144,24 @@ can run a getter or a Proxy trap, and a host bridging one should not silently
 receive `undefined` when it actually threw. A key that simply is not there is
 `undefined` with no error, which is what JavaScript does.
 
+### Keeping a Value alive
+
+A `Value` is a handle, and the collector does not see handles: it keeps what
+JavaScript can reach. A `Value` that only Go refers to — an object a host keeps
+between calls, a callback it will invoke later — can be swept by any call that
+runs JavaScript, its slot reused, and the handle then names whatever was
+allocated there next. Nothing fails; the host starts reading a different
+object. `Hold` roots it until released:
+
+```go
+release := rt.Hold(callback)
+defer release()          // counted, idempotent, safe to defer
+```
+
+Reading a `Value` straight after the call that produced it needs no hold;
+keeping one across `RunLoop`, `Await` or another call does. `Await` and
+`AwaitContext` hold the promise they are awaiting themselves.
+
 ## Go values in
 
 `Set` and every `any` parameter accept ordinary Go values:
@@ -301,7 +319,9 @@ res, err := rt.Await(v)   // drains the queue, unwraps; a rejection becomes *Err
 ```
 
 `Await` passes a non-promise straight through, so it is safe to wrap around any
-result. A promise still pending once the queue is empty reports `ErrPending`:
+result. It holds the promise while it waits (see Keeping a Value alive): a
+finished async function's promise is reachable from nothing JavaScript can see,
+and the jobs still draining after it settles can collect. A promise still pending once the queue is empty reports `ErrPending`:
 nothing left to run can settle it, which usually means it is waiting on host
 asynchrony this Runtime does not have. `RunJobs` is the bare drain.
 
