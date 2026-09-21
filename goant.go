@@ -324,6 +324,9 @@ func (rt *Runtime) Await(v Value) (Value, error) {
 	if err != nil {
 		return Value{}, err
 	}
+	// Held while the queue drains: draining runs JavaScript, JavaScript can
+	// collect, and a promise only the caller refers to is not a root. See Hold.
+	defer e.HoldValue(v.v)()
 	e.DrainJobs()
 	if !e.IsPromise(v.v) {
 		return v, nil
